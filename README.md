@@ -107,12 +107,13 @@ func main() {
         Limit(20).
         List()
 
-    // Update (partial — only non-zero fields)
+    // Update (partial — only non-zero fields) → returns (rowsAffected int64, err error)
     u.Name = "Alice Smith"
-    quark.For[User](ctx, client).Update(&u)
+    rows, err := quark.For[User](ctx, client).Update(&u)
+    _, _ = rows, err
 
     // Delete
-    quark.For[User](ctx, client).HardDelete(&u)
+    _, _ = quark.For[User](ctx, client).HardDelete(&u)
 
     _ = users
 }
