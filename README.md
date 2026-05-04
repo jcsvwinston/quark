@@ -9,7 +9,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/jcsvwinston/quark.svg)](https://pkg.go.dev/github.com/jcsvwinston/quark)
 [![CI](https://github.com/jcsvwinston/quark/actions/workflows/ci.yml/badge.svg)](https://github.com/jcsvwinston/quark/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.21%2B-00ADD8?logo=go)](https://go.dev)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-87%25-brightgreen)](docs/benchmarks.md)
 
 [Docs](docs/ENGLISH_DOCS.md) · [Quick Start](#-quick-start) · [Examples](examples/) · [CLI](#️-cli) · [Changelog](docs/RELEASE_NOTES_V1.md)
@@ -405,4 +405,4 @@ QUARK_TEST_ORACLE_DSN=oracle://...
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE)
+Apache 2.0 — see [LICENSE](LICENSE)
