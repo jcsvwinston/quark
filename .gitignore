@@ -1,0 +1,19 @@
+# Binaries
+*.exe
+*.out
+quark
+
+# Test artifacts
+*.test
+*.prof
+*.trace
+
+# Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Go workspace (local only)
+go.work
+go.work.sum
