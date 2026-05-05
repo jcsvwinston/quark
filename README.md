@@ -4,17 +4,118 @@
 
 # Quark
 
-**The type-safe, security-first ORM for Go — built on generics, designed for production.**
+**The type-safe, security-first ORM for Go — built on generics, built to production standards.**
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/jcsvwinston/quark.svg)](https://pkg.go.dev/github.com/jcsvwinston/quark)
 [![CI](https://github.com/jcsvwinston/quark/actions/workflows/ci.yml/badge.svg)](https://github.com/jcsvwinston/quark/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.21%2B-00ADD8?logo=go)](https://go.dev)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-87%25-brightgreen)](docs/benchmarks.md)
+[![Release](https://img.shields.io/github/v/release/jcsvwinston/quark)](https://github.com/jcsvwinston/quark/releases/latest)
 
 [Docs](docs/ENGLISH_DOCS.md) · [Quick Start](#-quick-start) · [Examples](examples/) · [CLI](#️-cli) · [Changelog](docs/RELEASE_NOTES_V1.md)
 
 </div>
+
+---
+
+## 📌 Status
+
+Quark is **v0.x** — production-grade design with an API that may evolve before v1.0. The core query builder, CRUD operations, and migration engine are considered stable. Breaking changes will be documented in the [changelog](docs/RELEASE_NOTES_V1.md) with a migration path.
+
+---
+
+## 🏗️ Why I built this
+
+After running production services on GORM, three patterns kept causing incidents: every `db.Find(&result)` forced an `interface{}` cast the compiler couldn't verify; column names in `WHERE` clauses were plain strings with no guard against typos or injection in dynamic queries; N+1 queries appeared silently whenever a `Preload` was forgotten, only surfacing in slow-query logs hours later; and multi-tenant isolation meant copy-pasting `WHERE tenant_id = ?` everywhere, relying on discipline instead of enforcement. Quark is the ORM I wished existed: generics end the casts, `SQLGuard` validates every identifier at the API boundary, eager loading is explicit, and multi-tenancy is first-class — not an afterthought.
+
+---
+
+## 🚀 Quick Start
+
+```bash
+go get github.com/jcsvwinston/quark
+```
+
+```go
+package main
+
+import (
+    "context"
+    "database/sql"
+    "log"
+
+    "github.com/jcsvwinston/quark"
+    _ "modernc.org/sqlite"
+)
+
+type User struct {
+    ID    int64  `db:"id"    pk:"true"`
+    Name  string `db:"name"  quark:"not_null"`
+    Email string `db:"email" quark:"unique"`
+    Age   int    `db:"age"`
+}
+
+func main() {
+    db, _ := sql.Open("sqlite", "file:app.db?cache=shared")
+    
+    client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Close()
+
+    ctx := context.Background()
+
+    // Create the table
+    client.Migrate(ctx, &User{})
+
+    // Insert
+    u := User{Name: "Alice", Email: "alice@example.com", Age: 30}
+    quark.For[User](ctx, client).Create(&u)
+    // u.ID is now set
+
+    // Query
+    users, _ := quark.For[User](ctx, client).
+        Where("age", ">=", 18).
+        OrderBy("name", "ASC").
+        Limit(20).
+        List()
+
+    // Update (partial — only non-zero fields) → returns (rowsAffected int64, err error)
+    u.Name = "Alice Smith"
+    rows, err := quark.For[User](ctx, client).Update(&u)
+    _, _ = rows, err
+
+    // Delete
+    _, _ = quark.For[User](ctx, client).HardDelete(&u)
+
+    _ = users
+}
+```
+
+**Switch to PostgreSQL** — change two lines, zero query code changes:
+
+```go
+client, _ = quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+```
+
+See the [blog-api example](examples/blog-api/) for a full end-to-end REST API with migrations, tests, and curl examples.
+
+---
+
+## 🎬 Demo
+
+> **Recording coming soon.** To preview Quark locally right now:
+>
+> ```bash
+> git clone https://github.com/jcsvwinston/quark
+> go run ./examples/blog-api
+> curl -s -X POST http://localhost:8080/authors \
+>   -H "Content-Type: application/json" \
+>   -d '{"name":"Alice","email":"alice@example.com"}' | jq .
+> curl -s "http://localhost:8080/posts" | jq .
+> ```
 
 ---
 
@@ -24,15 +125,22 @@ Most Go ORMs make you choose between safety and ergonomics. Quark doesn't.
 
 | | Quark | GORM | sqlx | ent |
 |---|:---:|:---:|:---:|:---:|
-| Native Generics (no `interface{}`) | ✅ | ❌ | ❌ | ✅ |
-| SQL Injection Guard (compile-time) | ✅ | ❌ | ❌ | ❌ |
+| Native Generics (no `interface{}`) | ✅ | partial¹ | ❌ | ✅ |
+| SQL Injection Guard | identifier + value | value only² | manual | value only² |
 | 6 Dialects, zero config switch | ✅ | ✅ | ❌ | partial |
-| Native Multi-Tenant (DB/Schema/RLS) | ✅ | ❌ | ❌ | ❌ |
-| Immutable Query Builder | ✅ | ❌ | ❌ | ✅ |
+| Native Multi-Tenant (DB/Schema/RLS) | ✅ | manual/plugin | manual | manual/interceptor |
+| Immutable Query Builder | ✅ | mutable³ | N/A | ✅ |
 | Integrated L2 Cache | ✅ | plugin | ❌ | ❌ |
 | `stdlib` `*sql.DB` — no magic pool | ✅ | ✅ | ✅ | ❌ |
-| OpenTelemetry built-in | ✅ | plugin | ❌ | ❌ |
-| Batch Ops (Delete/Upsert/Update) | ✅ | ❌ | ❌ | ❌ |
+| OpenTelemetry built-in | ✅ | plugin | ❌ | plugin |
+| Batch Ops (Delete/Upsert/Update) | ✅ | partial⁴ | ❌ | partial |
+
+> ¹ GORM v2 core API uses `interface{}`; generic wrappers exist but are not part of the primary API.  
+> ² GORM and ent use parameterized queries that protect *values* against injection. Quark additionally validates *identifiers* (column/table names) at the API layer. See [docs/comparison.md](docs/comparison.md) for a detailed breakdown with code examples.  
+> ³ GORM queries can mutate shared state when chained; `Session(&gorm.Session{NewDB: true})` mitigates this but is opt-in.  
+> ⁴ GORM supports `CreateInBatches`; batch DELETE and batch UPDATE require custom loops.
+
+For a cell-by-cell justification with code examples, see **[docs/comparison.md](docs/comparison.md)**.
 
 ---
 

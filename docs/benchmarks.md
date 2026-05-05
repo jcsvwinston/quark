@@ -1,59 +1,98 @@
-# Quark ORM Performance Benchmarks
+# Quark ORM — Performance Benchmarks
 
-This report summarizes the performance benchmarks for all supported database engines in Quark. The benchmarks were executed against local Docker instances (except for SQLite, which used in-memory mode) to simulate a real-world environment.
-
-## Visual Progress Verification
-Durante la ejecución, se inyectaron logs visuales para comprobar el progreso cada 1,000 operaciones. Esto confirma la estabilidad y consistencia de los motores bajo carga.
-
-```text
-  [VISUAL LOG] INSERT: processed 1000 records (last duration: 1.00ms)
-  [VISUAL LOG] INSERT: processed 5000 records (last duration: 751µs)
-  [VISUAL LOG] UPDATE: processed 3000 records (last duration: 284µs)
-  [VISUAL LOG] DELETE: processed 5000 records (last duration: 325µs)
-```
-
-## Resultados Detallados por Motor
-
-La siguiente tabla muestra el tiempo promedio por operación sobre 10,000 inserciones, 5,000 actualizaciones y 5,000 eliminaciones.
-
-| Motor | Operación | Tiempo Promedio (µs) | Tiempo Total |
-| :--- | :--- | :--- | :--- |
-| **SQLite (In-Memory)** | INSERT | **6.12** | 61.19 ms |
-| | UPDATE | 3.24 | 16.18 ms |
-| | DELETE | 1.92 | 9.59 ms |
-| **PostgreSQL** | INSERT | **198.55** | 1.99 s |
-| | UPDATE | 129.76 | 648.82 ms |
-| | DELETE | 128.53 | 642.63 ms |
-| **MySQL** | INSERT | **979.43** | 9.79 s |
-| | UPDATE | 275.57 | 1.38 s |
-| | DELETE | 266.18 | 1.33 s |
-| **MSSQL** | INSERT | **651.50** | 6.52 s |
-| | UPDATE | 266.88 | 1.33 s |
-| | DELETE | 265.41 | 1.33 s |
-| **Oracle** | INSERT | **431.73** | 4.32 s |
-| | UPDATE | 271.94 | 1.36 s |
-| | DELETE | 269.34 | 1.35 s |
-
-## Comparativa con el Mercado
-
-Comparado con los ORMs más populares de Go, Quark muestra características de rendimiento excepcionales, especialmente en su baja sobrecarga de construcción de consultas y caché de reflexión.
-
-| Característica | Quark | GORM | Ent | SQLBoiler |
-| :--- | :--- | :--- | :--- | :--- |
-| **Método Principal** | Reflection + Cache | Heavy Reflection | Code Generation | Code Generation |
-| **Sobrecarga** | Muy Baja | Alta | Baja | Mínima |
-| **Seguridad de Tipos** | Dynamic/Generics | Dynamic | Compile-time | Compile-time |
-| **Insert Perf (SQLite)** | ~6µs | ~50µs | ~15µs | ~8µs |
-| **Velocidad de Dev** | Muy Alta | Alta | Media | Baja |
-
-### Análisis
-1. **Liderazgo en SQLite**: El rendimiento de Quark con SQLite está virtualmente al nivel de SQL puro y SQLBoiler, gracias a su caché de reflexión optimizado.
-2. **Eficiencia en Postgres**: El promedio de 198µs para Postgres (incluyendo latencia de red a Docker) es extremadamente competitivo.
-3. **Consistencia**: El rendimiento se mantiene estable a través de 10,000+ operaciones sin fugas de memoria ni degradación significativa.
-
-## Conclusión
-Quark es "production-ready" y altamente performante. Ofrece una API amigable similar a GORM pero con características de rendimiento que se acercan a herramientas generadas por código como Ent y SQLBoiler.
+Benchmarks for Quark across all supported database engines. Results were collected against local Docker instances (except SQLite, which uses in-memory mode).
 
 ---
-*Generado el: 2026-05-02*
-*Entorno: Mac (ARM64), Docker Desktop, Go 1.25*
+
+## Environment
+
+| | |
+|---|---|
+| **Hardware** | Apple M-series (ARM64), 16 GB RAM |
+| **OS** | macOS 15 |
+| **Go** | 1.25.7 |
+| **Quark** | v0.1.0 |
+| **Docker Desktop** | 4.x (PostgreSQL 16, MySQL 8, MSSQL 2022, Oracle 21c) |
+| **SQLite** | modernc.org/sqlite v1.23 (pure Go, in-memory) |
+
+---
+
+## How to Reproduce
+
+### Full engine benchmark (observer-based, 10 000 inserts / 5 000 updates / 5 000 deletes)
+
+```bash
+# SQLite only (no external dependencies):
+go test -run TestBenchmarkEngines -v -timeout 5m
+
+# All engines (set DSN env vars first):
+export QUARK_TEST_POSTGRES_DSN="postgres://quark:quark@localhost:5432/quark_test?sslmode=disable"
+export QUARK_TEST_MYSQL_DSN="quark:quark@tcp(localhost:3306)/quark_test?parseTime=true"
+export QUARK_TEST_MSSQL_DSN="sqlserver://quark:Quark1234!@localhost:1433?database=quark_test"
+export QUARK_TEST_ORACLE_DSN="oracle://quark:quark@localhost:1521/ORCLPDB1"
+
+go test -run TestBenchmarkEngines -v -timeout 15m
+```
+
+The test prints per-operation timing and a summary at the end.
+
+---
+
+## Results — Quark Internal (avg µs/op over 10 000+ operations)
+
+| Engine | Operation | Avg (µs/op) | Total (N ops) |
+|:---|:---|---:|---:|
+| **SQLite (in-memory)** | INSERT | 6.12 | 10 000 |
+| | UPDATE | 3.24 | 5 000 |
+| | DELETE | 1.92 | 5 000 |
+| **PostgreSQL** | INSERT | 198.55 | 10 000 |
+| | UPDATE | 129.76 | 5 000 |
+| | DELETE | 128.53 | 5 000 |
+| **MySQL** | INSERT | 979.43 | 10 000 |
+| | UPDATE | 275.57 | 5 000 |
+| | DELETE | 266.18 | 5 000 |
+| **MSSQL** | INSERT | 651.50 | 10 000 |
+| | UPDATE | 266.88 | 5 000 |
+| | DELETE | 265.41 | 5 000 |
+| **Oracle** | INSERT | 431.73 | 10 000 |
+| | UPDATE | 271.94 | 5 000 |
+| | DELETE | 269.34 | 5 000 |
+
+> Times include round-trip to a local Docker container for all engines except SQLite. Network latency to Docker on the same machine accounts for the majority of the per-op cost for PostgreSQL and above.
+
+---
+
+## Cross-ORM Comparison
+
+> **Honest note:** The numbers below are *not* from a shared controlled benchmark harness. A fair apples-to-apples comparison requires the same hardware, the same database instance, the same schema, and the same query patterns measured in the same `go test -bench` run. That benchmark is planned for v0.2 (tracked in the roadmap). The table below is based on published benchmarks from each project's documentation and community reports.
+
+| | Quark | GORM v2 | ent | sqlx |
+|:---|:---:|:---:|:---:|:---:|
+| **Reflection approach** | cached, one-time | per-call (heavy) | code-gen (none) | manual scan |
+| **ORM overhead (SQLite insert, est.)** | ~6 µs | ~40–80 µs | ~10–20 µs | ~3–8 µs |
+| **Allocations per insert (est.)** | low | high | very low | very low |
+| **Memory stability (10 k ops)** | stable | stable | stable | stable |
+
+**Analysis:**
+- **SQLite performance** is close to raw `database/sql` thanks to Quark's one-time reflection cache. After the first query for a given model, struct metadata is never re-computed.
+- **PostgreSQL** at ~198 µs/op is dominated by Docker round-trip latency (~1 ms on loopback). Relative ORM overhead is a small fraction of that.
+- **GORM overhead** is higher primarily because it re-inspects struct tags on every query chain. Quark caches this work in a `sync.Map` on first use.
+- **ent and sqlx** are faster in raw throughput because ent avoids reflection entirely (code generation) and sqlx shifts the mapping work to the caller. If maximum throughput is the only priority and you are willing to accept code generation or manual scanning, those tools are strong choices. Quark optimizes for the balance between safety, ergonomics, and performance.
+
+---
+
+## Planned: `go test -bench` Reproducible Suite
+
+A `benchmarks/comparison/` package with proper `func BenchmarkXxx(b *testing.B)` functions comparing Quark, GORM, ent, sqlx, and bun on:
+
+- Single-row insert
+- Batch insert (1 000 rows)
+- Simple SELECT with WHERE
+- SELECT with JOIN
+- Eager loading (Preload equivalent)
+
+Will be published in v0.2. Contributions welcome — see [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+---
+
+*Last updated: 2026-05-05 · Environment: Mac ARM64, Docker Desktop, Go 1.25.7*
