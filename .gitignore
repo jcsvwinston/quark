@@ -2,6 +2,12 @@
 *.exe
 *.out
 quark
+blog-api
+
+# Example database files
+*.db
+*.db-shm
+*.db-wal
 
 # Test artifacts
 *.test
