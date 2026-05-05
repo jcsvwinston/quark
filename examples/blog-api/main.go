@@ -25,7 +25,9 @@ func newServer(dsn string) (*server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+	lims := quark.DefaultLimits()
+	lims.AllowRawQueries = true
+	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithLimits(lims))
 	if err != nil {
 		return nil, fmt.Errorf("quark client: %w", err)
 	}

@@ -22,7 +22,9 @@ func testServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+	lims := quark.DefaultLimits()
+	lims.AllowRawQueries = true
+	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithLimits(lims))
 	if err != nil {
 		t.Fatal(err)
 	}
