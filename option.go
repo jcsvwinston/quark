@@ -59,8 +59,8 @@ type Limits struct {
 // DefaultLimits returns sensible default limits.
 func DefaultLimits() Limits {
 	return Limits{
-		MaxQueryLength:     10 * 1024,       // 10KB
-		MaxResults:         10000,           // 10k rows max
+		MaxQueryLength:     10 * 1024, // 10KB
+		MaxResults:         10000,     // 10k rows max
 		MaxJoins:           5,
 		MaxWhereConditions: 20,
 		QueryTimeout:       30 * time.Second,

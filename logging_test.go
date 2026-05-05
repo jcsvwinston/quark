@@ -1,9 +1,9 @@
 package quark_test
 
 import (
-	"github.com/jcsvwinston/quark"
 	"context"
 	"database/sql"
+	"github.com/jcsvwinston/quark"
 	"log/slog"
 	"os"
 	"testing"
@@ -37,7 +37,7 @@ func (o *SQLQueryLogger) ObserveQuery(e quark.QueryEvent) {
 func TestSQLLogging(t *testing.T) {
 	// 1. Create a logger (here we use a text handler to see it clearly in console)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	
+
 	db, _ := sql.Open("sqlite", ":memory:")
 	defer db.Close()
 

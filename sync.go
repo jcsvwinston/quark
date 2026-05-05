@@ -50,7 +50,7 @@ func (c *Client) syncModel(ctx context.Context, model any, opts SyncOptions, exe
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
-	
+
 	meta := GetModelMetaByType(v)
 	if meta == nil {
 		return fmt.Errorf("could not get metadata for model type: %v", v)
@@ -79,7 +79,7 @@ func (c *Client) syncModel(ctx context.Context, model any, opts SyncOptions, exe
 		if field.Column == "" {
 			continue
 		}
-		
+
 		colNameLower := strings.ToLower(field.Column)
 		if _, ok := currentCols[colNameLower]; !ok {
 			// Column missing in DB. Check if it's a rename.

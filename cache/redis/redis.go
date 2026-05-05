@@ -51,13 +51,13 @@ func (s *Store) Set(ctx context.Context, key string, val []byte, ttl time.Durati
 	cacheKey := "quark:cache:" + key
 	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, cacheKey, val, ttl)
-	
+
 	for _, tag := range tags {
 		tagKey := "quark:tag:" + tag
 		pipe.SAdd(ctx, tagKey, cacheKey)
-		pipe.Expire(ctx, tagKey, ttl + (24 * time.Hour)) // Keep tags slightly longer
+		pipe.Expire(ctx, tagKey, ttl+(24*time.Hour)) // Keep tags slightly longer
 	}
-	
+
 	_, err := pipe.Exec(ctx)
 	return err
 }
@@ -74,7 +74,7 @@ func (s *Store) InvalidateTags(ctx context.Context, tags ...string) error {
 		if err != nil {
 			continue
 		}
-		
+
 		if len(keys) > 0 {
 			// Delete all cached entries and the tag set itself
 			pipe := s.rdb.Pipeline()

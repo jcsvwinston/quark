@@ -35,7 +35,7 @@ func (r *Routine[T]) execute() (*sql.Rows, *Client, error) {
 	if r.err != nil {
 		return nil, nil, r.err
 	}
-	
+
 	client, err := r.provider.GetClient(r.ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get client: %w", err)

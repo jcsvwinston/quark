@@ -32,7 +32,7 @@ const (
 // TenantConfig configures the TenantRouter.
 type TenantConfig struct {
 	Strategy       TenantStrategy
-	MaxCachedPools int // Maximum number of DB connection pools to keep open (for DatabasePerTenant)
+	MaxCachedPools int     // Maximum number of DB connection pools to keep open (for DatabasePerTenant)
 	BaseClient     *Client // Used for SchemaPerTenant and RowLevelSecurity
 	TenantColumn   string  // Column name for RowLevelSecurity, default is "tenant_id"
 }
@@ -57,11 +57,11 @@ type TenantRouter struct {
 	config   TenantConfig
 	resolver func(ctx context.Context) string
 	factory  func(tenantID string) (*Client, error)
-	
+
 	// LRU Cache for DatabasePerTenant strategy
-	cache    map[string]*list.Element
-	lruList  *list.List
-	mu       sync.Mutex
+	cache   map[string]*list.Element
+	lruList *list.List
+	mu      sync.Mutex
 }
 
 // NewTenantRouter creates a new router for multi-tenant database access.
@@ -122,8 +122,8 @@ func (r *TenantRouter) getOrCreateCached(tenantID string) (*Client, error) {
 		return elem.Value.(*lruEntry).client, nil
 	}
 
-	// Create new client via factory (while locked to prevent race conditions on factory execution, 
-	// though this could block other tenants if factory is slow. For a more robust solution, 
+	// Create new client via factory (while locked to prevent race conditions on factory execution,
+	// though this could block other tenants if factory is slow. For a more robust solution,
 	// a singleflight pattern could be used).
 	newClient, err := r.factory(tenantID)
 	if err != nil {
@@ -150,7 +150,7 @@ func (r *TenantRouter) evictOldest() {
 		r.lruList.Remove(elem)
 		entry := elem.Value.(*lruEntry)
 		delete(r.cache, entry.tenantID)
-		
+
 		// Close the underlying sql.DB connection to prevent leaks
 		if entry.client != nil && entry.client.db != nil {
 			// Do this in a goroutine to not block the current lock

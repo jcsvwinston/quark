@@ -1,10 +1,10 @@
 package quark_test
 
 import (
-	"github.com/jcsvwinston/quark"
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/jcsvwinston/quark"
 	"os"
 	"sync"
 	"testing"

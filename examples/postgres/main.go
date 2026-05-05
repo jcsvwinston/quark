@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/jcsvwinston/quark"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jcsvwinston/quark"
 )
 
 // Product represents a multi-tenant product model using RLS
@@ -67,7 +67,7 @@ func main() {
 
 	// 5. Create products for different tenants
 	fmt.Println("📝 Creating multi-tenant products...")
-	
+
 	// Create for Tenant A
 	ctxA := context.WithValue(ctx, "tenant_id", "tenant-a")
 	prodA := &Product{Name: "Laptop", Price: 1200.0}
@@ -84,7 +84,7 @@ func main() {
 
 	// 6. Verify Isolation
 	fmt.Println("🔍 Verifying Tenant Isolation...")
-	
+
 	itemsA, _ := quark.For[Product](ctxA, router).List()
 	if len(itemsA) > 0 {
 		fmt.Printf("Tenant A sees %d products: %v\n", len(itemsA), itemsA[0].Name)

@@ -52,7 +52,7 @@ func TestSync(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	
+
 	// Create table with V1
 	if err := client.Migrate(ctx, &UserV1{}); err != nil {
 		t.Fatal(err)
