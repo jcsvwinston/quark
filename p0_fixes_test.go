@@ -17,22 +17,18 @@ import (
 
 func setupLimitedDB(t *testing.T, limits quark.Limits) (*quark.Client, func()) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`CREATE TABLE users (
+	ctx := context.Background()
+	err = client.Exec(ctx, `CREATE TABLE users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		email TEXT NOT NULL, name TEXT, active BOOLEAN DEFAULT 1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
-		db.Close()
-		t.Fatal(err)
-	}
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithLimits(limits))
-	if err != nil {
-		db.Close()
+		client.Close()
 		t.Fatal(err)
 	}
 	return client, func() { client.Close() }
@@ -169,25 +165,19 @@ func TestMaxJoinsEnforced(t *testing.T) {
 // --- RightJoin (untested in existing suite) ---
 
 func TestRightJoin(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
+	client, err := quark.New("sqlite", ":memory:")
 	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Exec(`
-		CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT, name TEXT, active BOOLEAN DEFAULT 1, created_at DATETIME);
-		CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, status TEXT);
-	`)
-	if err != nil {
-		db.Close()
-		t.Fatal(err)
-	}
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
-	if err != nil {
-		db.Close()
 		t.Fatal(err)
 	}
 	defer client.Close()
 	ctx := context.Background()
+	err = client.Exec(ctx, `
+		CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT, name TEXT, active BOOLEAN DEFAULT 1, created_at DATETIME);
+		CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, status TEXT);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	u := User{Email: "rj@test.com", Name: "RJUser", Active: true}
 	quark.For[User](ctx, client).Create(&u) //nolint
@@ -280,31 +270,21 @@ func (m *queryRowCountMiddleware) WrapQueryRow(next quark.QueryRowFunc) quark.Qu
 }
 
 func TestWrapQueryRowInvoked(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
+	qrm := &queryRowCountMiddleware{}
+	client, err := quark.New("sqlite", ":memory:", quark.WithMiddleware(qrm))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`CREATE TABLE users (
+	defer client.Close()
+	ctx := context.Background()
+	err = client.Exec(ctx, `CREATE TABLE users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		email TEXT NOT NULL, name TEXT, active BOOLEAN DEFAULT 1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
-		db.Close()
 		t.Fatal(err)
 	}
-
-	qrm := &queryRowCountMiddleware{}
-	client, err := quark.New(db,
-		quark.WithDialect(quark.SQLite()),
-		quark.WithMiddleware(qrm),
-	)
-	if err != nil {
-		db.Close()
-		t.Fatal(err)
-	}
-	defer client.Close()
-	ctx := context.Background()
 
 	// Count() uses executeQueryRow
 	_, err = quark.For[User](ctx, client).Count()

@@ -15,11 +15,11 @@ import (
 
 // setupTestDBWithOrders creates users + orders tables for JOIN tests.
 func setupTestDBWithOrders(t *testing.T) (*quark.Client, func()) {
-	db, err := sql.Open("sqlite", ":memory:")
+	client, err := quark.New("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`
+	err = client.Exec(context.Background(), `
 		CREATE TABLE users (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			email TEXT NOT NULL, name TEXT, active BOOLEAN DEFAULT 1,
@@ -32,12 +32,7 @@ func setupTestDBWithOrders(t *testing.T) (*quark.Client, func()) {
 		);
 	`)
 	if err != nil {
-		db.Close()
-		t.Fatal(err)
-	}
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
-	if err != nil {
-		db.Close()
+		client.Close()
 		t.Fatal(err)
 	}
 	return client, func() { client.Close() }
@@ -351,17 +346,17 @@ func (m *mockMiddleware) WrapQueryRow(next quark.QueryRowFunc) quark.QueryRowFun
 }
 
 func TestMiddlewareChain(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
+	client, err := quark.New("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`CREATE TABLE users (
+	err = client.Exec(context.Background(), `CREATE TABLE users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		email TEXT NOT NULL, name TEXT, active BOOLEAN DEFAULT 1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
-		db.Close()
+		client.Close()
 		t.Fatal(err)
 	}
 
@@ -369,13 +364,11 @@ func TestMiddlewareChain(t *testing.T) {
 	m2 := &mockMiddleware{}
 
 	// Wire both middlewares into the client via WithMiddleware options
-	client, err := quark.New(db,
-		quark.WithDialect(quark.SQLite()),
+	client, err = quark.New("sqlite", ":memory:",
 		quark.WithMiddleware(m1),
 		quark.WithMiddleware(m2),
 	)
 	if err != nil {
-		db.Close()
 		t.Fatal(err)
 	}
 	defer client.Close()

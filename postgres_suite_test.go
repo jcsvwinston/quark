@@ -1,7 +1,6 @@
 package quark_test
 
 import (
-	"database/sql"
 	"log/slog"
 	"os"
 	"testing"
@@ -18,21 +17,15 @@ func TestSuitePostgres(t *testing.T) {
 		t.Skip("QUARK_TEST_POSTGRES_DSN not set")
 	}
 
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	client, err := quark.New(db,
-		quark.WithDialect(quark.PostgreSQL()),
+	client, err := quark.New("pgx", dsn,
 		quark.WithQueryObserver(NewSQLQueryLogger(logger)),
 		quark.WithMiddleware(quarkotel.New()),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer client.Close()
 
 	SharedSuite(t, client)
 }

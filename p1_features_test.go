@@ -2,7 +2,6 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -14,15 +13,11 @@ import (
 
 func newSQLiteClient(t *testing.T) *quark.Client {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+	client, err := quark.New("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("quark.New: %v", err)
 	}
+	t.Cleanup(func() { client.Close() })
 	return client
 }
 
@@ -362,7 +357,7 @@ func TestWhereSubquery(t *testing.T) {
 	// AllowRawQueries must be enabled for WhereSubquery
 	rawLimits := quark.DefaultLimits()
 	rawLimits.AllowRawQueries = true
-	rawClient, err := quark.New(client.Raw(), quark.WithDialect(quark.SQLite()), quark.WithLimits(rawLimits))
+	rawClient, err := client.WithOptions(quark.WithLimits(rawLimits))
 	if err != nil {
 		t.Fatalf("quark.New (raw): %v", err)
 	}

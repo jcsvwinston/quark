@@ -42,7 +42,6 @@ package main
 
 import (
     "context"
-    "database/sql"
     "log"
 
     "github.com/jcsvwinston/quark"
@@ -57,9 +56,7 @@ type User struct {
 }
 
 func main() {
-    db, _ := sql.Open("sqlite", "file:app.db?cache=shared")
-    
-    client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+    client, err := quark.New("sqlite", "file:app.db?cache=shared")
     if err != nil {
         log.Fatal(err)
     }
@@ -94,10 +91,10 @@ func main() {
 }
 ```
 
-**Switch to PostgreSQL** — change two lines, zero query code changes:
+**Switch to PostgreSQL** — change one line, zero query code changes:
 
 ```go
-client, _ = quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+client, _ = quark.New("postgres", "postgres://user:pass@localhost/db")
 ```
 
 See the [blog-api example](examples/blog-api/) for a full end-to-end REST API with migrations, tests, and curl examples.
@@ -175,7 +172,6 @@ package main
 
 import (
     "context"
-    "database/sql"
     "log"
 
     "github.com/jcsvwinston/quark"
@@ -190,9 +186,7 @@ type User struct {
 }
 
 func main() {
-    db, _ := sql.Open("sqlite", "file:app.db?cache=shared")
-    
-    client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+    client, err := quark.New("sqlite", "file:app.db?cache=shared")
     if err != nil {
         log.Fatal(err)
     }
@@ -227,10 +221,10 @@ func main() {
 }
 ```
 
-**Switch to PostgreSQL** — change two lines, zero query code changes:
+**Switch to PostgreSQL** — change one line, zero query code changes:
 
 ```go
-client, _ = quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+client, _ = quark.New("postgres", "postgres://user:pass@localhost/db")
 ```
 
 ---
@@ -254,7 +248,7 @@ Enable raw queries only where you deliberately need them:
 ```go
 lims := quark.DefaultLimits()
 lims.AllowRawQueries = true
-client, _ = quark.New(db, quark.WithDialect(quark.PostgreSQL()), quark.WithLimits(lims))
+client, _ = quark.New("postgres", "postgres://user:pass@localhost/db", quark.WithLimits(lims))
 ```
 
 ---
@@ -361,8 +355,7 @@ users, _ := quark.For[User](tenantCtx, router).List()
 import "github.com/jcsvwinston/quark/cache/memory"
 
 store := memory.New()
-client, _ := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, _ := quark.New("postgres", "postgres://user:pass@localhost/db",
     quark.WithCacheStore(store),
 )
 
@@ -384,8 +377,7 @@ Redis backend: `github.com/jcsvwinston/quark/cache/redis`
 ```go
 import quarkotel "github.com/jcsvwinston/quark/otel"
 
-client, _ := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, _ := quark.New("postgres", "postgres://user:pass@localhost/db",
     quark.WithMiddleware(quarkotel.New()),
 )
 // Every query now emits spans and metrics to your configured OTEL exporter
@@ -474,8 +466,7 @@ github.com/jcsvwinston/quark
 ## ⚙️ Configuration Reference
 
 ```go
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),   // SQLite() MySQL() MariaDB() MSSQL() Oracle()
+client, err := quark.New("postgres", "postgres://user:pass@localhost/db",
     quark.WithLimits(quark.Limits{
         MaxResults:         10_000,          // hard cap on List() results
         MaxWhereConditions: 20,              // prevent runaway WHERE chains

@@ -71,11 +71,10 @@ router := quark.NewTenantRouter(
         }
         
         // Per-tenant connection pool limits
-        db.SetMaxOpenConns(25)
-        db.SetMaxIdleConns(5)
-        db.SetConnMaxLifetime(5 * time.Minute)
+        // Note: These can now be set via WithMaxOpenConns, WithMaxIdleConns, WithConnMaxLifetime options
+        // when creating the client
         
-        return quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+        return quark.New("postgres", dsn)
     },
 )
 ```
@@ -173,11 +172,10 @@ factory := func(tenantID string) (*quark.Client, error) {
     db, err := sql.Open("postgres", dsn)
     
     // Per-tenant limits prevent one tenant from exhausting resources
-    db.SetMaxOpenConns(25)      // Maximum open connections per tenant
-    db.SetMaxIdleConns(5)       // Idle connections to maintain
-    db.SetConnMaxLifetime(5 * time.Minute)  // Connection recycling
+    // Connection pool limits can now be set via options:
+    // WithMaxOpenConns, WithMaxIdleConns, WithConnMaxLifetime, WithConnMaxIdleTime
     
-    return quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+    return quark.New("postgres", dsn)
 }
 ```
 

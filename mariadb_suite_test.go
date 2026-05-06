@@ -28,24 +28,18 @@ func TestSuiteMariaDB(t *testing.T) {
 		t.Skip("QUARK_TEST_MARIADB_DSN not set")
 	}
 
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	if err := db.Ping(); err != nil {
-		t.Skipf("MariaDB not reachable (%v), skipping", err)
-	}
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	client, err := quark.New(db,
-		quark.WithDialect(quark.MariaDB()),
+	client, err := quark.New("mysql", dsn,
 		quark.WithQueryObserver(NewSQLQueryLogger(logger)),
 		quark.WithMiddleware(quarkotel.New()),
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	defer client.Close()
+
+	if err := client.Raw().Ping(); err != nil {
+		t.Skipf("MariaDB not reachable (%v), skipping", err)
 	}
 
 	SharedSuite(t, client)
@@ -58,13 +52,13 @@ func TestMariaDBCache(t *testing.T) {
 		t.Skip("QUARK_TEST_MARIADB_DSN not set")
 	}
 
-	db, err := sql.Open("mysql", dsn)
+	baseClient, err := quark.New("mysql", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer baseClient.Close()
 
-	if err := db.Ping(); err != nil {
+	if err := baseClient.Raw().Ping(); err != nil {
 		t.Skipf("MariaDB not reachable (%v), skipping", err)
 	}
 
@@ -79,8 +73,7 @@ func TestMariaDBCache(t *testing.T) {
 		logger := &cacheLogger{}
 		memStore := memory.New()
 
-		client, err := quark.New(db,
-			quark.WithDialect(quark.MariaDB()),
+		client, err := baseClient.WithOptions(
 			quark.WithCacheStore(memStore),
 			quark.WithQueryObserver(logger),
 		)
@@ -94,7 +87,7 @@ func TestMariaDBCache(t *testing.T) {
 			Name  string `db:"name"`
 		}
 
-		noCache, _ := quark.New(db, quark.WithDialect(quark.MariaDB()))
+		noCache, _ := baseClient.WithOptions()
 		dropTable(noCache, "maria_db_cache_users")
 		client.Migrate(ctx, &MariaDBCacheUser{})
 
@@ -158,8 +151,7 @@ func TestMariaDBCache(t *testing.T) {
 		}
 
 		logger := &cacheLogger{}
-		client, err := quark.New(db,
-			quark.WithDialect(quark.MariaDB()),
+		client, err := baseClient.WithOptions(
 			quark.WithCacheStore(rStore),
 			quark.WithQueryObserver(logger),
 		)
@@ -173,7 +165,7 @@ func TestMariaDBCache(t *testing.T) {
 			Name  string `db:"name"`
 		}
 
-		noCache2, _ := quark.New(db, quark.WithDialect(quark.MariaDB()))
+		noCache2, _ := baseClient.WithOptions()
 		dropTable(noCache2, "maria_db_redis_cache_users")
 		client.Migrate(ctx, &MariaDBRedisCacheUser{})
 		quark.For[MariaDBRedisCacheUser](ctx, client).Create(&MariaDBRedisCacheUser{Email: "r@mdb.com", Name: "Redis"})
@@ -222,13 +214,11 @@ func TestMariaDBOtel(t *testing.T) {
 
 	ctx := context.Background()
 
-	client, err := quark.New(db,
-		quark.WithDialect(quark.MariaDB()),
-		quark.WithMiddleware(quarkotel.New()),
-	)
+	client, err := quark.New("mysql", dsn, quark.WithMiddleware(quarkotel.New()))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer client.Close()
 
 	type MariaDBOtelUser struct {
 		ID    int64  `db:"id" pk:"true"`
@@ -371,30 +361,20 @@ func TestMariaDBStress(t *testing.T) {
 		t.Skip("QUARK_TEST_MARIADB_DSN not set")
 	}
 
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	if err := db.Ping(); err != nil {
-		t.Skipf("MariaDB not reachable (%v), skipping", err)
-	}
-
 	exporter, shutdown := setupTestTelemetry()
 	defer shutdown(context.Background())
 
 	ctx := context.Background()
 	memStore := memory.New()
 
-	client, err := quark.New(db,
-		quark.WithDialect(quark.MariaDB()),
+	client, err := quark.New("mysql", dsn,
 		quark.WithCacheStore(memStore),
 		quark.WithMiddleware(quarkotel.New()),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer client.Close()
 
 	type MariaDBStressRecord struct {
 		ID    int64  `db:"id" pk:"true"`

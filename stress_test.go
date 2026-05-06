@@ -2,7 +2,6 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -74,24 +73,18 @@ func TestStressWithCacheAndOtel(t *testing.T) {
 	exporter, shutdown := setupTestTelemetry()
 	defer shutdown(context.Background())
 
-	db, err := sql.Open("sqlite", "file:stresscacheotel?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	defer db.Close()
-
 	ctx := context.Background()
 
 	// Crear cliente con caché y OTel
 	memStore := memory.New()
-	client, err := quark.New(db,
-		quark.WithDialect(quark.SQLite()),
+	client, err := quark.New("sqlite", "file:stresscacheotel?mode=memory&cache=shared",
 		quark.WithCacheStore(memStore),
 		quark.WithMiddleware(quarkotel.New()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	defer client.Close()
 
 	type StressCacheRecord struct {
 		ID    int64  `db:"id" pk:"true"`
@@ -272,22 +265,16 @@ func TestStressWithRealOtelCollector(t *testing.T) {
 	}
 	defer shutdown(ctx)
 
-	db, err := sql.Open("sqlite", "file:stressrealotel?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	defer db.Close()
-
 	// Crear cliente con caché y OTel
 	memStore := memory.New()
-	client, err := quark.New(db,
-		quark.WithDialect(quark.SQLite()),
+	client, err := quark.New("sqlite", "file:stressreal?mode=memory&cache=shared",
 		quark.WithCacheStore(memStore),
 		quark.WithMiddleware(quarkotel.New()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	defer client.Close()
 
 	type StressRealRecord struct {
 		ID    int64  `db:"id" pk:"true"`

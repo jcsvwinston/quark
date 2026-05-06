@@ -2,13 +2,13 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"github.com/jcsvwinston/quark"
 	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jcsvwinston/quark"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -79,20 +79,15 @@ func TestBenchmarkEngines(t *testing.T) {
 		}
 
 		t.Run(eng.name, func(t *testing.T) {
-			db, err := sql.Open(eng.drv, eng.dsn)
-			if err != nil {
-				t.Fatalf("failed to open %s: %v", eng.name, err)
-			}
-			defer db.Close()
-
 			obs := &metricsObserver{}
-			client, err := quark.New(db, quark.WithDialect(eng.dial), quark.WithQueryObserver(obs))
+			client, err := quark.New(eng.drv, eng.dsn, quark.WithQueryObserver(obs))
 			if err != nil {
 				t.Fatalf("failed to create client for %s: %v", eng.name, err)
 			}
+			defer client.Close()
 			ctx := context.Background()
 
-			client.Raw().Exec("DROP TABLE IF EXISTS bench_models")
+			client.Exec(ctx, "DROP TABLE IF EXISTS bench_models")
 			client.Migrate(ctx, &BenchModel{})
 
 			// 1. Bulk Insert (10,000 records)

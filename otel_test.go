@@ -2,7 +2,6 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -103,18 +102,13 @@ func TestOtel_InsertSpans(t *testing.T) {
 	exporter, shutdown := setupTestTelemetry()
 	defer shutdown(context.Background())
 
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	defer db.Close()
-
 	ctx := context.Background()
 
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithMiddleware(quarkotel.New()))
+	client, err := quark.New("sqlite", ":memory:", quark.WithMiddleware(quarkotel.New()))
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	defer client.Close()
 
 	type TestUser struct {
 		ID    int64  `db:"id" pk:"true"`
@@ -172,18 +166,13 @@ func TestOtel_QuerySpans(t *testing.T) {
 	exporter, shutdown := setupTestTelemetry()
 	defer shutdown(context.Background())
 
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	defer db.Close()
-
 	ctx := context.Background()
 
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithMiddleware(quarkotel.New()))
+	client, err := quark.New("sqlite", ":memory:", quark.WithMiddleware(quarkotel.New()))
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	defer client.Close()
 
 	type TestUser struct {
 		ID    int64  `db:"id" pk:"true"`
@@ -246,18 +235,13 @@ func TestOtel_FirstOperation(t *testing.T) {
 	exporter, shutdown := setupTestTelemetry()
 	defer shutdown(context.Background())
 
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	defer db.Close()
-
 	ctx := context.Background()
 
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithMiddleware(quarkotel.New()))
+	client, err := quark.New("sqlite", ":memory:", quark.WithMiddleware(quarkotel.New()))
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	defer client.Close()
 
 	type TestUser struct {
 		ID    int64  `db:"id" pk:"true"`
@@ -315,18 +299,13 @@ func TestOtel_Attributes(t *testing.T) {
 	exporter, shutdown := setupTestTelemetry()
 	defer shutdown(context.Background())
 
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	defer db.Close()
-
 	ctx := context.Background()
 
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithMiddleware(quarkotel.New()))
+	client, err := quark.New("sqlite", ":memory:", quark.WithMiddleware(quarkotel.New()))
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	defer client.Close()
 
 	type TestUser struct {
 		ID    int64  `db:"id" pk:"true"`
@@ -378,18 +357,13 @@ func TestOtel_TransactionSpans(t *testing.T) {
 	exporter, shutdown := setupTestTelemetry()
 	defer shutdown(context.Background())
 
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	defer db.Close()
-
 	ctx := context.Background()
 
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithMiddleware(quarkotel.New()))
+	client, err := quark.New("sqlite", ":memory:", quark.WithMiddleware(quarkotel.New()))
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	defer client.Close()
 
 	type TestUser struct {
 		ID   int64  `db:"id" pk:"true"`
@@ -422,19 +396,14 @@ func TestOtel_ContextPropagation(t *testing.T) {
 	exporter, shutdown := setupTestTelemetry()
 	defer shutdown(context.Background())
 
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	defer db.Close()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithMiddleware(quarkotel.New()))
+	client, err := quark.New("sqlite", ":memory:", quark.WithMiddleware(quarkotel.New()))
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	defer client.Close()
 
 	type TestUser struct {
 		ID   int64  `db:"id" pk:"true"`
@@ -475,16 +444,11 @@ func TestIntegration_WithRealCollector(t *testing.T) {
 	}
 	defer shutdown(ctx)
 
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	defer db.Close()
-
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithMiddleware(quarkotel.New()))
+	client, err := quark.New("sqlite", ":memory:", quark.WithMiddleware(quarkotel.New()))
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	defer client.Close()
 
 	type TestUser struct {
 		ID    int64  `db:"id" pk:"true"`

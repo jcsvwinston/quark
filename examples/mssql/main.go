@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -29,17 +28,15 @@ func main() {
 		dsn = "sqlserver://sa:QuarkTest123!@localhost:1433?database=master"
 	}
 
-	db, err := sql.Open("sqlserver", dsn)
+	// 2. Initialize Quark Client (sql.Open is handled internally)
+	client, err := quark.New("sqlserver", dsn,
+		quark.WithMaxOpenConns(25),
+		quark.WithMaxIdleConns(5),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
-
-	// 2. Initialize Quark Client
-	client, err := quark.New(db, quark.WithDialect(quark.MSSQL()))
-	if err != nil {
-		log.Fatal(err)
-	}
+	defer client.Close()
 
 	// 3. Auto-Migrate
 	fmt.Println("🚀 Migrating schema...")

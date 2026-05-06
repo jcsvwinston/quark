@@ -19,14 +19,13 @@ func TestSuiteMSSQL(t *testing.T) {
 		t.Skip("QUARK_TEST_MSSQL_DSN not set")
 	}
 
-	db, err := sql.Open("sqlserver", dsn)
+	// Create database if not exists
+	tempDB, err := sql.Open("sqlserver", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Create database if not exists
-	_, _ = db.Exec("IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'quark_test') CREATE DATABASE quark_test")
-	db.Close()
+	_, _ = tempDB.Exec("IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'quark_test') CREATE DATABASE quark_test")
+	tempDB.Close()
 
 	// Reconnect to the test database
 	if !strings.Contains(dsn, "database=") {
@@ -39,21 +38,15 @@ func TestSuiteMSSQL(t *testing.T) {
 		dsn = strings.Replace(dsn, "database=master", "database=quark_test", 1)
 	}
 
-	db, err = sql.Open("sqlserver", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	client, err := quark.New(db,
-		quark.WithDialect(quark.MSSQL()),
+	client, err := quark.New("sqlserver", dsn,
 		quark.WithQueryObserver(NewSQLQueryLogger(logger)),
 		quark.WithMiddleware(quarkotel.New()),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer client.Close()
 
 	SharedSuite(t, client)
 }

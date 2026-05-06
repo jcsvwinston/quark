@@ -92,7 +92,7 @@ myDialect := &MyCustomDialect{}
 quark.RegisterDialect("customdb", myDialect)
 
 // Use it
-client, err := quark.New(db, quark.WithDialect(quark.DetectDialectByName("customdb")))
+client, err := quark.New("customdb", "customdb://user:pass@localhost/db")
 ```
 
 The `Dialect` interface includes methods for SQL generation, identifier quoting, placeholder formatting, and DDL operations (ALTER TABLE).

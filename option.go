@@ -83,6 +83,58 @@ func WithCacheStore(s CacheStore) Option {
 	}
 }
 
+// PoolOption is a configuration option for the database connection pool.
+// These are applied to the *sql.DB before creating the Client.
+type PoolOption interface {
+	isPoolOption()
+	apply(*sql.DB)
+}
+
+type poolOption struct {
+	fn func(*sql.DB)
+}
+
+func (o poolOption) isPoolOption() {}
+func (o poolOption) apply(db *sql.DB) {
+	o.fn(db)
+}
+
+// WithMaxOpenConns sets the maximum number of open connections to the database.
+func WithMaxOpenConns(n int) PoolOption {
+	return poolOption{
+		fn: func(db *sql.DB) {
+			db.SetMaxOpenConns(n)
+		},
+	}
+}
+
+// WithMaxIdleConns sets the maximum number of idle connections in the pool.
+func WithMaxIdleConns(n int) PoolOption {
+	return poolOption{
+		fn: func(db *sql.DB) {
+			db.SetMaxIdleConns(n)
+		},
+	}
+}
+
+// WithConnMaxLifetime sets the maximum amount of time a connection may be reused.
+func WithConnMaxLifetime(d time.Duration) PoolOption {
+	return poolOption{
+		fn: func(db *sql.DB) {
+			db.SetConnMaxLifetime(d)
+		},
+	}
+}
+
+// WithConnMaxIdleTime sets the maximum amount of time a connection may be idle.
+func WithConnMaxIdleTime(d time.Duration) PoolOption {
+	return poolOption{
+		fn: func(db *sql.DB) {
+			db.SetConnMaxIdleTime(d)
+		},
+	}
+}
+
 // QueryObserver is called after each query execution.
 // Use this for logging, metrics, auditing, etc.
 type QueryObserver interface {

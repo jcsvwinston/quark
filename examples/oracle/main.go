@@ -33,17 +33,15 @@ func main() {
 
 	// Uncomment the following lines when CGO is enabled and Godror is available
 	/*
-		db, err := sql.Open("godror", dsn)
+		// 2. Initialize Quark Client (sql.Open is handled internally)
+		client, err := quark.New("godror", dsn,
+			quark.WithMaxOpenConns(25),
+			quark.WithMaxIdleConns(5),
+		)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer db.Close()
-
-		// 2. Initialize Quark Client
-		client, err := quark.New(db, quark.WithDialect(quark.Oracle()))
-		if err != nil {
-			log.Fatal(err)
-		}
+		defer client.Close()
 
 		// 3. Auto-Migrate
 		fmt.Println("🚀 Migrating schema...")

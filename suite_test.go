@@ -147,11 +147,7 @@ type CacheModel struct {
 
 func runCacheValidation(ctx context.Context, t *testing.T, baseClient *quark.Client, store quark.CacheStore) {
 	counter := &sqlCounter{}
-	client, _ := quark.New(baseClient.Raw(),
-		quark.WithDialect(baseClient.Dialect()),
-		quark.WithCacheStore(store),
-		quark.WithQueryObserver(counter),
-	)
+	client, _ := baseClient.WithOptions(quark.WithCacheStore(store), quark.WithQueryObserver(counter))
 
 	dropTable(client, "cache_models")
 	client.Migrate(ctx, &CacheModel{})
@@ -531,7 +527,7 @@ func testEvents(ctx context.Context, t *testing.T, client *quark.Client) {
 	// Quark quark.Client has an 'observers' slice. Let's see if we can append to it.
 	// Actually, it's unexported. But we can create a NEW client with the SAME DB for this test.
 
-	c2, _ := quark.New(client.Raw(), quark.WithDialect(client.Dialect()), quark.WithQueryObserver(obs))
+	c2, _ := client.WithOptions(quark.WithQueryObserver(obs))
 
 	type EventUser struct {
 		ID   int64  `db:"id" pk:"true"`
@@ -576,7 +572,7 @@ func (m *suiteMockMiddleware) WrapExec(next quark.ExecFunc) quark.ExecFunc {
 func testMiddleware(ctx context.Context, t *testing.T, client *quark.Client) {
 	dropTable(client, "mid_users")
 	mid := &suiteMockMiddleware{}
-	c2, _ := quark.New(client.Raw(), quark.WithDialect(client.Dialect()), quark.WithMiddleware(mid))
+	c2, _ := client.WithOptions(quark.WithMiddleware(mid))
 
 	type MidUser struct {
 		ID int64 `db:"id" pk:"true"`
@@ -592,7 +588,7 @@ func testMiddleware(ctx context.Context, t *testing.T, client *quark.Client) {
 func testRaw(ctx context.Context, t *testing.T, client *quark.Client) {
 	dropTable(client, "raw_test")
 	// Enable raw queries for this test
-	c2, _ := quark.New(client.Raw(), quark.WithDialect(client.Dialect()), quark.WithLimits(quark.Limits{AllowRawQueries: true, MaxResults: 1000, QueryTimeout: time.Second}))
+	c2, _ := client.WithOptions(quark.WithLimits(quark.Limits{AllowRawQueries: true, MaxResults: 1000, QueryTimeout: time.Second}))
 
 	sqlType := "TEXT"
 	switch client.Dialect().Name() {
@@ -617,11 +613,7 @@ func testRaw(ctx context.Context, t *testing.T, client *quark.Client) {
 
 func testDatabasePerTenant(ctx context.Context, t *testing.T, client *quark.Client) {
 	factory := func(tenantID string) (*quark.Client, error) {
-		db, err := sql.Open("sqlite", ":memory:")
-		if err != nil {
-			return nil, err
-		}
-		return quark.New(db, quark.WithDialect(quark.SQLite()))
+		return quark.New("sqlite", ":memory:")
 	}
 
 	cfg := quark.DefaultTenantConfig()
@@ -754,7 +746,7 @@ func testSync(ctx context.Context, t *testing.T, client *quark.Client) {
 	}
 
 	// Destructive mode
-	cDestructive, _ := quark.New(client.Raw(), quark.WithDialect(client.Dialect()), quark.WithLimits(quark.Limits{SafeMigrations: false}))
+	cDestructive, _ := client.WithOptions(quark.WithLimits(quark.Limits{SafeMigrations: false}))
 	if err := cDestructive.Sync(ctx, quark.SyncOptions{}, &SyncUserV4{}); err != nil {
 		t.Fatalf("destructive sync failed: %v", err)
 	}
@@ -1053,7 +1045,7 @@ func testP1Features(ctx context.Context, t *testing.T, client *quark.Client) {
 		// AllowRawQueries must be true for WhereSubquery to work
 		rawLimits := quark.DefaultLimits()
 		rawLimits.AllowRawQueries = true
-		rawClient, _ := quark.New(client.Raw(), quark.WithDialect(client.Dialect()), quark.WithLimits(rawLimits))
+		rawClient, _ := client.WithOptions(quark.WithLimits(rawLimits))
 
 		// dialect-aware quoting for the subquery
 		q := client.Dialect().Quote
@@ -1117,10 +1109,7 @@ func testOtelInSharedSuite(ctx context.Context, t *testing.T, client *quark.Clie
 	}
 
 	// Client with OTel middleware wired to the now-active global TracerProvider.
-	otelClient, err := quark.New(client.Raw(),
-		quark.WithDialect(client.Dialect()),
-		quark.WithMiddleware(quarkotel.New()),
-	)
+	otelClient, err := client.WithOptions(quark.WithMiddleware(quarkotel.New()))
 	if err != nil {
 		t.Fatalf("failed to create otel client: %v", err)
 	}

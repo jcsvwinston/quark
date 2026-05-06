@@ -73,10 +73,10 @@ GORM and ent protect query *values* through parameterized queries, which is the 
 
 ```go
 // SQLite
-client, _ := quark.New(db, quark.WithDialect(quark.SQLite()))
+client, _ := quark.New("sqlite", ":memory:")
 
 // PostgreSQL — one line changes, all queries identical
-client, _ = quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+client, _ = quark.New("postgres", "postgres://user:pass@localhost/db")
 ```
 
 Quark supports: SQLite, PostgreSQL, MySQL, MariaDB, MSSQL, Oracle.
@@ -158,7 +158,7 @@ GORM's `Session(&gorm.Session{NewDB: true})` can mitigate this, but it is opt-in
 
 ```go
 store := memory.New()
-client, _ := quark.New(db, quark.WithDialect(quark.PostgreSQL()), quark.WithCacheStore(store))
+client, _ := quark.New("postgres", "postgres://user:pass@localhost/db", quark.WithCacheStore(store))
 
 users, _ := quark.For[User](ctx, client).Cache(5*time.Minute, "users").List()
 store.InvalidateTags(ctx, "users") // invalidate after a write
@@ -179,8 +179,7 @@ GORM has no built-in cache. Third-party packages (e.g., `go-gorm/cache`) exist b
 ```go
 import quarkotel "github.com/jcsvwinston/quark/otel"
 
-client, _ := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, _ := quark.New("postgres", "postgres://user:pass@localhost/db",
     quark.WithMiddleware(quarkotel.New()),
 )
 // Every query now emits spans — no further changes needed.

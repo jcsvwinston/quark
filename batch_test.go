@@ -2,7 +2,6 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 
@@ -22,15 +21,10 @@ type BatchUser struct {
 // newBatchClient spins up an isolated in-memory SQLite client for a single test.
 func newBatchClient(t *testing.T) (*quark.Client, func()) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
 	l := quark.DefaultLimits()
 	l.SafeMigrations = false
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithLimits(l))
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(l))
 	if err != nil {
-		db.Close()
 		t.Fatalf("new client: %v", err)
 	}
 	ctx := context.Background()

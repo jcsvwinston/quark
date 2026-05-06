@@ -2,7 +2,6 @@ package migrate_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 
@@ -16,12 +15,7 @@ import (
 // AllowRawQueries must be true because Migrator uses client.Exec internally.
 func setupMigratorDB(t *testing.T) (*quark.Client, func()) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	client, err := quark.New(db,
-		quark.WithDialect(quark.SQLite()),
+	client, err := quark.New("sqlite", ":memory:",
 		quark.WithLimits(quark.Limits{
 			MaxQueryLength:     10 * 1024,
 			MaxResults:         10000,
@@ -32,7 +26,6 @@ func setupMigratorDB(t *testing.T) (*quark.Client, func()) {
 		}),
 	)
 	if err != nil {
-		db.Close()
 		t.Fatalf("new client: %v", err)
 	}
 	return client, func() { client.Close() }

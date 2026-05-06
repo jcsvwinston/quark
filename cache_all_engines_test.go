@@ -2,7 +2,6 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strings"
@@ -87,12 +86,6 @@ func TestCacheAllEngines(t *testing.T) {
 		}
 
 		t.Run(eng.name, func(t *testing.T) {
-			db, err := sql.Open(eng.drv, eng.dsn)
-			if err != nil {
-				t.Fatalf("failed to open %s: %v", eng.name, err)
-			}
-			defer db.Close()
-
 			logger := &cacheLogger{}
 			ctx := context.Background()
 
@@ -100,11 +93,15 @@ func TestCacheAllEngines(t *testing.T) {
 			fmt.Printf("🔍 ENGINE: %s\n", eng.name)
 			fmt.Printf("%s\n", strings.Repeat("=", 70))
 
-			// Limpiar tabla si existe
-			db.Exec("DROP TABLE IF EXISTS cache_test_users")
-
 			// Cliente SIN caché
-			clientNoCache, _ := quark.New(db, quark.WithDialect(eng.dial), quark.WithQueryObserver(logger))
+			clientNoCache, err := quark.New(eng.drv, eng.dsn, quark.WithQueryObserver(logger))
+			if err != nil {
+				t.Fatalf("failed to create client: %v", err)
+			}
+			defer clientNoCache.Close()
+
+			// Limpiar tabla si existe
+			clientNoCache.Exec(ctx, "DROP TABLE IF EXISTS cache_test_users")
 			clientNoCache.Migrate(ctx, &CacheTestUser{})
 
 			// Insertar datos
@@ -135,11 +132,13 @@ func TestCacheAllEngines(t *testing.T) {
 			memStore := memory.New()
 			logger.Reset()
 
-			clientWithCache, _ := quark.New(db,
-				quark.WithDialect(eng.dial),
+			clientWithCache, err := clientNoCache.WithOptions(
 				quark.WithCacheStore(memStore),
 				quark.WithQueryObserver(logger),
 			)
+			if err != nil {
+				t.Fatalf("failed to create client with cache: %v", err)
+			}
 
 			// Test 1: Primera consulta (MISS)
 			fmt.Println("→ 1ª consulta caché: quark.For[User](ctx, client).Where(\"id\", \"=\", 1).Cache(5m).First()")
@@ -219,11 +218,13 @@ func TestCacheAllEngines(t *testing.T) {
 					fmt.Printf("⚠ Redis no disponible (%v), saltando test Redis\n", err)
 				} else {
 					logger.Reset()
-					clientRedis, _ := quark.New(db,
-						quark.WithDialect(eng.dial),
+					clientRedis, err := clientNoCache.WithOptions(
 						quark.WithCacheStore(redisStore),
 						quark.WithQueryObserver(logger),
 					)
+					if err != nil {
+						t.Fatalf("failed to create client with redis cache: %v", err)
+					}
 
 					fmt.Println("→ 1ª consulta Redis: quark.For[User](ctx, client).Where(\"id\", \"=\", 2).Cache(5m).First()")
 					start = time.Now()

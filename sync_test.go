@@ -2,7 +2,6 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -40,16 +39,11 @@ type UserV4 struct {
 func (UserV4) TableName() string { return "users" }
 
 func TestSync(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:synctest?mode=memory&cache=shared")
+	client, err := quark.New("sqlite3", "file:synctest?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	defer client.Close()
 
 	ctx := context.Background()
 
@@ -102,7 +96,8 @@ func TestSync(t *testing.T) {
 	}
 
 	// Second sync with SafeMigrations = false - should drop contacts
-	client, _ = quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithLimits(quark.Limits{SafeMigrations: false}))
+	client, _ = quark.New("sqlite3", "file:synctest?mode=memory&cache=shared", quark.WithLimits(quark.Limits{SafeMigrations: false}))
+	defer client.Close()
 	if err := client.Sync(ctx, quark.SyncOptions{}, &UserV4{}); err != nil {
 		t.Fatal(err)
 	}

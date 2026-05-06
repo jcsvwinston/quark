@@ -2,7 +2,6 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -22,16 +21,11 @@ type Post struct {
 }
 
 func TestAssociationSaving(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
+	client, err := quark.New("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	defer client.Close()
 
 	ctx := context.Background()
 	if err := client.Migrate(ctx, &AssocUser{}, &Post{}); err != nil {

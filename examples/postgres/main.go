@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -31,17 +30,15 @@ func main() {
 		dsn = "postgres://quark_user:quark_pass@localhost:5432/quark_test?sslmode=disable"
 	}
 
-	db, err := sql.Open("pgx", dsn)
+	// 2. Initialize Base Quark Client (sql.Open is handled internally)
+	baseClient, err := quark.New("pgx", dsn,
+		quark.WithMaxOpenConns(25),
+		quark.WithMaxIdleConns(5),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
-
-	// 2. Initialize Base Quark Client
-	baseClient, err := quark.New(db, quark.WithDialect(quark.PostgreSQL()))
-	if err != nil {
-		log.Fatal(err)
-	}
+	defer baseClient.Close()
 
 	// 3. Initialize TenantRouter for RLS
 	router := quark.NewTenantRouter(

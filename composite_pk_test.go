@@ -2,7 +2,6 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -98,12 +97,13 @@ func TestCompositePK_StringKeys(t *testing.T) {
 func setupCompositePKDB(t *testing.T) (*quark.Client, func()) {
 	t.Helper()
 
-	db, err := sql.Open("sqlite", ":memory:")
+	client, err := quark.New("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec(`
+	ctx := context.Background()
+	err = client.Exec(ctx, `
 		CREATE TABLE order_items (
 			order_id   INTEGER NOT NULL,
 			product_id INTEGER NOT NULL,
@@ -113,11 +113,11 @@ func setupCompositePKDB(t *testing.T) (*quark.Client, func()) {
 		)
 	`)
 	if err != nil {
-		db.Close()
+		client.Close()
 		t.Fatalf("create table: %v", err)
 	}
 
-	_, err = db.Exec(`
+	err = client.Exec(ctx, `
 		CREATE TABLE role_permissions (
 			role_id       TEXT NOT NULL,
 			permission_id TEXT NOT NULL,
@@ -126,14 +126,8 @@ func setupCompositePKDB(t *testing.T) (*quark.Client, func()) {
 		)
 	`)
 	if err != nil {
-		db.Close()
+		client.Close()
 		t.Fatalf("create table: %v", err)
-	}
-
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
-	if err != nil {
-		db.Close()
-		t.Fatal(err)
 	}
 
 	return client, func() { client.Close() }

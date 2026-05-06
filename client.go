@@ -24,6 +24,8 @@ type Client struct {
 	middleware []Middleware
 	limits     Limits
 	cacheStore CacheStore
+	driverName string
+	dataSource string
 }
 
 // ClientProvider is an interface that provides a database client.
@@ -37,22 +39,34 @@ func (c *Client) GetClient(ctx context.Context) (*Client, error) {
 	return c, nil
 }
 
-// New creates a new quark Client with the given database connection and options.
+// New creates a new quark Client with the given driver name and data source.
 //
 // Example:
 //
-//	db, err := sql.Open("postgres", "postgres://user:pass@localhost/db")
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	client, err := quark.New(db,
-//	    quark.WithDialect(quark.PostgreSQL()),
-//	    quark.WithLogger(slog.Default()),
+//	client, err := quark.New("sqlite", "example.db",
+//	    quark.WithMaxOpenConns(25),
+//	    quark.WithMaxIdleConns(5),
 //	)
-func New(db *sql.DB, opts ...Option) (*Client, error) {
-	if db == nil {
-		return nil, fmt.Errorf("%w: db cannot be nil", ErrConnection)
+//
+// For PostgreSQL:
+//
+//	client, err := quark.New("pgx", "postgres://user:pass@localhost/db",
+//	    quark.WithMaxOpenConns(25),
+//	)
+//
+// The dialect is auto-detected from the driver name. You can override it with WithDialect().
+func New(driverName, dataSource string, opts ...any) (*Client, error) {
+	// Open database connection
+	db, err := sql.Open(driverName, dataSource)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrConnection, err)
+	}
+
+	// Apply pool options before creating the client
+	for _, opt := range opts {
+		if poolOpt, ok := opt.(PoolOption); ok {
+			poolOpt.apply(db)
+		}
 	}
 
 	// Test connection
@@ -69,16 +83,16 @@ func New(db *sql.DB, opts ...Option) (*Client, error) {
 		observers:  make([]QueryObserver, 0),
 		middleware: make([]Middleware, 0),
 		limits:     DefaultLimits(),
+		driverName: driverName,
+		dataSource: dataSource,
 	}
 
-	// Auto-detect dialect if not specified
+	// Auto-detect dialect from driverName if not specified
 	if c.dialect == nil {
-		driver := reflect.TypeOf(db.Driver()).String()
-		// Try to extract driver name from type string like "*pq.Driver" or "*stdlib.Driver"
-		dialect, err := detectDialectFromDriver(driver, db)
+		dialect, err := DetectDialect(driverName)
 		if err != nil {
 			c.logger.Warn("could not auto-detect dialect, defaulting to generic",
-				"driver", driver,
+				"driver", driverName,
 				"error", err)
 			// Default to PostgreSQL as most common
 			c.dialect = PostgreSQL()
@@ -87,9 +101,11 @@ func New(db *sql.DB, opts ...Option) (*Client, error) {
 		}
 	}
 
-	// Apply options
+	// Apply client options (skip pool options)
 	for _, opt := range opts {
-		opt(c)
+		if clientOpt, ok := opt.(Option); ok {
+			clientOpt(c)
+		}
 	}
 
 	c.logger.Info("quark client initialized",
@@ -255,6 +271,12 @@ func (c *Client) Close() error {
 // Dialect returns the dialect being used.
 func (c *Client) Dialect() Dialect {
 	return c.dialect
+}
+
+// WithOptions creates a new client with the same database connection but different options.
+// This is useful for tests that need to create clients with different configurations.
+func (c *Client) WithOptions(opts ...any) (*Client, error) {
+	return New(c.driverName, c.dataSource, opts...)
 }
 
 // detectDialectFromDriver attempts to detect the dialect from the driver type.

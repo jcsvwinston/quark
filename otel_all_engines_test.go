@@ -2,7 +2,6 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strings"
@@ -55,12 +54,6 @@ func TestOtelAllEngines(t *testing.T) {
 			exporter, shutdown := setupTestTelemetry()
 			defer shutdown(context.Background())
 
-			db, err := sql.Open(eng.drv, eng.dsn)
-			if err != nil {
-				t.Fatalf("failed to open %s: %v", eng.name, err)
-			}
-			defer db.Close()
-
 			ctx := context.Background()
 
 			fmt.Printf("\n%s\n", strings.Repeat("=", 70))
@@ -68,16 +61,14 @@ func TestOtelAllEngines(t *testing.T) {
 			fmt.Printf("%s\n", strings.Repeat("=", 70))
 
 			// Crear cliente con middleware OTel
-			client, err := quark.New(db,
-				quark.WithDialect(eng.dial),
-				quark.WithMiddleware(quarkotel.New()),
-			)
+			client, err := quark.New(eng.drv, eng.dsn, quark.WithMiddleware(quarkotel.New()))
 			if err != nil {
 				t.Fatalf("failed to create client for %s: %v", eng.name, err)
 			}
+			defer client.Close()
 
 			// Limpiar tabla si existe
-			db.Exec("DROP TABLE IF EXISTS otel_test_users")
+			client.Exec(ctx, "DROP TABLE IF EXISTS otel_test_users")
 
 			// Migrar
 			if err := client.Migrate(ctx, &OtelTestUser{}); err != nil {

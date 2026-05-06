@@ -9,13 +9,11 @@ It provides a fluent, immutable query builder, multi-dialect support, and a rich
 
 ```go
 import (
-    "database/sql"
     _ "modernc.org/sqlite"
     "github.com/jcsvwinston/quark"
 )
 
-db, _ := sql.Open("sqlite", ":memory:")
-client, _ := quark.New(db, quark.WithDialect(quark.SQLite()))
+client, _ := quark.New("sqlite", ":memory:")
 defer client.Close()
 ```
 
@@ -381,7 +379,7 @@ func (m *LogMiddleware) WrapExec(next quark.ExecFunc) quark.ExecFunc {
     }
 }
 
-client, _ := quark.New(db, quark.WithMiddleware(&LogMiddleware{}))
+client, _ := quark.New("sqlite", ":memory:", quark.WithMiddleware(&LogMiddleware{}))
 ```
 
 ### Query Observers
@@ -390,7 +388,7 @@ type MetricsObserver struct{}
 func (o *MetricsObserver) ObserveQuery(e quark.QueryEvent) {
     metrics.Record(e.SQL, e.Duration)
 }
-client, _ := quark.New(db, quark.WithQueryObserver(&MetricsObserver{}))
+client, _ := quark.New("sqlite", ":memory:", quark.WithQueryObserver(&MetricsObserver{}))
 ```
 
 ---
@@ -401,8 +399,7 @@ client, _ := quark.New(db, quark.WithQueryObserver(&MetricsObserver{}))
 import "github.com/jcsvwinston/quark/cache/memory"
 
 store := memory.New()
-client, _ := quark.New(db,
-    quark.WithDialect(quark.SQLite()),
+client, _ := quark.New("sqlite", ":memory:",
     quark.WithCacheStore(store),
 )
 
@@ -441,8 +438,7 @@ users, _ := quark.For[User](ctx, router).List()
 ```go
 import "github.com/jcsvwinston/quark/otel"
 
-client, _ := quark.New(db,
-    quark.WithDialect(quark.SQLite()),
+client, _ := quark.New("sqlite", ":memory:",
     quark.WithMiddleware(otel.New()),
 )
 ```

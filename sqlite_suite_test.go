@@ -1,7 +1,6 @@
 package quark_test
 
 import (
-	"database/sql"
 	"log/slog"
 	"os"
 	"testing"
@@ -13,21 +12,15 @@ import (
 )
 
 func TestSuiteSQLite(t *testing.T) {
-	db, err := sql.Open("sqlite", "file:suitesqlite?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	client, err := quark.New(db,
-		quark.WithDialect(quark.SQLite()),
+	client, err := quark.New("sqlite", "file:suitesqlite?mode=memory&cache=shared",
 		quark.WithQueryObserver(NewSQLQueryLogger(logger)),
 		quark.WithMiddleware(quarkotel.New()),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer client.Close()
 
 	SharedSuite(t, client)
 }

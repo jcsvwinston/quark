@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"time"
@@ -24,18 +23,15 @@ type User struct {
 func main() {
 	ctx := context.Background()
 
-	// 1. Initialize SQLite connection
-	db, err := sql.Open("sqlite", "example.db")
+	// 1. Initialize Quark Client (sql.Open is handled internally)
+	client, err := quark.New("sqlite", "example.db",
+		quark.WithMaxOpenConns(25),
+		quark.WithMaxIdleConns(5),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
-
-	// 2. Initialize Quark Client
-	client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
-	if err != nil {
-		log.Fatal(err)
-	}
+	defer client.Close()
 
 	// 3. Auto-Migrate
 	fmt.Println("🚀 Migrating schema...")

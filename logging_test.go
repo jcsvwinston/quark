@@ -2,11 +2,11 @@ package quark_test
 
 import (
 	"context"
-	"database/sql"
-	"github.com/jcsvwinston/quark"
 	"log/slog"
 	"os"
 	"testing"
+
+	"github.com/jcsvwinston/quark"
 
 	_ "modernc.org/sqlite"
 )
@@ -38,12 +38,10 @@ func TestSQLLogging(t *testing.T) {
 	// 1. Create a logger (here we use a text handler to see it clearly in console)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	db, _ := sql.Open("sqlite", ":memory:")
-	defer db.Close()
-
 	// 2. Inject the logger as a QueryObserver
 	sqlLogger := NewSQLQueryLogger(logger)
-	client, _ := quark.New(db, quark.WithDialect(quark.SQLite()), quark.WithQueryObserver(sqlLogger))
+	client, _ := quark.New("sqlite", ":memory:", quark.WithQueryObserver(sqlLogger))
+	defer client.Close()
 
 	ctx := context.Background()
 	type LogUser struct {

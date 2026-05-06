@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -25,22 +24,21 @@ func main() {
 	ctx := context.Background()
 
 	// 1. Initialize MySQL connection
+	// Set QUARK_EXAMPLE_MYSQL_DSN="user:pass@tcp(localhost:3306)/db"
 	dsn := os.Getenv("QUARK_EXAMPLE_MYSQL_DSN")
 	if dsn == "" {
-		dsn = "quark_user:quark_pass@tcp(localhost:3306)/quark_test?parseTime=true"
+		dsn = "quark_user:quark_pass@tcp(localhost:3306)/quark_test"
 	}
 
-	db, err := sql.Open("mysql", dsn)
+	// 2. Initialize Quark Client (sql.Open is handled internally)
+	client, err := quark.New("mysql", dsn,
+		quark.WithMaxOpenConns(25),
+		quark.WithMaxIdleConns(5),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
-
-	// 2. Initialize Quark
-	client, err := quark.New(db, quark.WithDialect(quark.MySQL()))
-	if err != nil {
-		log.Fatal(err)
-	}
+	defer client.Close()
 
 	// 3. Migrate
 	fmt.Println("🚀 Migrating MySQL schema...")
