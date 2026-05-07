@@ -42,8 +42,3 @@ func toSnakeCase(s string) string {
 func pluralize(s string) string {
 	return schema.Pluralize(s)
 }
-
-// findPK finds the primary key field in a struct value (delegates to internal/schema).
-func findPK(v reflect.Value) (pkMeta, bool) {
-	return schema.FindPK(v)
-}

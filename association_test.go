@@ -21,7 +21,9 @@ type Post struct {
 }
 
 func TestAssociationSaving(t *testing.T) {
-	client, err := quark.New("sqlite3", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite3", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}

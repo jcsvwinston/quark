@@ -97,7 +97,9 @@ func TestCompositePK_StringKeys(t *testing.T) {
 func setupCompositePKDB(t *testing.T) (*quark.Client, func()) {
 	t.Helper()
 
-	client, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}

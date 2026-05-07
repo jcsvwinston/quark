@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"strings"
 	"time"
 )
@@ -166,9 +165,10 @@ func For[T any](ctx context.Context, provider ClientProvider) *Query[T] {
 			return q
 		}
 
-		if router.config.Strategy == SchemaPerTenant {
+		switch router.config.Strategy {
+		case SchemaPerTenant:
 			q.schema = tenantID
-		} else if router.config.Strategy == RowLevelSecurity {
+		case RowLevelSecurity:
 			q.tenantID = tenantID
 			q.tenantCol = router.config.TenantColumn
 			// Pre-inject the RLS WHERE condition
@@ -182,13 +182,6 @@ func For[T any](ctx context.Context, provider ClientProvider) *Query[T] {
 	}
 
 	return q
-}
-
-// tableNameFromType derives table name from generic type T.
-func tableNameFromType[T any]() string {
-	var zero T
-	name := toSnakeCase(pluralize(reflect.TypeOf(zero).Elem().Name()))
-	return name
 }
 
 // RawQuery executes a raw SQL query with the given arguments.
@@ -277,31 +270,6 @@ func (c *Client) Dialect() Dialect {
 // This is useful for tests that need to create clients with different configurations.
 func (c *Client) WithOptions(opts ...any) (*Client, error) {
 	return New(c.driverName, c.dataSource, opts...)
-}
-
-// detectDialectFromDriver attempts to detect the dialect from the driver type.
-func detectDialectFromDriver(driverType string, db *sql.DB) (Dialect, error) {
-	// Check registered dialects first
-	if d, err := DetectDialectByName(driverType); err == nil {
-		return d, nil
-	}
-
-	// Try to get the driver name from the db
-	// This is heuristic-based
-	switch {
-	case containsAny(driverType, "pgx", "pq.", "postgres"):
-		return PostgreSQL(), nil
-	case containsAny(driverType, "mysql", "mariadb"):
-		return MySQL(), nil
-	case containsAny(driverType, "sqlite", "modernc"):
-		return SQLite(), nil
-	case containsAny(driverType, "sqlserver", "mssql", "azure"):
-		return MSSQL(), nil
-	case containsAny(driverType, "oracle", "godror", "oci8"):
-		return Oracle(), nil
-	default:
-		return nil, fmt.Errorf("could not detect dialect from driver: %s", driverType)
-	}
 }
 
 func containsAny(s string, substrs ...string) bool {

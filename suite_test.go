@@ -78,7 +78,7 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	})
 
 	t.Run("DatabasePerTenant", func(t *testing.T) {
-		testDatabasePerTenant(ctx, t, client)
+		testDatabasePerTenant(ctx, t)
 	})
 
 	t.Run("Sync", func(t *testing.T) {
@@ -611,9 +611,11 @@ func testRaw(ctx context.Context, t *testing.T, client *quark.Client) {
 	}
 }
 
-func testDatabasePerTenant(ctx context.Context, t *testing.T, client *quark.Client) {
+func testDatabasePerTenant(ctx context.Context, t *testing.T) {
 	factory := func(tenantID string) (*quark.Client, error) {
-		return quark.New("sqlite", ":memory:")
+		limits := quark.DefaultLimits()
+		limits.AllowRawQueries = true
+		return quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	}
 
 	cfg := quark.DefaultTenantConfig()

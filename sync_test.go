@@ -39,7 +39,9 @@ type UserV4 struct {
 func (UserV4) TableName() string { return "users" }
 
 func TestSync(t *testing.T) {
-	client, err := quark.New("sqlite3", "file:synctest?mode=memory&cache=shared")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite3", "file:synctest?mode=memory&cache=shared", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,7 +40,9 @@ func TestSQLLogging(t *testing.T) {
 
 	// 2. Inject the logger as a QueryObserver
 	sqlLogger := NewSQLQueryLogger(logger)
-	client, _ := quark.New("sqlite", ":memory:", quark.WithQueryObserver(sqlLogger))
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, _ := quark.New("sqlite", ":memory:", quark.WithLimits(limits), quark.WithQueryObserver(sqlLogger))
 	defer client.Close()
 
 	ctx := context.Background()

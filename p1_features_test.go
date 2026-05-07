@@ -13,7 +13,9 @@ import (
 
 func newSQLiteClient(t *testing.T) *quark.Client {
 	t.Helper()
-	client, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatalf("quark.New: %v", err)
 	}
@@ -354,17 +356,9 @@ func TestWhereSubquery(t *testing.T) {
 		{UserID: 3, Amount: 200.0},
 	})
 
-	// AllowRawQueries must be enabled for WhereSubquery
-	rawLimits := quark.DefaultLimits()
-	rawLimits.AllowRawQueries = true
-	rawClient, err := client.WithOptions(quark.WithLimits(rawLimits))
-	if err != nil {
-		t.Fatalf("quark.New (raw): %v", err)
-	}
-
 	// WHERE id IN (SELECT id FROM p1_orders WHERE amount > 75)
 	sub := `SELECT "id" FROM "p1_orders" WHERE "amount" > 75`
-	results, err := quark.For[P1Order](ctx, rawClient).WhereSubquery("id", "IN", sub).List()
+	results, err := quark.For[P1Order](ctx, client).WhereSubquery("id", "IN", sub).List()
 	if err != nil {
 		t.Fatalf("WhereSubquery: %v", err)
 	}
@@ -373,7 +367,15 @@ func TestWhereSubquery(t *testing.T) {
 	}
 
 	// Negative: must be blocked without AllowRawQueries
-	_, err = quark.For[P1Order](ctx, client).WhereSubquery("id", "IN", sub).List()
+	noRawLimits := quark.DefaultLimits()
+	noRawClient, err := quark.New("sqlite", ":memory:", quark.WithLimits(noRawLimits))
+	if err != nil {
+		t.Fatalf("quark.New (no raw): %v", err)
+	}
+	defer noRawClient.Close()
+	noRawClient.Migrate(ctx, &P1Order{})
+
+	_, err = quark.For[P1Order](ctx, noRawClient).WhereSubquery("id", "IN", sub).List()
 	if err == nil {
 		t.Error("WhereSubquery: expected error when AllowRawQueries=false, got nil")
 	}

@@ -19,7 +19,9 @@ import (
 
 func newSQLiteDB(t *testing.T) *quark.Client {
 	t.Helper()
-	c, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	c, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,10 +152,7 @@ func TestBaseMiddlewarePassthrough(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRoutineBuilder(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 
 	ctx := context.Background()
@@ -201,13 +200,11 @@ func TestRoutineBuilder(t *testing.T) {
 }
 
 func TestRoutineBuilder_FirstEmpty(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 	ctx := context.Background()
 
+	var err error
 	if err = c.Exec(ctx, "CREATE TABLE empty_tbl (id INTEGER PRIMARY KEY)"); err != nil {
 		t.Fatal(err)
 	}
@@ -389,10 +386,7 @@ type JoinPost struct {
 }
 
 func TestQueryJoinMethods(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 
 	ctx := context.Background()
@@ -444,10 +438,7 @@ type UpsertItem struct {
 }
 
 func TestUpsertSQLite(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 
 	ctx := context.Background()
@@ -483,10 +474,7 @@ type BatchItem struct {
 }
 
 func TestCreateBatch(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 
 	ctx := context.Background()
@@ -520,10 +508,7 @@ type AggItem struct {
 }
 
 func TestAggregates_Extra(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 
 	ctx := context.Background()
@@ -578,10 +563,7 @@ type GbItem struct {
 }
 
 func TestDistinctGroupByHaving(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 
 	ctx := context.Background()
@@ -629,13 +611,11 @@ func TestDistinctGroupByHaving(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestQueryRightJoin(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 
 	ctx := context.Background()
+	var err error
 
 	if err := c.Exec(ctx, `CREATE TABLE rj_a (id INTEGER PRIMARY KEY, val TEXT)`); err != nil {
 		t.Fatal(err)
@@ -672,10 +652,7 @@ type PagEdge struct {
 }
 
 func TestPaginateEdgeCases(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 
 	ctx := context.Background()
@@ -805,13 +782,11 @@ type SoftItem struct {
 }
 
 func TestSoftDelete(t *testing.T) {
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := newSQLiteDB(t)
 	defer c.Close()
 
 	ctx := context.Background()
+	var err error
 
 	if err := c.Exec(ctx, `CREATE TABLE soft_items (id INTEGER PRIMARY KEY, name TEXT, deleted_at DATETIME)`); err != nil {
 		t.Fatal(err)

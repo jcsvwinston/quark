@@ -89,6 +89,7 @@ func TestPaginateDoesNotMutateOriginalQuery(t *testing.T) {
 func TestMaxWhereConditionsEnforced(t *testing.T) {
 	limits := quark.DefaultLimits()
 	limits.MaxWhereConditions = 2
+	limits.AllowRawQueries = true
 	client, cleanup := setupLimitedDB(t, limits)
 	defer cleanup()
 	ctx := context.Background()
@@ -110,6 +111,7 @@ func TestMaxWhereConditionsEnforced(t *testing.T) {
 func TestMaxWhereConditionsNotEnforcedWhenWithinLimit(t *testing.T) {
 	limits := quark.DefaultLimits()
 	limits.MaxWhereConditions = 5
+	limits.AllowRawQueries = true
 	client, cleanup := setupLimitedDB(t, limits)
 	defer cleanup()
 	ctx := context.Background()
@@ -128,6 +130,7 @@ func TestMaxWhereConditionsNotEnforcedWhenWithinLimit(t *testing.T) {
 func TestMaxQueryLengthEnforced(t *testing.T) {
 	limits := quark.DefaultLimits()
 	limits.MaxQueryLength = 10 // absurdly small
+	limits.AllowRawQueries = true
 	client, cleanup := setupLimitedDB(t, limits)
 	defer cleanup()
 	ctx := context.Background()
@@ -146,6 +149,7 @@ func TestMaxQueryLengthEnforced(t *testing.T) {
 func TestMaxJoinsEnforced(t *testing.T) {
 	limits := quark.DefaultLimits()
 	limits.MaxJoins = 1
+	limits.AllowRawQueries = true
 	client, cleanup := setupLimitedDB(t, limits)
 	defer cleanup()
 	ctx := context.Background()
@@ -165,7 +169,9 @@ func TestMaxJoinsEnforced(t *testing.T) {
 // --- RightJoin (untested in existing suite) ---
 
 func TestRightJoin(t *testing.T) {
-	client, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +238,8 @@ func TestMemoryCacheClose(t *testing.T) {
 
 func TestErrTimeoutWrapping(t *testing.T) {
 	limits := quark.DefaultLimits()
-	limits.QueryTimeout = 1 * time.Nanosecond // force timeout
+	limits.QueryTimeout = time.Nanosecond
+	limits.AllowRawQueries = true
 	client, cleanup := setupLimitedDB(t, limits)
 	defer cleanup()
 
@@ -271,7 +278,9 @@ func (m *queryRowCountMiddleware) WrapQueryRow(next quark.QueryRowFunc) quark.Qu
 
 func TestWrapQueryRowInvoked(t *testing.T) {
 	qrm := &queryRowCountMiddleware{}
-	client, err := quark.New("sqlite", ":memory:", quark.WithMiddleware(qrm))
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits), quark.WithMiddleware(qrm))
 	if err != nil {
 		t.Fatal(err)
 	}

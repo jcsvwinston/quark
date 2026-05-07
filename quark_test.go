@@ -23,7 +23,9 @@ type User struct {
 
 func setupTestDB(t *testing.T) (*quark.Client, func()) {
 	// Create quark client (sql.Open is handled internally)
-	client, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +546,9 @@ type CustomerOrder struct {
 }
 
 func TestEagerLoading(t *testing.T) {
-	client, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +586,8 @@ func TestEagerLoading(t *testing.T) {
 	}
 
 	for _, c := range customers {
-		if c.Name == "Alice" {
+		switch c.Name {
+		case "Alice":
 			if len(c.Orders) != 2 {
 				t.Errorf("expected Alice to have 2 orders, got %d", len(c.Orders))
 			} else {
@@ -590,7 +595,7 @@ func TestEagerLoading(t *testing.T) {
 					t.Errorf("missing order 100 for Alice")
 				}
 			}
-		} else if c.Name == "Bob" {
+		case "Bob":
 			if len(c.Orders) != 1 {
 				t.Errorf("expected Bob to have 1 order, got %d", len(c.Orders))
 			} else {
@@ -641,7 +646,9 @@ func (h *HookUser) AfterDelete(ctx context.Context) error {
 }
 
 func TestHooks(t *testing.T) {
-	client, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +701,9 @@ type ValidatedUser struct {
 }
 
 func TestMigrationsAndValidation(t *testing.T) {
-	client, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -741,7 +750,9 @@ func TestMigrationsAndValidation(t *testing.T) {
 }
 
 func TestTenantRouter(t *testing.T) {
-	baseClient, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	baseClient, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +785,9 @@ func TestTenantRouter(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
-	client, err := quark.New("sqlite", ":memory:")
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
 	if err != nil {
 		t.Fatal(err)
 	}
