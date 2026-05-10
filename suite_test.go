@@ -85,6 +85,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testJoinOnSecurity(ctx, t, client)
 	})
 
+	t.Run("DirtyTracking", func(t *testing.T) {
+		testDirtyTracking(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

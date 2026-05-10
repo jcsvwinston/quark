@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Dirty tracking ligero (Phase 1)**: new `Query[T].Track()` modifier returns
+  a `*TrackedQuery[T]` whose `Find` / `First` / `List` yield `*Tracked[T]`
+  wrappers carrying a column-value snapshot taken at load time. Calling
+  `Tracked.Save(ctx)` emits an UPDATE that touches only the columns whose
+  values actually differ from the snapshot — and writes them whether they
+  are zero or non-zero. This is the permanent fix for the P0-4 zero-value
+  trap: `tracked.Entity.Active = false; tracked.Save(ctx)` writes `false`
+  to the database without the caller resorting to `UpdateFields` or
+  `UpdateMap`. `Tracked.Changed()` exposes the changed column list for
+  tests and observability. The snapshot lives on the wrapper, not in the
+  Client, so there is no shared map to grow or evict; tenant predicates
+  from the loading query are propagated to Save's WHERE clause; the
+  primary-key column and the configured tenant column are never written
+  even if the caller mutates them on the entity.
+
 ### Security
 
 - **`JOIN ... ON` clause concatenated raw (P0-5)**: `Join`/`LeftJoin`/
