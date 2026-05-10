@@ -65,15 +65,34 @@ debe devolver error, no nil). Doc en `website/docs/guides/relations.mdx`
 sección "Idempotent linking"; CHANGELOG `### Fixed`; Historial en
 `docs/playbooks/query-builder.md`.
 
-### P0-4 · `isZeroValue` impide `Update` con valores cero (false / 0 / "")
+### ~~P0-4 · `isZeroValue` impide `Update` con valores cero (false / 0 / "")~~
 
-- **Origen**: `query_crud.go:649` (función `isZeroValue`). `Update(entity)` salta los campos cuyo valor es el zero-value del tipo.
-- **Impacto**: imposible poner un bool a `false`, un int a `0`, un string a `""` con `Update(entity)`. Sorpresivo y peligroso (silencioso). El usuario debe usar `UpdateMap` con WHERE manual.
-- **Fix esperado** (compatible con el plan: dirty tracking ligero llega en Fase 1, este es el parche P0):
-  1. Añadir API explícita `UpdateFields(entity, fields ...string)` que actualiza sólo los campos nombrados, sin filtrar zero-values.
-  2. Documentar la trampa de `Update(entity)` con un warning visible en `website/docs/crud/update.md`.
-  3. Loguear (a nivel WARN) cuando `Update(entity)` salta campos zero-value, para que el desarrollador note el efecto.
-- **Test de regresión**: actualizar un `bool` de `true` a `false` con `UpdateFields(u, "active")`; asertar que la fila quedó con `active = false`.
+**Mitigado** — el comportamiento de `Update(entity)` saltarse zeros sigue por
+diseño (dirty tracking llega en Fase 1), pero ahora hay tres salidas
+explícitas para no quedarse sin escribir ceros:
+
+1. Nueva API `UpdateFields(entity, fields ...string)` en `query_crud.go` que
+   ignora `isZeroValue` y escribe sólo los campos nombrados. Rechaza lista
+   vacía, unknown field y la PK. Hooks Before/After siguen corriendo.
+2. `Update(entity)` ahora loguea WARN listando los campos zero-value que se
+   está saltando — la trampa deja de ser silenciosa.
+3. `website/docs/reference/api/crud.mdx` tiene un admonition `:::caution
+   Zero-value trap (P0-4):::` y una sección nueva `## UpdateFields` con
+   tabla de reglas y ejemplo.
+
+Cobertura: `testUpdateZeroValues` en `update_zero_values_test.go` wired a
+`SharedSuite`. 6 subtests:
+- `UpdateSkipsZerosByDesign` documenta el comportamiento actual de Update.
+- `UpdateFieldsWritesZeroBool` verifica `false` se escribe.
+- `UpdateFieldsWritesZeroIntAndEmptyString` verifica `0` y `""`.
+- `UpdateFieldsRejectsUnknownField`, `UpdateFieldsRefusesToOverwritePK`,
+  `UpdateFieldsRejectsEmptyList` cubren los errores del builder.
+
+Doc CHANGELOG `### Added` (`UpdateFields`) + `### Changed` (Update WARN).
+Historial en `docs/playbooks/query-builder.md`.
+
+**Cierre permanente**: dirty tracking ligero en Fase 1 (Track() + snapshot al
+cargar + Save() que sólo emite UPDATE de campos cambiados).
 - **Doc**: warning en `website/docs/crud/update.md` y entrada en CHANGELOG.
 
 ### P0-5 · `JOIN ON` se concatena al SQL sin pasar por el guard

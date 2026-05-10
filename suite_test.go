@@ -77,6 +77,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testM2MLinkErrors(ctx, t, client)
 	})
 
+	t.Run("UpdateZeroValues", func(t *testing.T) {
+		testUpdateZeroValues(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

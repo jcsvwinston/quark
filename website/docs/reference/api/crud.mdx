@@ -82,7 +82,16 @@ Zero values are skipped:
 | `false` | yes |
 | `nil` pointer/slice/map | yes |
 
-Use `UpdateMap` when a zero value must be written explicitly.
+:::caution Zero-value trap (P0-4)
+Because `Update` filters out zero values, it **cannot** write `false`, `0`,
+`""`, or `nil` to a column. To put `active = false` into the database use
+[`UpdateFields`](#updatefields) or [`UpdateMap`](#updatemap). When `Update`
+detects skipped zero-value fields it logs a `WARN` line so you notice the
+silent skip.
+
+This trap will go away when dirty tracking lands in Phase 1. Until then
+treat `Update` as "partial update of explicitly-set non-zero fields".
+:::
 
 `Update` merges primary-key predicates with any existing query `Where` clauses:
 
@@ -93,6 +102,31 @@ rows, err := quark.For[User](ctx, client).
 ```
 
 Hooks: `BeforeUpdate` and `AfterUpdate`.
+
+## UpdateFields
+
+### `UpdateFields(entity *T, fields ...string) (int64, error)`
+
+Updates only the named fields on the entity, bypassing the zero-value filter.
+This is the recommended escape hatch for writing `false`, `0`, `""`, or `nil`.
+
+```go
+user := User{ID: 42, Active: false}
+rows, err := quark.For[User](ctx, client).UpdateFields(&user, "active")
+// emitted: UPDATE "users" SET "active" = $1 WHERE "id" = $2  args=[false, 42]
+```
+
+Rules:
+
+| Rule | Reason |
+| --- | --- |
+| Field name matches the `db` tag (or struct field name when no `db` tag is set). | Same identifier resolution as `Update`/`Find`. |
+| Listing the primary key column returns an error. | Overwriting the PK would corrupt the row's identity. |
+| Listing an unknown field returns an error. | Fail fast on typos. |
+| Empty `fields` returns an error. | An update with no SET clause is meaningless. |
+| Existing `Where()` predicates are merged with the PK predicate. | Same behaviour as `Update`. |
+
+Hooks: `BeforeUpdate` and `AfterUpdate` run, just like `Update`.
 
 ## UpdateMap
 

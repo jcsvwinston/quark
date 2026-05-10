@@ -412,11 +412,18 @@ func (q *BaseQuery) scanReturning(row *sql.Row, v reflect.Value) error {
 	return nil
 }
 
-// Update updates the entity by its primary key.
-// Non-zero fields are updated (partial update).
+// Update updates the entity by its primary key with partial-update semantics:
+// only fields whose value is non-zero for their type are written.
+//
+// CAUTION — zero-value trap (P0-4 — pending dirty tracking in Phase 1):
+// because zero values are skipped, calling Update cannot write false to a
+// bool, 0 to an integer, "" to a string, or nil to a pointer/slice/map.
+// To write a zero value explicitly, use UpdateFields or UpdateMap.
+// When Update detects skipped zero-value fields it logs a WARN line so
+// callers notice the silent skip.
+//
 // Any Where() conditions are merged into the WHERE clause alongside the PK.
-// Returns the number of rows affected.
-// Update performs a partial update of non-zero fields and recursively saves associations.
+// Returns the number of rows affected. Recursively saves associations.
 func (q *Query[T]) Update(entity *T) (int64, error) {
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
@@ -439,6 +446,166 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 		}
 	}
 
+	return rowsAffected, nil
+}
+
+// UpdateFields updates only the named fields on the entity, bypassing the
+// zero-value filter that Update applies. This is the recommended API when
+// you need to write false / 0 / "" / nil to a column — values that Update
+// would silently skip.
+//
+// fields are matched against struct field db tags only — the same identifier
+// resolution as Update and Find. Listing a struct field name without a db tag
+// returns ErrInvalidQuery: there is one canonical name per column and we
+// don't accept aliases here, to keep the resolution unambiguous.
+//
+// The primary key is never overwritten; listing a PK column returns an
+// error. If the client is configured with the RowLevelSecurity tenant
+// strategy, the tenant column is injected before the SET clause is built;
+// callers do not need to (and should not) list it explicitly.
+//
+// Example:
+//
+//	user := User{ID: 42, Active: false}
+//	rows, err := quark.For[User](ctx, client).UpdateFields(&user, "active")
+//	// emitted: UPDATE "users" SET "active" = $1 WHERE "id" = $2  args=[false, 42]
+//
+// Returns the number of rows affected.
+func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
+	if q.client == nil {
+		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+	}
+	if len(fields) == 0 {
+		return 0, fmt.Errorf("%w: UpdateFields requires at least one field name", ErrInvalidQuery)
+	}
+
+	if hook, ok := any(entity).(BeforeUpdateHook); ok {
+		if err := hook.BeforeUpdate(q.ctx); err != nil {
+			return 0, err
+		}
+	}
+
+	v := reflect.ValueOf(entity).Elem()
+	q.ensureTenantID(v)
+
+	// db-tag-only lookup. We deliberately do not register the struct field
+	// name as an alias: the rest of the ORM (Update, Find, Where) resolves
+	// columns by db tag, and accepting both creates ambiguity if a field's
+	// db tag happens to collide with another field's struct name (silent
+	// last-write-wins on the map insert).
+	t := v.Type()
+	idxByName := make(map[string]int, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		fld := t.Field(i)
+		dbTag := fld.Tag.Get("db")
+		if dbTag == "" || dbTag == "-" {
+			continue
+		}
+		idxByName[dbTag] = i
+	}
+
+	// Skip PK columns from the SET clause regardless of whether the caller
+	// listed them — overwriting the PK is never the intent and would corrupt
+	// the row's identity.
+	pkCols := map[string]struct{}{}
+	if q.meta.HasCompositePK {
+		for _, cpk := range q.meta.CompositePK {
+			pkCols[cpk.Column] = struct{}{}
+		}
+	} else if q.pk.Column != "" {
+		pkCols[q.pk.Column] = struct{}{}
+	}
+
+	var setClauses []string
+	var args []any
+	argIndex := 1
+
+	for _, name := range fields {
+		idx, ok := idxByName[name]
+		if !ok {
+			return 0, fmt.Errorf("%w: UpdateFields: unknown field %q on %s", ErrInvalidQuery, name, t.Name())
+		}
+		dbTag := t.Field(idx).Tag.Get("db")
+		if dbTag == "" {
+			dbTag = name
+		}
+		if _, isPK := pkCols[dbTag]; isPK {
+			return 0, fmt.Errorf("%w: UpdateFields: cannot overwrite primary key column %q", ErrInvalidQuery, dbTag)
+		}
+		if err := q.guard.ValidateIdentifier(dbTag); err != nil {
+			return 0, err
+		}
+		// Safe Sprintf: dbTag is validated by the guard above, and
+		// dialect.Placeholder emits only literal placeholder syntax.
+		setClauses = append(setClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(dbTag), q.dialect.Placeholder(argIndex)))
+		args = append(args, v.Field(idx).Interface())
+		argIndex++
+	}
+
+	var sqlBuf strings.Builder
+	sqlBuf.WriteString("UPDATE ")
+	sqlBuf.WriteString(q.fullTableName())
+	sqlBuf.WriteString(" SET ")
+	sqlBuf.WriteString(strings.Join(setClauses, ", "))
+	sqlBuf.WriteString(" WHERE ")
+
+	if q.meta.HasCompositePK {
+		for j, cpk := range q.meta.CompositePK {
+			if j > 0 {
+				sqlBuf.WriteString(" AND ")
+			}
+			sqlBuf.WriteString(q.dialect.Quote(cpk.Column))
+			sqlBuf.WriteString(" = ")
+			sqlBuf.WriteString(q.dialect.Placeholder(argIndex))
+			args = append(args, v.Field(cpk.Index).Interface())
+			argIndex++
+		}
+	} else {
+		if q.pk.Column == "" {
+			return 0, fmt.Errorf("%w: UpdateFields requires a primary key", ErrInvalidModel)
+		}
+		sqlBuf.WriteString(q.dialect.Quote(q.pk.Column))
+		sqlBuf.WriteString(" = ")
+		sqlBuf.WriteString(q.dialect.Placeholder(argIndex))
+		args = append(args, getPKValue(v, q.pk))
+		argIndex++
+	}
+
+	// Merge any additional Where() conditions in the same way Update does.
+	for _, cond := range q.where {
+		sqlBuf.WriteString(" AND ")
+		if err := q.guard.ValidateIdentifier(cond.column); err != nil {
+			return 0, err
+		}
+		if err := q.guard.ValidateOperator(cond.operator); err != nil {
+			return 0, err
+		}
+		sqlBuf.WriteString(q.dialect.Quote(cond.column))
+		sqlBuf.WriteString(" ")
+		sqlBuf.WriteString(cond.operator)
+		sqlBuf.WriteString(" ")
+		sqlBuf.WriteString(q.dialect.Placeholder(argIndex))
+		args = append(args, cond.value)
+		argIndex++
+	}
+
+	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+	defer cancel()
+
+	result, err := q.executeExec(ctx, sqlBuf.String(), args)
+	if err != nil {
+		return 0, fmt.Errorf("UpdateFields failed: %w", err)
+	}
+	rowsAffected := int64(0)
+	if result != nil {
+		rowsAffected, _ = result.RowsAffected()
+	}
+
+	if hook, ok := any(entity).(AfterUpdateHook); ok {
+		if err := hook.AfterUpdate(q.ctx); err != nil {
+			return rowsAffected, err
+		}
+	}
 	return rowsAffected, nil
 }
 
@@ -490,6 +657,7 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 	q.ensureTenantID(v) // Inject tenant ID BEFORE processing fields
 
 	var setClauses []string
+	var skippedZero []string
 	var args []any
 	argIndex := 1
 
@@ -518,8 +686,11 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 
 		fieldValue := v.Field(i)
 
-		// Skip zero values (partial update)
+		// Skip zero values (partial update). Track them so we can log a
+		// single WARN below — Update with zero values is silently skipped
+		// (the P0-4 trap), and users that hit it should be told.
 		if isZeroValue(fieldValue) {
+			skippedZero = append(skippedZero, dbTag)
 			continue
 		}
 
@@ -530,6 +701,14 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 		setClauses = append(setClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(dbTag), q.dialect.Placeholder(argIndex)))
 		args = append(args, fieldValue.Interface())
 		argIndex++
+	}
+
+	if len(skippedZero) > 0 && q.client != nil && q.client.logger != nil {
+		q.client.logger.Warn(
+			"Update skipped zero-value fields; use UpdateFields(entity, ...) or UpdateMap to write false / 0 / \"\" / nil explicitly",
+			"table", q.table,
+			"skipped", skippedZero,
+		)
 	}
 
 	if len(setClauses) == 0 {
