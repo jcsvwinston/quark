@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Nullable[T]` generic (Phase 1 F1-3)**: re-export of `database/sql.Null[T]`
+  under a Quark-friendly name, plus the constructors `SomeOf(v)` /
+  `NullOf[T]()`. Replaces the long-standing `*time.Time` / `sql.NullString`
+  pointer-as-nullable hacks with `Nullable[time.Time]` / `Nullable[string]`
+  while keeping the same Scanner+Valuer round-trip plumbing the standard
+  library already provides. The migrate layer detects `Nullable[T]` and
+  emits T's SQL type for the column, so a model that previously needed a
+  custom mapper now Just Works (`Nullable[int64]` → BIGINT,
+  `Nullable[time.Time]` → TIMESTAMP / DATETIME / DATETIME2 per dialect).
+
 - **Soft-delete scopes `WithTrashed()` / `OnlyTrashed()` and `Restore` (Phase 1 F1-5)**:
   the existing automatic `deleted_at IS NULL` filter now has two named
   escape hatches: `WithTrashed()` returns both live and trashed rows

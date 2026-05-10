@@ -101,6 +101,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testSoftDeleteScopes(ctx, t, client)
 	})
 
+	t.Run("Nullable", func(t *testing.T) {
+		testNullable(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})
