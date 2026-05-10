@@ -261,10 +261,32 @@ orders, err := quark.For[Order](ctx, client).
     List()
 ```
 
-The joined table name is validated, while the `ON` clause is a raw SQL fragment.
-Keep it static and under your control.
+### ON-clause grammar
 
-Current `Where` and `Select` identifiers are validated as simple names, so they
+The joined table name is validated as an identifier. The `ON` clause is also
+validated against a minimal identifier-only grammar:
+
+| Accepted | Rejected |
+| --- | --- |
+| `"users.id = orders.user_id"` | `""` (empty) |
+| `"a.x = b.y AND c.z = d.w"` | `"users.id = 1"` (literal RHS) |
+| `"a = b OR c = d"` (lowercase ok) | `"users.id = 'alice'"` |
+| `"users.id = orders.user_id AND users.tenant_id = orders.tenant_id"` | `"LOWER(users.id) = orders.user_id"` (function) |
+| | `"(users.id = orders.user_id)"` (parentheses) |
+| | `"users.id = orders.user_id; DROP TABLE x"` |
+| | `"users.id = orders.user_id -- comment"` |
+| | `"users.id = orders.user_id /* x */"` |
+
+The exact regex is in `internal/guard.ValidateJoinOn`; the operators
+allowed are `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Anything else returns
+[`ErrInvalidJoin`](/docs/reference/api/errors) at execution time.
+
+The string-raw `Join(table, on string)` API is **deprecated** as of v0.2 and
+will be replaced by a structured `Join(table).On(col, op, otherCol)` builder
+in v0.4 (Phase 2 AST). Until then drop down to [`RawQuery`](#raw-sql-as-an-escape-hatch)
+for joins that don't fit the grammar.
+
+`Where` and `Select` identifiers are still validated as simple names, so they
 do not accept dotted identifiers such as `users.active`. For complex join
 filters or projections, use a database view, add columns to a dedicated read
 model, or opt into `RawQuery`.

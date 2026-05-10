@@ -262,6 +262,17 @@ func (q *Query[T]) Offset(n int) *Query[T] {
 
 // Join adds an INNER JOIN clause.
 //
+// The on argument must match the minimal identifier-only grammar that
+// guard.ValidateJoinOn enforces (e.g. "users.id = orders.user_id" or
+// "users.id = orders.user_id AND users.tenant_id = orders.tenant_id").
+// Literals, function calls, subqueries, and parentheses are rejected;
+// drop down to RawQuery for shapes outside the grammar. Invalid input
+// surfaces ErrInvalidJoin at execution time (List, First, Iter, ...).
+//
+// Deprecated: the string-raw form will be removed in v0.4 in favor of a
+// structured builder Join(table).On(col, op, otherCol). Track the
+// migration in docs/MIGRATION_v0.2.0.md.
+//
 // Example:
 //
 //	quark.For[Order](ctx, client).
@@ -273,14 +284,20 @@ func (q *Query[T]) Join(table, on string) *Query[T] {
 	return c
 }
 
-// LeftJoin adds a LEFT JOIN clause.
+// LeftJoin adds a LEFT JOIN clause. The on grammar matches Join — see its
+// docstring for accepted shapes and the v0.4 deprecation notice.
+//
+// Deprecated: see Join.
 func (q *Query[T]) LeftJoin(table, on string) *Query[T] {
 	c := q.clone()
 	c.joins = append(c.joins, join{joinType: "LEFT JOIN", table: table, onClause: on})
 	return c
 }
 
-// RightJoin adds a RIGHT JOIN clause.
+// RightJoin adds a RIGHT JOIN clause. The on grammar matches Join — see its
+// docstring for accepted shapes and the v0.4 deprecation notice.
+//
+// Deprecated: see Join.
 func (q *Query[T]) RightJoin(table, on string) *Query[T] {
 	c := q.clone()
 	c.joins = append(c.joins, join{joinType: "RIGHT JOIN", table: table, onClause: on})

@@ -6,8 +6,8 @@ files:
   - internal/guard/guard.go
 last_review: 2026-05-10
 related_adrs: []
-related_p0: [P0-5]
-closed_p0: [P0-2]
+related_p0: []
+closed_p0: [P0-2, P0-5]
 phase: 0
 ---
 
@@ -31,17 +31,7 @@ El guard **NO es defensa completa contra inyección SQL** — eso requeriría un
 
 ## Bugs P0 vivos
 
-### P0-5 · `JOIN ... ON` se concatena raw
-
-**Localización**: `query_builder.go:229` y `query_exec.go:467`. La string `onClause` no pasa por el guard.
-
-**Impacto**: Inconsistencia. `WHERE col` valida; `JOIN ON expr` no.
-
-**Fix esperado en este módulo**:
-
-1. Añadir `ValidateJoinOn(expr string) error` en `internal/guard/guard.go` con un parser mínimo que acepte el patrón `[ident.]ident OP [ident.]ident [AND/OR …]` y rechace lo demás.
-2. Marcar la firma string-raw de `Join` como deprecated en godoc.
-3. (Fase 2) Introducir API estructurada `Join(table).On(col, op, otherCol)` con AST.
+(ninguno en este módulo; ver § Historial.)
 
 ## Historial — bugs cerrados
 
@@ -59,6 +49,35 @@ El guard **NO es defensa completa contra inyección SQL** — eso requeriría un
 **Cobertura de regresión**: `testJSONPathSecurity` en `json_path_security_test.go` wired a `SharedSuite` (los 6 motores). Aserciones: (a) path en bind args, no en SQL; (b) 8 vectores de inyección rechazados (comillas, `;`, `--`, `/*`, leading `$`, dash, espacios, vacío).
 
 **Anti-pattern a evitar al construir nuevas funciones JSON**: cualquier path o expresión proveniente de input del usuario que se interpole con `Sprintf %s` en lugar de pasarse como bind. Si añades soporte JSON nuevo (containment ops, JSONB queries, arrays), sigue el patrón `Dialect.JSONExtract`: validar + retornar args + bind marker neutro.
+
+### P0-5 · `JOIN ... ON` se concatenaba raw (cerrado, fase deprecation)
+
+`query_builder.go:Join`/`LeftJoin`/`RightJoin` aceptaban `on` como string opaco
+y `query_exec.go:buildSelect`/`Count` lo emitían verbatim al SQL final. `WHERE
+col` se validaba via `ValidateIdentifier`; `JOIN ON` no. Si el `on` venía de
+input dinámico, vector de inyección — el caso más simple es
+`"users.id = orders.user_id; DROP TABLE orders"`.
+
+Fix aplicado:
+
+1. **`guard.ValidateJoinOn(expr)`** — regex `^\s*<token>\s*<op>\s*<token>(\s+(?i:AND|OR)\s+<token>\s*<op>\s*<token>)*\s*$` con `<token> = ident(.ident)?` y `<op> ∈ {=, !=, <>, <, <=, >, >=}` (max 512 chars). Sólo comparaciones identifier-to-identifier; literales, function calls, paréntesis, subqueries y comentarios SQL quedan rechazados.
+2. **Wiring**: ambos call sites (`query_exec.go:buildSelect` y `Count`) llaman al validator antes de concatenar `j.onClause`. Path inválido → `ErrInvalidJoin` (sentinel nuevo en `errors.go`) sin ejecutar SQL.
+3. **Deprecation**: `Join`, `LeftJoin`, `RightJoin` en su forma string-raw están marcados `// Deprecated:` en godoc; reemplazo en v0.4 con builder estructurado `Join(table).On(col, op, otherCol)` (Fase 2 AST).
+
+Cobertura: `testJoinOnSecurity` en `join_on_security_test.go` wired a
+`SharedSuite` — 4 subtests (valid identifier join, valid AND-joined, 8
+vectores de inyección rechazados, mismo check para Count). Unit tests
+adicionales en `internal/guard/guard_test.go` (`TestValidateJoinOn_Valid`
+con 12 casos, `TestValidateJoinOn_Invalid` con 18 casos, BoundMethod).
+
+**Anti-pattern a evitar al añadir más builders SQL**: cualquier string que
+provenga de input del usuario y termine en SQL final debe pasar por un
+validator del guard antes de concatenarse. La regla cubre nombres de columna,
+nombres de tabla, nombres de schema, expresiones JSON path, expresiones
+JOIN ON, y cualquier identificador o predicado nuevo que añadas. Si la
+expresión es lo bastante rica como para que un validator de regex no le
+quepa, reescribe esa parte del builder con AST (Fase 2) en lugar de añadir
+otra string-raw API.
 
 ## Limitaciones reconocidas (NO publicitar como completas)
 
@@ -120,7 +139,7 @@ El guard valida lo que se le pasa explícitamente. **Si tu nuevo código constru
 
 - **Fase 0**:
   - ~~`ValidateJSONPath` (cerró P0-2 — ver Historial).~~
-  - `ValidateJoinOn` (cierra P0-5 hasta que llegue Fase 2 con AST).
+  - ~~`ValidateJoinOn` (cerró P0-5 hasta Fase 2 — ver Historial).~~
 - **Fase 1**:
   - `maxIdentifierLen` por dialecto.
 - **Fase 4** (paralelo a observabilidad):

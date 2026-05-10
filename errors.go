@@ -32,6 +32,13 @@ var (
 	// use RawQuery for those.
 	ErrInvalidJSONPath = errors.New("invalid JSON path")
 
+	// ErrInvalidJoin indicates that a JOIN ... ON clause passed to Join,
+	// LeftJoin, or RightJoin does not match the minimal identifier-only
+	// grammar Quark accepts while a structured Join().On() builder is pending
+	// (Phase 2 AST). See guard.ValidateJoinOn for the grammar; use a
+	// structured Join (when available) or RawQuery for shapes outside it.
+	ErrInvalidJoin = errors.New("invalid JOIN ON clause")
+
 	// ErrDialectNotSupported indicates that the database dialect is not supported.
 	ErrDialectNotSupported = errors.New("dialect not supported")
 

@@ -95,15 +95,38 @@ Historial en `docs/playbooks/query-builder.md`.
 cargar + Save() que sólo emite UPDATE de campos cambiados).
 - **Doc**: warning en `website/docs/crud/update.md` y entrada en CHANGELOG.
 
-### P0-5 · `JOIN ON` se concatena al SQL sin pasar por el guard
+### ~~P0-5 · `JOIN ON` se concatena al SQL sin pasar por el guard~~
 
-- **Origen**: `query_builder.go:229` (firma `Join(table, onClause)`) + `query_exec.go:467` (concatena el `onClause` raw).
-- **Impacto**: inconsistencia de seguridad. `WHERE col` se valida contra `ValidateIdentifier`, pero `JOIN ON` acepta cualquier string. Si `onClause` viene de input dinámico, vector de inyección.
-- **Fix esperado**: introducir API estructurada `Join(table).On(col, op, otherCol)` y `JoinExpr(table, expr Expr)` donde `Expr` es el AST de la Fase 2. Mientras tanto:
-  - Validar el `onClause` actual con un parser mínimo que acepte el patrón `[ident.]ident OP [ident.]ident [AND/OR …]` y rechace lo demás.
-  - Marcar la firma string-raw como deprecated en godoc, con plazo de eliminación en v0.4.
-- **Test de regresión**: `Join("users", "users.id = orders.user_id; DROP TABLE orders")` debe devolver `ErrInvalidJoin`, no ejecutar.
-- **Doc**: entrada de deprecación en CHANGELOG `### Deprecated` y nota en `website/docs/queries/joins.md`.
+**Cerrado** (fase deprecation; reemplazo definitivo con AST en v0.4).
+
+- `internal/guard.ValidateJoinOn` valida la grammar identifier-only:
+  `[ident.]ident OP [ident.]ident ((AND|OR) [ident.]ident OP [ident.]ident)*`
+  con operadores `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=` y max 512 chars.
+- Wired en `query_exec.go:buildSelect` y `Count` antes de concatenar
+  `j.onClause`. Path inválido devuelve `ErrInvalidJoin` (sentinel nuevo en
+  `errors.go`) sin ejecutar SQL.
+- `Join`, `LeftJoin`, `RightJoin` marcados `// Deprecated:` en godoc; remplazo
+  programado para v0.4 con builder estructurado `Join(table).On(col, op, otherCol)`
+  (Fase 2 AST).
+
+Cobertura:
+- Unit tests en `internal/guard/guard_test.go`: `TestValidateJoinOn_Valid` (12
+  casos, incluido lowercase AND/OR + multi-condición), `TestValidateJoinOn_Invalid`
+  (18 casos: `;`, `--`, `/*`, literales, function calls, paréntesis, UNION,
+  operadores junk, identifiers con dash o leading `$`, three-segment idents,
+  double dot, missing operator/lhs/rhs), `TestValidateJoinOn_BoundMethod`.
+- Regresión en `join_on_security_test.go` wired a `SharedSuite`. 4 subtests:
+  `ValidJoinExecutes`, `ValidMultiConditionJoinExecutes`,
+  `InjectionAttemptRejected` (table-driven sobre 8 vectores con
+  `errors.Is(err, ErrInvalidJoin)`), `InjectionAttemptRejectedInCount` (cubre
+  el path Count() que construye su propio JOIN SQL).
+
+Docs: CHANGELOG `### Security` + `### Added` (sentinel); MIGRATION_v0.2.0
+sección de deprecation con tabla de accepted/rejected y migration steps;
+nota en `website/docs/guides/querying.mdx` sección "Joins" con la grammar
+y la deprecation; `website/docs/reference/api/errors.mdx` actualizado con
+el nuevo sentinel; Historial en `docs/playbooks/security.md` y
+`docs/playbooks/query-builder.md`.
 
 ---
 

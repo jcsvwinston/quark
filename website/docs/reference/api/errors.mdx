@@ -9,6 +9,7 @@ var (
     ErrInvalidQuery        = errors.New("invalid query")
     ErrInvalidIdentifier   = errors.New("invalid identifier")
     ErrInvalidJSONPath     = errors.New("invalid JSON path")
+    ErrInvalidJoin         = errors.New("invalid JOIN ON clause")
     ErrDialectNotSupported = errors.New("dialect not supported")
     ErrConnection          = errors.New("database connection error")
     ErrTimeout             = errors.New("query timeout")
@@ -22,6 +23,14 @@ receives a path that does not match the dotted identifier grammar
 binds the path as a parameter in every dialect, but rejects malformed paths
 at the API surface so callers fail fast with a clear error rather than
 producing surprising SQL.
+
+`ErrInvalidJoin` is returned when [`Join`/`LeftJoin`/`RightJoin`](/docs/guides/querying#joins)
+receives an `ON` clause that does not match the minimal identifier-only
+grammar enforced by `internal/guard.ValidateJoinOn`. The grammar accepts
+identifier-to-identifier comparisons (`a.b = c.d`) joined by `AND`/`OR`
+and the operators `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Literals,
+function calls, subqueries, and parentheses are rejected — the string-raw
+form is deprecated and will be replaced by a structured builder in v0.4.
 
 ## Error Checking
 
