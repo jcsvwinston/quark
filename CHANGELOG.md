@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Subqueries via `AsSubquery` + `Sub` / `Exists` / `NotExists` /
+  `InSub` / `NotInSub` (Phase 2)**: any `Query[T]` can be captured as a
+  `*Subquery` and embedded in the AST. The capture eagerly renders the
+  inner SELECT (identifier validation, soft-delete predicate, JOINs,
+  GROUP BY, HAVING, ORDER BY, LIMIT, lock suffix) using the active
+  dialect's identifier quoting but with `?` as the bind marker, so the
+  outer query's `buildWhereClause` swaps each `?` for the dialect's
+  placeholder syntax at the correct argIndex when the wrapping Expr is
+  rendered. Supports the canonical shapes:
+  ```go
+  // WHERE "id" IN (SELECT "user_id" FROM "orders" WHERE "amount" > ?)
+  q.WhereExpr(quark.InSub(quark.Col("id"), sub))
+  // WHERE "id" = (SELECT MAX("user_id") FROM "orders")
+  q.WhereExpr(quark.Eq(quark.Col("id"), quark.Sub(sub)))
+  // WHERE EXISTS (SELECT 1 FROM "orders" WHERE ...)
+  q.WhereExpr(quark.Exists(sub))
+  ```
+  Internally the renderer wraps the active dialect in a `qmarkDialect`
+  that delegates everything except `Placeholder`, which always returns
+  `?`. So Quote, LimitOffset, and JSONExtract stay dialect-correct.
+  Errors during `AsSubquery` (invalid identifier in the inner SELECT,
+  or any pessimistic-lock option set on the inner query) propagate to
+  the caller; `MustAsSubquery` is the panic-on-error variant for use
+  inside expression composition. Pessimistic locks on the inner query
+  are rejected with `ErrUnsupportedFeature` because MSSQL emits
+  `WITH (UPDLOCK)` inline in the FROM clause — illegal inside an
+  `IN (SELECT ...)` context — and the safe pattern is to acquire locks
+  on the outer query.
+
 - **Composable expression AST + `WhereExpr` / `HavingExpr` (Phase 2)**: a
   typed expression tree (`Expr` interface, `Col`, `Lit`, `And`, `Or`,
   `Not`, `Cmp`, `Eq`/`Ne`/`Lt`/`Gt`/`Lte`/`Gte`, `In`, `NotIn`, `Func`)
