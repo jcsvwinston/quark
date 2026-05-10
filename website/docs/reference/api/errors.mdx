@@ -10,6 +10,7 @@ var (
     ErrInvalidIdentifier   = errors.New("invalid identifier")
     ErrInvalidJSONPath     = errors.New("invalid JSON path")
     ErrInvalidJoin         = errors.New("invalid JOIN ON clause")
+    ErrStaleEntity         = errors.New("stale entity (optimistic-locking conflict)")
     ErrDialectNotSupported = errors.New("dialect not supported")
     ErrConnection          = errors.New("database connection error")
     ErrTimeout             = errors.New("query timeout")
@@ -23,6 +24,13 @@ receives a path that does not match the dotted identifier grammar
 binds the path as a parameter in every dialect, but rejects malformed paths
 at the API surface so callers fail fast with a clear error rather than
 producing surprising SQL.
+
+`ErrStaleEntity` is returned when an `Update` / `UpdateFields` / `Tracked.Save`
+on a model carrying a `quark:"version"` field would have written an
+already-advanced row — the version predicate didn't match, no rows were
+written, and the caller must reload + replay or surface the conflict. See
+[Optimistic Locking](/docs/guides/modeling#optimistic-locking) for the
+column-tag contract and an example retry pattern.
 
 `ErrInvalidJoin` is returned when [`Join`/`LeftJoin`/`RightJoin`](/docs/guides/querying#joins)
 receives an `ON` clause that does not match the minimal identifier-only

@@ -58,6 +58,7 @@ not repeatedly reflect over the same struct shape.
 | `nullable:"false"` | `Migrate` | Also emits `NOT NULL`. |
 | `default:"value"` | `Migrate` | Emits `DEFAULT value` exactly as written. |
 | `quark:"unique"` | `Migrate` | Emits `UNIQUE`. |
+| `quark:"version"` | `Update`, `UpdateFields`, `Tracked.Save` | Optimistic-locking column. SET `version = version + 1`, WHERE `version = <loaded>`. Conflict → `ErrStaleEntity`. |
 | `quark:"rename:old_col"` | `Sync` | Renames `old_col` to the current `db` column. |
 | `validate:"rule"` | `Create`, `Upsert`, batch writes | Runs `go-playground/validator/v10` rules. |
 
@@ -195,6 +196,47 @@ rows, err := quark.For[User](ctx, client).
         "score":  0,
     })
 ```
+
+## Optimistic Locking
+
+A model with a numeric field tagged `quark:"version"` opts into optimistic
+locking. Every `Update`, `UpdateFields`, and `Tracked.Save` then includes
+`version = version + 1` in the `SET` clause and `AND version = <loaded>` in
+the `WHERE` clause:
+
+```go
+type Account struct {
+    ID      int64  `db:"id" pk:"true"`
+    Owner   string `db:"owner"`
+    Balance int64  `db:"balance"`
+    Version int64  `db:"version" quark:"version"`
+}
+
+a, _ := quark.For[Account](ctx, client).Find(42)
+a.Balance = 150
+_, err := quark.For[Account](ctx, client).Update(&a)
+// emitted: UPDATE "accounts" SET "balance" = $1, "version" = "version" + 1
+//          WHERE "id" = $2 AND "version" = $3
+// args: [150, 42, <loaded version>]
+```
+
+When another writer has already advanced the version since `Find`, the row
+won't match the predicate, the update affects zero rows, and Quark returns
+`quark.ErrStaleEntity` without writing:
+
+```go
+if errors.Is(err, quark.ErrStaleEntity) {
+    // reload, replay, retry — or surface the conflict to the user.
+}
+```
+
+On success Quark bumps the entity's version field in memory so a subsequent
+`Update` sees the new value without a re-read. The version column is
+automatically `NOT NULL` (a NULL version cannot be incremented). Only one
+field per model may carry the tag.
+
+`Tracked.Save` follows the same contract; a save with no actual column
+changes is still a no-op (zero rows, no SQL emitted, version not bumped).
 
 ## Soft Deletes
 

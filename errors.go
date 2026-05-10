@@ -39,6 +39,14 @@ var (
 	// structured Join (when available) or RawQuery for shapes outside it.
 	ErrInvalidJoin = errors.New("invalid JOIN ON clause")
 
+	// ErrStaleEntity indicates that an optimistic-locking update failed
+	// because the row's version column had been bumped by another writer
+	// since the entity was loaded. The caller should reload the row, replay
+	// the change against the fresh state, and retry — or surface the
+	// conflict to the user. Returned by Update / UpdateFields / Tracked.Save
+	// when the model carries a quark:"version" field.
+	ErrStaleEntity = errors.New("stale entity (optimistic-locking conflict)")
+
 	// ErrDialectNotSupported indicates that the database dialect is not supported.
 	ErrDialectNotSupported = errors.New("dialect not supported")
 

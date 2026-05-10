@@ -56,8 +56,26 @@ CHANGELOG `### Added`.
 ### F1-5 · Soft delete real
 [Pendiente] Scope `WithTrashed()` / `OnlyTrashed()` automático cuando el modelo tiene `DeletedAt *time.Time`.
 
-### F1-6 · Optimistic locking
-[Pendiente] Tag `quark:"version"` que incrementa y añade a WHERE en cada UPDATE; error tipado `ErrStaleEntity`.
+### ~~F1-6 · Optimistic locking~~
+
+**Cerrado** — tag `quark:"version"` en un campo numérico activa el lock.
+`buildUpdate`/`UpdateFields`/`Tracked.Save` añaden `version = version + 1`
+en SET y `AND version = <loaded>` en WHERE; rows-affected==0 retorna
+`ErrStaleEntity` (sentinel nuevo en `errors.go`). Tras éxito se bumpea la
+versión del struct en memoria. La columna queda automáticamente NOT NULL.
+Solo un campo puede llevar el tag.
+
+`Tracked.Save` sigue siendo no-op si no hay cambios de columnas: la versión
+sólo bumpea cuando ya hay otra escritura — la actualización del lock va en
+la misma UPDATE, no en una segunda.
+
+Cobertura: `testOptimisticLocking` (`optimistic_locking_test.go`) wired a
+`SharedSuite`. 6 subtests: UpdateBumpsVersion, StaleUpdateReturnsErrStaleEntity
+(dos lectores, segundo escritor falla), UpdateFieldsBumpsVersion,
+UpdateFieldsStaleReturnsErrStaleEntity, TrackedSaveBumpsVersion (incluye
+re-save no-op), TrackedSaveStaleReturnsErrStaleEntity. Doc:
+`website/docs/guides/modeling.mdx` § Optimistic Locking;
+`website/docs/reference/api/errors.mdx`; CHANGELOG `### Added`.
 
 ---
 
