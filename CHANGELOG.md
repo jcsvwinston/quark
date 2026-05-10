@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`JSON[T any]` generic + `[]byte` BLOB mapping (Phase 1 F1-2)**:
+  `quark.JSON[T]` is a typed wrapper that round-trips a Go value through a
+  SQL JSON column via `encoding/json`. It implements
+  [`sql.Scanner`](https://pkg.go.dev/database/sql#Scanner) and
+  [`driver.Valuer`](https://pkg.go.dev/database/sql/driver#Valuer) directly,
+  so the round-trip uses the standard library's plumbing — no extra reflect
+  in Quark's hot paths. The migrate layer detects `JSON[T]` and emits the
+  dialect-native column type:
+  Postgres `JSONB`; MySQL/MariaDB `JSON`; SQLite `TEXT` (with `json_*`
+  functions still available); SQL Server `NVARCHAR(MAX)`; Oracle `CLOB`.
+  Pair with `Nullable[JSON[T]]` when you need to distinguish SQL NULL from
+  an empty payload. The migrate layer also learned to map `[]byte` to the
+  dialect-native binary column (`BYTEA` on Postgres, `VARBINARY(MAX)` on
+  SQL Server, `BLOB` elsewhere) instead of the previous `TEXT` fallback.
+
 - **`Nullable[T]` generic (Phase 1 F1-3)**: re-export of `database/sql.Null[T]`
   under a Quark-friendly name, plus the constructors `SomeOf(v)` /
   `NullOf[T]()`. Replaces the long-standing `*time.Time` / `sql.NullString`
