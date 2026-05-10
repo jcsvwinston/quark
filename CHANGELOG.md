@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Eager-loading paths now chunk parent keys (Phase 2)**: `Preload` over a
+  large parent set used to assemble a single `IN(...)` clause with one
+  bind per parent — silently broken on Oracle (1000-IN cap) and at risk on
+  SQL Server (~2100 bind ceiling). The three relation loaders
+  (`loadStandardRelation`, `loadM2MRelation`, `loadPolymorphicRelation`)
+  now chunk at 1000 keys per query and aggregate results across chunks
+  via a new internal `chunkParentKeys` helper. Tenant predicates and
+  polymorphic-type discriminators are re-applied per chunk so the
+  invariant survives the iteration.
+
 ### Added
 
 - **Pessimistic locking (Phase 2)**: `Query[T].ForUpdate()`, `ForShare()`,
