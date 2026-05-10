@@ -113,6 +113,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testPessimisticLocking(ctx, t, client)
 	})
 
+	t.Run("INChunking", func(t *testing.T) {
+		testINChunking(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

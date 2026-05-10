@@ -587,6 +587,30 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	return sqlStr, args, nil
 }
 
+// inChunkSize is the maximum number of parent-keys we put inside a single
+// IN(...) clause when eager-loading relations. Sized to stay under Oracle's
+// 1000-element IN cap; MSSQL's ~2100 bind-parameter ceiling tolerates the
+// same chunk plus the handful of tenant / poly-type parameters added on
+// top, leaving comfortable headroom.
+const inChunkSize = 1000
+
+// chunkParentKeys yields slices of allKeys of at most inChunkSize elements
+// to fn. Used by the eager-loading paths so a giant Preload doesn't blow
+// dialect IN / bind-parameter caps. fn is invoked once per chunk and any
+// error short-circuits the iteration.
+func chunkParentKeys(allKeys []any, fn func(chunk []any) error) error {
+	for start := 0; start < len(allKeys); start += inChunkSize {
+		end := start + inChunkSize
+		if end > len(allKeys) {
+			end = len(allKeys)
+		}
+		if err := fn(allKeys[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // substitutePathMarkers walks fragment, replacing each literal '?' with the
 // dialect-specific placeholder for the next argIndex, and returns the rendered
 // fragment plus the number of substitutions made. expectedMarkers is the
@@ -880,39 +904,51 @@ func (q *Query[T]) loadStandardRelation(results []T, relName string, relMeta *Re
 		foreignCol = relMeta.JoinCol
 	}
 
-	// Build query using IN clause
-	placeholders := make([]string, len(parentKeys))
-	for i := range parentKeys {
-		placeholders[i] = q.dialect.Placeholder(i + 1)
-	}
-
-	var whereClauses []string
-	whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", q.dialect.Quote(foreignCol), strings.Join(placeholders, ", ")))
-
-	// Inject tenant filtering if active
+	// Determine whether the related model has a tenant column to scope by.
+	hasTenantCol := false
 	if q.tenantID != "" && q.tenantCol != "" {
-		// Check if related model has the tenant column
 		if _, ok := relModel.FieldByCol[strings.ToLower(q.tenantCol)]; ok {
-			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(parentKeys)+1)))
-			parentKeys = append(parentKeys, q.tenantID)
+			hasTenantCol = true
 		}
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-		q.dialect.Quote(relModel.Table),
-		strings.Join(whereClauses, " AND "),
-	)
+	// Chunk parentKeys so a giant Preload doesn't blow Oracle's 1000-IN cap
+	// or MSSQL's ~2100-bind-parameter ceiling. Aggregate each chunk's rows
+	// into the same scanAndMapRelations target — order across chunks is
+	// irrelevant because mapping is by parent-key.
+	return chunkParentKeys(parentKeys, func(chunk []any) error {
+		placeholders := make([]string, len(chunk))
+		for i := range chunk {
+			placeholders[i] = q.dialect.Placeholder(i + 1)
+		}
 
-	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-	defer cancel()
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, chunk...)
 
-	rows, err := q.executeQuery(ctx, query, parentKeys)
-	if err != nil {
-		return fmt.Errorf("failed to load relation %s: %w", relName, err)
-	}
-	defer rows.Close()
+		var whereClauses []string
+		whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", q.dialect.Quote(foreignCol), strings.Join(placeholders, ", ")))
 
-	return q.scanAndMapRelations(rows, results, relName, relMeta, relModel, foreignCol, keyMap)
+		if hasTenantCol {
+			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(chunk)+1)))
+			args = append(args, q.tenantID)
+		}
+
+		query := fmt.Sprintf("SELECT * FROM %s WHERE %s",
+			q.dialect.Quote(relModel.Table),
+			strings.Join(whereClauses, " AND "),
+		)
+
+		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+		defer cancel()
+
+		rows, err := q.executeQuery(ctx, query, args)
+		if err != nil {
+			return fmt.Errorf("failed to load relation %s: %w", relName, err)
+		}
+		defer rows.Close()
+
+		return q.scanAndMapRelations(rows, results, relName, relMeta, relModel, foreignCol, keyMap)
+	})
 }
 
 // loadM2MRelation handles many-to-many relations through a join table
@@ -942,124 +978,133 @@ func (q *Query[T]) loadM2MRelation(results []T, relName string, relMeta *Relatio
 		return nil
 	}
 
-	// Query join table to get mappings
-	joinPlaceholders := make([]string, len(parentKeys))
-	for i := range parentKeys {
-		joinPlaceholders[i] = q.dialect.Placeholder(i + 1)
-	}
-
-	joinQuery := fmt.Sprintf("SELECT %s, %s FROM %s WHERE %s IN (%s)",
-		q.dialect.Quote(relMeta.JoinFK),
-		q.dialect.Quote(relMeta.JoinRefFK),
-		q.dialect.Quote(relMeta.JoinTable),
-		q.dialect.Quote(relMeta.JoinFK),
-		strings.Join(joinPlaceholders, ", "),
-	)
-
-	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-	defer cancel()
-
-	joinRows, err := q.executeQuery(ctx, joinQuery, parentKeys)
-	if err != nil {
-		return fmt.Errorf("failed to load join table for relation %s: %w", relName, err)
-	}
-
-	// Build map of related ID -> parent IDs
-	relatedToParent := make(map[any][]any) // related_id -> []parent_id
+	// Step 1: query the join table in chunks of inChunkSize parent keys to
+	// keep IN(...) under dialect caps. Aggregate the parent → related
+	// mapping across chunks.
+	relatedToParent := make(map[any][]any) // related_id → []parent_id
 	var relatedKeys []any
 	seenRelated := make(map[any]bool)
 
-	for joinRows.Next() {
-		var parentID, relatedID any
-		if err := joinRows.Scan(&parentID, &relatedID); err != nil {
-			joinRows.Close()
-			return err
+	if err := chunkParentKeys(parentKeys, func(chunk []any) error {
+		joinPlaceholders := make([]string, len(chunk))
+		for i := range chunk {
+			joinPlaceholders[i] = q.dialect.Placeholder(i + 1)
 		}
-		relatedToParent[relatedID] = append(relatedToParent[relatedID], parentID)
-		if !seenRelated[relatedID] {
-			relatedKeys = append(relatedKeys, relatedID)
-			seenRelated[relatedID] = true
+		joinQuery := fmt.Sprintf("SELECT %s, %s FROM %s WHERE %s IN (%s)",
+			q.dialect.Quote(relMeta.JoinFK),
+			q.dialect.Quote(relMeta.JoinRefFK),
+			q.dialect.Quote(relMeta.JoinTable),
+			q.dialect.Quote(relMeta.JoinFK),
+			strings.Join(joinPlaceholders, ", "),
+		)
+		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+		defer cancel()
+
+		joinRows, err := q.executeQuery(ctx, joinQuery, chunk)
+		if err != nil {
+			return fmt.Errorf("failed to load join table for relation %s: %w", relName, err)
 		}
+		defer joinRows.Close()
+		for joinRows.Next() {
+			var parentID, relatedID any
+			if err := joinRows.Scan(&parentID, &relatedID); err != nil {
+				return err
+			}
+			relatedToParent[relatedID] = append(relatedToParent[relatedID], parentID)
+			if !seenRelated[relatedID] {
+				relatedKeys = append(relatedKeys, relatedID)
+				seenRelated[relatedID] = true
+			}
+		}
+		return joinRows.Err()
+	}); err != nil {
+		return err
 	}
-	joinRows.Close()
 
 	if len(relatedKeys) == 0 {
 		return nil
 	}
 
-	relPlaceholders := make([]string, len(relatedKeys))
-	for i := range relatedKeys {
-		relPlaceholders[i] = q.dialect.Placeholder(i + 1)
-	}
-
-	var whereClauses []string
-	whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", q.dialect.Quote(relModel.PK.Column), strings.Join(relPlaceholders, ", ")))
-
-	// Inject tenant filtering if active
+	hasTenantCol := false
 	if q.tenantID != "" && q.tenantCol != "" {
 		if _, ok := relModel.FieldByCol[strings.ToLower(q.tenantCol)]; ok {
-			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(relatedKeys)+1)))
-			relatedKeys = append(relatedKeys, q.tenantID)
+			hasTenantCol = true
 		}
 	}
 
-	relQuery := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-		q.dialect.Quote(relModel.Table),
-		strings.Join(whereClauses, " AND "),
-	)
-
-	ctx, cancel = context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-	defer cancel()
-
-	rows, err := q.executeQuery(ctx, relQuery, relatedKeys)
-	if err != nil {
-		return fmt.Errorf("failed to load m2m relation %s: %w", relName, err)
-	}
-	defer rows.Close()
-
-	// Custom mapping for m2m: map related records back to parents
-	cols, _ := rows.Columns()
 	pkFieldMeta, ok := relModel.FieldByCol[strings.ToLower(relModel.PK.Column)]
 	if !ok {
 		return fmt.Errorf("could not find PK column %s in related model", relModel.PK.Column)
 	}
 
-	for rows.Next() {
-		relPtr := reflect.New(relMeta.RefType)
-		relVal := relPtr.Elem()
+	// Step 2: load the related rows in chunks of related keys. Mapping
+	// happens inline so each chunk's rows fan out to the right parents
+	// without having to keep them in a slice across chunks.
+	return chunkParentKeys(relatedKeys, func(chunk []any) error {
+		relPlaceholders := make([]string, len(chunk))
+		for i := range chunk {
+			relPlaceholders[i] = q.dialect.Placeholder(i + 1)
+		}
 
-		scanDest := make([]any, len(cols))
-		for i, col := range cols {
-			if fm, ok := relModel.FieldByCol[col]; ok {
-				scanDest[i] = makeScanDest(relVal.Field(fm.Index))
-			} else {
-				var discard any
-				scanDest[i] = &discard
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, chunk...)
+
+		var whereClauses []string
+		whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", q.dialect.Quote(relModel.PK.Column), strings.Join(relPlaceholders, ", ")))
+
+		if hasTenantCol {
+			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(chunk)+1)))
+			args = append(args, q.tenantID)
+		}
+
+		relQuery := fmt.Sprintf("SELECT * FROM %s WHERE %s",
+			q.dialect.Quote(relModel.Table),
+			strings.Join(whereClauses, " AND "),
+		)
+
+		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+		defer cancel()
+
+		rows, err := q.executeQuery(ctx, relQuery, args)
+		if err != nil {
+			return fmt.Errorf("failed to load m2m relation %s: %w", relName, err)
+		}
+		defer rows.Close()
+
+		cols, _ := rows.Columns()
+
+		for rows.Next() {
+			relPtr := reflect.New(relMeta.RefType)
+			relVal := relPtr.Elem()
+
+			scanDest := make([]any, len(cols))
+			for i, col := range cols {
+				if fm, ok := relModel.FieldByCol[col]; ok {
+					scanDest[i] = makeScanDest(relVal.Field(fm.Index))
+				} else {
+					var discard any
+					scanDest[i] = &discard
+				}
 			}
-		}
+			if err := rows.Scan(scanDest...); err != nil {
+				return err
+			}
 
-		if err := rows.Scan(scanDest...); err != nil {
-			return err
-		}
-
-		// Get the related ID
-		relatedID := relVal.Field(pkFieldMeta.Index).Interface()
-
-		// Find parent IDs that have this related record
-		if parentIDs, ok := relatedToParent[relatedID]; ok {
-			for _, parentID := range parentIDs {
-				if parentIndexes, ok := parentKeyMap[parentID]; ok {
-					for _, pIdx := range parentIndexes {
-						parentVal := reflect.ValueOf(&results[pIdx]).Elem()
-						relField := parentVal.FieldByName(relName)
-						relField.Set(reflect.Append(relField, relVal))
+			relatedID := relVal.Field(pkFieldMeta.Index).Interface()
+			if parentIDs, ok := relatedToParent[relatedID]; ok {
+				for _, parentID := range parentIDs {
+					if parentIndexes, ok := parentKeyMap[parentID]; ok {
+						for _, pIdx := range parentIndexes {
+							parentVal := reflect.ValueOf(&results[pIdx]).Elem()
+							relField := parentVal.FieldByName(relName)
+							relField.Set(reflect.Append(relField, relVal))
+						}
 					}
 				}
 			}
 		}
-	}
-
-	return rows.Err()
+		return rows.Err()
+	})
 }
 
 // loadPolymorphicRelation handles polymorphic relations
@@ -1089,40 +1134,51 @@ func (q *Query[T]) loadPolymorphicRelation(results []T, relName string, relMeta 
 		return nil
 	}
 
-	placeholders := make([]string, len(parentKeys))
-	for i := range parentKeys {
-		placeholders[i] = q.dialect.Placeholder(i + 2) // +2 because $1 is the type
-	}
-
-	var whereClauses []string
-	whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(relMeta.PolyTypeColumn), q.dialect.Placeholder(1)))
-	whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", q.dialect.Quote(relMeta.PolyIDColumn), strings.Join(placeholders, ", ")))
-
-	args := append([]any{relMeta.PolyType}, parentKeys...)
-
-	// Inject tenant filtering if active
+	hasTenantCol := false
 	if q.tenantID != "" && q.tenantCol != "" {
 		if _, ok := relModel.FieldByCol[strings.ToLower(q.tenantCol)]; ok {
-			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(args)+1)))
-			args = append(args, q.tenantID)
+			hasTenantCol = true
 		}
 	}
 
-	polyQuery := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-		q.dialect.Quote(relModel.Table),
-		strings.Join(whereClauses, " AND "),
-	)
+	// Chunk so a Preload over thousands of polymorphic parents stays under
+	// dialect IN / bind caps. Each chunk is its own SELECT; the mapping
+	// path scanAndMapPolymorphicRelations consumes the rows and dispatches
+	// them to the right parents independently of chunking.
+	return chunkParentKeys(parentKeys, func(chunk []any) error {
+		// $1 is the polymorphic type discriminator; segment IDs follow.
+		placeholders := make([]string, len(chunk))
+		for i := range chunk {
+			placeholders[i] = q.dialect.Placeholder(i + 2)
+		}
 
-	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-	defer cancel()
+		var whereClauses []string
+		whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(relMeta.PolyTypeColumn), q.dialect.Placeholder(1)))
+		whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", q.dialect.Quote(relMeta.PolyIDColumn), strings.Join(placeholders, ", ")))
 
-	rows, err := q.executeQuery(ctx, polyQuery, args)
-	if err != nil {
-		return fmt.Errorf("failed to load polymorphic relation %s: %w", relName, err)
-	}
-	defer rows.Close()
+		args := append([]any{relMeta.PolyType}, chunk...)
 
-	return q.scanAndMapPolymorphicRelations(rows, results, relName, relMeta, relModel, parentKeyMap)
+		if hasTenantCol {
+			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(args)+1)))
+			args = append(args, q.tenantID)
+		}
+
+		polyQuery := fmt.Sprintf("SELECT * FROM %s WHERE %s",
+			q.dialect.Quote(relModel.Table),
+			strings.Join(whereClauses, " AND "),
+		)
+
+		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+		defer cancel()
+
+		rows, err := q.executeQuery(ctx, polyQuery, args)
+		if err != nil {
+			return fmt.Errorf("failed to load polymorphic relation %s: %w", relName, err)
+		}
+		defer rows.Close()
+
+		return q.scanAndMapPolymorphicRelations(rows, results, relName, relMeta, relModel, parentKeyMap)
+	})
 }
 
 // scanAndMapRelations scans rows and maps them to parent structs (for standard relations)

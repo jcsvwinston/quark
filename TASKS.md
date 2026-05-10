@@ -35,8 +35,18 @@ Doc: `website/docs/guides/querying.mdx` § Pessimistic Locking con la matriz
 por dialect y nota sobre transacciones; `website/docs/reference/api/errors.mdx`
 ErrUnsupportedFeature; CHANGELOG `### Added`.
 
-### F2-IN-chunking · Pendiente
-Chunking automático de `IN(...)` por dialect (Oracle 1000, MSSQL 2100 params).
+### ~~F2-IN-chunking · Chunking automático de `IN(...)` por dialect~~
+
+**Cerrado** — `chunkParentKeys` helper en `query_exec.go` (constante
+`inChunkSize = 1000`, conservadora para los 6 motores). Las 3 funciones de
+preload — `loadStandardRelation` / `loadM2MRelation` / `loadPolymorphicRelation` —
+ahora envuelven sus IN-load en el helper y agregan resultados a través de
+chunks. Los predicados de tenant / poly-type discriminator se re-aplican
+por chunk.
+
+Cobertura: `testINChunking/PreloadChunksAt1000` en SharedSuite (2500 padres
+× 1 child cada uno → 3 IN(...) selects observados via middleware) +
+`TestChunkParentKeys_Contract` con la matemática de redondeo.
 
 ### F2-AST · Pendiente
 Tipo `Expr` componible: `Col`, `Lit`, `Func`, `And`/`Or`/`Not`, `In`, `Exists`. `Where` y `Having` aceptan `Expr`.
