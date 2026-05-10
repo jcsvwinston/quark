@@ -73,8 +73,7 @@ safety of the raw SQL:
 lims := quark.DefaultLimits()
 lims.AllowRawQueries = true
 
-client, _ := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, _ := quark.New("postgres", dsn,
     quark.WithLimits(lims),
 )
 ```

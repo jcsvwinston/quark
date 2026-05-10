@@ -177,7 +177,7 @@ db.Where("tenant_id = ?", tenantID).Find(&users)
 import "github.com/jcsvwinston/quark/cache/memory"
 
 store := memory.New()
-client, _ := quark.New(db, quark.WithDialect(quark.PostgreSQL()), quark.WithCacheStore(store))
+client, _ := quark.New("postgres", dsn, quark.WithCacheStore(store))
 
 users, _ := quark.For[User](ctx, client).
     Cache(5*time.Minute, "users").

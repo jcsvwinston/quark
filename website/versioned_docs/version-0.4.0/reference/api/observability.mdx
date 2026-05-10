@@ -19,8 +19,7 @@ func (m *MetricsObserver) ObserveQuery(event quark.QueryEvent) {
     metrics.Record(event.Table, event.Operation, event.Duration, event.Rows, event.Error)
 }
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithQueryObserver(&MetricsObserver{}),
 )
 ```
@@ -82,8 +81,7 @@ func (l *LoggingMiddleware) WrapQuery(next quark.QueryFunc) quark.QueryFunc {
 ```go
 import quarkotel "github.com/jcsvwinston/quark/otel"
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithMiddleware(quarkotel.New()),
 )
 ```

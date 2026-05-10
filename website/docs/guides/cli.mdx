@@ -24,7 +24,6 @@ package main
 
 import (
     "context"
-    "database/sql"
     "flag"
     "log"
 
@@ -45,16 +44,10 @@ func main() {
     flag.BoolVar(&dryRun, "dry-run", false, "preview pending migrations")
     flag.Parse()
 
-    db, err := sql.Open("postgres", dsn)
-    if err != nil {
-        log.Fatal(err)
-    }
-
     limits := quark.DefaultLimits()
     limits.AllowRawQueries = true
 
-    client, err := quark.New(db,
-        quark.WithDialect(quark.PostgreSQL()),
+    client, err := quark.New("postgres", dsn,
         quark.WithLimits(limits),
     )
     if err != nil {
@@ -124,8 +117,7 @@ logger on the client to capture the planned SQL:
 ```go
 logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLogger(logger),
 )
 ```

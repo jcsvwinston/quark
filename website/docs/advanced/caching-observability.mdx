@@ -25,8 +25,7 @@ import (
 store := memory.New()
 defer store.Close()
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithCacheStore(store),
 )
 
@@ -98,8 +97,7 @@ if err := store.Ping(ctx); err != nil {
     return err
 }
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithCacheStore(store),
 )
 ```
@@ -172,8 +170,7 @@ func (m *LogMiddleware) WrapExec(next quark.ExecFunc) quark.ExecFunc {
     }
 }
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithMiddleware(&LogMiddleware{}),
 )
 ```
@@ -198,8 +195,7 @@ func (o *MetricsObserver) ObserveQuery(e quark.QueryEvent) {
     )
 }
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithQueryObserver(&MetricsObserver{}),
 )
 ```
@@ -224,8 +220,7 @@ auditing. Redact sensitive arguments before exporting them.
 ```go
 import quarkotel "github.com/jcsvwinston/quark/otel"
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithMiddleware(quarkotel.New()),
 )
 ```
@@ -261,8 +256,7 @@ when you need production `LISTEN/NOTIFY`.
 store := memory.New()
 defer store.Close()
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithCacheStore(store),
     quark.WithMiddleware(quarkotel.New()),
     quark.WithMiddleware(&LogMiddleware{}),

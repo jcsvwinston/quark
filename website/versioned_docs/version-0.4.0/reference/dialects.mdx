@@ -54,7 +54,7 @@ if err != nil {
     return err
 }
 
-client, err := quark.New(db, quark.WithDialect(dialect))
+client, err := quark.New("customdb", dsn, quark.WithDialect(dialect))
 ```
 
 `DetectDialectByName` looks up a registered dialect by name and returns

@@ -14,8 +14,8 @@ once, then add the driver package for the database engine your application uses.
 | Requirement | Notes |
 | --- | --- |
 | Go 1.21+ | Quark uses generics and the modern module-aware Go toolchain. |
-| A `database/sql` driver | The driver owns the wire protocol and DSN format. |
-| An explicit dialect | Auto-detection exists, but production code should pass `WithDialect`. |
+| A `database/sql` driver | The driver owns the wire protocol and DSN format. Imported with the blank-import idiom. |
+| Driver name passed to `quark.New` | Quark auto-detects the dialect from the driver name; override with `WithDialect` when registering a custom dialect. |
 
 ```bash
 go get github.com/jcsvwinston/quark
@@ -75,7 +75,6 @@ package main
 
 import (
     "context"
-    "database/sql"
     "log"
 
     "github.com/jcsvwinston/quark"
@@ -89,12 +88,7 @@ type User struct {
 }
 
 func main() {
-    db, err := sql.Open("sqlite", "file:quark.db?cache=shared")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+    client, err := quark.New("sqlite", "file:quark.db?cache=shared")
     if err != nil {
         log.Fatal(err)
     }
@@ -120,42 +114,36 @@ driver/dialect mismatch.
 
 ## Switching Engines
 
-The model and query code do not change when you change the database. The driver,
-DSN, and dialect option do.
+The model and query code do not change when you change the database. The driver
+import and the driver name passed to `quark.New` do.
 
 ```go
 import (
-    "database/sql"
-
     "github.com/jcsvwinston/quark"
     _ "github.com/lib/pq"
 )
 
-db, err := sql.Open("postgres", "postgres://user:pass@localhost/app?sslmode=disable")
-if err != nil {
-    return err
-}
-
-client, err := quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+client, err := quark.New("postgres", "postgres://user:pass@localhost/app?sslmode=disable")
 if err != nil {
     return err
 }
 ```
 
-Dialect selection controls placeholder syntax, identifier quoting, `RETURNING`
-behavior, upsert fragments, JSON expressions, pagination, and DDL.
+The dialect is auto-detected from the driver name. It controls placeholder
+syntax, identifier quoting, `RETURNING` behavior, upsert fragments, JSON
+expressions, pagination, and DDL.
 
 ## Pool Configuration
 
-Quark uses the `*sql.DB` you give it. Configure the connection pool before or
-after creating the client:
+Quark owns the `*sql.DB` it creates. Configure the pool through the
+`WithMaxOpenConns`, `WithMaxIdleConns`, and `WithConnMaxLifetime` options:
 
 ```go
-db.SetMaxOpenConns(25)
-db.SetMaxIdleConns(25)
-db.SetConnMaxLifetime(30 * time.Minute)
-
-client, err := quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+client, err := quark.New("postgres", dsn,
+    quark.WithMaxOpenConns(25),
+    quark.WithMaxIdleConns(25),
+    quark.WithConnMaxLifetime(30*time.Minute),
+)
 ```
 
 For database-per-tenant routing, each tenant can own its own `*sql.DB` pool. See

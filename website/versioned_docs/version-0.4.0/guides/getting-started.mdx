@@ -9,7 +9,7 @@ description: "Build a complete Quark flow: connect, model, migrate, write, query
 This guide builds the smallest useful Quark application. It uses SQLite so you
 can run it locally without containers, but the same model and query code works
 with PostgreSQL, MySQL, MariaDB, SQL Server, and Oracle by changing the driver
-and `WithDialect` option.
+name passed to `quark.New`.
 
 ## The Mental Model
 
@@ -32,7 +32,6 @@ package main
 
 import (
     "context"
-    "database/sql"
     "errors"
     "log"
     "time"
@@ -67,12 +66,7 @@ func (u *User) BeforeUpdate(ctx context.Context) error {
 func main() {
     ctx := context.Background()
 
-    db, err := sql.Open("sqlite", "file:quark.db?cache=shared")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+    client, err := quark.New("sqlite", "file:quark.db?cache=shared")
     if err != nil {
         log.Fatal(err)
     }
@@ -127,21 +121,16 @@ func main() {
 ## Create a Client
 
 ```go
-db, err := sql.Open("sqlite", "file:quark.db?cache=shared")
-if err != nil {
-    return err
-}
-
-client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+client, err := quark.New("sqlite", "file:quark.db?cache=shared")
 if err != nil {
     return err
 }
 defer client.Close()
 ```
 
-Passing `WithDialect` explicitly is recommended. Auto-detection is useful for
-experiments, but dialect choice affects generated SQL in ways you want to make
-obvious during code review.
+The dialect is auto-detected from the driver name. Use `WithDialect` to override
+when the driver name is ambiguous (e.g. registering a custom dialect under
+`pgx`).
 
 ## Define a Model
 

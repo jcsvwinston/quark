@@ -6,22 +6,17 @@ description: "All quark.New options: dialect, logger, limits, cache, middleware,
 
 # Configuration Reference
 
-Quark configuration is per client. `quark.New(db, ...options)` does not modify
-global ORM state.
+Quark configuration is per client. `quark.New(driverName, dataSource, ...options)`
+does not modify global ORM state.
 
 ## Minimal Client
 
 ```go
-db, err := sql.Open("sqlite", "file:app.db?cache=shared")
-if err != nil {
-    return err
-}
-
-client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+client, err := quark.New("sqlite", "file:app.db?cache=shared")
 ```
 
-`quark.New` validates that `db` is non-nil and pings it with a five-second
-startup timeout.
+`quark.New` opens the connection itself and pings it with a five-second startup
+timeout. The dialect is auto-detected from the driver name.
 
 ## Production Shape
 
@@ -36,8 +31,7 @@ limits.SafeMigrations = true
 
 store := memory.New()
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLogger(logger),
     quark.WithLimits(limits),
     quark.WithCacheStore(store),
@@ -54,12 +48,15 @@ expired query contexts in the current implementation.
 
 | Option | Purpose |
 | --- | --- |
-| `WithDialect(d Dialect)` | Sets SQL dialect explicitly. |
+| `WithDialect(d Dialect)` | Overrides the dialect that would be auto-detected from the driver name. |
 | `WithLogger(l *slog.Logger)` | Sets the client logger. |
 | `WithLimits(l Limits)` | Sets security and performance limits. |
 | `WithCacheStore(s CacheStore)` | Enables query cache storage. |
 | `WithMiddleware(m Middleware)` | Adds execution middleware. |
 | `WithQueryObserver(o QueryObserver)` | Adds post-execution query observers. |
+| `WithMaxOpenConns(n int)` | Sets `*sql.DB.SetMaxOpenConns`. |
+| `WithMaxIdleConns(n int)` | Sets `*sql.DB.SetMaxIdleConns`. |
+| `WithConnMaxLifetime(d time.Duration)` | Sets `*sql.DB.SetConnMaxLifetime`. |
 
 ## Dialect
 
@@ -75,15 +72,16 @@ quark.WithDialect(quark.Oracle())
 The dialect controls placeholders, identifier quoting, `RETURNING`, last-insert
 ID behavior, upsert SQL, JSON extraction, pagination, routines, and schema DDL.
 
-Auto-detection exists, but explicit dialects are easier to review and test.
+`quark.New` auto-detects the dialect from the driver name. Pass `WithDialect`
+only when the driver name is ambiguous (e.g. `pgx` shared between PostgreSQL
+and CockroachDB) or when registering a custom dialect.
 
 ## Logger
 
 ```go
 logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLogger(logger),
 )
 ```
@@ -124,8 +122,7 @@ limits := quark.DefaultLimits()
 limits.AllowRawQueries = true // only for migration/admin clients
 limits.MaxWhereConditions = 30
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLimits(limits),
 )
 ```
@@ -143,8 +140,7 @@ import "github.com/jcsvwinston/quark/cache/memory"
 store := memory.New()
 defer store.Close()
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.SQLite()),
+client, err := quark.New("sqlite", "file:app.db?cache=shared",
     quark.WithCacheStore(store),
 )
 ```
@@ -160,8 +156,7 @@ store := rediscache.New(rediscache.Options{
     DB:       0,
 })
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithCacheStore(store),
 )
 ```
@@ -183,8 +178,7 @@ func (m *AuditMiddleware) WrapQuery(next quark.QueryFunc) quark.QueryFunc {
     }
 }
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithMiddleware(&AuditMiddleware{}),
 )
 ```
@@ -208,8 +202,7 @@ func (m *MetricsObserver) ObserveQuery(event quark.QueryEvent) {
     metrics.Record(event.Table, event.Operation, event.Duration, event.Rows, event.Error)
 }
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithQueryObserver(&MetricsObserver{}),
 )
 ```
