@@ -97,6 +97,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testOptimisticLocking(ctx, t, client)
 	})
 
+	t.Run("SoftDeleteScopes", func(t *testing.T) {
+		testSoftDeleteScopes(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

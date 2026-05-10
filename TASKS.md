@@ -53,8 +53,23 @@ PointerTypeStrippedOnRegistration (`*time.Duration`). Doc en
 `website/docs/guides/modeling.mdx` § Field Tags + § Custom type mappers;
 CHANGELOG `### Added`.
 
-### F1-5 · Soft delete real
-[Pendiente] Scope `WithTrashed()` / `OnlyTrashed()` automático cuando el modelo tiene `DeletedAt *time.Time`.
+### ~~F1-5 · Soft delete real~~
+
+**Cerrado** — `Query[T].WithTrashed()` (incluye trashed) y `Query[T].OnlyTrashed()`
+(solo trashed) suman a `Unscoped()` (mantenido como alias). Filtro
+`deleted_at IS NULL` por defecto sigue siendo automático en reads/Count/aggregates;
+ahora centralizado en `BaseQuery.softDeletePredicate()` para mantener los 3 call
+sites coherentes. Nuevo `Query[T].Restore(entity)` que limpia `deleted_at`
+con guard `AND deleted_at IS NOT NULL` (un Restore sobre fila live es 0-row
+no-op, no stealth NULL write). Tenant predicate se preserva en Restore.
+
+Cobertura: `testSoftDeleteScopes` (`soft_delete_scope_test.go`) wired a
+`SharedSuite`. 7 subtests: DefaultScopeHidesTrashed, WithTrashedReturnsAll,
+UnscopedAliasOfWithTrashed, OnlyTrashedReturnsTrashed, CountRespectsScopes
+(con los 3 modos), RestoreUntrashesARow, RestoreOnLiveRowIsNoop.
+
+Doc: `website/docs/guides/modeling.mdx` § Soft Deletes reescrito con tabla
+de modifiers + sección Restore. CHANGELOG `### Added`.
 
 ### ~~F1-6 · Optimistic locking~~
 

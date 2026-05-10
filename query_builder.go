@@ -54,22 +54,23 @@ type BaseQuery struct {
 	meta    *ModelMeta
 
 	// Query state (cloned on each builder method)
-	selectCols []string
-	where      []condition
-	orderBy    []order
-	joins      []join
-	preloads   []string
-	limit      int
-	offset     int
-	hasLimit   bool   // tracks if Limit() was explicitly called
-	unscoped   bool   // if true, includes soft-deleted records
-	tenantID   string // for RowLevelSecurity isolation
-	tenantCol  string // column name for tenant isolation
-	cache      CacheConfig
-	groupBy    []string    // GROUP BY columns
-	having     []condition // HAVING conditions
-	distinct   bool        // SELECT DISTINCT
-	err        error       // stores initialization error from ClientProvider
+	selectCols  []string
+	where       []condition
+	orderBy     []order
+	joins       []join
+	preloads    []string
+	limit       int
+	offset      int
+	hasLimit    bool   // tracks if Limit() was explicitly called
+	unscoped    bool   // if true, soft-delete filter is dropped (WithTrashed semantics)
+	onlyTrashed bool   // if true, the soft-delete filter is inverted to IS NOT NULL
+	tenantID    string // for RowLevelSecurity isolation
+	tenantCol   string // column name for tenant isolation
+	cache       CacheConfig
+	groupBy     []string    // GROUP BY columns
+	having      []condition // HAVING conditions
+	distinct    bool        // SELECT DISTINCT
+	err         error       // stores initialization error from ClientProvider
 }
 
 // Query represents a type-safe database query builder for model T.
@@ -99,6 +100,7 @@ func (q *Query[T]) clone() *Query[T] {
 	c.groupBy = append([]string(nil), q.groupBy...)
 	c.having = append([]condition(nil), q.having...)
 	c.unscoped = q.unscoped
+	c.onlyTrashed = q.onlyTrashed
 	c.distinct = q.distinct
 	c.tenantID = q.tenantID
 	c.tenantCol = q.tenantCol
@@ -113,10 +115,34 @@ func (q *Query[T]) Preload(relations ...string) *Query[T] {
 	return c
 }
 
-// Unscoped ignores soft-delete filters for the query.
+// Unscoped ignores soft-delete filters for the query, returning both
+// trashed and non-trashed rows. Equivalent to WithTrashed; kept for
+// backward compatibility.
 func (q *Query[T]) Unscoped() *Query[T] {
 	c := q.clone()
 	c.unscoped = true
+	c.onlyTrashed = false
+	return c
+}
+
+// WithTrashed returns a query that includes both soft-deleted (trashed) and
+// live rows — the same effect as Unscoped, named for parity with the
+// scope-driven idiom that other ORMs use. Only meaningful when the model
+// carries a deleted_at column.
+func (q *Query[T]) WithTrashed() *Query[T] {
+	c := q.clone()
+	c.unscoped = true
+	c.onlyTrashed = false
+	return c
+}
+
+// OnlyTrashed returns a query that filters down to soft-deleted rows
+// (deleted_at IS NOT NULL) so callers can list, restore, or hard-delete
+// the trash. A no-op when the model has no deleted_at column.
+func (q *Query[T]) OnlyTrashed() *Query[T] {
+	c := q.clone()
+	c.unscoped = false
+	c.onlyTrashed = true
 	return c
 }
 
@@ -179,23 +205,24 @@ func (q *Query[T]) WhereBetween(column string, start, end any) *Query[T] {
 // Internal helper. Not part of the public API.
 func (b *BaseQuery) cloneForGroup() BaseQuery {
 	c := BaseQuery{
-		client:    b.client,
-		ctx:       b.ctx,
-		table:     b.table,
-		schema:    b.schema,
-		dialect:   b.dialect,
-		guard:     b.guard,
-		pk:        b.pk,
-		exec:      b.exec,
-		meta:      b.meta,
-		tenantID:  b.tenantID,
-		tenantCol: b.tenantCol,
-		cache:     b.cache,
-		limit:     b.limit,
-		offset:    b.offset,
-		hasLimit:  b.hasLimit,
-		unscoped:  b.unscoped,
-		err:       b.err,
+		client:      b.client,
+		ctx:         b.ctx,
+		table:       b.table,
+		schema:      b.schema,
+		dialect:     b.dialect,
+		guard:       b.guard,
+		pk:          b.pk,
+		exec:        b.exec,
+		meta:        b.meta,
+		tenantID:    b.tenantID,
+		tenantCol:   b.tenantCol,
+		cache:       b.cache,
+		limit:       b.limit,
+		offset:      b.offset,
+		hasLimit:    b.hasLimit,
+		unscoped:    b.unscoped,
+		onlyTrashed: b.onlyTrashed,
+		err:         b.err,
 	}
 	if c.tenantID != "" && c.tenantCol != "" {
 		c.where = []condition{{

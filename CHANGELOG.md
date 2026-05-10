@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Soft-delete scopes `WithTrashed()` / `OnlyTrashed()` and `Restore` (Phase 1 F1-5)**:
+  the existing automatic `deleted_at IS NULL` filter now has two named
+  escape hatches: `WithTrashed()` returns both live and trashed rows
+  (alias of `Unscoped`, kept for backward compatibility), and
+  `OnlyTrashed()` flips the predicate to `deleted_at IS NOT NULL` so
+  callers can list only the trash. Both modifiers propagate through
+  `clone()`. New `Query[T].Restore(entity)` method clears `deleted_at`
+  on the row identified by the entity's PK; the SQL includes
+  `AND deleted_at IS NOT NULL` so a Restore on a live row is a 0-row
+  no-op (no stealth NULL write). Tenant predicate from the loading
+  query is preserved on `Restore`. The default scope, `Count`, and
+  aggregates all consult a new centralised `softDeletePredicate`
+  helper so the three call sites stay in lock-step.
+
 - **Optimistic locking via `quark:"version"` (Phase 1 F1-6)**: tagging a numeric
   field with `quark:"version"` enables row-level optimistic-locking on
   `Update` / `UpdateFields` / `Tracked.Save`. Each successful update emits
