@@ -482,6 +482,79 @@ func (q *Query[T]) Apply(scopes ...Scope[T]) *Query[T] {
 	return current
 }
 
+// WhereExpr adds a WHERE condition built from a composable Expr AST.
+//
+// The AST is rendered against the active dialect at call time, producing a
+// fragment with '?' bind markers plus the args. Storage and execution reuse
+// the existing raw-fragment slot in condition: buildWhereClause substitutes
+// each '?' for the dialect placeholder at the correct argIndex, so the AST
+// stays dialect-agnostic at construction time and integrates cleanly with
+// WhereJSON, Or, and the rest of the builder.
+//
+// Errors raised during ToSQL — unknown function names, invalid identifiers,
+// invalid operators, empty IN lists — are stashed on the query and surface
+// at execution time wrapping ErrInvalidQuery.
+//
+// Example:
+//
+//	q := quark.For[User](ctx, client).WhereExpr(
+//	    quark.Or(
+//	        quark.Eq(quark.Col("role"), quark.Lit("admin")),
+//	        quark.And(
+//	            quark.Gt(quark.Col("logins"), quark.Lit(10)),
+//	            quark.Eq(quark.Col("verified"), quark.Lit(true)),
+//	        ),
+//	    ),
+//	)
+func (q *Query[T]) WhereExpr(e Expr) *Query[T] {
+	c := q.clone()
+	if e == nil {
+		return c
+	}
+	frag, args, err := e.ToSQL(q.dialect, q.guard)
+	if err != nil {
+		c.err = err
+		return c
+	}
+	if frag == "" {
+		return c
+	}
+	c.where = append(c.where, condition{
+		column:    frag,
+		operator:  "",
+		logic:     "AND",
+		isRaw:     true,
+		extraArgs: args,
+	})
+	return c
+}
+
+// HavingExpr adds a HAVING condition built from the Expr AST. Same rendering
+// pipeline as WhereExpr; useful for aggregate predicates that need the full
+// composition surface (Func("COUNT", Col("*")) > Lit(5), and so on).
+func (q *Query[T]) HavingExpr(e Expr) *Query[T] {
+	c := q.clone()
+	if e == nil {
+		return c
+	}
+	frag, args, err := e.ToSQL(q.dialect, q.guard)
+	if err != nil {
+		c.err = err
+		return c
+	}
+	if frag == "" {
+		return c
+	}
+	c.having = append(c.having, condition{
+		column:    frag,
+		operator:  "",
+		logic:     "AND",
+		isRaw:     true,
+		extraArgs: args,
+	})
+	return c
+}
+
 // WhereJSON adds a WHERE condition for a JSON field.
 // column is the JSON column name, path is a dotted key path within the JSON
 // object (e.g. "user.name"). The path is validated and bound as a parameter

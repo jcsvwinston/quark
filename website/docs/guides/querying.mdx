@@ -116,6 +116,62 @@ This produces the shape:
 WHERE active = ? OR (role = ? AND verified = ?)
 ```
 
+## Composable Expressions
+
+For predicates that nest deeper than `Or` makes ergonomic, Quark exposes a
+typed expression AST. Build the expression with leaf and combinator
+constructors and hand it to `WhereExpr` or `HavingExpr`:
+
+```go
+users, err := quark.For[User](ctx, client).WhereExpr(
+    quark.And(
+        quark.Eq(quark.Col("active"), quark.Lit(true)),
+        quark.Or(
+            quark.Eq(quark.Col("role"), quark.Lit("admin")),
+            quark.And(
+                quark.Gt(quark.Col("logins"), quark.Lit(10)),
+                quark.Eq(quark.Col("verified"), quark.Lit(true)),
+            ),
+        ),
+    ),
+).List()
+// WHERE ("active" = $1 AND ("role" = $2 OR ("logins" > $3 AND "verified" = $4)))
+```
+
+The available nodes are:
+
+| Node | Renders |
+| --- | --- |
+| `Col(name)` | quoted identifier (`*` allowed only inside `Func("COUNT", ...)`) |
+| `Lit(value)` | bound parameter, never interpolated |
+| `Eq` / `Ne` / `Lt` / `Gt` / `Lte` / `Gte` / `Cmp(lhs, op, rhs)` | comparison; operator validated against the standard whitelist |
+| `And(...)` / `Or(...)` | parenthesised when ≥ 2 children, transparent when 1, empty renders nothing |
+| `Not(expr)` | `NOT (...)` |
+| `In(lhs, vals...)` / `NotIn(lhs, vals...)` | `lhs IN (?, ?, ...)`. Empty value list is rejected — use a no-rows query instead. |
+| `Func(name, args...)` | function call; name validated against a 10-name whitelist (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `LOWER`, `UPPER`, `LENGTH`, `COALESCE`, `ABS`) |
+
+`HavingExpr` accepts the same AST and is the structured counterpart to
+`HavingAggregate` for predicates the aggregate helper can't express:
+
+```go
+buckets, err := quark.For[Order](ctx, client).
+    GroupBy("customer_id").
+    HavingExpr(
+        quark.Gt(
+            quark.Func("SUM", quark.Col("amount")),
+            quark.Lit(int64(1000)),
+        ),
+    ).List()
+// GROUP BY "customer_id" HAVING SUM("amount") > $1
+```
+
+Validation errors at any leaf (`Col` with an invalid identifier, `Cmp` with
+an unknown operator, `Func` with a non-whitelisted name) are stashed on
+the query and surface at execution time wrapping `ErrInvalidQuery`. The
+AST emits `?` as a neutral bind marker; Quark substitutes it for the
+dialect's placeholder syntax (`$1`, `@p1`, `:1`, `?`) at render time, so a
+single AST renders correctly across every supported engine.
+
 ## Ordering, Limits, and Pagination
 
 ```go

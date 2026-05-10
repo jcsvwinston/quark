@@ -125,6 +125,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testNestedPreload(ctx, t, client)
 	})
 
+	t.Run("ExprAST", func(t *testing.T) {
+		testExprAST(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

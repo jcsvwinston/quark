@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Composable expression AST + `WhereExpr` / `HavingExpr` (Phase 2)**: a
+  typed expression tree (`Expr` interface, `Col`, `Lit`, `And`, `Or`,
+  `Not`, `Cmp`, `Eq`/`Ne`/`Lt`/`Gt`/`Lte`/`Gte`, `In`, `NotIn`, `Func`)
+  rendered into the existing where-clause pipeline through `WhereExpr`
+  and `HavingExpr`. Identifiers go through `SQLGuard.ValidateIdentifier`
+  at every leaf, operators through `SQLGuard.ValidateOperator`, and
+  function names against a conservative 10-name whitelist (`COUNT`,
+  `SUM`, `AVG`, `MIN`, `MAX`, `LOWER`, `UPPER`, `LENGTH`, `COALESCE`,
+  `ABS`). The AST emits `?` as a neutral bind marker; the existing
+  `substitutePathMarkers` helper swaps each `?` for the dialect's
+  placeholder syntax at render time, so the same AST renders correctly
+  against PostgreSQL `$N`, MSSQL `@pN`, Oracle `:N`, MySQL/SQLite `?`
+  without per-dialect indexing arithmetic in user code. Closes the gap
+  where deep `(A OR (B AND C))` predicates required `RawQuery`.
+
 - **Nested Preload via dotted paths (Phase 2)**: `Preload("Orders.Items.Product")`
   now walks the dotted path and loads each level in a single eager-loading
   pass. Multiple paths sharing a prefix are merged via `parsePreloads` so
@@ -29,20 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Having(Func("count", Col("*")), ">", 5)` arrives with the rest of the
   Phase 2 AST.
 
-### Fixed
-
-- **Eager-loading paths now chunk parent keys (Phase 2)**: `Preload` over a
-  large parent set used to assemble a single `IN(...)` clause with one
-  bind per parent — silently broken on Oracle (1000-IN cap) and at risk on
-  SQL Server (~2100 bind ceiling). The three relation loaders
-  (`loadStandardRelation`, `loadM2MRelation`, `loadPolymorphicRelation`)
-  now chunk at 1000 keys per query and aggregate results across chunks
-  via a new internal `chunkParentKeys` helper. Tenant predicates and
-  polymorphic-type discriminators are re-applied per chunk so the
-  invariant survives the iteration.
-
-### Added
-
 - **Pessimistic locking (Phase 2)**: `Query[T].ForUpdate()`, `ForShare()`,
   `SkipLocked()`, `NoWait()` modifiers. The dialect emits the right shape:
   `FOR UPDATE [SKIP LOCKED|NOWAIT]` / `FOR SHARE` for PG, MySQL, MariaDB,
@@ -57,6 +58,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new interface method consumed by `buildSelect` to attach pessimistic-lock
   fragments to the SELECT in the right placement per dialect. Custom
   dialects must implement it.
+
+### Fixed
+
+- **Eager-loading paths now chunk parent keys (Phase 2)**: `Preload` over a
+  large parent set used to assemble a single `IN(...)` clause with one
+  bind per parent — silently broken on Oracle (1000-IN cap) and at risk on
+  SQL Server (~2100 bind ceiling). The three relation loaders
+  (`loadStandardRelation`, `loadM2MRelation`, `loadPolymorphicRelation`)
+  now chunk at 1000 keys per query and aggregate results across chunks
+  via a new internal `chunkParentKeys` helper. Tenant predicates and
+  polymorphic-type discriminators are re-applied per chunk so the
+  invariant survives the iteration.
 
 ## [0.3.0] - 2026-05-10
 
