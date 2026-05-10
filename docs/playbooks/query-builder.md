@@ -9,7 +9,8 @@ files:
   - cursor.go
 last_review: 2026-05-10
 related_adrs: [0001, 0002, 0007]
-related_p0: [P0-1, P0-4, P0-5]
+related_p0: [P0-4, P0-5]
+closed_p0: [P0-1, P0-3]
 phase: 0
 ---
 
@@ -27,14 +28,6 @@ Esto es deuda conocida; el plan es introducir un AST en Fase 2 (ver `docs/ANALIS
 
 ## Bugs P0 vivos
 
-### P0-1 · `Or()` no propaga `tenantID/tenantCol/schema/cache/limits`
-
-**Localización**: `query_builder.go:175-186`. Crea un `BaseQuery` blanco hardcodeado.
-
-**Impacto**: cualquier query con `Or(...)` bajo estrategia `RowLevelSecurity` rompe el aislamiento entre tenants. Bug de seguridad explotable.
-
-**Patrón correcto**: cuando clones para un grupo (`Or`, futuro `WhereGroup`, futuro AST), copia TODOS los campos de aislamiento del padre. El fix recomendado es extraer `(b *BaseQuery) cloneForGroup() BaseQuery`.
-
 ### P0-4 · `isZeroValue` impide `Update` con `false`/`0`/`""`
 
 **Localización**: `query_crud.go:649` (`isZeroValue`).
@@ -50,6 +43,33 @@ Esto es deuda conocida; el plan es introducir un AST en Fase 2 (ver `docs/ANALIS
 **Impacto**: `WHERE col` se valida via `internal/guard.SQLGuard.ValidateIdentifier`; `JOIN ON` no. Inconsistencia de seguridad. Si `onClause` viene de input dinámico, vector de inyección.
 
 **Fix esperado**: API estructurada `Join(table).On(col, op, otherCol)` y deprecar la string-raw. Mientras tanto, validar el patrón mínimo en el guard.
+
+## Historial — bugs cerrados
+
+### P0-1 · `Or()` no propagaba `tenantID/tenantCol/schema/cache/limits` (cerrado)
+
+`Query[T].Or` construía un `BaseQuery` blanco hardcoded; el grupo OR escapaba
+el predicado de tenant por precedencia SQL. Fix: `(b *BaseQuery) cloneForGroup()`
+copia el contexto de aislamiento al blank y pre-inyecta el predicado de tenant
+para que el grupo OR lo herede. Detalles en `docs/playbooks/tenant.md`.
+
+### P0-3 · `linkM2M` swallowed every driver error (cerrado)
+
+`query_crud.go:linkM2M` retornaba `nil` ante cualquier error del INSERT en la
+join table, no sólo ante duplicados. El comentario decía "Ignore duplicate
+key errors" pero el código ignoraba todo: FK violations, missing tables,
+conexiones rotas. Fix: helper `isUniqueViolation(err)` en `db_errors.go` que
+hace `errors.As` contra los tipos de error de los 6 drivers (PG `*pgconn.PgError`
+SQLSTATE 23505, MySQL `*mysql.MySQLError` 1062, MSSQL `mssql.Error` 2627/2601,
+Oracle `*network.OracleError` ErrCode 1, SQLite extended codes 2067/1555 en
+ambos drivers mattn y modernc). `linkM2M` ahora retorna `nil` sólo si el error
+es unique violation; cualquier otro error se envuelve con `wrapDBError` y se
+propaga. Cobertura: `testM2MLinkErrors` (idempotent re-link + missing-table
+propagation).
+
+**Anti-pattern a evitar al añadir Save-flow code nuevo**: cualquier `if err
+!= nil { return nil }` en una rama "ignore X" debe discriminar el error por
+tipo/código, nunca por su mera presencia.
 
 ## Anti-patterns a vigilar
 

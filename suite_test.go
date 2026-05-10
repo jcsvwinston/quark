@@ -73,6 +73,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testJSONPathSecurity(ctx, t, client)
 	})
 
+	t.Run("M2MLinkErrors", func(t *testing.T) {
+		testM2MLinkErrors(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

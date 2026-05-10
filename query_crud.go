@@ -1683,6 +1683,13 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 }
 
 // linkM2M creates a record in the join table if it doesn't exist.
+//
+// The operation is idempotent for an already-existing link: a unique-key
+// violation from any of the supported drivers is interpreted as "already
+// linked" and surfaces as nil. Every other driver error (foreign-key
+// violation, missing table, broken connection, etc.) is wrapped with
+// wrapDBError and returned, so callers see the failure instead of silent
+// corruption.
 func (q *BaseQuery) linkM2M(rel RelationMeta, parentPK, childPK any) error {
 	sqlStr := fmt.Sprintf("INSERT INTO %s (%s, %s) VALUES (%s, %s)",
 		q.dialect.Quote(rel.JoinTable),
@@ -1693,9 +1700,11 @@ func (q *BaseQuery) linkM2M(rel RelationMeta, parentPK, childPK any) error {
 	)
 
 	_, err := q.executeExec(q.ctx, sqlStr, []any{parentPK, childPK})
-	if err != nil {
-		// Ignore duplicate key errors - already linked
+	if err == nil {
 		return nil
 	}
-	return nil
+	if isUniqueViolation(err) {
+		return nil
+	}
+	return fmt.Errorf("linkM2M: %w", wrapDBError(err))
 }
