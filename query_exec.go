@@ -689,9 +689,20 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 				return "", nil, err
 			}
 		}
-		// Raw expressions with empty operator are written as-is (e.g. subqueries)
+		// Raw expressions with empty operator are written as-is plus any
+		// '?' markers in the fragment substituted for dialect placeholders.
+		// This is the path the AST (WhereExpr/HavingExpr) takes: the
+		// Expr.ToSQL output already contains the fully-formed predicate;
+		// buildWhereClause's only job is to swap '?' for $N / @p1 / : / etc.
+		// at the right argIndex and thread extraArgs into args in order.
 		if cond.isRaw && cond.operator == "" {
-			parts = append(parts, connector+not+cond.column)
+			rendered, n, err := substitutePathMarkers(cond.column, len(cond.extraArgs), q.dialect, argIndex)
+			if err != nil {
+				return "", nil, err
+			}
+			parts = append(parts, connector+not+rendered)
+			args = append(args, cond.extraArgs...)
+			argIndex += n
 			continue
 		}
 

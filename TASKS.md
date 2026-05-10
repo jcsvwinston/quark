@@ -48,8 +48,34 @@ Cobertura: `testINChunking/PreloadChunksAt1000` en SharedSuite (2500 padres
 × 1 child cada uno → 3 IN(...) selects observados via middleware) +
 `TestChunkParentKeys_Contract` con la matemática de redondeo.
 
-### F2-AST · Pendiente
-Tipo `Expr` componible: `Col`, `Lit`, `Func`, `And`/`Or`/`Not`, `In`, `Exists`. `Where` y `Having` aceptan `Expr`.
+### ~~F2-AST · Tipo `Expr` componible~~
+
+**Cerrado** — `expr.go` introduce el AST y `query_builder.go` añade
+`Query[T].WhereExpr(e Expr)` y `Query[T].HavingExpr(e Expr)`. Nodos:
+`Col`, `Lit`, `And`, `Or`, `Not`, `Cmp` (+ `Eq`/`Ne`/`Lt`/`Gt`/`Lte`/`Gte`),
+`In`, `NotIn`, `Func`. Cada nodo implementa
+`ToSQL(d Dialect, g *SQLGuard) (string, []any, error)`; los identificadores
+pasan por `ValidateIdentifier`, los operadores por `ValidateOperator`, y los
+nombres de función contra una whitelist conservadora de 10 entradas
+(COUNT/SUM/AVG/MIN/MAX/LOWER/UPPER/LENGTH/COALESCE/ABS).
+
+El AST emite `?` como bind marker neutral; `WhereExpr`/`HavingExpr`
+almacenan el fragmento en el slot `condition{isRaw:true, operator:""}` y
+`buildWhereClause` reutiliza `substitutePathMarkers` para reescribir cada
+`?` al placeholder del dialecto en el `argIndex` correcto. La forma
+componible `Having(Func("count", Col("*")), ">", 5)` queda disponible vía
+`HavingExpr(Gt(Func("COUNT", Col("*")), Lit(5)))`.
+
+`Exists` queda fuera del AST v0.4 — aterriza con F2-subqueries cuando
+exista la pieza `Subquery`.
+
+Cobertura: `expr_test.go` (7 tests unitarios sobre cada nodo + composición)
++ `testExprAST` en SharedSuite (5 subtests: EqAndOrFiltersCorrectRows,
+InFiltersMultipleValues, NotWrapsCompare, HavingExprWithFunc,
+InvalidIdentifierSurfacesAtExec, PlaceholderSubstitution).
+
+Doc: `website/docs/guides/querying.mdx` § Composable Expressions con tabla
+de nodos + ejemplo HavingExpr; CHANGELOG `### Added`.
 
 ### F2-subqueries · Pendiente
 `AsSubquery()` integrable en otro `Where`/`Join`.
