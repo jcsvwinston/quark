@@ -65,6 +65,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testMultiTenant(ctx, t, client)
 	})
 
+	t.Run("OrRLSLeak", func(t *testing.T) {
+		testOrRLSLeak(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

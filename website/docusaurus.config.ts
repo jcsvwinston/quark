@@ -17,12 +17,12 @@ const config: Config = {
   url: 'https://jcsvwinston.github.io',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: '/quark-docs/',
+  baseUrl: '/website/',
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
   organizationName: 'jcsvwinston',
-  projectName: 'quark-docs',
+  projectName: 'quark',
   trailingSlash: false,
 
   onBrokenLinks: 'throw',
@@ -57,7 +57,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           editUrl:
-            'https://github.com/jcsvwinston/quark-docs/tree/main/',
+            'https://github.com/jcsvwinston/quark/tree/main/',
         },
         blog: {
           showReadingTime: true,
@@ -66,7 +66,7 @@ const config: Config = {
             xslt: true,
           },
           editUrl:
-            'https://github.com/jcsvwinston/quark-docs/tree/main/',
+            'https://github.com/jcsvwinston/quark/tree/main/',
           // Useful options to enforce blogging best practices
           onInlineTags: 'warn',
           onInlineAuthors: 'warn',

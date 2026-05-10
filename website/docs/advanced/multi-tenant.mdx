@@ -77,6 +77,21 @@ docs, err := quark.For[Document](tenantCtx, router).
 The effective query includes `tenant_id = 'acme'` even though application code
 does not repeat that filter.
 
+`Or()` groups inherit the tenant predicate. Because SQL operator precedence
+parses `A AND B OR C` as `(A AND B) OR C`, an OR branch built by the callback
+must carry its own `tenant_id = ?` predicate to stay isolated. Quark does this
+automatically:
+
+```go
+docs, err := quark.For[Document](tenantCtx, router).
+    Where("status", "=", "draft").
+    Or(func(q *quark.Query[Document]) *quark.Query[Document] {
+        return q.Where("status", "=", "published")
+    }).
+    List()
+// emitted: WHERE tenant_id = ? AND status = ? OR (tenant_id = ? AND status = ?)
+```
+
 Writes also inherit tenant context. If the model has the configured tenant
 column and the field is zero, Quark fills it before insert.
 

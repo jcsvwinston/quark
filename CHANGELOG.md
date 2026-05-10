@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Tenant isolation leak in `Or()` under `RowLevelSecurity` (P0-1)**: an `Or(...)`
+  group used to be built on a fresh `BaseQuery` that did not carry the active
+  `tenantID` / `tenantCol`. Combined with SQL operator precedence
+  (`A AND B OR C` parses as `(A AND B) OR C`), the OR branch escaped the outer
+  `tenant_id = ?` predicate and could return rows from other tenants. Fixed by
+  introducing an internal `BaseQuery.cloneForGroup()` helper that propagates
+  isolation/context state to the callback's blank query and pre-injects the
+  tenant predicate into the OR group, so the rendered SQL becomes
+  `WHERE tenant_id=? AND ... OR (tenant_id=? AND ...)`. Added a regression
+  test (`testOrRLSLeak`) wired into the shared multi-engine suite that fails
+  before the fix and passes after, including a nested-`Or` variant.
+  No public API change.
+
 ## [0.1.1] - 2026-05-06
 
 ### Breaking Changes

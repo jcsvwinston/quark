@@ -158,6 +158,51 @@ func (q *Query[T]) WhereBetween(column string, start, end any) *Query[T] {
 	return c
 }
 
+// cloneForGroup returns a BaseQuery that carries the parent's isolation and context
+// state (tenantID/tenantCol/schema/cache/client/dialect/limits/etc.) but with the
+// query-shape slices (where/orderBy/joins/preloads/groupBy/having/selectCols)
+// left empty so a callback can build a fresh sub-clause.
+//
+// When the parent has an active RowLevelSecurity tenantID, the tenant predicate
+// is pre-injected into the returned where slice so any group built on top of it
+// inherits the isolation filter. This pre-injection is intentionally redundant
+// with the one in client.go's For[T] constructor: the constructor protects the
+// outer query, and this protects the OR/group sub-clause. Removing either side
+// re-opens the precedence leak (`A AND B OR C` parses as `(A AND B) OR C`), so
+// keep both.
+//
+// Internal helper. Not part of the public API.
+func (b *BaseQuery) cloneForGroup() BaseQuery {
+	c := BaseQuery{
+		client:    b.client,
+		ctx:       b.ctx,
+		table:     b.table,
+		schema:    b.schema,
+		dialect:   b.dialect,
+		guard:     b.guard,
+		pk:        b.pk,
+		exec:      b.exec,
+		meta:      b.meta,
+		tenantID:  b.tenantID,
+		tenantCol: b.tenantCol,
+		cache:     b.cache,
+		limit:     b.limit,
+		offset:    b.offset,
+		hasLimit:  b.hasLimit,
+		unscoped:  b.unscoped,
+		err:       b.err,
+	}
+	if c.tenantID != "" && c.tenantCol != "" {
+		c.where = []condition{{
+			column:   c.tenantCol,
+			operator: "=",
+			value:    c.tenantID,
+			logic:    "AND",
+		}}
+	}
+	return c
+}
+
 // Or adds an OR condition group. The callback receives a fresh Query to build conditions.
 // All conditions within the callback are grouped with AND and joined to the outer query with OR.
 //
@@ -170,20 +215,11 @@ func (q *Query[T]) WhereBetween(column string, start, end any) *Query[T] {
 //	    }).List()
 //
 // Generates: WHERE "active" = $1 OR ("role" = $2 AND "role" = $3)
+//
+// Under the RowLevelSecurity tenant strategy the OR group inherits the parent's
+// tenant_id predicate so it cannot escape isolation via SQL operator precedence.
 func (q *Query[T]) Or(fn func(*Query[T]) *Query[T]) *Query[T] {
-	// Create a blank query to collect conditions from the callback
-	blank := &Query[T]{
-		BaseQuery: BaseQuery{
-			client:  q.client,
-			ctx:     q.ctx,
-			table:   q.table,
-			dialect: q.dialect,
-			guard:   q.guard,
-			pk:      q.pk,
-			exec:    q.exec,
-			meta:    q.meta,
-		},
-	}
+	blank := &Query[T]{BaseQuery: q.cloneForGroup()}
 	result := fn(blank)
 
 	c := q.clone()
