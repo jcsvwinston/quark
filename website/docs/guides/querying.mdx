@@ -172,6 +172,39 @@ AST emits `?` as a neutral bind marker; Quark substitutes it for the
 dialect's placeholder syntax (`$1`, `@p1`, `:1`, `?`) at render time, so a
 single AST renders correctly across every supported engine.
 
+## Common Table Expressions (CTEs)
+
+`With(name, sub)` attaches a CTE definition that prefixes the outer
+SELECT with `WITH "name" AS (<inner>)`:
+
+```go
+topOrders, _ := quark.For[Order](ctx, client).
+    Select("user_id", "amount").
+    Where("amount", ">", 100).
+    AsSubquery()
+
+users, err := quark.For[User](ctx, client).
+    With("top_orders", topOrders).
+    Join("top_orders", "users.id = top_orders.user_id").
+    Limit(50).
+    List()
+// WITH "top_orders" AS (SELECT "user_id", "amount" FROM "orders" WHERE "amount" > $1)
+// SELECT * FROM "users" INNER JOIN "top_orders" ON ...
+```
+
+`WithRecursive(name, sub)` adds the `RECURSIVE` keyword to the prefix
+when the inner body is a recursive `UNION ALL` shape. The CTE name is
+validated through `SQLGuard.ValidateIdentifier`; multiple `With` calls
+compose in order, and a single `WithRecursive` anywhere in the chain
+promotes the entire prefix to `WITH RECURSIVE ...`.
+
+CTE bodies are rendered with `?` markers at capture time and rewritten
+to the dialect's placeholder syntax when the outer SELECT is built. The
+inner args are prepended to the outer args slice so positional
+placeholders ($N / @pN / :N) line up — composing a CTE across
+PostgreSQL, MSSQL, Oracle, MySQL/MariaDB, or SQLite needs no
+per-dialect arithmetic in user code.
+
 ## Subqueries
 
 Any `Query[T]` can be captured as a `*Subquery` and embedded in the

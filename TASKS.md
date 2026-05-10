@@ -99,8 +99,29 @@ SubAsScalarComparison, InvalidInnerIdentifierSurfacesAtCapture).
 Doc: `website/docs/guides/querying.mdx` § Subqueries con tabla de
 wrappers; CHANGELOG `### Added`.
 
-### F2-CTE · Pendiente
-`With("t", subq).For[T]().Where(...)` + `WithRecursive`.
+### ~~F2-CTE · `With("t", subq)` + `WithRecursive`~~
+
+**Cerrado** — `cte.go` introduce `Query[T].With(name, sub *Subquery)` y
+`WithRecursive(name, sub *Subquery)`. `BaseQuery.ctes` (`[]cteEntry`) se
+añade al state y `clone()` lo deep-copia. `buildSelect` antepone el
+prefijo `WITH "name" AS (<inner>)` (o `WITH RECURSIVE ...` si alguna
+entrada es recursiva), substituye los `?` markers internos via
+`substitutePathMarkers` con `argIndex = len(args)+1`, y prepende los
+args inner al slice global. WHERE/HAVING reindexan automáticamente
+porque su `argIndex` ya es `len(args)+1`.
+
+El cuerpo recursivo en sí necesita `UNION ALL`, que llega con F2-set.
+Hasta entonces el caller compone la recursión a través del Subquery
+fuente.
+
+Cobertura: `testCTE` en SharedSuite con 5 subtests
+(WithPrependsCTEAndJoins, WithRecursiveEmitsRECURSIVE,
+InvalidCTENameSurfacesAtExec, NilSubqueryRejected,
+CTEArgsAreThreadedBeforeWHERE). Los asserts sobre el SQL emitido pasan
+por middleware (`cteCapturingMiddleware`).
+
+Doc: `website/docs/guides/querying.mdx` § Common Table Expressions
+(CTEs); CHANGELOG `### Added`.
 
 ### F2-window · Pendiente
 `OverWindow(name).PartitionBy(...).OrderBy(...)`; `RowNumber`/`Rank`/`Lag`.

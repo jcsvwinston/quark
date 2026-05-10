@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CTE support via `With` / `WithRecursive` (Phase 2)**: any
+  `*Subquery` can be attached to an outer query as a named CTE. The
+  outer SELECT is prefixed with `WITH "name" AS (<inner>)` (or
+  `WITH RECURSIVE ...` if any attached entry is recursive), the inner
+  args are substituted and prepended to the args slice, and the outer
+  WHERE / HAVING argIndex shifts accordingly so dialect placeholders
+  ($N / @pN / :N) line up across the CTE-prefix → outer-WHERE
+  boundary. The outer query references the CTE by name in JOIN
+  clauses (the existing JoinOn grammar already accepts the
+  `cte_name.col = parent.col` shape).
+
+  ```go
+  topOrders, _ := quark.For[Order](ctx, c).
+      Where("amount", ">", 100).
+      Select("user_id").
+      AsSubquery()
+
+  users, _ := quark.For[User](ctx, c).
+      With("top_orders", topOrders).
+      Join("top_orders", "users.id = top_orders.user_id").
+      List()
+  // WITH "top_orders" AS (SELECT "user_id" FROM "orders" WHERE "amount" > $1)
+  // SELECT * FROM "users" INNER JOIN "top_orders" ON ...
+  ```
+
+  CTE names go through `SQLGuard.ValidateIdentifier`. Recursive CTEs
+  emit the dialect-portable `WITH RECURSIVE` keyword; the recursive
+  body itself currently requires the user to express the
+  `UNION ALL`-shape — full UNION / INTERSECT / EXCEPT support arrives
+  in F2-set.
+
 - **Subqueries via `AsSubquery` + `Sub` / `Exists` / `NotExists` /
   `InSub` / `NotInSub` (Phase 2)**: any `Query[T]` can be captured as a
   `*Subquery` and embedded in the AST. The capture eagerly renders the

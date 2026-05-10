@@ -133,6 +133,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testSubquery(ctx, t, client)
 	})
 
+	t.Run("CTE", func(t *testing.T) {
+		testCTE(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})
