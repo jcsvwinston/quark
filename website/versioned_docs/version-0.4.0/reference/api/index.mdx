@@ -37,9 +37,7 @@ package main
 
 import (
     "context"
-    "database/sql"
-    "log"
-    
+
     _ "github.com/lib/pq"
     "github.com/jcsvwinston/quark"
 )
@@ -51,8 +49,7 @@ type User struct {
 }
 
 func main() {
-    db, _ := sql.Open("postgres", "...")
-    client, _ := quark.New(db)
+    client, _ := quark.New("postgres", "...")
     ctx := context.Background()
     
     // Create

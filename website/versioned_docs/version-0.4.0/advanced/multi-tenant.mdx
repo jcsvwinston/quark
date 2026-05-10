@@ -143,13 +143,10 @@ router := quark.NewTenantRouter(
     cfg,
     ResolveTenant,
     func(tenantID string) (*quark.Client, error) {
-        db, err := sql.Open("postgres", dsnForTenant(tenantID))
-        if err != nil {
-            return nil, err
-        }
-        db.SetMaxOpenConns(10)
-        db.SetMaxIdleConns(10)
-        return quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+        return quark.New("postgres", dsnForTenant(tenantID),
+            quark.WithMaxOpenConns(10),
+            quark.WithMaxIdleConns(10),
+        )
     },
 )
 

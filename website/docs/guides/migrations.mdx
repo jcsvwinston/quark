@@ -117,8 +117,7 @@ DDL. If neither column exists, it adds `full_name`.
 limits := quark.DefaultLimits()
 limits.SafeMigrations = true
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLimits(limits),
 )
 ```
@@ -130,8 +129,7 @@ but no longer exist in the model. To allow destructive drops, opt in explicitly:
 limits := quark.DefaultLimits()
 limits.SafeMigrations = false
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLimits(limits),
 )
 
@@ -241,7 +239,6 @@ package main
 
 import (
     "context"
-    "database/sql"
     "log"
 
     "github.com/jcsvwinston/quark"
@@ -254,16 +251,10 @@ import (
 func main() {
     ctx := context.Background()
 
-    db, err := sql.Open("postgres", "postgres://user:pass@localhost/app?sslmode=disable")
-    if err != nil {
-        log.Fatal(err)
-    }
-
     limits := quark.DefaultLimits()
     limits.AllowRawQueries = true
 
-    client, err := quark.New(db,
-        quark.WithDialect(quark.PostgreSQL()),
+    client, err := quark.New("postgres", "postgres://user:pass@localhost/app?sslmode=disable",
         quark.WithLimits(limits),
     )
     if err != nil {

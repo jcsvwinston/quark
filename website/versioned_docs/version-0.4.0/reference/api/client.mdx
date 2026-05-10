@@ -5,18 +5,22 @@ SQLGuard, limits, middleware, observers, and cache store.
 
 ## New
 
-### `New(db *sql.DB, opts ...Option) (*Client, error)`
+### `New(driverName, dataSource string, opts ...any) (*Client, error)`
 
-Creates a client and pings the database.
+Opens a database connection, pings it, and returns a configured `*Client`. The
+dialect is auto-detected from `driverName`; override it with `WithDialect` only
+when the driver name is ambiguous (e.g. registering a custom dialect under a
+shared driver name like `pgx`).
 
 ```go
-db, err := sql.Open("postgres", "postgres://user:pass@localhost/app?sslmode=disable")
-if err != nil {
-    return err
-}
+import (
+    "log/slog"
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+    "github.com/jcsvwinston/quark"
+    _ "github.com/lib/pq"
+)
+
+client, err := quark.New("postgres", "postgres://user:pass@localhost/app?sslmode=disable",
     quark.WithLogger(slog.Default()),
 )
 if err != nil {
@@ -25,24 +29,37 @@ if err != nil {
 defer client.Close()
 ```
 
+Driver name → dialect mapping (auto-detected):
+
+| Driver name | Dialect |
+| --- | --- |
+| `sqlite`, `sqlite3` | SQLite |
+| `postgres`, `pgx` | PostgreSQL |
+| `mysql` | MySQL |
+| `mariadb` | MariaDB |
+| `sqlserver`, `mssql` | MSSQL |
+| `oracle`, `godror` | Oracle |
+
+`opts` accepts both client options (`Option`) and pool options (`PoolOption`).
+Pool options are applied before the ping; client options after.
+
 Errors:
 
 | Case | Error |
 | --- | --- |
-| `db == nil` | wraps `ErrConnection` |
+| `sql.Open` fails | wraps `ErrConnection` |
 | `PingContext` fails | wraps `ErrConnection` |
-
-If `WithDialect` is omitted, Quark tries to detect the dialect from the driver
-type. Explicit `WithDialect` is recommended in production.
 
 ## Options
 
 ### `WithDialect(d Dialect) Option`
 
-Sets the SQL dialect.
+Overrides the dialect that would otherwise be auto-detected from the driver
+name. Useful when a driver name is shared between engines (e.g. `pgx` for both
+PostgreSQL and CockroachDB) or when registering a custom dialect.
 
 ```go
-client, err := quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+client, err := quark.New("pgx", dsn, quark.WithDialect(quark.PostgreSQL()))
 ```
 
 Available constructors:
@@ -62,8 +79,7 @@ Sets the structured logger.
 
 ```go
 logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLogger(logger),
 )
 ```
@@ -78,8 +94,7 @@ Sets security and performance limits.
 limits := quark.DefaultLimits()
 limits.AllowRawQueries = true
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLimits(limits),
 )
 ```
@@ -117,8 +132,7 @@ Attaches a cache backend.
 ```go
 store := memory.New()
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.SQLite()),
+client, err := quark.New("sqlite", "file:app.db?cache=shared",
     quark.WithCacheStore(store),
 )
 ```
@@ -128,8 +142,7 @@ client, err := quark.New(db,
 Adds middleware to the execution chain.
 
 ```go
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithMiddleware(quarkotel.New()),
 )
 ```
@@ -139,8 +152,7 @@ client, err := quark.New(db,
 Adds a post-execution observer.
 
 ```go
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithQueryObserver(&MetricsObserver{}),
 )
 ```
@@ -180,8 +192,7 @@ Executes raw SQL that returns rows.
 limits := quark.DefaultLimits()
 limits.AllowRawQueries = true
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLimits(limits),
 )
 

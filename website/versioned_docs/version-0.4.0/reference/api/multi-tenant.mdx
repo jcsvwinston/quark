@@ -24,8 +24,7 @@ router := quark.NewTenantRouter(
     },
     func(tenantID string) (*quark.Client, error) {
         // Create tenant-specific client
-        db, _ := sql.Open("postgres", fmt.Sprintf(".../tenant_%s", tenantID))
-        return quark.New(db)
+        return quark.New("postgres", fmt.Sprintf(".../tenant_%s", tenantID))
     },
 )
 ```

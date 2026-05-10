@@ -160,8 +160,7 @@ the migration client with `AllowRawQueries: true`:
 limits := quark.DefaultLimits()
 limits.AllowRawQueries = true
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLimits(limits),
 )
 ```

@@ -19,8 +19,7 @@ users, err := quark.For[User](ctx, client).
 The query will only use caching if the client has a cache store:
 
 ```go
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithCacheStore(store),
 )
 ```
@@ -77,8 +76,7 @@ import "github.com/jcsvwinston/quark/cache/memory"
 store := memory.New()
 defer store.Close()
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.SQLite()),
+client, err := quark.New("sqlite", "file:app.db?cache=shared",
     quark.WithCacheStore(store),
 )
 ```
@@ -101,8 +99,7 @@ if err := store.Ping(ctx); err != nil {
     return err
 }
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithCacheStore(store),
 )
 ```

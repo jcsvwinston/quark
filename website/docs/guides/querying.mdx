@@ -482,7 +482,7 @@ The exact regex is `^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$`, total
 length capped at 256 characters. Anything else returns
 [`ErrInvalidJSONPath`](/docs/reference/api/errors) at execution time. Array
 indexes (`items[0].id` / `items.0.id`) and engine-specific JSONPath operators
-are out of scope — drop down to [`RawQuery`](#raw-sql-as-an-escape-hatch) for
+are out of scope — drop down to [`RawQuery`](#subqueries-and-raw-sql) for
 those cases.
 
 ### Injection safety
@@ -627,8 +627,7 @@ flags, and repeated dashboard queries.
 limits := quark.DefaultLimits()
 limits.AllowRawQueries = true
 
-client, err := quark.New(db,
-    quark.WithDialect(quark.PostgreSQL()),
+client, err := quark.New("postgres", dsn,
     quark.WithLimits(limits),
 )
 ```
