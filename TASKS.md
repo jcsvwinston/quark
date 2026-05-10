@@ -31,8 +31,21 @@ CHANGELOG `### Added`; Historial en `docs/playbooks/query-builder.md` §P0-4
 ### F1-2 · Tipos ricos
 [Pendiente] `shopspring/decimal`, `google/uuid`, `time.Duration`, JSON tipado vía generics (`JSON[T]`), arrays Postgres, mapeo correcto de timezones.
 
-### F1-3 · `Nullable[T]` genérico
-[Pendiente] Reemplazo idiomático de `*time.Time` / `sql.NullString`.
+### ~~F1-3 · `Nullable[T]` genérico~~
+
+**Cerrado** — `quark.Nullable[T]` aliasa `database/sql.Null[T]` (Go 1.22+);
+constructores `SomeOf(v)` / `NullOf[T]()` en `nullable.go`. Round-trip funciona
+sin cambios en quark porque `*sql.Null[T]` ya implementa Scanner/Valuer.
+`internal/migrate.SQLTypeWithOpts` detecta `sql.Null[T]` (helper `isSQLNull`)
+y recursa al tipo T, así que `Nullable[int64]` → BIGINT, `Nullable[time.Time]`
+→ TIMESTAMP/DATETIME/DATETIME2 por dialect, sin custom mapper.
+
+Cobertura: `testNullable` (`nullable_test.go`) wired a `SharedSuite`. 3 subtests:
+RoundTripValuesAndNulls (4 tipos: string, int64, time.Time, float64; mezcla
+de Some/None), ExplicitNullSomeAndNone (todo NULL), SomeOfPreservesValues
+(time.Time con `.Equal()` para resistir el monotonic-clock issue del F1-1).
+
+Doc: `website/docs/guides/modeling.mdx` § Nullable columns; CHANGELOG `### Added`.
 
 ### ~~F1-4 · `RegisterTypeMapper`~~
 

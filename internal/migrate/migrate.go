@@ -4,6 +4,7 @@ package migrate
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -66,6 +67,11 @@ func LookupTypeMapper(t reflect.Type) TypeMapper {
 // migrate / sync layers; SQLType remains as a convenience wrapper for
 // callers that don't (yet) have TypeOptions.
 func SQLTypeWithOpts(dialectName string, t reflect.Type, opts TypeOptions) string {
+	// Strip pointer wrapper so *T and T resolve to the same SQL type.
+	if t != nil && t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
 	// Custom mappers take precedence over the built-in switch — except for
 	// PK columns, which need the dialect-specific PRIMARY KEY suffix the
 	// SQLType builder appends. Custom mappers can opt in to PK handling by
@@ -73,6 +79,16 @@ func SQLTypeWithOpts(dialectName string, t reflect.Type, opts TypeOptions) strin
 	if mapper := LookupTypeMapper(t); mapper != nil {
 		return mapper(dialectName, opts)
 	}
+
+	// sql.Null[T] (re-exported as quark.Nullable[T]): unwrap and recurse
+	// into T so the column gets T's SQL type. The wrapper itself is just a
+	// (V T, Valid bool) pair plus Scanner+Valuer; the storage type is T's.
+	if isSQLNull(t) {
+		if vf, ok := t.FieldByName("V"); ok {
+			return SQLTypeWithOpts(dialectName, vf.Type, opts)
+		}
+	}
+
 	// Apply size/precision overrides where they apply naturally to the
 	// built-in switch. This wraps SQLType so the existing big switch stays
 	// intact.
@@ -84,6 +100,21 @@ func SQLTypeWithOpts(dialectName string, t reflect.Type, opts TypeOptions) strin
 		base = applyPrecisionScale(base, dialectName, opts.Precision, opts.Scale)
 	}
 	return base
+}
+
+// isSQLNull reports whether t is database/sql's Null[T] generic struct (which
+// quark.Nullable[T] aliases). Identification is by package + name prefix
+// because the generic instantiation embeds the type parameter in
+// reflect.Type.Name() ("Null[string]", "Null[time.Time]", …).
+func isSQLNull(t reflect.Type) bool {
+	if t == nil || t.Kind() != reflect.Struct {
+		return false
+	}
+	if t.PkgPath() != "database/sql" {
+		return false
+	}
+	name := t.Name()
+	return name == "Null" || strings.HasPrefix(name, "Null[")
 }
 
 // applySize rewrites a VARCHAR/CHAR/NVARCHAR family default with an explicit

@@ -79,6 +79,38 @@ type Profile struct {
 }
 ```
 
+### Nullable columns
+
+For columns that are SQL-NULL-valued, the idiomatic option is the generic
+`quark.Nullable[T]` wrapper (a re-export of `database/sql.Null[T]` from
+Go 1.22+ with friendlier constructors):
+
+```go
+import "github.com/jcsvwinston/quark"
+
+type Profile struct {
+    ID    int64                       `db:"id" pk:"true"`
+    Bio   quark.Nullable[string]      `db:"bio"`
+    Born  quark.Nullable[time.Time]   `db:"born"`
+}
+
+p := Profile{
+    Bio:  quark.SomeOf("hello"),       // SET
+    Born: quark.NullOf[time.Time](),   // SQL NULL
+}
+```
+
+`Nullable[T]` already implements `sql.Scanner` and `driver.Valuer` so the
+round-trip uses the standard library's fast paths — no extra reflect on
+your hot path. The migrate layer recognises the wrapper and emits T's
+column type, so you don't have to register a custom mapper for common
+combinations.
+
+The previous idiom of `*time.Time` / `sql.NullString` continues to work,
+but `Nullable[T]` is the recommended form for new code: it avoids the
+implicit heap allocation of pointer-as-nullable and reads more naturally
+at the call site (`p.Bio.Valid` vs. `p.Bio == nil`).
+
 ### Custom type mappers
 
 For Go types beyond the built-in primitives (`shopspring/decimal.Decimal`,
