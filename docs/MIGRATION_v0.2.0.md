@@ -75,6 +75,34 @@ Leading `$` (the JSONPath sigil that some engines use internally, e.g.
 `$.user.name`) is rejected at the API surface. The dialect adds it where
 needed; the public API stays uniform across motors.
 
+### `Join` / `LeftJoin` / `RightJoin` `on` clause now validated (P0-5)
+
+The string-raw `on` argument is **deprecated**. Previously it was emitted
+verbatim into the SQL; now it is validated against the identifier-only
+grammar enforced by `internal/guard.ValidateJoinOn`:
+
+| Accepted | Rejected (returns `ErrInvalidJoin`) |
+| --- | --- |
+| `Join("u", "u.id = o.user_id")` | `Join("u", "u.id = o.user_id; DROP TABLE o")` |
+| `Join("u", "u.id = o.user_id AND u.tenant = o.tenant")` | `Join("u", "u.id = 1")` |
+| `Join("u", "a.x = b.y OR c.z = d.w")` | `Join("u", "(u.id = o.user_id)")` |
+| | `Join("u", "LOWER(u.id) = o.user_id")` |
+| | `Join("u", "u.id = o.user_id -- comment")` |
+
+#### Migration steps
+
+If you have a `Join` call site whose `on` clause does not fit the grammar
+above, you have two options for v0.2:
+
+1. Move the join into a `RawQuery` call (gated by `AllowRawQueries`).
+2. Restructure the join as a single SELECT with a `Where` predicate that
+   uses simple identifier names plus a database view that pre-joins the
+   tables.
+
+In v0.4 a structured `Join(table).On(col, op, otherCol)` builder will replace
+the string-raw form. The deprecation period gives callers the v0.2 → v0.3
+release window to migrate.
+
 ## Non-breaking changes
 
 For non-breaking entries see `CHANGELOG.md` under `[Unreleased]`.

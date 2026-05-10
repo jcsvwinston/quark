@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/jcsvwinston/quark/internal/guard"
 )
 
 // timeFormats is the ordered list of layouts tried when parsing datetime strings from drivers
@@ -377,6 +379,12 @@ func (q *Query[T]) Count() (int64, error) {
 
 	// JOIN clauses
 	for _, j := range q.joins {
+		if err := q.guard.ValidateIdentifier(j.table); err != nil {
+			return 0, err
+		}
+		if err := guard.ValidateJoinOn(j.onClause); err != nil {
+			return 0, fmt.Errorf("%w: %v", ErrInvalidJoin, err)
+		}
 		sqlBuf.WriteString(" ")
 		sqlBuf.WriteString(j.joinType)
 		sqlBuf.WriteString(" ")
@@ -458,6 +466,9 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 		for _, j := range q.joins {
 			if err := q.guard.ValidateIdentifier(j.table); err != nil {
 				return "", nil, err
+			}
+			if err := guard.ValidateJoinOn(j.onClause); err != nil {
+				return "", nil, fmt.Errorf("%w: %v", ErrInvalidJoin, err)
 			}
 			sqlBuf.WriteString(" ")
 			sqlBuf.WriteString(j.joinType)
@@ -1161,6 +1172,10 @@ func (q *Query[T]) scanAndMapRelations(rows *sql.Rows, results []T, relName stri
 }
 
 // aggregate executes SELECT agg_func(column) FROM table WHERE …
+//
+// NOTE: aggregates intentionally do not apply joins or preloads — the SQL
+// is built from the base table only. If you need an aggregate over a join,
+// use a database view, RawQuery, or wait for the Phase 2 AST.
 func (q *Query[T]) aggregate(fn, column string) (float64, error) {
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)

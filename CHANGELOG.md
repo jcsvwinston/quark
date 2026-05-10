@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`JOIN ... ON` clause concatenated raw (P0-5)**: `Join`/`LeftJoin`/
+  `RightJoin` accepted the `on` argument as an opaque string and emitted it
+  verbatim into the SELECT/Count SQL with no validation — an inconsistency
+  with `WHERE` (which already validated identifiers) and an injection vector
+  if the `on` came from dynamic input. Fixed: `internal/guard.ValidateJoinOn`
+  enforces the minimal grammar `[ident.]ident OP [ident.]ident
+  ((AND|OR) [ident.]ident OP [ident.]ident)*` (operators
+  `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`; max 512 chars). Both call sites
+  (`buildSelect` and `Count`) now reject malformed clauses with the new
+  sentinel `ErrInvalidJoin`. The string-raw signature is marked deprecated
+  in godoc; the structured `Join(table).On(col, op, otherCol)` builder is
+  scheduled for v0.4 (Phase 2 AST). Regression: `testJoinOnSecurity` wired
+  into the shared suite — valid identifier joins, valid AND-joined clauses,
+  8 injection vectors rejected, and a Count-path check.
+
 ### Added
+
+- **`ErrInvalidJoin`** sentinel for malformed `Join`/`LeftJoin`/`RightJoin`
+  ON clauses (P0-5).
 
 - **`UpdateFields(entity, fields ...string)` API (P0-4 escape hatch)**:
   explicit partial-update method that writes only the named fields, bypassing

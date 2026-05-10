@@ -9,8 +9,8 @@ files:
   - cursor.go
 last_review: 2026-05-10
 related_adrs: [0001, 0002, 0007]
-related_p0: [P0-5]
-closed_p0: [P0-1, P0-3, P0-4]
+related_p0: []
+closed_p0: [P0-1, P0-3, P0-4, P0-5]
 phase: 0
 ---
 
@@ -28,15 +28,18 @@ Esto es deuda conocida; el plan es introducir un AST en Fase 2 (ver `docs/ANALIS
 
 ## Bugs P0 vivos
 
-### P0-5 · `JOIN ... ON` se concatena raw
-
-**Localización**: `query_builder.go:229` (firma `Join(table, onClause)`) + `query_exec.go:467` (concatena el `onClause`).
-
-**Impacto**: `WHERE col` se valida via `internal/guard.SQLGuard.ValidateIdentifier`; `JOIN ON` no. Inconsistencia de seguridad. Si `onClause` viene de input dinámico, vector de inyección.
-
-**Fix esperado**: API estructurada `Join(table).On(col, op, otherCol)` y deprecar la string-raw. Mientras tanto, validar el patrón mínimo en el guard.
+(ninguno; ver § Historial.)
 
 ## Historial — bugs cerrados
+
+### P0-5 · `JOIN ... ON` se concatenaba raw (cerrado, fase deprecation)
+
+`Query[T].Join`/`LeftJoin`/`RightJoin` aceptaban un `on` string-raw que iba al
+SQL final sin pasar por el guard. Asimétrico con `WHERE col`. Detalles del fix
+en `docs/playbooks/security.md` § Historial — incluye la grammar aceptada,
+los call sites tocados (`query_exec.go:buildSelect` y `Count`), el sentinel
+`ErrInvalidJoin` (`errors.go`), y la deprecation programada para v0.4 cuando
+llegue el builder estructurado `Join(table).On(col, op, otherCol)`.
 
 ### P0-1 · `Or()` no propagaba `tenantID/tenantCol/schema/cache/limits` (cerrado)
 

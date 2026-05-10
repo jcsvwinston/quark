@@ -138,6 +138,63 @@ func (g *SQLGuard) ValidateJSONPath(path string) error {
 	return ValidateJSONPath(path)
 }
 
+// joinOnRegex matches the minimal grammar Quark accepts for JOIN ... ON
+// clauses while a structured Join().On() builder is pending (Phase 2 AST).
+//
+// Grammar (case-insensitive AND/OR keywords):
+//
+//	token       = ident ( "." ident )?
+//	op          = "=" | "!=" | "<>" | "<" | "<=" | ">" | ">="
+//	condition   = token whitespace? op whitespace? token
+//	expression  = condition ( whitespace ("AND"|"OR") whitespace condition )*
+//
+// Identifier-to-identifier comparisons only. Literal values, function calls,
+// subqueries, and parentheses are rejected — drop down to a structured Join
+// (Phase 2) or RawQuery if you need them.
+var joinOnRegex = regexp.MustCompile(
+	`^\s*` +
+		// First condition.
+		`[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?` +
+		`\s*(?:=|!=|<>|<=|>=|<|>)\s*` +
+		`[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?` +
+		// Optional repeated conditions joined by AND / OR.
+		`(?:\s+(?i:AND|OR)\s+` +
+		`[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?` +
+		`\s*(?:=|!=|<>|<=|>=|<|>)\s*` +
+		`[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?` +
+		`)*\s*$`)
+
+// maxJoinOnLen caps the JOIN ... ON expression length. Legitimate identifier-
+// based ON clauses fit comfortably; longer strings are almost always payloads.
+const maxJoinOnLen = 512
+
+// ValidateJoinOn checks that an ON clause matches the minimal identifier-
+// only grammar Quark accepts while a structured Join().On() builder is
+// pending. It rejects anything containing literals, semicolons, comments,
+// quotes, parentheses, or arbitrary whitespace surrounding non-token
+// characters — so injection payloads ("...; DROP TABLE x") cannot pass.
+//
+// Returns an error whose message starts with "ErrInvalidJoin:" so callers
+// in package quark can wrap it with the public sentinel via errors.Join.
+func ValidateJoinOn(expr string) error {
+	if len(expr) == 0 {
+		return fmt.Errorf("ErrInvalidJoin: ON clause is empty")
+	}
+	if len(expr) > maxJoinOnLen {
+		return fmt.Errorf("ErrInvalidJoin: ON clause exceeds maximum length of %d characters", maxJoinOnLen)
+	}
+	if !joinOnRegex.MatchString(expr) {
+		return fmt.Errorf("ErrInvalidJoin: ON clause %q must be identifier-only conditions joined by AND/OR (e.g. \"users.id = orders.user_id\")", expr)
+	}
+	return nil
+}
+
+// ValidateJoinOn is the SQLGuard-bound counterpart to the package-level
+// function; both share the same logic and accept the same shapes.
+func (g *SQLGuard) ValidateJoinOn(expr string) error {
+	return ValidateJoinOn(expr)
+}
+
 // jsonTablePathRegex matches the more permissive JSONPath grammar accepted by
 // MariaDB's JSON_TABLE root expression — it allows array iterators (`[*]`)
 // and bracket indexes (`[0]`) on top of dotted keys, but still rejects

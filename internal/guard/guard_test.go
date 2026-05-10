@@ -299,3 +299,68 @@ func TestValidateJSONPath_BoundMethod(t *testing.T) {
 		t.Error("bound ValidateJSONPath accepted injectable path")
 	}
 }
+
+// --- ValidateJoinOn ---
+
+func TestValidateJoinOn_Valid(t *testing.T) {
+	cases := []string{
+		"users.id = orders.user_id",
+		"a = b",
+		"users.id=orders.user_id", // no whitespace around op
+		"users.id != orders.user_id",
+		"users.id <> orders.user_id",
+		"users.id <= orders.user_id",
+		"users.id >= orders.user_id",
+		"users.id <  orders.user_id", // double space ok
+		"users.id = orders.user_id AND users.tenant_id = orders.tenant_id",
+		"users.id = orders.user_id and users.tenant_id = orders.tenant_id", // lowercase
+		"a.x = b.y OR c.z = d.w",
+		"a = b AND c = d AND e = f",
+	}
+	for _, expr := range cases {
+		if err := guard.ValidateJoinOn(expr); err != nil {
+			t.Errorf("expected %q to be valid, got: %v", expr, err)
+		}
+	}
+}
+
+func TestValidateJoinOn_Invalid(t *testing.T) {
+	cases := []struct {
+		expr string
+		why  string
+	}{
+		{"", "empty"},
+		{"users.id = orders.user_id; DROP TABLE orders", "trailing injection"},
+		{"users.id = orders.user_id -- comment", "line comment"},
+		{"users.id = orders.user_id /* x */", "block comment"},
+		{"users.id = 1", "rhs is a literal"},
+		{"users.id = 'alice'", "rhs is a string literal"},
+		{"users.id = LOWER(orders.user_id)", "function call"},
+		{"users.id = orders.user_id UNION SELECT 1", "union"},
+		{"(users.id = orders.user_id)", "parentheses"},
+		{"users.id = orders.user_id OR 1=1", "OR with literals"},
+		{"users.id =", "missing rhs"},
+		{"= orders.user_id", "missing lhs"},
+		{"users.id orders.user_id", "missing operator"},
+		{"users.id $$$ orders.user_id", "junk operator"},
+		{"users-id = orders.user_id", "dash in identifier"},
+		{"$.user.id = orders.user_id", "leading $"},
+		{"a.b.c = d.e", "three-segment ident"},
+		{"a..b = c.d", "double dot"},
+	}
+	for _, c := range cases {
+		if err := guard.ValidateJoinOn(c.expr); err == nil {
+			t.Errorf("expected error for %q (%s), got nil", c.expr, c.why)
+		}
+	}
+}
+
+func TestValidateJoinOn_BoundMethod(t *testing.T) {
+	g := guard.New()
+	if err := g.ValidateJoinOn("a.b = c.d"); err != nil {
+		t.Errorf("bound ValidateJoinOn rejected valid expression: %v", err)
+	}
+	if err := g.ValidateJoinOn("a = b; DROP"); err == nil {
+		t.Error("bound ValidateJoinOn accepted injectable expression")
+	}
+}
