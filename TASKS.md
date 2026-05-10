@@ -63,8 +63,24 @@ Tipo `Expr` componible: `Col`, `Lit`, `Func`, `And`/`Or`/`Not`, `In`, `Exists`. 
 ### F2-set · Pendiente
 `UNION` / `INTERSECT` / `EXCEPT` entre `Query[T]`.
 
-### F2-having-agg · Pendiente
-`Having(Func("count", Col("*")), ">", 5)` (cierra el bug histórico de paréntesis en HAVING).
+### ~~F2-having-agg · HAVING sobre agregados~~
+
+**Cerrado** — `Query[T].HavingAggregate(fn, column, operator, value)` en
+`query_builder.go`. Whitelist de fns (COUNT/SUM/AVG/MIN/MAX, case-insensitive);
+column va por `ValidateIdentifier` salvo `*` que sólo se acepta con COUNT.
+Internamente construye la expresión `<FN>(<col>) <op> ?` y la mete como
+condición con `isRaw: true` en el slot de `having[]` que `buildWhereClause`
+ya soporta.
+
+Cobertura: `testHavingAggregate` en SharedSuite, 6 subtests:
+CountStarGreaterThan, SumGreaterEqual, CaseInsensitiveFn, RejectsUnknownFn,
+RejectsStarOnNonCount, RejectsInvalidColumn. Las verificaciones de SQL
+emitido pasan por middleware (Count() devuelve total rows, no group count,
+así que no sirve para validar GROUP BY semantics).
+
+Doc: `website/docs/guides/querying.mdx` § Grouped Aggregates and HAVING
+con tabla de reglas; CHANGELOG `### Added`. La forma plenamente componible
+`Having(Func("count", Col("*")), ">", 5)` aterrizará con el AST de Fase 2.
 
 ### F2-nested-preload · Pendiente
 `.Preload("Orders.Items.Product")` con planificación batch.

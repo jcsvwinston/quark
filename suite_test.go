@@ -117,6 +117,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testINChunking(ctx, t, client)
 	})
 
+	t.Run("HavingAggregate", func(t *testing.T) {
+		testHavingAggregate(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})
