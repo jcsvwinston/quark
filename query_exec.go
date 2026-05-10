@@ -490,17 +490,51 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	if q.distinct {
 		sqlBuf.WriteString("DISTINCT ")
 	}
-	if len(q.selectCols) > 0 {
-		quoted := make([]string, len(q.selectCols))
-		for i, col := range q.selectCols {
-			if err := q.guard.ValidateIdentifier(col); err != nil {
-				return "", nil, err
-			}
-			quoted[i] = q.dialect.Quote(col)
-		}
-		sqlBuf.WriteString(strings.Join(quoted, ", "))
-	} else {
+	// SELECT list: regular cols (Select), then AST projections
+	// (SelectExpr). Both render in the order they were added; '?' markers
+	// in the AST projections get reindexed to the dialect placeholder at
+	// the current argIndex.
+	hasCols := len(q.selectCols) > 0
+	hasExprs := len(q.selectExprs) > 0
+	if !hasCols && !hasExprs {
 		sqlBuf.WriteString("*")
+	} else {
+		if hasCols {
+			quoted := make([]string, len(q.selectCols))
+			for i, col := range q.selectCols {
+				if err := q.guard.ValidateIdentifier(col); err != nil {
+					return "", nil, err
+				}
+				quoted[i] = q.dialect.Quote(col)
+			}
+			sqlBuf.WriteString(strings.Join(quoted, ", "))
+		}
+		if hasExprs {
+			// Track the AST-projection arg index explicitly (matching the
+			// buildCTEPrefix pattern) instead of relying on len(args)+1 in
+			// each iteration. Sanity-check the substitution count against
+			// len(e.args) so a marker/arg mismatch surfaces here, not as
+			// a malformed SQL the driver rejects.
+			exprArgIndex := len(args) + 1
+			for i, e := range q.selectExprs {
+				if i > 0 || hasCols {
+					sqlBuf.WriteString(", ")
+				}
+				rendered, n, err := substitutePathMarkers(e.sql, len(e.args), q.dialect, exprArgIndex)
+				if err != nil {
+					return "", nil, err
+				}
+				if n != len(e.args) {
+					return "", nil, fmt.Errorf("%w: SelectExpr %q expected %d markers, substituted %d",
+						ErrInvalidQuery, e.alias, len(e.args), n)
+				}
+				sqlBuf.WriteString(rendered)
+				sqlBuf.WriteString(" AS ")
+				sqlBuf.WriteString(q.dialect.Quote(e.alias))
+				args = append(args, e.args...)
+				exprArgIndex += len(e.args)
+			}
+		}
 	}
 
 	// FROM clause

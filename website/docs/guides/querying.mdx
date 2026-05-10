@@ -172,6 +172,52 @@ AST emits `?` as a neutral bind marker; Quark substitutes it for the
 dialect's placeholder syntax (`$1`, `@p1`, `:1`, `?`) at render time, so a
 single AST renders correctly across every supported engine.
 
+## Window Functions
+
+Window functions live in the SELECT list, so they need an alias to be
+useful. `SelectExpr(alias, e)` projects any AST expression as a named
+column; the typed `Over(inner, window)` combinator wraps an inner
+expression with an `OVER (PARTITION BY ... ORDER BY ...)` clause:
+
+```go
+sales, err := quark.For[Sale](ctx, client).
+    Select("id", "region", "amount").
+    SelectExpr("rk", quark.Over(
+        quark.Rank(),
+        quark.NewWindow().
+            PartitionBy(quark.Col("region")).
+            OrderBy(quark.Col("amount"), true),
+    )).
+    Limit(50).
+    List()
+// SELECT "id", "region", "amount",
+//        RANK() OVER (PARTITION BY "region" ORDER BY "amount" DESC) AS "rk"
+// FROM "sales"
+```
+
+| Helper | Renders |
+| --- | --- |
+| `RowNumber()` | `ROW_NUMBER()` |
+| `Rank()` | `RANK()` |
+| `DenseRank()` | `DENSE_RANK()` |
+| `Lag(col, offset)` | `LAG(<col>, ?)` (offset is bound) |
+| `Lead(col, offset)` | `LEAD(<col>, ?)` |
+
+You can also wrap any aggregate from the AST whitelist with `Over` for
+running totals: `Over(Func("SUM", Col("amount")), NewWindow().OrderBy(Col("id"), false))`.
+
+`Window` is immutable — `PartitionBy` and `OrderBy` return a fresh copy,
+so a single Window definition can be reused across multiple `Over`
+calls without aliasing.
+
+The window's `?` markers are reindexed to the dialect's placeholder
+when the outer SELECT renders, and the args land in the args slice
+between any CTE args and the WHERE args. The shapes the helpers emit
+are part of the SQL standard (or near-standard) and run on all six
+target dialects (PostgreSQL, MySQL 8+, MariaDB 10.2+, MSSQL, Oracle,
+SQLite 3.25+); end-to-end coverage is currently exercised on SQLite,
+with the other five engines pending the testcontainer roll-out.
+
 ## Common Table Expressions (CTEs)
 
 `With(name, sub)` attaches a CTE definition that prefixes the outer

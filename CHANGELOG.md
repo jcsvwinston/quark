@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Window functions via `SelectExpr` + `Over` / `Window` / `RowNumber` /
+  `Rank` / `DenseRank` / `Lag` / `Lead` (Phase 2)**: a typed surface for
+  windowed projections that fits inside the AST. `Window` is a
+  partition / order specification (`NewWindow().PartitionBy(Col("status")).
+  OrderBy(Col("amount"), true)`) — immutable, chain-style. `Over(inner,
+  w)` wraps any AST Expr with the OVER clause; the dedicated leaves
+  `RowNumber`, `Rank`, `DenseRank`, `Lag(col, offset)`, and `Lead(col,
+  offset)` cover the most-used window functions and bypass the function
+  whitelist (their syntax is restricted to OVER (...) contexts the
+  whitelist doesn't model). The Lag/Lead offset is bound as a parameter,
+  not interpolated, so the bind path stays uniform.
+
+  The new `Query[T].SelectExpr(alias, e)` method projects an arbitrary
+  AST expression into the SELECT list aliased as `alias` (validated
+  through `SQLGuard.ValidateIdentifier`):
+  ```go
+  q := quark.For[Sale](ctx, c).
+      Select("id", "region", "amount").
+      SelectExpr("rk", quark.Over(quark.Rank(),
+          quark.NewWindow().
+              PartitionBy(quark.Col("region")).
+              OrderBy(quark.Col("amount"), true)))
+  // SELECT "id", "region", "amount",
+  //        RANK() OVER (PARTITION BY "region" ORDER BY "amount" DESC) AS "rk"
+  // FROM "sales"
+  ```
+  AST projections compose with regular `Select(cols...)` (comma-joined
+  in order). Their bind args land in the args slice between any CTE
+  args and the WHERE args, matching the SQL-surface order.
+
 - **CTE support via `With` / `WithRecursive` (Phase 2)**: any
   `*Subquery` can be attached to an outer query as a named CTE. The
   outer SELECT is prefixed with `WITH "name" AS (<inner>)` (or

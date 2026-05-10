@@ -68,12 +68,22 @@ type BaseQuery struct {
 	tenantID    string // for RowLevelSecurity isolation
 	tenantCol   string // column name for tenant isolation
 	cache       CacheConfig
-	groupBy     []string    // GROUP BY columns
-	having      []condition // HAVING conditions
-	distinct    bool        // SELECT DISTINCT
-	lock        LockOptions // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
-	ctes        []cteEntry  // common table expressions (WITH ...) prepended to the SELECT
-	err         error       // stores initialization error from ClientProvider
+	groupBy     []string          // GROUP BY columns
+	having      []condition       // HAVING conditions
+	distinct    bool              // SELECT DISTINCT
+	lock        LockOptions       // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
+	ctes        []cteEntry        // common table expressions (WITH ...) prepended to the SELECT
+	selectExprs []selectExprEntry // AST projections rendered in the SELECT list (window funcs, scalar subqueries, aliased computations)
+	err         error             // stores initialization error from ClientProvider
+}
+
+// selectExprEntry holds one AST-rendered projection in the SELECT list.
+// The sql carries '?' bind markers; buildSelect substitutes them for
+// the dialect's placeholder syntax at the correct argIndex.
+type selectExprEntry struct {
+	alias string
+	sql   string
+	args  []any
 }
 
 // Query represents a type-safe database query builder for model T.
@@ -110,6 +120,7 @@ func (q *Query[T]) clone() *Query[T] {
 	c.cache = q.cache
 	c.lock = q.lock
 	c.ctes = append([]cteEntry(nil), q.ctes...)
+	c.selectExprs = append([]selectExprEntry(nil), q.selectExprs...)
 	return &c
 }
 
@@ -482,6 +493,50 @@ func (q *Query[T]) Apply(scopes ...Scope[T]) *Query[T] {
 		current = s(current)
 	}
 	return current
+}
+
+// SelectExpr adds an AST projection to the SELECT list, aliased as
+// `alias`. Use it for window functions, scalar subqueries, or any
+// expression the plain `Select(cols...)` API can't model:
+//
+//	q := quark.For[Order](ctx, client).
+//	    SelectExpr("rank", quark.Over(quark.Rank(),
+//	        quark.NewWindow().
+//	            PartitionBy(quark.Col("status")).
+//	            OrderBy(quark.Col("amount"), true))).
+//	    SelectExpr("running_total", quark.Over(
+//	        quark.Func("SUM", quark.Col("amount")),
+//	        quark.NewWindow().OrderBy(quark.Col("id"), false)))
+//
+// The expression is rendered against a `qmark`-emitting dialect at
+// SelectExpr time, so the inner '?' markers are reindexed to the outer
+// dialect's placeholder syntax when buildSelect runs. The args land in
+// the args slice between any CTE args and the WHERE args — matching
+// the SQL-surface order of the SELECT projection.
+//
+// Composing SelectExpr with the plain Select(cols...) is allowed: the
+// regular columns render first, the AST projections after, comma-
+// separated. If neither is set, the SELECT defaults to '*'.
+func (q *Query[T]) SelectExpr(alias string, e Expr) *Query[T] {
+	c := q.clone()
+	if e == nil {
+		c.err = fmt.Errorf("%w: SelectExpr(%q, nil)", ErrInvalidQuery, alias)
+		return c
+	}
+	if err := c.guard.ValidateIdentifier(alias); err != nil {
+		c.err = err
+		return c
+	}
+	// Render with a qmarkDialect so the projection comes out with '?' as
+	// the bind marker; buildSelect reindexes them at outer render time.
+	qmark := qmarkDialect{Dialect: c.dialect}
+	sql, args, err := e.ToSQL(qmark, c.guard)
+	if err != nil {
+		c.err = err
+		return c
+	}
+	c.selectExprs = append(c.selectExprs, selectExprEntry{alias: alias, sql: sql, args: args})
+	return c
 }
 
 // WhereExpr adds a WHERE condition built from a composable Expr AST.

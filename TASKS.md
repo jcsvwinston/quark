@@ -123,8 +123,35 @@ por middleware (`cteCapturingMiddleware`).
 Doc: `website/docs/guides/querying.mdx` § Common Table Expressions
 (CTEs); CHANGELOG `### Added`.
 
-### F2-window · Pendiente
-`OverWindow(name).PartitionBy(...).OrderBy(...)`; `RowNumber`/`Rank`/`Lag`.
+### ~~F2-window · `Over` + `Window` + `RowNumber`/`Rank`/`Lag`/`Lead`~~
+
+**Cerrado** — `window.go` introduce el tipo `Window` inmutable
+(NewWindow → PartitionBy → OrderBy devuelve copia) y los nodos AST
+`Over(inner, w)`, `RowNumber`, `Rank`, `DenseRank`, `Lag(col, offset)`,
+`Lead(col, offset)`. Las funciones de ventana bypass la whitelist de
+`Func` porque su sintaxis está restringida al contexto `OVER (...)`.
+El offset de Lag/Lead se bindea como parámetro, no se interpola.
+
+`Query[T].SelectExpr(alias string, e Expr)` añade una proyección AST
+al SELECT list. Renderiza vía qmarkDialect (igual que `AsSubquery`)
+para que los `?` se reindexen al placeholder del dialecto en el
+`argIndex` correcto cuando `buildSelect` corre. `selectExprs` se
+añade a BaseQuery y `clone()` lo deep-copia.
+
+`buildSelect` ahora compone el SELECT list combinando
+`selectCols` + `selectExprs` (separados por coma; en ese orden), y
+los args de las proyecciones AST aterrizan entre los args de CTE y
+los args de WHERE — coincidiendo con el orden SQL.
+
+Cobertura: `window_test.go` (6 tests unitarios sobre cada nodo +
+inmutabilidad) + `testWindow` en SharedSuite (3 subtests:
+SelectExprRendersOverPartitionByOrderBy,
+SelectExprErrorsOnInvalidAlias,
+SelectExprComposesWithRegularSelect). Los asserts sobre SQL emitida
+pasan por middleware `windowCapturing`.
+
+Doc: `website/docs/guides/querying.mdx` § Window Functions con tabla
+de helpers; CHANGELOG `### Added`.
 
 ### F2-set · Pendiente
 `UNION` / `INTERSECT` / `EXCEPT` entre `Query[T]`.
