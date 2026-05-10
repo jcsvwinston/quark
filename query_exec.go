@@ -820,415 +820,66 @@ func (q *Query[T]) findField(elem reflect.Value, column string) reflect.Value {
 	return reflect.Value{}
 }
 
-// loadRelations eager loads requested relations for the given results.
+// loadRelations eager loads requested relations for the given results,
+// recursing into dotted paths (Phase 2: Preload("Orders.Items.Product")).
+//
+// reflect.ValueOf(&results).Elem() is used (rather than reflect.ValueOf(results))
+// so the slice is addressable: when we recurse into nested levels we take
+// pointers into the parent's relation slices (Posts[j].Addr()) and those
+// pointers must alias back into the original results so mutations
+// propagate up.
 func (q *Query[T]) loadRelations(results []T) error {
-	for _, relName := range q.preloads {
-		relMeta, ok := q.meta.Relations[relName]
-		if !ok {
-			return fmt.Errorf("relation %s not found on model %s", relName, q.table)
-		}
+	if len(results) == 0 || len(q.preloads) == 0 {
+		return nil
+	}
+	tree := parsePreloads(q.preloads)
+	return q.loadPreloadTree(reflect.ValueOf(&results).Elem(), q.meta, tree)
+}
 
+// loadPreloadTree walks the preload tree against an arbitrary parent slice
+// (reflect.Value of []T for some T). Owner meta describes the parent shape;
+// each iteration loads the named relation, then if children are present,
+// gathers the loaded child slice across all parents and recurses with the
+// related model's meta.
+func (q *BaseQuery) loadPreloadTree(parents reflect.Value, ownerMeta *ModelMeta, nodes []*preloadNode) error {
+	if parents.Len() == 0 || len(nodes) == 0 {
+		return nil
+	}
+	for _, node := range nodes {
+		relMeta, ok := ownerMeta.Relations[node.name]
+		if !ok {
+			return fmt.Errorf("relation %s not found on model %s", node.name, ownerMeta.Table)
+		}
 		relModel := GetModelMetaByType(relMeta.RefType)
 
 		switch relMeta.Type {
 		case "m2m", "many_to_many":
-			if err := q.loadM2MRelation(results, relName, relMeta, relModel); err != nil {
+			if err := q.loadM2M(parents, ownerMeta, node.name, relMeta, relModel); err != nil {
 				return err
 			}
 		case "polymorphic":
-			if err := q.loadPolymorphicRelation(results, relName, relMeta, relModel); err != nil {
+			if err := q.loadPolymorphic(parents, ownerMeta, node.name, relMeta, relModel); err != nil {
 				return err
 			}
 		default:
-			// has_one, has_many, belongs_to
-			if err := q.loadStandardRelation(results, relName, relMeta, relModel); err != nil {
+			if err := q.loadStandard(parents, ownerMeta, node.name, relMeta, relModel); err != nil {
 				return err
+			}
+		}
+
+		// Recurse into nested levels: gather every loaded child across the
+		// parent slice into a flat slice, then preload its own relations.
+		if len(node.children) > 0 {
+			children := gatherLoadedChildren(parents, node.name, relMeta)
+			if children.Len() > 0 {
+				if err := q.loadPreloadTree(children, relModel, node.children); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
 	return nil
-}
-
-// loadStandardRelation handles has_one, has_many, and belongs_to relations
-func (q *Query[T]) loadStandardRelation(results []T, relName string, relMeta *RelationMeta, relModel *ModelMeta) error {
-	// Determine which column in the parent we are joining on
-	var parentCol string
-	if relMeta.Type == "belongs_to" {
-		parentCol = relMeta.JoinCol // The parent holds the FK
-	} else {
-		parentCol = q.meta.PK.Column // The parent holds the PK
-	}
-
-	// Find the field index for the parent column
-	parentFieldMeta, ok := q.meta.FieldByCol[strings.ToLower(parentCol)]
-	if !ok {
-		// Fallback: assume it's a field name
-		for _, fm := range q.meta.Fields {
-			if strings.EqualFold(fm.Type.Name(), parentCol) {
-				parentFieldMeta = &fm
-				break
-			}
-		}
-		if parentFieldMeta == nil {
-			return fmt.Errorf("could not find parent column %s for relation %s", parentCol, relName)
-		}
-	}
-
-	// Collect parent keys
-	var parentKeys []any
-	keyMap := make(map[any][]int) // parent key -> indexes in results slice
-
-	for i := range results {
-		val := reflect.ValueOf(&results[i]).Elem()
-		pKey := val.Field(parentFieldMeta.Index).Interface()
-
-		// Skip zero values
-		if reflect.ValueOf(pKey).IsZero() {
-			continue
-		}
-
-		parentKeys = append(parentKeys, pKey)
-		keyMap[pKey] = append(keyMap[pKey], i)
-	}
-
-	if len(parentKeys) == 0 {
-		return nil
-	}
-
-	// Determine the foreign column in the related table
-	var foreignCol string
-	if relMeta.Type == "belongs_to" {
-		foreignCol = relModel.PK.Column
-	} else {
-		foreignCol = relMeta.JoinCol
-	}
-
-	// Determine whether the related model has a tenant column to scope by.
-	hasTenantCol := false
-	if q.tenantID != "" && q.tenantCol != "" {
-		if _, ok := relModel.FieldByCol[strings.ToLower(q.tenantCol)]; ok {
-			hasTenantCol = true
-		}
-	}
-
-	// Chunk parentKeys so a giant Preload doesn't blow Oracle's 1000-IN cap
-	// or MSSQL's ~2100-bind-parameter ceiling. Aggregate each chunk's rows
-	// into the same scanAndMapRelations target — order across chunks is
-	// irrelevant because mapping is by parent-key.
-	return chunkParentKeys(parentKeys, func(chunk []any) error {
-		placeholders := make([]string, len(chunk))
-		for i := range chunk {
-			placeholders[i] = q.dialect.Placeholder(i + 1)
-		}
-
-		args := make([]any, 0, len(chunk)+1)
-		args = append(args, chunk...)
-
-		var whereClauses []string
-		whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", q.dialect.Quote(foreignCol), strings.Join(placeholders, ", ")))
-
-		if hasTenantCol {
-			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(chunk)+1)))
-			args = append(args, q.tenantID)
-		}
-
-		query := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-			q.dialect.Quote(relModel.Table),
-			strings.Join(whereClauses, " AND "),
-		)
-
-		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-		defer cancel()
-
-		rows, err := q.executeQuery(ctx, query, args)
-		if err != nil {
-			return fmt.Errorf("failed to load relation %s: %w", relName, err)
-		}
-		defer rows.Close()
-
-		return q.scanAndMapRelations(rows, results, relName, relMeta, relModel, foreignCol, keyMap)
-	})
-}
-
-// loadM2MRelation handles many-to-many relations through a join table
-func (q *Query[T]) loadM2MRelation(results []T, relName string, relMeta *RelationMeta, relModel *ModelMeta) error {
-	// Get parent PK values
-	parentCol := q.meta.PK.Column
-	parentFieldMeta, ok := q.meta.FieldByCol[strings.ToLower(parentCol)]
-	if !ok {
-		return fmt.Errorf("could not find parent PK column %s for m2m relation %s", parentCol, relName)
-	}
-
-	// Collect parent keys
-	var parentKeys []any
-	parentKeyMap := make(map[any][]int)
-
-	for i := range results {
-		val := reflect.ValueOf(&results[i]).Elem()
-		pKey := val.Field(parentFieldMeta.Index).Interface()
-		if reflect.ValueOf(pKey).IsZero() {
-			continue
-		}
-		parentKeys = append(parentKeys, pKey)
-		parentKeyMap[pKey] = append(parentKeyMap[pKey], i)
-	}
-
-	if len(parentKeys) == 0 {
-		return nil
-	}
-
-	// Step 1: query the join table in chunks of inChunkSize parent keys to
-	// keep IN(...) under dialect caps. Aggregate the parent → related
-	// mapping across chunks.
-	relatedToParent := make(map[any][]any) // related_id → []parent_id
-	var relatedKeys []any
-	seenRelated := make(map[any]bool)
-
-	if err := chunkParentKeys(parentKeys, func(chunk []any) error {
-		joinPlaceholders := make([]string, len(chunk))
-		for i := range chunk {
-			joinPlaceholders[i] = q.dialect.Placeholder(i + 1)
-		}
-		joinQuery := fmt.Sprintf("SELECT %s, %s FROM %s WHERE %s IN (%s)",
-			q.dialect.Quote(relMeta.JoinFK),
-			q.dialect.Quote(relMeta.JoinRefFK),
-			q.dialect.Quote(relMeta.JoinTable),
-			q.dialect.Quote(relMeta.JoinFK),
-			strings.Join(joinPlaceholders, ", "),
-		)
-		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-		defer cancel()
-
-		joinRows, err := q.executeQuery(ctx, joinQuery, chunk)
-		if err != nil {
-			return fmt.Errorf("failed to load join table for relation %s: %w", relName, err)
-		}
-		defer joinRows.Close()
-		for joinRows.Next() {
-			var parentID, relatedID any
-			if err := joinRows.Scan(&parentID, &relatedID); err != nil {
-				return err
-			}
-			relatedToParent[relatedID] = append(relatedToParent[relatedID], parentID)
-			if !seenRelated[relatedID] {
-				relatedKeys = append(relatedKeys, relatedID)
-				seenRelated[relatedID] = true
-			}
-		}
-		return joinRows.Err()
-	}); err != nil {
-		return err
-	}
-
-	if len(relatedKeys) == 0 {
-		return nil
-	}
-
-	hasTenantCol := false
-	if q.tenantID != "" && q.tenantCol != "" {
-		if _, ok := relModel.FieldByCol[strings.ToLower(q.tenantCol)]; ok {
-			hasTenantCol = true
-		}
-	}
-
-	pkFieldMeta, ok := relModel.FieldByCol[strings.ToLower(relModel.PK.Column)]
-	if !ok {
-		return fmt.Errorf("could not find PK column %s in related model", relModel.PK.Column)
-	}
-
-	// Step 2: load the related rows in chunks of related keys. Mapping
-	// happens inline so each chunk's rows fan out to the right parents
-	// without having to keep them in a slice across chunks.
-	return chunkParentKeys(relatedKeys, func(chunk []any) error {
-		relPlaceholders := make([]string, len(chunk))
-		for i := range chunk {
-			relPlaceholders[i] = q.dialect.Placeholder(i + 1)
-		}
-
-		args := make([]any, 0, len(chunk)+1)
-		args = append(args, chunk...)
-
-		var whereClauses []string
-		whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", q.dialect.Quote(relModel.PK.Column), strings.Join(relPlaceholders, ", ")))
-
-		if hasTenantCol {
-			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(chunk)+1)))
-			args = append(args, q.tenantID)
-		}
-
-		relQuery := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-			q.dialect.Quote(relModel.Table),
-			strings.Join(whereClauses, " AND "),
-		)
-
-		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-		defer cancel()
-
-		rows, err := q.executeQuery(ctx, relQuery, args)
-		if err != nil {
-			return fmt.Errorf("failed to load m2m relation %s: %w", relName, err)
-		}
-		defer rows.Close()
-
-		cols, _ := rows.Columns()
-
-		for rows.Next() {
-			relPtr := reflect.New(relMeta.RefType)
-			relVal := relPtr.Elem()
-
-			scanDest := make([]any, len(cols))
-			for i, col := range cols {
-				if fm, ok := relModel.FieldByCol[col]; ok {
-					scanDest[i] = makeScanDest(relVal.Field(fm.Index))
-				} else {
-					var discard any
-					scanDest[i] = &discard
-				}
-			}
-			if err := rows.Scan(scanDest...); err != nil {
-				return err
-			}
-
-			relatedID := relVal.Field(pkFieldMeta.Index).Interface()
-			if parentIDs, ok := relatedToParent[relatedID]; ok {
-				for _, parentID := range parentIDs {
-					if parentIndexes, ok := parentKeyMap[parentID]; ok {
-						for _, pIdx := range parentIndexes {
-							parentVal := reflect.ValueOf(&results[pIdx]).Elem()
-							relField := parentVal.FieldByName(relName)
-							relField.Set(reflect.Append(relField, relVal))
-						}
-					}
-				}
-			}
-		}
-		return rows.Err()
-	})
-}
-
-// loadPolymorphicRelation handles polymorphic relations
-func (q *Query[T]) loadPolymorphicRelation(results []T, relName string, relMeta *RelationMeta, relModel *ModelMeta) error {
-	// Get parent PK values
-	parentCol := q.meta.PK.Column
-	parentFieldMeta, ok := q.meta.FieldByCol[parentCol]
-	if !ok {
-		return fmt.Errorf("could not find parent PK column %s for polymorphic relation %s", parentCol, relName)
-	}
-
-	// Collect parent keys
-	var parentKeys []any
-	parentKeyMap := make(map[any][]int)
-
-	for i := range results {
-		val := reflect.ValueOf(&results[i]).Elem()
-		pKey := val.Field(parentFieldMeta.Index).Interface()
-		if reflect.ValueOf(pKey).IsZero() {
-			continue
-		}
-		parentKeys = append(parentKeys, pKey)
-		parentKeyMap[pKey] = append(parentKeyMap[pKey], i)
-	}
-
-	if len(parentKeys) == 0 {
-		return nil
-	}
-
-	hasTenantCol := false
-	if q.tenantID != "" && q.tenantCol != "" {
-		if _, ok := relModel.FieldByCol[strings.ToLower(q.tenantCol)]; ok {
-			hasTenantCol = true
-		}
-	}
-
-	// Chunk so a Preload over thousands of polymorphic parents stays under
-	// dialect IN / bind caps. Each chunk is its own SELECT; the mapping
-	// path scanAndMapPolymorphicRelations consumes the rows and dispatches
-	// them to the right parents independently of chunking.
-	return chunkParentKeys(parentKeys, func(chunk []any) error {
-		// $1 is the polymorphic type discriminator; segment IDs follow.
-		placeholders := make([]string, len(chunk))
-		for i := range chunk {
-			placeholders[i] = q.dialect.Placeholder(i + 2)
-		}
-
-		var whereClauses []string
-		whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(relMeta.PolyTypeColumn), q.dialect.Placeholder(1)))
-		whereClauses = append(whereClauses, fmt.Sprintf("%s IN (%s)", q.dialect.Quote(relMeta.PolyIDColumn), strings.Join(placeholders, ", ")))
-
-		args := append([]any{relMeta.PolyType}, chunk...)
-
-		if hasTenantCol {
-			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(args)+1)))
-			args = append(args, q.tenantID)
-		}
-
-		polyQuery := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-			q.dialect.Quote(relModel.Table),
-			strings.Join(whereClauses, " AND "),
-		)
-
-		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-		defer cancel()
-
-		rows, err := q.executeQuery(ctx, polyQuery, args)
-		if err != nil {
-			return fmt.Errorf("failed to load polymorphic relation %s: %w", relName, err)
-		}
-		defer rows.Close()
-
-		return q.scanAndMapPolymorphicRelations(rows, results, relName, relMeta, relModel, parentKeyMap)
-	})
-}
-
-// scanAndMapRelations scans rows and maps them to parent structs (for standard relations)
-func (q *Query[T]) scanAndMapRelations(rows *sql.Rows, results []T, relName string, relMeta *RelationMeta, relModel *ModelMeta, foreignCol string, keyMap map[any][]int) error {
-	cols, _ := rows.Columns()
-
-	foreignFieldMeta, ok := relModel.FieldByCol[strings.ToLower(foreignCol)]
-	if !ok {
-		return fmt.Errorf("could not find foreign column %s in related model", foreignCol)
-	}
-
-	for rows.Next() {
-		relPtr := reflect.New(relMeta.RefType)
-		relVal := relPtr.Elem()
-
-		scanDest := make([]any, len(cols))
-		for i, col := range cols {
-			if fm, ok := relModel.FieldByCol[strings.ToLower(col)]; ok {
-				scanDest[i] = makeScanDest(relVal.Field(fm.Index))
-			} else {
-				var discard any
-				scanDest[i] = &discard
-			}
-		}
-
-		if err := rows.Scan(scanDest...); err != nil {
-			return err
-		}
-
-		fKey := relVal.Field(foreignFieldMeta.Index).Interface()
-
-		if parentIndexes, ok := keyMap[fKey]; ok {
-			for _, pIdx := range parentIndexes {
-				parentVal := reflect.ValueOf(&results[pIdx]).Elem()
-				relField := parentVal.FieldByName(relName)
-
-				if relMeta.IsSlice {
-					relField.Set(reflect.Append(relField, relVal))
-				} else {
-					if relField.Kind() == reflect.Ptr {
-						relField.Set(relPtr)
-					} else {
-						relField.Set(relVal)
-					}
-				}
-			}
-		}
-	}
-
-	return rows.Err()
 }
 
 // aggregate executes SELECT agg_func(column) FROM table WHERE …

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Nested Preload via dotted paths (Phase 2)**: `Preload("Orders.Items.Product")`
+  now walks the dotted path and loads each level in a single eager-loading
+  pass. Multiple paths sharing a prefix are merged via `parsePreloads` so
+  `Preload("Posts", "Posts.Comments")` only loads `Posts` once. Internally
+  the per-relation loaders moved from `Query[T]` to `BaseQuery` and now
+  accept the parent slice as a `reflect.Value`, so the recursive descent
+  doesn't need a generic instantiation per level.
+
 - **`HavingAggregate(fn, column, op, value)` (Phase 2)**: structured way to
   write `HAVING COUNT(*) > 5` / `HAVING SUM(amount) >= 100` / `HAVING
   AVG(price) < ?` etc. without falling back to `RawQuery`. Closes the
