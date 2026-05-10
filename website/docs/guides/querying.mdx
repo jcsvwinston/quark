@@ -291,6 +291,38 @@ do not accept dotted identifiers such as `users.active`. For complex join
 filters or projections, use a database view, add columns to a dedicated read
 model, or opt into `RawQuery`.
 
+## Pessimistic Locking
+
+`ForUpdate`, `ForShare`, `SkipLocked`, and `NoWait` attach a row-level
+pessimistic lock to the emitted `SELECT`. The dialect picks the right
+shape:
+
+```go
+orders, err := quark.For[Order](ctx, client).
+    Where("status", "=", "pending").
+    ForUpdate().
+    SkipLocked().
+    Limit(10).
+    List()
+```
+
+| Dialect | `ForUpdate` | `SkipLocked` | `NoWait` | `ForShare` |
+| --- | --- | --- | --- | --- |
+| PostgreSQL | `FOR UPDATE` | ✅ | ✅ | `FOR SHARE` |
+| MySQL 8+ / MariaDB 10.6+ | `FOR UPDATE` | ✅ | ✅ | `FOR SHARE` |
+| Oracle | `FOR UPDATE` | ✅ (12c+) | ✅ | ❌ → `ErrUnsupportedFeature` |
+| SQL Server | `WITH (UPDLOCK, ROWLOCK)` | `READPAST` | ❌ → `ErrUnsupportedFeature` | `WITH (HOLDLOCK, ROWLOCK)` |
+| SQLite | ❌ → `ErrUnsupportedFeature` | n/a | n/a | n/a |
+
+SQLite has no row-level pessimistic-lock primitive — use `BEGIN IMMEDIATE`
+or `BEGIN EXCLUSIVE` in your transaction wrapper instead. SQL Server's
+table-hint syntax means the lock instruction lives in the `FROM` clause
+rather than at the end of the `SELECT`; this is invisible to the caller.
+
+Pessimistic locks belong inside an explicit transaction. Outside a
+transaction the lock is released as soon as the SELECT completes and you
+gain nothing.
+
 ## Reusable Scopes
 
 Scopes are plain functions:

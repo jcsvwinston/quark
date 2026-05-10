@@ -70,6 +70,7 @@ type BaseQuery struct {
 	groupBy     []string    // GROUP BY columns
 	having      []condition // HAVING conditions
 	distinct    bool        // SELECT DISTINCT
+	lock        LockOptions // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
 	err         error       // stores initialization error from ClientProvider
 }
 
@@ -105,6 +106,7 @@ func (q *Query[T]) clone() *Query[T] {
 	c.tenantID = q.tenantID
 	c.tenantCol = q.tenantCol
 	c.cache = q.cache
+	c.lock = q.lock
 	return &c
 }
 

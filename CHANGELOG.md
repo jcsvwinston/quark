@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(empty — next changes go here.)
+### Added
+
+- **Pessimistic locking (Phase 2)**: `Query[T].ForUpdate()`, `ForShare()`,
+  `SkipLocked()`, `NoWait()` modifiers. The dialect emits the right shape:
+  `FOR UPDATE [SKIP LOCKED|NOWAIT]` / `FOR SHARE` for PG, MySQL, MariaDB,
+  and Oracle (Oracle has no `FOR SHARE` and returns `ErrUnsupportedFeature`
+  for it); MSSQL emits table hints (`WITH (UPDLOCK, ROWLOCK [, READPAST])`)
+  in the FROM clause; SQLite returns `ErrUnsupportedFeature` for any
+  non-zero lock option (use `BEGIN IMMEDIATE` in the transaction instead).
+  New error sentinel `ErrUnsupportedFeature` for these dialect-feature
+  gates.
+
+- **`Dialect.LockSuffix(LockOptions) (tableHint, suffix string, err error)`**:
+  new interface method consumed by `buildSelect` to attach pessimistic-lock
+  fragments to the SELECT in the right placement per dialect. Custom
+  dialects must implement it.
 
 ## [0.3.0] - 2026-05-10
 

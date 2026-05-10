@@ -47,6 +47,13 @@ var (
 	// when the model carries a quark:"version" field.
 	ErrStaleEntity = errors.New("stale entity (optimistic-locking conflict)")
 
+	// ErrUnsupportedFeature indicates that a feature is not supported by the
+	// active database dialect. Returned by builder methods (e.g. ForUpdate
+	// on SQLite) so callers can branch by dialect or fall back to a different
+	// strategy. The error message includes the dialect name and the feature
+	// being requested.
+	ErrUnsupportedFeature = errors.New("feature not supported by dialect")
+
 	// ErrDialectNotSupported indicates that the database dialect is not supported.
 	ErrDialectNotSupported = errors.New("dialect not supported")
 
