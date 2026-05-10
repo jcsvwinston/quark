@@ -1,0 +1,694 @@
+---
+sidebar_position: 4
+title: Query Builder
+description: Build safe immutable queries with filters, scopes, pagination, streaming, aggregates, JSON predicates, and controlled raw SQL.
+---
+
+# Query Builder
+
+`quark.For[Model](ctx, client)` returns a `*quark.Query[Model]`. The builder is
+immutable: every method that changes query state returns a clone.
+
+```go
+base := quark.For[User](ctx, client).
+    Where("active", "=", true)
+
+admins := base.Where("role", "=", "admin")
+editors := base.Where("role", "=", "editor")
+```
+
+`base`, `admins`, and `editors` are independent. This makes it comfortable to
+package common filters as scopes or reuse a base query across service methods.
+
+## Execution Methods
+
+| Method | Use it when |
+| --- | --- |
+| `List()` | You want a slice. Call `Limit` deliberately. |
+| `First()` | You want one matching row or `ErrNotFound`. |
+| `Find(id)` | You want one row by a simple primary key. |
+| `Count()` | You need a matching-row count. |
+| `Paginate(size, page)` | You need rows plus total/page metadata. |
+| `Iter(fn)` | You want streaming callback processing. |
+| `Cursor()` | You want manual streaming control. |
+
+`List` applies a safe default limit of 100 when no explicit `Limit` is present.
+For exports, backfills, or queues, use `Iter` or `Cursor` so rows are streamed
+instead of collected into memory.
+
+## Basic Filters
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Where("age", ">=", 18).
+    Where("email", "LIKE", "%@acme.com").
+    OrderBy("created_at", "DESC").
+    Limit(25).
+    List()
+```
+
+Column names and operators are validated before SQL is generated. Values are
+sent as bound parameters.
+
+| Operator family | Examples |
+| --- | --- |
+| Equality | `=`, `!=`, `<>` |
+| Comparison | `<`, `<=`, `>`, `>=` |
+| Pattern | `LIKE`, `NOT LIKE` |
+| Null | `IS NULL`, `IS NOT NULL` |
+| Set/range | `IN`, `NOT IN`, `BETWEEN`, `NOT BETWEEN` |
+
+Null checks do not consume a value:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("deleted_at", "IS NULL", nil).
+    List()
+```
+
+## Set and Range Predicates
+
+```go
+users, err := quark.For[User](ctx, client).
+    WhereIn("role", []any{"admin", "editor"}).
+    WhereBetween("created_at", start, end).
+    List()
+```
+
+Avoid calling `WhereIn` with an empty slice. Most SQL engines reject `IN ()`, and
+an empty input is usually better handled in application code:
+
+```go
+if len(ids) == 0 {
+    return []User{}, nil
+}
+
+users, err := quark.For[User](ctx, client).WhereIn("id", ids).List()
+```
+
+## Negation and OR Groups
+
+`WhereNot` wraps the condition in `NOT`:
+
+```go
+users, err := quark.For[User](ctx, client).
+    WhereNot("banned", "=", true).
+    List()
+```
+
+`Or` accepts a callback. Conditions inside the callback are grouped together and
+joined with `AND`, then the group is attached to the outer query with `OR`.
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Or(func(q *quark.Query[User]) *quark.Query[User] {
+        return q.Where("role", "=", "admin").
+            Where("verified", "=", true)
+    }).
+    List()
+```
+
+This produces the shape:
+
+```sql
+WHERE active = ? OR (role = ? AND verified = ?)
+```
+
+## Composable Expressions
+
+For predicates that nest deeper than `Or` makes ergonomic, Quark exposes a
+typed expression AST. Build the expression with leaf and combinator
+constructors and hand it to `WhereExpr` or `HavingExpr`:
+
+```go
+users, err := quark.For[User](ctx, client).WhereExpr(
+    quark.And(
+        quark.Eq(quark.Col("active"), quark.Lit(true)),
+        quark.Or(
+            quark.Eq(quark.Col("role"), quark.Lit("admin")),
+            quark.And(
+                quark.Gt(quark.Col("logins"), quark.Lit(10)),
+                quark.Eq(quark.Col("verified"), quark.Lit(true)),
+            ),
+        ),
+    ),
+).List()
+// WHERE ("active" = $1 AND ("role" = $2 OR ("logins" > $3 AND "verified" = $4)))
+```
+
+The available nodes are:
+
+| Node | Renders |
+| --- | --- |
+| `Col(name)` | quoted identifier (`*` allowed only inside `Func("COUNT", ...)`) |
+| `Lit(value)` | bound parameter, never interpolated |
+| `Eq` / `Ne` / `Lt` / `Gt` / `Lte` / `Gte` / `Cmp(lhs, op, rhs)` | comparison; operator validated against the standard whitelist |
+| `And(...)` / `Or(...)` | parenthesised when ≥ 2 children, transparent when 1, empty renders nothing |
+| `Not(expr)` | `NOT (...)` |
+| `In(lhs, vals...)` / `NotIn(lhs, vals...)` | `lhs IN (?, ?, ...)`. Empty value list is rejected — use a no-rows query instead. |
+| `Func(name, args...)` | function call; name validated against a 10-name whitelist (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `LOWER`, `UPPER`, `LENGTH`, `COALESCE`, `ABS`) |
+
+`HavingExpr` accepts the same AST and is the structured counterpart to
+`HavingAggregate` for predicates the aggregate helper can't express:
+
+```go
+buckets, err := quark.For[Order](ctx, client).
+    GroupBy("customer_id").
+    HavingExpr(
+        quark.Gt(
+            quark.Func("SUM", quark.Col("amount")),
+            quark.Lit(int64(1000)),
+        ),
+    ).List()
+// GROUP BY "customer_id" HAVING SUM("amount") > $1
+```
+
+Validation errors at any leaf (`Col` with an invalid identifier, `Cmp` with
+an unknown operator, `Func` with a non-whitelisted name) are stashed on
+the query and surface at execution time wrapping `ErrInvalidQuery`. The
+AST emits `?` as a neutral bind marker; Quark substitutes it for the
+dialect's placeholder syntax (`$1`, `@p1`, `:1`, `?`) at render time, so a
+single AST renders correctly across every supported engine.
+
+## Set Operators (UNION, INTERSECT, EXCEPT)
+
+`Union`, `UnionAll`, `Intersect`, and `Except` combine two `Query[T]`
+queries through the standard SQL compound-select form:
+
+```go
+adminEmails := quark.For[User](ctx, client).
+    Select("email").
+    Where("role", "=", "admin")
+
+ownerEmails := quark.For[User](ctx, client).
+    Select("email").
+    Where("role", "=", "owner")
+
+privileged, err := adminEmails.UnionAll(ownerEmails).List()
+// SELECT "email" FROM "users" WHERE "role" = $1
+//   UNION ALL
+// SELECT "email" FROM "users" WHERE "role" = $2
+```
+
+| Method | Renders |
+| --- | --- |
+| `Union(other)` | `... UNION ...` (deduplicated) |
+| `UnionAll(other)` | `... UNION ALL ...` (multiset) |
+| `Intersect(other)` | `... INTERSECT ...` |
+| `Except(other)` | `... EXCEPT ...` (Oracle: `MINUS`) |
+
+The rendered form is flat, without parentheses around individual
+operands — SQLite's compound-select grammar rejects parenthesised
+operands, so the SQL standard's flat shape is the portable form.
+
+Operand restrictions (each violation surfaces as
+`ErrUnsupportedFeature`):
+
+- Operand cannot have `ORDER BY`, `LIMIT`, `OFFSET`, lock options,
+  its own CTEs, or nested set-ops.
+- Base cannot have pessimistic locks.
+
+`ORDER BY` / `LIMIT` on the outer (base) query apply to the combined
+result, which is the SQL standard binding.
+
+Dialect coverage:
+
+- **MySQL / MariaDB**: only `UNION` / `UNION ALL` are supported. `Intersect`
+  and `Except` return `ErrUnsupportedFeature` — rewrite as a JOIN.
+- **Oracle**: `EXCEPT` renders as `MINUS`. `INTERSECT ALL` and `MINUS ALL`
+  are not supported.
+- **SQLite**: `INTERSECT ALL` and `EXCEPT ALL` are not supported (use the
+  non-`ALL` variants).
+- **PostgreSQL**, **MSSQL**: full support.
+
+## Window Functions
+
+Window functions live in the SELECT list, so they need an alias to be
+useful. `SelectExpr(alias, e)` projects any AST expression as a named
+column; the typed `Over(inner, window)` combinator wraps an inner
+expression with an `OVER (PARTITION BY ... ORDER BY ...)` clause:
+
+```go
+sales, err := quark.For[Sale](ctx, client).
+    Select("id", "region", "amount").
+    SelectExpr("rk", quark.Over(
+        quark.Rank(),
+        quark.NewWindow().
+            PartitionBy(quark.Col("region")).
+            OrderBy(quark.Col("amount"), true),
+    )).
+    Limit(50).
+    List()
+// SELECT "id", "region", "amount",
+//        RANK() OVER (PARTITION BY "region" ORDER BY "amount" DESC) AS "rk"
+// FROM "sales"
+```
+
+| Helper | Renders |
+| --- | --- |
+| `RowNumber()` | `ROW_NUMBER()` |
+| `Rank()` | `RANK()` |
+| `DenseRank()` | `DENSE_RANK()` |
+| `Lag(col, offset)` | `LAG(<col>, ?)` (offset is bound) |
+| `Lead(col, offset)` | `LEAD(<col>, ?)` |
+
+You can also wrap any aggregate from the AST whitelist with `Over` for
+running totals: `Over(Func("SUM", Col("amount")), NewWindow().OrderBy(Col("id"), false))`.
+
+`Window` is immutable — `PartitionBy` and `OrderBy` return a fresh copy,
+so a single Window definition can be reused across multiple `Over`
+calls without aliasing.
+
+The window's `?` markers are reindexed to the dialect's placeholder
+when the outer SELECT renders, and the args land in the args slice
+between any CTE args and the WHERE args. The shapes the helpers emit
+are part of the SQL standard (or near-standard) and run on all six
+target dialects (PostgreSQL, MySQL 8+, MariaDB 10.2+, MSSQL, Oracle,
+SQLite 3.25+); end-to-end coverage is currently exercised on SQLite,
+with the other five engines pending the testcontainer roll-out.
+
+## Common Table Expressions (CTEs)
+
+`With(name, sub)` attaches a CTE definition that prefixes the outer
+SELECT with `WITH "name" AS (<inner>)`:
+
+```go
+topOrders, _ := quark.For[Order](ctx, client).
+    Select("user_id", "amount").
+    Where("amount", ">", 100).
+    AsSubquery()
+
+users, err := quark.For[User](ctx, client).
+    With("top_orders", topOrders).
+    Join("top_orders", "users.id = top_orders.user_id").
+    Limit(50).
+    List()
+// WITH "top_orders" AS (SELECT "user_id", "amount" FROM "orders" WHERE "amount" > $1)
+// SELECT * FROM "users" INNER JOIN "top_orders" ON ...
+```
+
+`WithRecursive(name, sub)` adds the `RECURSIVE` keyword to the prefix
+when the inner body is a recursive `UNION ALL` shape. The CTE name is
+validated through `SQLGuard.ValidateIdentifier`; multiple `With` calls
+compose in order, and a single `WithRecursive` anywhere in the chain
+promotes the entire prefix to `WITH RECURSIVE ...`.
+
+CTE bodies are rendered with `?` markers at capture time and rewritten
+to the dialect's placeholder syntax when the outer SELECT is built. The
+inner args are prepended to the outer args slice so positional
+placeholders ($N / @pN / :N) line up — composing a CTE across
+PostgreSQL, MSSQL, Oracle, MySQL/MariaDB, or SQLite needs no
+per-dialect arithmetic in user code.
+
+## Subqueries
+
+Any `Query[T]` can be captured as a `*Subquery` and embedded in the
+expression AST through `Sub`, `Exists`, `NotExists`, `InSub`, or
+`NotInSub`:
+
+```go
+sub, err := quark.For[Order](ctx, client).
+    Select("user_id").
+    Where("amount", ">", 100).
+    AsSubquery()
+
+users, err := quark.For[User](ctx, client).WhereExpr(
+    quark.InSub(quark.Col("id"), sub),
+).List()
+// WHERE "id" IN (SELECT "user_id" FROM "orders" WHERE "amount" > $1)
+```
+
+| Wrapper | Renders |
+| --- | --- |
+| `Sub(sub)` | `(<subquery>)` — for scalar comparisons (`Eq(Col("x"), Sub(maxX))`) |
+| `Exists(sub)` | `EXISTS (<subquery>)` |
+| `NotExists(sub)` | `NOT EXISTS (<subquery>)` |
+| `InSub(lhs, sub)` | `lhs IN (<subquery>)` |
+| `NotInSub(lhs, sub)` | `lhs NOT IN (<subquery>)` |
+
+`AsSubquery()` renders the inner SELECT eagerly and returns an error if
+identifier validation fails on the inner query — so a bad column or
+operator surfaces at capture time, not at the outer query's exec time.
+`MustAsSubquery()` is the panic-on-error variant for inline composition.
+
+Pessimistic locks (`ForUpdate`, `ForShare`, `SkipLocked`, `NoWait`) on
+the inner query are rejected — MSSQL inlines `WITH (UPDLOCK)` in the
+FROM clause, which is not legal inside an `IN (SELECT ...)` context.
+Acquire locks on the outer query instead.
+
+The captured SQL uses `?` as the bind marker, regardless of the active
+dialect. When the outer query renders, every `?` in the embedded
+fragment is rewritten to the dialect's placeholder (`$1`, `@p1`, `:1`,
+or `?`) at the correct arg index, and the inner args are threaded into
+the outer arg list in order. So a single subquery composes correctly
+across all six supported engines.
+
+## Ordering, Limits, and Pagination
+
+```go
+users, err := quark.For[User](ctx, client).
+    OrderBy("created_at", "DESC").
+    OrderBy("id", "ASC").
+    Limit(20).
+    Offset(40).
+    List()
+```
+
+`Paginate(pageSize, page)` runs a count query and a limited select:
+
+```go
+page, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    OrderBy("id", "ASC").
+    Paginate(20, 0)
+
+fmt.Println(page.Total)
+fmt.Println(page.TotalPages)
+fmt.Println(page.Items)
+```
+
+Pages are zero-indexed. `Paginate(20, 0)` returns the first page.
+
+## Selecting Columns
+
+`Select` accepts column identifiers from the model table:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Select("id", "email", "name").
+    Limit(100).
+    List()
+```
+
+Because selected columns are validated as identifiers, `Select` is intentionally
+not a raw SQL projection API. Expressions such as `COUNT(*) AS count`,
+`users.id`, or `orders.total AS order_total` should be handled by the aggregate
+helpers, a view model over a database view, or `RawQuery` with explicit
+`AllowRawQueries`.
+
+`Distinct` works with simple selected columns:
+
+```go
+roles, err := quark.For[User](ctx, client).
+    Select("role").
+    Distinct().
+    Limit(50).
+    List()
+```
+
+## Grouped Aggregates and HAVING
+
+`GroupBy` and `HavingAggregate` compose to filter on a group's aggregate
+without falling back to `RawQuery`:
+
+```go
+groups, err := quark.For[Order](ctx, client).
+    GroupBy("status").
+    HavingAggregate("COUNT", "*", ">", 5).
+    Limit(50).
+    List()
+// emitted: SELECT * FROM "orders" GROUP BY "status" HAVING COUNT(*) > $1
+```
+
+`HavingAggregate(fn, column, op, value)` rules:
+
+| Rule | Why |
+| --- | --- |
+| `fn` is one of `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` (case-insensitive). | Whitelist; unknown functions fail the SQL guard. |
+| `column == "*"` is only valid with `COUNT`. | `SUM(*)` etc. are not valid SQL. |
+| Other `column` values pass through `SQLGuard.ValidateIdentifier`. | Same identifier-safety rule as `Where`. |
+| `op` is the standard comparison operator whitelist. | `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`, `LIKE`, `ILIKE`, `BETWEEN`, `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`. |
+
+The plain `Having(column, op, value)` API still validates `column` as a
+plain identifier and therefore cannot express aggregates — use it for
+post-aggregation filtering on a non-aggregate column.
+
+## Aggregates
+
+Use aggregate helpers for common numeric summaries:
+
+```go
+total, err := quark.For[Order](ctx, client).
+    Where("status", "=", "paid").
+    Sum("amount")
+
+avg, err := quark.For[Order](ctx, client).Avg("amount")
+min, err := quark.For[Order](ctx, client).Min("amount")
+max, err := quark.For[Order](ctx, client).Max("amount")
+```
+
+`Count`, `Sum`, `Avg`, `Min`, and `Max` respect `Where`, soft-delete filters,
+and tenant isolation.
+
+`GroupBy` and `Having` are available for simple grouped model queries:
+
+```go
+rows, err := quark.For[Order](ctx, client).
+    Select("status").
+    GroupBy("status").
+    Having("status", "!=", "cancelled").
+    Limit(20).
+    List()
+```
+
+For grouped aggregate projections, prefer a database view plus a typed model or
+controlled raw SQL until Quark grows a typed expression API.
+
+## JSON Predicates
+
+`WhereJSON` asks the dialect to build a JSON extraction expression:
+
+```go
+users, err := quark.For[User](ctx, client).
+    WhereJSON("metadata", "plan", "=", "enterprise").
+    List()
+```
+
+### Path grammar
+
+Quark accepts dotted identifier paths:
+
+| Accepted | Rejected |
+| --- | --- |
+| `"name"` | `""` (empty) |
+| `"user.name"` | `"$.user.name"` (leading `$`) |
+| `"user.profile.email"` | `".user"` / `"user."` / `"user..name"` |
+| `"_private.field"` | `"1user"` (digit-leading segment) |
+| `"x1.y2.z3"` | `"user-name"` / `"user name"` / quotes / semicolons / SQL comments |
+
+The exact regex is `^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$`, total
+length capped at 256 characters. Anything else returns
+[`ErrInvalidJSONPath`](/docs/reference/api/errors) at execution time. Array
+indexes (`items[0].id` / `items.0.id`) and engine-specific JSONPath operators
+are out of scope — drop down to [`RawQuery`](#raw-sql-as-an-escape-hatch) for
+those cases.
+
+### Injection safety
+
+The path is **bound as a parameter**, never interpolated into the SQL surface.
+A path that matches the grammar above produces:
+
+| Dialect | Shape (with `column = "metadata"`, `path = "plan"`) |
+| --- | --- |
+| PostgreSQL | `jsonb_extract_path_text(("metadata")::jsonb, $1) = $2` (one bind per path segment) |
+| MySQL | `JSON_EXTRACT(\`metadata\`, ?) = ?` (path bound as `"$.plan"`) |
+| MariaDB | `JSON_VALUE(\`metadata\`, ?) = ?` |
+| SQLite | `JSON_EXTRACT("metadata", ?) = ?` |
+| SQL Server | `JSON_VALUE([metadata], @p1) = @p2` |
+| Oracle | `JSON_VALUE("METADATA", :1) = :2` |
+
+Even if the path were attacker-controlled the validator rejects everything
+SQL-meaningful, and the bind-as-parameter render makes injection impossible at
+the dialect surface. If you find a path that breaks either guarantee, file an
+issue under the `security` label.
+
+## Joins
+
+`Join`, `LeftJoin`, and `RightJoin` open a structured JOIN against the
+named table; complete the JOIN by chaining `.On(left, op, right)` (the
+typed binary identifier comparison) or `.OnRaw(onClause)` (the legacy
+free-form string for compound ON clauses):
+
+```go
+orders, err := quark.For[Order](ctx, client).
+    Join("users").On("users.id", "=", "orders.user_id").
+    Where("status", "=", "paid").
+    OrderBy("created_at", "DESC").
+    Limit(50).
+    List()
+```
+
+### ON-clause grammar
+
+Both `.On` and `.OnRaw` route through the same validator. The joined
+table name is validated as an identifier; the `ON` clause is validated
+against a minimal identifier-only grammar:
+
+| Accepted | Rejected |
+| --- | --- |
+| `"users.id = orders.user_id"` | `""` (empty) |
+| `"a.x = b.y AND c.z = d.w"` | `"users.id = 1"` (literal RHS) |
+| `"a = b OR c = d"` (lowercase ok) | `"users.id = 'alice'"` |
+| `"users.id = orders.user_id AND users.tenant_id = orders.tenant_id"` | `"LOWER(users.id) = orders.user_id"` (function) |
+| | `"(users.id = orders.user_id)"` (parentheses) |
+| | `"users.id = orders.user_id; DROP TABLE x"` |
+| | `"users.id = orders.user_id -- comment"` |
+| | `"users.id = orders.user_id /* x */"` |
+
+The exact regex is in `internal/guard.ValidateJoinOn`; the operators
+allowed are `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Anything else returns
+[`ErrInvalidJoin`](/docs/reference/api/errors) at execution time.
+
+For multi-condition ON clauses use `.OnRaw`:
+
+```go
+q := quark.For[Order](ctx, client).
+    Join("users").OnRaw("users.id = orders.user_id AND users.tenant_id = orders.tenant_id")
+```
+
+`.On(left, op, right)` is the typed shape and covers the
+overwhelming majority of JOINs. `.OnRaw` is the escape hatch for
+clauses outside the simple binary form — it runs the same
+validator, so injection attempts continue to surface as
+`ErrInvalidJoin`.
+
+The v0.3.x string-raw `Join(table, on)` signature is removed in v0.4 — see
+[`docs/MIGRATION_v0.4.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.4.0.md)
+for the mechanical rewrite.
+
+`Where` and `Select` identifiers are still validated as simple names, so they
+do not accept dotted identifiers such as `users.active`. For complex join
+filters or projections, use a database view, add columns to a dedicated read
+model, or opt into `RawQuery`.
+
+## Pessimistic Locking
+
+`ForUpdate`, `ForShare`, `SkipLocked`, and `NoWait` attach a row-level
+pessimistic lock to the emitted `SELECT`. The dialect picks the right
+shape:
+
+```go
+orders, err := quark.For[Order](ctx, client).
+    Where("status", "=", "pending").
+    ForUpdate().
+    SkipLocked().
+    Limit(10).
+    List()
+```
+
+| Dialect | `ForUpdate` | `SkipLocked` | `NoWait` | `ForShare` |
+| --- | --- | --- | --- | --- |
+| PostgreSQL | `FOR UPDATE` | ✅ | ✅ | `FOR SHARE` |
+| MySQL 8+ / MariaDB 10.6+ | `FOR UPDATE` | ✅ | ✅ | `FOR SHARE` |
+| Oracle | `FOR UPDATE` | ✅ (12c+) | ✅ | ❌ → `ErrUnsupportedFeature` |
+| SQL Server | `WITH (UPDLOCK, ROWLOCK)` | `READPAST` | ❌ → `ErrUnsupportedFeature` | `WITH (HOLDLOCK, ROWLOCK)` |
+| SQLite | ❌ → `ErrUnsupportedFeature` | n/a | n/a | n/a |
+
+SQLite has no row-level pessimistic-lock primitive — use `BEGIN IMMEDIATE`
+or `BEGIN EXCLUSIVE` in your transaction wrapper instead. SQL Server's
+table-hint syntax means the lock instruction lives in the `FROM` clause
+rather than at the end of the `SELECT`; this is invisible to the caller.
+
+Pessimistic locks belong inside an explicit transaction. Outside a
+transaction the lock is released as soon as the SELECT completes and you
+gain nothing.
+
+## Reusable Scopes
+
+Scopes are plain functions:
+
+```go
+var ActiveUsers = quark.Scope[User](func(q *quark.Query[User]) *quark.Query[User] {
+    return q.Where("active", "=", true)
+})
+
+func CreatedAfter(t time.Time) quark.Scope[User] {
+    return func(q *quark.Query[User]) *quark.Query[User] {
+        return q.Where("created_at", ">=", t)
+    }
+}
+
+users, err := quark.For[User](ctx, client).
+    Apply(ActiveUsers, CreatedAfter(time.Now().AddDate(0, -1, 0))).
+    Limit(100).
+    List()
+```
+
+Scopes are useful for authorization boundaries, soft business filters, feature
+flags, and repeated dashboard queries.
+
+## Subqueries and Raw SQL
+
+`WhereSubquery` is intentionally disabled unless the client allows raw SQL:
+
+```go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true
+
+client, err := quark.New(db,
+    quark.WithDialect(quark.PostgreSQL()),
+    quark.WithLimits(limits),
+)
+```
+
+Then:
+
+```go
+users, err := quark.For[User](ctx, client).
+    WhereSubquery("id", "IN", "SELECT user_id FROM orders WHERE total > 100").
+    List()
+```
+
+Only use this for static or carefully constructed SQL. Bound parameters protect
+values, but a raw subquery can still encode unsafe identifiers or SQL structure.
+
+For full raw reads, use `client.RawQuery`:
+
+```go
+rows, err := client.RawQuery(ctx,
+    "SELECT id, email FROM users WHERE active = $1",
+    true,
+)
+```
+
+`RawQuery` requires placeholders when validation asks for them.
+
+## Streaming
+
+`Iter` scans one row at a time and calls your callback:
+
+```go
+err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    OrderBy("id", "ASC").
+    Iter(func(user User) error {
+        return sendToSearchIndex(ctx, user)
+    })
+```
+
+`Cursor` gives manual control:
+
+```go
+cursor, err := quark.For[User](ctx, client).
+    OrderBy("id", "ASC").
+    Cursor()
+if err != nil {
+    return err
+}
+defer cursor.Close()
+
+for cursor.Next() {
+    var user User
+    if err := cursor.Scan(&user); err != nil {
+        return err
+    }
+    process(user)
+}
+
+return cursor.Err()
+```
+
+Always close cursors so the underlying `sql.Rows` and context cancellation are
+released.
