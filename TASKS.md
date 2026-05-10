@@ -77,8 +77,27 @@ InvalidIdentifierSurfacesAtExec, PlaceholderSubstitution).
 Doc: `website/docs/guides/querying.mdx` § Composable Expressions con tabla
 de nodos + ejemplo HavingExpr; CHANGELOG `### Added`.
 
-### F2-subqueries · Pendiente
-`AsSubquery()` integrable en otro `Where`/`Join`.
+### ~~F2-subqueries · `AsSubquery()` integrable~~
+
+**Cerrado** — `subquery.go` introduce `Subquery` (snapshot del SELECT
+renderizado con `?` markers via `qmarkDialect`), `Query[T].AsSubquery()`
++ `MustAsSubquery()`, y los wrappers Expr `Sub`, `Exists`, `NotExists`,
+`InSub`, `NotInSub`. La captura usa el dialect activo para Quote /
+LimitOffset / JSONExtract / LockSuffix pero overridea Placeholder a `?`
+para que el AST exterior renumere a placeholders del dialecto en el
+`argIndex` correcto. Errores en validación interna (identifier inválido)
+afloran en el momento de `AsSubquery`, no en la ejecución exterior.
+
+`Cast` queda fuera de v0.4 — se añade ad-hoc cuando aparezca un caso
+real (typed column projections del codegen, Fase 6).
+
+Cobertura: `subquery_test.go` (1 test unitario sobre placeholders +
+ordering de args) + `testSubquery` en SharedSuite (4 subtests:
+InSubFiltersUsersWithPositiveOrders, NotInSubFiltersUsersWithoutPositiveOrders,
+SubAsScalarComparison, InvalidInnerIdentifierSurfacesAtCapture).
+
+Doc: `website/docs/guides/querying.mdx` § Subqueries con tabla de
+wrappers; CHANGELOG `### Added`.
 
 ### F2-CTE · Pendiente
 `With("t", subq).For[T]().Where(...)` + `WithRecursive`.

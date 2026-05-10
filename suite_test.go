@@ -129,6 +129,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testExprAST(ctx, t, client)
 	})
 
+	t.Run("Subquery", func(t *testing.T) {
+		testSubquery(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

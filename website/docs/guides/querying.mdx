@@ -172,6 +172,49 @@ AST emits `?` as a neutral bind marker; Quark substitutes it for the
 dialect's placeholder syntax (`$1`, `@p1`, `:1`, `?`) at render time, so a
 single AST renders correctly across every supported engine.
 
+## Subqueries
+
+Any `Query[T]` can be captured as a `*Subquery` and embedded in the
+expression AST through `Sub`, `Exists`, `NotExists`, `InSub`, or
+`NotInSub`:
+
+```go
+sub, err := quark.For[Order](ctx, client).
+    Select("user_id").
+    Where("amount", ">", 100).
+    AsSubquery()
+
+users, err := quark.For[User](ctx, client).WhereExpr(
+    quark.InSub(quark.Col("id"), sub),
+).List()
+// WHERE "id" IN (SELECT "user_id" FROM "orders" WHERE "amount" > $1)
+```
+
+| Wrapper | Renders |
+| --- | --- |
+| `Sub(sub)` | `(<subquery>)` — for scalar comparisons (`Eq(Col("x"), Sub(maxX))`) |
+| `Exists(sub)` | `EXISTS (<subquery>)` |
+| `NotExists(sub)` | `NOT EXISTS (<subquery>)` |
+| `InSub(lhs, sub)` | `lhs IN (<subquery>)` |
+| `NotInSub(lhs, sub)` | `lhs NOT IN (<subquery>)` |
+
+`AsSubquery()` renders the inner SELECT eagerly and returns an error if
+identifier validation fails on the inner query — so a bad column or
+operator surfaces at capture time, not at the outer query's exec time.
+`MustAsSubquery()` is the panic-on-error variant for inline composition.
+
+Pessimistic locks (`ForUpdate`, `ForShare`, `SkipLocked`, `NoWait`) on
+the inner query are rejected — MSSQL inlines `WITH (UPDLOCK)` in the
+FROM clause, which is not legal inside an `IN (SELECT ...)` context.
+Acquire locks on the outer query instead.
+
+The captured SQL uses `?` as the bind marker, regardless of the active
+dialect. When the outer query renders, every `?` in the embedded
+fragment is rewritten to the dialect's placeholder (`$1`, `@p1`, `:1`,
+or `?`) at the correct arg index, and the inner args are threaded into
+the outer arg list in order. So a single subquery composes correctly
+across all six supported engines.
+
 ## Ordering, Limits, and Pagination
 
 ```go
