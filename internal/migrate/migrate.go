@@ -89,6 +89,13 @@ func SQLTypeWithOpts(dialectName string, t reflect.Type, opts TypeOptions) strin
 		}
 	}
 
+	// quark.JSON[T]: emit the dialect-native JSON column type. Detection
+	// is by package + name prefix; T's identity is irrelevant since the
+	// column always stores serialised bytes.
+	if isQuarkJSON(t) {
+		return jsonColumnType(dialectName)
+	}
+
 	// Apply size/precision overrides where they apply naturally to the
 	// built-in switch. This wraps SQLType so the existing big switch stays
 	// intact.
@@ -115,6 +122,36 @@ func isSQLNull(t reflect.Type) bool {
 	}
 	name := t.Name()
 	return name == "Null" || strings.HasPrefix(name, "Null[")
+}
+
+// isQuarkJSON reports whether t is quark.JSON[T]. Same detection strategy
+// as isSQLNull — package path + name prefix — because the generic
+// instantiation cannot be addressed by reflect.TypeOf at registration time.
+func isQuarkJSON(t reflect.Type) bool {
+	if t == nil || t.Kind() != reflect.Struct {
+		return false
+	}
+	if t.PkgPath() != "github.com/jcsvwinston/quark" {
+		return false
+	}
+	name := t.Name()
+	return name == "JSON" || strings.HasPrefix(name, "JSON[")
+}
+
+// jsonColumnType returns the dialect-native column type for a JSON payload.
+func jsonColumnType(dialectName string) string {
+	switch dialectName {
+	case "postgres":
+		return "JSONB"
+	case "mysql", "mariadb":
+		return "JSON"
+	case "mssql":
+		return "NVARCHAR(MAX)"
+	case "oracle":
+		return "CLOB"
+	default:
+		return "TEXT"
+	}
 }
 
 // applySize rewrites a VARCHAR/CHAR/NVARCHAR family default with an explicit
@@ -260,6 +297,19 @@ func SQLType(dialectName string, t reflect.Type, isPK bool) string {
 				return "DATETIME2"
 			default:
 				return "TIMESTAMP"
+			}
+		}
+	case reflect.Slice:
+		// []byte → BLOB / BYTEA / VARBINARY per dialect. Differentiate
+		// from generic slices (which fall through to TEXT) by element kind.
+		if t.Elem().Kind() == reflect.Uint8 {
+			switch dialectName {
+			case "postgres":
+				return "BYTEA"
+			case "mssql":
+				return "VARBINARY(MAX)"
+			default:
+				return "BLOB"
 			}
 		}
 	}

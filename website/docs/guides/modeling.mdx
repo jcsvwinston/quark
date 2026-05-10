@@ -111,6 +111,58 @@ but `Nullable[T]` is the recommended form for new code: it avoids the
 implicit heap allocation of pointer-as-nullable and reads more naturally
 at the call site (`p.Bio.Valid` vs. `p.Bio == nil`).
 
+### Typed JSON columns
+
+For columns that hold serialised Go values, the idiomatic option is the
+generic `quark.JSON[T]` wrapper. It implements `sql.Scanner` and
+`driver.Valuer` via `encoding/json`, so the round-trip uses the standard
+library's plumbing:
+
+```go
+type Settings struct {
+    Theme  string `json:"theme"`
+    Volume int    `json:"volume"`
+}
+
+type Profile struct {
+    ID       int64                  `db:"id" pk:"true"`
+    Settings quark.JSON[Settings]   `db:"settings"`
+}
+
+p := Profile{Settings: quark.JSON[Settings]{V: Settings{Theme: "dark", Volume: 7}}}
+_ = quark.For[Profile](ctx, client).Create(&p)
+```
+
+The migrate layer recognises `JSON[T]` and emits the dialect-native column
+type — `JSONB` on Postgres, `JSON` on MySQL/MariaDB, `TEXT` on SQLite,
+`NVARCHAR(MAX)` on SQL Server, `CLOB` on Oracle. Pair with
+`quark.Nullable[quark.JSON[T]]` when you need to distinguish SQL NULL from
+an empty payload.
+
+`JSON[T]` accepts any `T` that round-trips through `encoding/json`:
+structs, maps, slices, primitive types. Validation and migration of the
+shape itself is your responsibility — Quark stores the bytes verbatim and
+unmarshals them back into `T` on read.
+
+### Binary columns
+
+A plain `[]byte` field maps to the dialect-native binary column:
+
+| Dialect | Type |
+| --- | --- |
+| PostgreSQL | `BYTEA` |
+| MySQL / MariaDB | `BLOB` |
+| SQLite | `BLOB` |
+| SQL Server | `VARBINARY(MAX)` |
+| Oracle | `BLOB` |
+
+```go
+type File struct {
+    ID    int64  `db:"id" pk:"true"`
+    Bytes []byte `db:"bytes"`
+}
+```
+
 ### Custom type mappers
 
 For Go types beyond the built-in primitives (`shopspring/decimal.Decimal`,

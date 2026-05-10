@@ -105,6 +105,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testNullable(ctx, t, client)
 	})
 
+	t.Run("JSONField", func(t *testing.T) {
+		testJSONField(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

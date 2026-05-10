@@ -28,8 +28,38 @@ Doc: `website/docs/reference/api/crud.mdx` § "Track + Save (dirty tracking)";
 CHANGELOG `### Added`; Historial en `docs/playbooks/query-builder.md` §P0-4
 (cierre permanente).
 
-### F1-2 · Tipos ricos
-[Pendiente] `shopspring/decimal`, `google/uuid`, `time.Duration`, JSON tipado vía generics (`JSON[T]`), arrays Postgres, mapeo correcto de timezones.
+### ~~F1-2 · Tipos ricos~~
+
+**Cerrado** (parte core; arrays Postgres y timezones quedan deferred a Fase 2
+porque requieren motor-specific work no trivial).
+
+- **`quark.JSON[T any]`** (`json_field.go`): wrapper genérico que implementa
+  `sql.Scanner`/`driver.Valuer` vía `encoding/json`. Migrate detecta el
+  wrapper (`internal/migrate.isQuarkJSON` por package + name prefix) y emite
+  JSON column dialect-native: PG JSONB, MySQL/MariaDB JSON, SQLite TEXT,
+  MSSQL NVARCHAR(MAX), Oracle CLOB.
+- **`[]byte` mapping**: añadido al `internal/migrate.SQLType` switch — PG
+  BYTEA, MSSQL VARBINARY(MAX), resto BLOB. Antes caía a TEXT (silently
+  wrong en BLOB-heavy workloads).
+- **`time.Duration`**: ya cerrado en F1-4 (registrado como BIGINT/NUMBER(19)).
+
+Cobertura: `testJSONField` (`json_field_test.go`) wired a `SharedSuite`. 3
+subtests: StructValueRoundTrip (struct + slice + map + []byte), ZeroValueScansAsZero,
+UpdateReplacesPayload (vía Tracked.Save para validar la integración con dirty
+tracking).
+
+Deferred a Fase 2 con su propio scope:
+- **Arrays Postgres** (`pgtype.Array`) — requiere wrapper neutro que
+  abstraiga el concepto sin pegar el dialect a `pgtype` directamente.
+- **Timezones** (default UTC + override por columna) — diseño abierto sobre
+  cómo configurar el override (tag `quark:"tz=UTC"` vs Client option).
+- **`shopspring/decimal` y `google/uuid` pre-registered**: el usuario puede
+  registrarlos en su init con `RegisterTypeMapper` (F1-4); Quark no los
+  pre-registra para no añadir dependencias obligatorias. Documentado en el
+  ejemplo de modeling.mdx § Custom type mappers.
+
+Doc: `website/docs/guides/modeling.mdx` § Typed JSON columns + § Binary
+columns; CHANGELOG `### Added`.
 
 ### ~~F1-3 · `Nullable[T]` genérico~~
 
