@@ -93,6 +93,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testTypeMapper(ctx, t, client)
 	})
 
+	t.Run("OptimisticLocking", func(t *testing.T) {
+		testOptimisticLocking(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

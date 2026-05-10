@@ -115,6 +115,12 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 			// isolation boundary, not user-mutable state.
 			continue
 		}
+		if fm.IsVersion {
+			// The version column gets a dedicated "version = version + 1"
+			// clause appended below — never write the entity's snapshotted
+			// value back, even if the caller mutated it.
+			continue
+		}
 		snapVal, hasSnap := t.snap[col]
 		if !hasSnap {
 			continue
@@ -133,8 +139,26 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 		argIndex++
 	}
 
+	// If nothing changed, skip the UPDATE entirely — including the version
+	// bump. Save with a snapshot equal to current state is a no-op by
+	// contract; otherwise a callers's idempotent retry would silently
+	// inflate the version each time.
 	if len(setClauses) == 0 {
 		return 0, nil
+	}
+
+	// Optimistic locking: when there are real column changes, bundle a
+	// version bump into the same UPDATE so the row's version moves in
+	// lock-step with the data write. The predicate added below to WHERE
+	// is what makes the lock effective.
+	hasVersion := versionFieldOf(t.meta) != nil
+	if hasVersion {
+		vfm := versionFieldOf(t.meta)
+		if err := t.guard.ValidateIdentifier(vfm.Column); err != nil {
+			return 0, err
+		}
+		quoted := t.dialect.Quote(vfm.Column)
+		setClauses = append(setClauses, fmt.Sprintf("%s = %s + 1", quoted, quoted))
 	}
 
 	var sqlBuf strings.Builder
@@ -179,6 +203,21 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 		argIndex++
 	}
 
+	// Optimistic-locking predicate: AND version = <snapshot_version>. We
+	// use the snapshot rather than the entity's current value so the user
+	// can't unintentionally overwrite the predicate by mutating the
+	// version field directly.
+	if hasVersion {
+		vfm := versionFieldOf(t.meta)
+		snapVer, _ := t.snap[vfm.Column]
+		sqlBuf.WriteString(" AND ")
+		sqlBuf.WriteString(t.dialect.Quote(vfm.Column))
+		sqlBuf.WriteString(" = ")
+		sqlBuf.WriteString(t.dialect.Placeholder(argIndex))
+		args = append(args, snapVer)
+		argIndex++
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, t.client.limits.QueryTimeout)
 	defer cancel()
 
@@ -209,6 +248,19 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 	rowsAffected := int64(0)
 	if result != nil {
 		rowsAffected, _ = result.RowsAffected()
+	}
+
+	// Optimistic locking: zero rows-affected with a version column means
+	// another writer bumped the version since we loaded. Surface as
+	// ErrStaleEntity. Otherwise bump the in-memory version + the snapshot
+	// so a subsequent Save against the same Tracked stays consistent.
+	if hasVersion {
+		vfm := versionFieldOf(t.meta)
+		if rowsAffected == 0 {
+			return 0, fmt.Errorf("%w: table %s pk=%v", ErrStaleEntity, t.table, getPKValue(v, t.pk))
+		}
+		bumpVersion(v, vfm)
+		t.snap[vfm.Column] = v.Field(vfm.Index).Interface()
 	}
 
 	// Refresh the snapshot for the columns we just wrote, so a subsequent

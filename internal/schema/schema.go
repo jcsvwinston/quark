@@ -91,6 +91,12 @@ type ModelMeta struct {
 	Fields         []FieldMeta
 	FieldByCol     map[string]*FieldMeta    // lookup by db column name
 	Relations      map[string]*RelationMeta // lookup by field name
+
+	// VersionFieldIndex is the FieldMeta index of the optimistic-locking
+	// version column, or -1 when the model does not have one. Cached at
+	// schema-compute time so the hot Update / Save paths don't have to
+	// re-scan Fields.
+	VersionFieldIndex int
 }
 
 // FieldMeta holds metadata about a single struct field.
@@ -114,6 +120,13 @@ type FieldMeta struct {
 	Size      int
 	Precision int
 	Scale     int
+
+	// IsVersion marks the field as the optimistic-locking version column.
+	// Set by quark:"version". When present, Update / UpdateFields /
+	// Tracked.Save include "version = version + 1" in SET and
+	// "AND version = ?" in WHERE; a zero rows-affected on the response
+	// surfaces ErrStaleEntity. Only one field per model may carry this tag.
+	IsVersion bool
 }
 
 // modelRegistry caches ModelMeta by reflect.Type.
@@ -171,9 +184,10 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 	}
 
 	meta := &ModelMeta{
-		Table:      tableName,
-		FieldByCol: make(map[string]*FieldMeta),
-		Relations:  make(map[string]*RelationMeta),
+		Table:             tableName,
+		FieldByCol:        make(map[string]*FieldMeta),
+		Relations:         make(map[string]*RelationMeta),
+		VersionFieldIndex: -1,
 	}
 
 	// Find PKs: collect all pk:"true" tags; fall back to db:"id"
@@ -288,6 +302,7 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 		notNull := isPK // PKs are always NOT NULL
 		defaultVal := ""
 		unique := false
+		isVersion := false
 		if quarkTag := field.Tag.Get("quark"); quarkTag != "" {
 			for _, part := range strings.Split(quarkTag, ",") {
 				part = strings.TrimSpace(part)
@@ -297,6 +312,11 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 					notNull = true
 				} else if part == "unique" {
 					unique = true
+				} else if part == "version" {
+					isVersion = true
+					// version columns must be NOT NULL — a NULL version
+					// can't be incremented and would defeat the lock.
+					notNull = true
 				}
 			}
 		}
@@ -320,6 +340,7 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 			Size:      fieldSize,
 			Precision: fieldPrecision,
 			Scale:     fieldScale,
+			IsVersion: isVersion,
 		}
 		meta.Fields = append(meta.Fields, fm)
 		meta.FieldByCol[strings.ToLower(dbTag)] = &meta.Fields[len(meta.Fields)-1]
@@ -330,6 +351,12 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 				meta.PK = PKMeta{Column: dbTag, Index: i, Kind: field.Type.Kind()}
 				meta.HasPK = true
 			}
+		}
+		if isVersion && meta.VersionFieldIndex < 0 {
+			// Cache the index of the version field for the hot Update / Save
+			// paths. We store the position within meta.Fields (not the
+			// reflect index) so callers can do meta.Fields[idx] directly.
+			meta.VersionFieldIndex = len(meta.Fields) - 1
 		}
 	}
 

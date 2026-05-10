@@ -220,6 +220,18 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 			return 0, err
 		}
 		rowsAffected, _ = res.RowsAffected()
+
+		// Optimistic locking: zero rows-affected when the model carries a
+		// version column means the version predicate didn't match — another
+		// writer bumped it after we loaded. Surface as ErrStaleEntity.
+		// Otherwise bump the in-memory version so a subsequent Update on
+		// the same struct sees the new value.
+		if vfm := versionFieldOf(meta); vfm != nil {
+			if rowsAffected == 0 {
+				return 0, fmt.Errorf("%w: table %s pk=%v", ErrStaleEntity, meta.Table, getPKValue(elem, meta.PK))
+			}
+			bumpVersion(elem, vfm)
+		}
 	} else {
 		sqlStr, args, err := dq.buildInsert(elem)
 		if err != nil {
@@ -542,6 +554,17 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		argIndex++
 	}
 
+	// Optimistic-locking SET (version = version + 1). Same shape as Update:
+	// append after the user-named columns so the placeholder indices for the
+	// regular fields don't shift.
+	if vfm := versionFieldOf(q.meta); vfm != nil {
+		if err := q.guard.ValidateIdentifier(vfm.Column); err != nil {
+			return 0, err
+		}
+		quoted := q.dialect.Quote(vfm.Column)
+		setClauses = append(setClauses, fmt.Sprintf("%s = %s + 1", quoted, quoted))
+	}
+
 	var sqlBuf strings.Builder
 	sqlBuf.WriteString("UPDATE ")
 	sqlBuf.WriteString(q.fullTableName())
@@ -568,6 +591,16 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		sqlBuf.WriteString(" = ")
 		sqlBuf.WriteString(q.dialect.Placeholder(argIndex))
 		args = append(args, getPKValue(v, q.pk))
+		argIndex++
+	}
+
+	// Optimistic-locking predicate: AND version = <loaded_version>.
+	if vfm := versionFieldOf(q.meta); vfm != nil {
+		sqlBuf.WriteString(" AND ")
+		sqlBuf.WriteString(q.dialect.Quote(vfm.Column))
+		sqlBuf.WriteString(" = ")
+		sqlBuf.WriteString(q.dialect.Placeholder(argIndex))
+		args = append(args, readVersion(v, vfm))
 		argIndex++
 	}
 
@@ -599,6 +632,14 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 	rowsAffected := int64(0)
 	if result != nil {
 		rowsAffected, _ = result.RowsAffected()
+	}
+
+	// Optimistic locking: stale → ErrStaleEntity. Otherwise bump in memory.
+	if vfm := versionFieldOf(q.meta); vfm != nil {
+		if rowsAffected == 0 {
+			return 0, fmt.Errorf("%w: table %s pk=%v", ErrStaleEntity, q.meta.Table, getPKValue(v, q.pk))
+		}
+		bumpVersion(v, vfm)
 	}
 
 	if hook, ok := any(entity).(AfterUpdateHook); ok {
@@ -686,6 +727,13 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 
 		fieldValue := v.Field(i)
 
+		// Skip the optimistic-locking version column from the normal SET
+		// path — it gets a dedicated "version = version + 1" assignment
+		// below, and a "AND version = ?" predicate in WHERE.
+		if vfm := versionFieldOf(q.meta); vfm != nil && vfm.Index == i {
+			continue
+		}
+
 		// Skip zero values (partial update). Track them so we can log a
 		// single WARN below — Update with zero values is silently skipped
 		// (the P0-4 trap), and users that hit it should be told.
@@ -701,6 +749,17 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 		setClauses = append(setClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(dbTag), q.dialect.Placeholder(argIndex)))
 		args = append(args, fieldValue.Interface())
 		argIndex++
+	}
+
+	// If the model carries quark:"version", include the version-bump in the
+	// SET clause. Done after the field loop so it's append-only and doesn't
+	// shift placeholder indices for the regular columns.
+	if vfm := versionFieldOf(q.meta); vfm != nil {
+		if err := q.guard.ValidateIdentifier(vfm.Column); err != nil {
+			return "", nil, err
+		}
+		quoted := q.dialect.Quote(vfm.Column)
+		setClauses = append(setClauses, fmt.Sprintf("%s = %s + 1", quoted, quoted))
 	}
 
 	if len(skippedZero) > 0 && q.client != nil && q.client.logger != nil {
@@ -739,6 +798,18 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 		sql.WriteString(" = ")
 		sql.WriteString(q.dialect.Placeholder(argIndex))
 		args = append(args, getPKValue(v, q.pk))
+		argIndex++
+	}
+
+	// Optimistic-locking predicate: AND version = <loaded_version>. The
+	// caller must check rows-affected and surface ErrStaleEntity on zero;
+	// buildUpdate is the SQL builder, not the executor.
+	if vfm := versionFieldOf(q.meta); vfm != nil {
+		sql.WriteString(" AND ")
+		sql.WriteString(q.dialect.Quote(vfm.Column))
+		sql.WriteString(" = ")
+		sql.WriteString(q.dialect.Placeholder(argIndex))
+		args = append(args, readVersion(v, vfm))
 		argIndex++
 	}
 

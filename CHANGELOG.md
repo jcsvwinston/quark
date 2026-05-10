@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Optimistic locking via `quark:"version"` (Phase 1 F1-6)**: tagging a numeric
+  field with `quark:"version"` enables row-level optimistic-locking on
+  `Update` / `UpdateFields` / `Tracked.Save`. Each successful update emits
+  `SET ..., version = version + 1 WHERE pk = ? AND version = <loaded>` and
+  bumps the entity's in-memory version. When the predicate doesn't match
+  (another writer already advanced the column) the call returns the new
+  sentinel `ErrStaleEntity` without writing. Pairs naturally with the
+  Phase-1 dirty-tracking pipeline: a `Tracked.Save` after a no-op mutation
+  is still a no-op (the version is not bumped on its own).
+
+- **`ErrStaleEntity`** sentinel for optimistic-locking conflicts (F1-6).
+
 - **`RegisterTypeMapper(reflect.Type, TypeMapper)` (Phase 1 F1-4)**: extensible
   Go-type → SQL-type mapping for `client.Migrate` and `client.Sync`. Custom
   types (decimal.Decimal, uuid.UUID, IP addresses, vector types, …) can plug
