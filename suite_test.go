@@ -137,6 +137,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testCTE(ctx, t, client)
 	})
 
+	t.Run("Window", func(t *testing.T) {
+		testWindow(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})
