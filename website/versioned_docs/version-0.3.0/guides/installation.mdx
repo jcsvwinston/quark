@@ -1,0 +1,204 @@
+---
+sidebar_position: 1
+title: Installation
+description: Requirements, database drivers, optional packages, and a verified smoke test.
+---
+
+# Installation
+
+Quark is a regular Go module built on top of `database/sql`. You install the ORM
+once, then add the driver package for the database engine your application uses.
+
+## Requirements
+
+| Requirement | Notes |
+| --- | --- |
+| Go 1.21+ | Quark uses generics and the modern module-aware Go toolchain. |
+| A `database/sql` driver | The driver owns the wire protocol and DSN format. |
+| An explicit dialect | Auto-detection exists, but production code should pass `WithDialect`. |
+
+```bash
+go get github.com/jcsvwinston/quark
+```
+
+```go
+import "github.com/jcsvwinston/quark"
+```
+
+Quark is currently a v0.x library. The query builder, CRUD methods, transactions,
+batch operations, schema helpers, cache abstraction, and tenant router are present
+in the public package. A standalone `cmd/quark` binary is not part of the current
+module tree, so migration workflows should use the Go APIs documented in
+[Migrations and Sync](migrations).
+
+## Driver Packages
+
+Install exactly the driver you need. Quark does not wrap or replace driver DSNs.
+
+| Engine | Suggested driver | Dialect option |
+| --- | --- | --- |
+| SQLite | `modernc.org/sqlite` | `quark.SQLite()` |
+| PostgreSQL | `github.com/lib/pq` | `quark.PostgreSQL()` |
+| MySQL | `github.com/go-sql-driver/mysql` | `quark.MySQL()` |
+| MariaDB | `github.com/go-sql-driver/mysql` | `quark.MariaDB()` |
+| SQL Server | `github.com/microsoft/go-mssqldb` | `quark.MSSQL()` |
+| Oracle | `github.com/sijms/go-ora/v2` | `quark.Oracle()` |
+
+```bash
+go get modernc.org/sqlite
+go get github.com/lib/pq
+go get github.com/go-sql-driver/mysql
+go get github.com/microsoft/go-mssqldb
+go get github.com/sijms/go-ora/v2
+```
+
+SQLite is the simplest local starting point because it needs no external service.
+For MySQL and MariaDB, include `parseTime=true` in the DSN when you scan
+`time.Time` fields.
+
+## Optional Packages
+
+| Package | Purpose |
+| --- | --- |
+| `github.com/jcsvwinston/quark/cache/memory` | In-process `CacheStore` with tag invalidation. |
+| `github.com/jcsvwinston/quark/cache/redis` | Redis-backed `CacheStore`. |
+| `github.com/jcsvwinston/quark/otel` | OpenTelemetry middleware. |
+| `github.com/jcsvwinston/quark/migrate` | Versioned migration registry and migrator. |
+
+The core package has no framework dependency. You can use it from HTTP handlers,
+workers, CLIs, tests, or any service layer that can pass a `context.Context`.
+
+## Minimal Client
+
+```go
+package main
+
+import (
+    "context"
+    "database/sql"
+    "log"
+
+    "github.com/jcsvwinston/quark"
+    _ "modernc.org/sqlite"
+)
+
+type User struct {
+    ID    int64  `db:"id" pk:"true"`
+    Email string `db:"email" quark:"unique,not_null"`
+    Name  string `db:"name" quark:"not_null"`
+}
+
+func main() {
+    db, err := sql.Open("sqlite", "file:quark.db?cache=shared")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    client, err := quark.New(db, quark.WithDialect(quark.SQLite()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Close()
+
+    ctx := context.Background()
+    if err := client.Migrate(ctx, &User{}); err != nil {
+        log.Fatal(err)
+    }
+
+    user := User{Email: "alice@example.com", Name: "Alice"}
+    if err := quark.For[User](ctx, client).Create(&user); err != nil {
+        log.Fatal(err)
+    }
+
+    log.Printf("created user id=%d", user.ID)
+}
+```
+
+`quark.New` pings the database during construction. Treat a returned error as a
+startup failure: wrong DSN, unreachable database, credentials rejected, or a
+driver/dialect mismatch.
+
+## Switching Engines
+
+The model and query code do not change when you change the database. The driver,
+DSN, and dialect option do.
+
+```go
+import (
+    "database/sql"
+
+    "github.com/jcsvwinston/quark"
+    _ "github.com/lib/pq"
+)
+
+db, err := sql.Open("postgres", "postgres://user:pass@localhost/app?sslmode=disable")
+if err != nil {
+    return err
+}
+
+client, err := quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+if err != nil {
+    return err
+}
+```
+
+Dialect selection controls placeholder syntax, identifier quoting, `RETURNING`
+behavior, upsert fragments, JSON expressions, pagination, and DDL.
+
+## Pool Configuration
+
+Quark uses the `*sql.DB` you give it. Configure the connection pool before or
+after creating the client:
+
+```go
+db.SetMaxOpenConns(25)
+db.SetMaxIdleConns(25)
+db.SetConnMaxLifetime(30 * time.Minute)
+
+client, err := quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+```
+
+For database-per-tenant routing, each tenant can own its own `*sql.DB` pool. See
+[Multi-Tenant](../advanced/multi-tenant) before setting high pool limits.
+
+## Smoke Test
+
+Use this to verify that the driver, dialect, migration helper, insert path, and
+primary-key writeback all work:
+
+```go
+func Smoke(ctx context.Context, client *quark.Client) error {
+    type HealthCheck struct {
+        ID   int64  `db:"id" pk:"true"`
+        Name string `db:"name" quark:"not_null"`
+    }
+
+    if err := client.Migrate(ctx, &HealthCheck{}); err != nil {
+        return err
+    }
+
+    row := HealthCheck{Name: "ok"}
+    if err := quark.For[HealthCheck](ctx, client).Create(&row); err != nil {
+        return err
+    }
+
+    _, err := quark.For[HealthCheck](ctx, client).Find(row.ID)
+    return err
+}
+```
+
+## Integration Test DSNs
+
+The upstream test suite uses environment variables for external engines. SQLite
+tests can run offline.
+
+```bash
+export QUARK_TEST_POSTGRES_DSN="postgres://user:pass@localhost:5432/testdb?sslmode=disable"
+export QUARK_TEST_MYSQL_DSN="user:pass@tcp(localhost:3306)/testdb?parseTime=true"
+export QUARK_TEST_MSSQL_DSN="sqlserver://sa:Pass@localhost:1433?database=testdb"
+export QUARK_TEST_ORACLE_DSN="oracle://user:pass@localhost:1521/XE"
+```
+
+When a test or local tool uses raw DDL through `client.Exec`, configure the client
+with `AllowRawQueries: true`. The high-level `Migrate`, `Sync`, `CreateIndex`,
+and `AddForeignKey` helpers do not require raw-query opt-in.

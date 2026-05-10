@@ -4,16 +4,15 @@
 
 # Quark
 
-**The type-safe, security-first ORM for Go — built on generics, built to production standards.**
+**A type-safe, security-first ORM for Go — generics on the surface, six dialects underneath.**
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/jcsvwinston/quark.svg)](https://pkg.go.dev/github.com/jcsvwinston/quark)
 [![CI](https://github.com/jcsvwinston/quark/actions/workflows/ci.yml/badge.svg)](https://github.com/jcsvwinston/quark/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.21%2B-00ADD8?logo=go)](https://go.dev)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-87%25-brightgreen)](docs/benchmarks.md)
 [![Release](https://img.shields.io/github/v/release/jcsvwinston/quark)](https://github.com/jcsvwinston/quark/releases/latest)
 
-[Docs](docs/ENGLISH_DOCS.md) · [Quick Start](#-quick-start) · [Examples](examples/) · [CLI](#️-cli) · [Changelog](docs/RELEASE_NOTES_V1.md)
+[Docs](https://jcsvwinston.github.io/quark/) · [Quick Start](#-quick-start) · [Examples](examples/) · [CLI](#️-cli) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -21,7 +20,9 @@
 
 ## 📌 Status
 
-Quark is **v0.x** — production-grade design with an API that may evolve before v1.0. The core query builder, CRUD operations, and migration engine are considered stable. Breaking changes will be documented in the [changelog](docs/RELEASE_NOTES_V1.md) with a migration path.
+Quark is in **v0.3** — late-alpha. The Phase 0 P0 backlog is closed, the Phase 1 deliverables (dirty tracking, `Nullable[T]`, `JSON[T]`, `RegisterTypeMapper`, optimistic locking, soft-delete scopes) shipped, and the public API is stabilising fast. **It is not yet v1.0 production-ready** — see [`docs/ANALISIS_MADUREZ.md`](docs/ANALISIS_MADUREZ.md) for the honest gap analysis and the path to a real v1.0.
+
+Breaking changes are documented in [`docs/MIGRATION_v0.3.0.md`](docs/MIGRATION_v0.3.0.md) with a migration path; release notes per version live under [`docs/RELEASE_NOTES_*.md`](docs/).
 
 ---
 
