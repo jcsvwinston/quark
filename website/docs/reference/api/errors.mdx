@@ -11,6 +11,7 @@ var (
     ErrInvalidJSONPath     = errors.New("invalid JSON path")
     ErrInvalidJoin         = errors.New("invalid JOIN ON clause")
     ErrStaleEntity         = errors.New("stale entity (optimistic-locking conflict)")
+    ErrUnsupportedFeature  = errors.New("feature not supported by dialect")
     ErrDialectNotSupported = errors.New("dialect not supported")
     ErrConnection          = errors.New("database connection error")
     ErrTimeout             = errors.New("query timeout")
@@ -24,6 +25,14 @@ receives a path that does not match the dotted identifier grammar
 binds the path as a parameter in every dialect, but rejects malformed paths
 at the API surface so callers fail fast with a clear error rather than
 producing surprising SQL.
+
+`ErrUnsupportedFeature` is returned by builder methods (e.g.
+[`ForUpdate`](/docs/guides/querying#pessimistic-locking) on SQLite,
+`NoWait` on SQL Server) when the active dialect does not implement the
+requested feature. The error message includes the dialect name and the
+specific gap so callers can branch by dialect or fall back to a different
+strategy. Useful with `errors.Is` to check whether a soft fallback is
+appropriate (e.g. drop down to a transaction-level lock).
 
 `ErrStaleEntity` is returned when an `Update` / `UpdateFields` / `Tracked.Save`
 on a model carrying a `quark:"version"` field would have written an

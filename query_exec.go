@@ -452,6 +452,17 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	}
 	sqlBuf.WriteString(q.fullTableName())
 
+	// Pessimistic locking: MSSQL emits its hint right after the table name
+	// (`FROM users WITH (UPDLOCK, ROWLOCK)`); the row-level dialects emit a
+	// suffix at the very end of the SELECT — handled below.
+	lockHint, lockSuffix, lockErr := q.dialect.LockSuffix(q.lock)
+	if lockErr != nil {
+		return "", nil, lockErr
+	}
+	if lockHint != "" {
+		sqlBuf.WriteString(lockHint)
+	}
+
 	// JOIN clauses
 	if len(q.joins) > 0 {
 		if len(q.joins) > q.client.limits.MaxJoins {
@@ -558,6 +569,11 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	if limitOffset != "" {
 		sqlBuf.WriteString(" ")
 		sqlBuf.WriteString(limitOffset)
+	}
+
+	// Pessimistic-lock suffix (PG / MySQL / MariaDB / Oracle).
+	if lockSuffix != "" {
+		sqlBuf.WriteString(lockSuffix)
 	}
 
 	sqlStr := sqlBuf.String()

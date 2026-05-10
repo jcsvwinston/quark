@@ -104,6 +104,21 @@ type Dialect interface {
 	// SupportsTransactionalDDL indicates if the dialect supports DDL in transactions.
 	SupportsTransactionalDDL() bool
 
+	// LockSuffix returns the SQL fragments needed to attach a pessimistic
+	// lock to a SELECT.
+	//
+	//   - tableHint is appended after the FROM clause's table name. MSSQL
+	//     uses this slot for `WITH (UPDLOCK, ROWLOCK)`-style hints; the
+	//     row-level locking dialects return "" here.
+	//   - suffix is appended at the very end of the SELECT (after ORDER BY
+	//     and LIMIT/OFFSET) — `FOR UPDATE [SKIP LOCKED|NOWAIT]` for the
+	//     PG/MySQL/Oracle/MariaDB family.
+	//
+	// Returning ErrUnsupportedFeature signals "this dialect doesn't speak
+	// pessimistic locks at this level" — SQLite is the canonical case.
+	// LockOptions.IsZero() input must always return ("", "", nil).
+	LockSuffix(opts LockOptions) (tableHint, suffix string, err error)
+
 	// UpsertSQL returns the dialect-specific upsert (INSERT … ON CONFLICT … DO UPDATE)
 	// fragment that is appended after the VALUES clause.
 	// conflictCols: columns that define the conflict target (e.g. primary key or unique index).

@@ -9,7 +9,62 @@
 
 ---
 
-## Fase 1 — Tipos ricos y dirty tracking ligero
+## Fase 2 — Query builder componible y locking
+
+### ~~F2-locking · Pessimistic locking~~
+
+**Cerrado** — `Query[T].ForUpdate()`, `ForShare()`, `SkipLocked()`, `NoWait()`
+modifiers en `locking.go`. Nuevo `Dialect.LockSuffix(opts) (tableHint,
+suffix string, err error)` consumido por `buildSelect`. Implementaciones en
+`dialect_lock.go`:
+
+- PG / MySQL / MariaDB: `FOR UPDATE [SKIP LOCKED|NOWAIT]` / `FOR SHARE` suffix.
+- Oracle: igual a PG, sin `FOR SHARE` (devuelve `ErrUnsupportedFeature`).
+- MSSQL: table hints `WITH (UPDLOCK|HOLDLOCK, ROWLOCK [, READPAST])` en FROM.
+  No tiene NOWAIT directo → `ErrUnsupportedFeature`.
+- SQLite: cualquier opción no-zero → `ErrUnsupportedFeature` (usar `BEGIN IMMEDIATE`).
+
+Sentinel nuevo `ErrUnsupportedFeature` en `errors.go`.
+
+Cobertura: 17 unit tests (`TestLockSuffix_PerDialect` table-driven sobre los
+6 motores con todas las combinaciones, `TestLockOptions_IsZero`,
+`TestForUpdate_BuildsLockedSelect`) + `testPessimisticLocking` en
+SharedSuite (no-op baseline + SQLite-unsupported).
+
+Doc: `website/docs/guides/querying.mdx` § Pessimistic Locking con la matriz
+por dialect y nota sobre transacciones; `website/docs/reference/api/errors.mdx`
+ErrUnsupportedFeature; CHANGELOG `### Added`.
+
+### F2-IN-chunking · Pendiente
+Chunking automático de `IN(...)` por dialect (Oracle 1000, MSSQL 2100 params).
+
+### F2-AST · Pendiente
+Tipo `Expr` componible: `Col`, `Lit`, `Func`, `And`/`Or`/`Not`, `In`, `Exists`. `Where` y `Having` aceptan `Expr`.
+
+### F2-subqueries · Pendiente
+`AsSubquery()` integrable en otro `Where`/`Join`.
+
+### F2-CTE · Pendiente
+`With("t", subq).For[T]().Where(...)` + `WithRecursive`.
+
+### F2-window · Pendiente
+`OverWindow(name).PartitionBy(...).OrderBy(...)`; `RowNumber`/`Rank`/`Lag`.
+
+### F2-set · Pendiente
+`UNION` / `INTERSECT` / `EXCEPT` entre `Query[T]`.
+
+### F2-having-agg · Pendiente
+`Having(Func("count", Col("*")), ">", 5)` (cierra el bug histórico de paréntesis en HAVING).
+
+### F2-nested-preload · Pendiente
+`.Preload("Orders.Items.Product")` con planificación batch.
+
+### F2-join-builder · Pendiente
+Builder estructurado `Join(table).On(col, op, otherCol)` reemplazando la deprecation actual de string-raw Join.
+
+---
+
+## Fase 1 — Tipos ricos y dirty tracking ligero (cerrada en v0.3.0)
 
 ### ~~F1-1 · Dirty tracking ligero (cierre permanente de P0-4)~~
 
