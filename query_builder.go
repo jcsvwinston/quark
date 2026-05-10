@@ -6,6 +6,7 @@ package quark
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -381,6 +382,10 @@ func (q *Query[T]) GroupBy(columns ...string) *Query[T] {
 }
 
 // Having adds a HAVING condition (used together with GroupBy).
+//
+// The column argument is validated as a plain identifier — no parentheses,
+// function calls, or expressions. To filter on aggregates such as
+// COUNT(*) or SUM(col), use HavingAggregate instead.
 func (q *Query[T]) Having(column string, operator string, value any) *Query[T] {
 	c := q.clone()
 	c.having = append(c.having, condition{
@@ -388,6 +393,74 @@ func (q *Query[T]) Having(column string, operator string, value any) *Query[T] {
 		operator: operator,
 		value:    value,
 		logic:    "AND",
+	})
+	return c
+}
+
+// allowedAggregateFns is the whitelist of function names that
+// HavingAggregate accepts as its first argument. The list mirrors the
+// SQL-92 standard aggregates the dialects share without translation.
+var allowedAggregateFns = map[string]struct{}{
+	"COUNT": {},
+	"SUM":   {},
+	"AVG":   {},
+	"MIN":   {},
+	"MAX":   {},
+}
+
+// HavingAggregate adds a HAVING condition over an aggregate function.
+//
+// fn must be one of COUNT, SUM, AVG, MIN, MAX (case-insensitive). column is
+// either a regular column name (validated through SQLGuard) or "*" — only
+// accepted with COUNT, since "SUM(*)" / "AVG(*)" / etc. are not valid SQL.
+// operator goes through the same whitelist Where uses (=, !=, <>, <, <=,
+// >, >=, IN, NOT IN, BETWEEN, IS [NOT] NULL, LIKE, ILIKE).
+//
+// Example:
+//
+//	groups, err := quark.For[Order](ctx, client).
+//	    GroupBy("status").
+//	    HavingAggregate("COUNT", "*", ">", 5).
+//	    List()
+//	// emitted: ... GROUP BY "status" HAVING COUNT(*) > $1
+//
+// This closes the historic Having(column, op, value) limitation where the
+// column went through ValidateIdentifier and aggregates therefore could
+// not be expressed without RawQuery. The structured-AST form
+// Having(Func("count", Col("*")), ">", 5) arrives with the full Phase 2
+// AST; HavingAggregate is the focused, type-safe shortcut for the
+// overwhelmingly common case.
+func (q *Query[T]) HavingAggregate(fn, column, operator string, value any) *Query[T] {
+	c := q.clone()
+
+	upperFn := strings.ToUpper(strings.TrimSpace(fn))
+	if _, ok := allowedAggregateFns[upperFn]; !ok {
+		c.err = fmt.Errorf("%w: HavingAggregate fn %q must be one of COUNT/SUM/AVG/MIN/MAX", ErrInvalidQuery, fn)
+		return c
+	}
+	var expr string
+	if column == "*" {
+		if upperFn != "COUNT" {
+			c.err = fmt.Errorf("%w: HavingAggregate column \"*\" only valid with COUNT, got %s", ErrInvalidQuery, upperFn)
+			return c
+		}
+		expr = upperFn + "(*)"
+	} else {
+		if err := q.guard.ValidateIdentifier(column); err != nil {
+			c.err = err
+			return c
+		}
+		expr = upperFn + "(" + q.dialect.Quote(column) + ")"
+	}
+
+	// Reuse the condition raw-fragment slot. buildWhereClause renders
+	// isRaw conditions verbatim and validates the operator separately.
+	c.having = append(c.having, condition{
+		column:   expr,
+		operator: operator,
+		value:    value,
+		logic:    "AND",
+		isRaw:    true,
 	})
 	return c
 }

@@ -169,6 +169,33 @@ roles, err := quark.For[User](ctx, client).
     List()
 ```
 
+## Grouped Aggregates and HAVING
+
+`GroupBy` and `HavingAggregate` compose to filter on a group's aggregate
+without falling back to `RawQuery`:
+
+```go
+groups, err := quark.For[Order](ctx, client).
+    GroupBy("status").
+    HavingAggregate("COUNT", "*", ">", 5).
+    Limit(50).
+    List()
+// emitted: SELECT * FROM "orders" GROUP BY "status" HAVING COUNT(*) > $1
+```
+
+`HavingAggregate(fn, column, op, value)` rules:
+
+| Rule | Why |
+| --- | --- |
+| `fn` is one of `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` (case-insensitive). | Whitelist; unknown functions fail the SQL guard. |
+| `column == "*"` is only valid with `COUNT`. | `SUM(*)` etc. are not valid SQL. |
+| Other `column` values pass through `SQLGuard.ValidateIdentifier`. | Same identifier-safety rule as `Where`. |
+| `op` is the standard comparison operator whitelist. | `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`, `LIKE`, `ILIKE`, `BETWEEN`, `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`. |
+
+The plain `Having(column, op, value)` API still validates `column` as a
+plain identifier and therefore cannot express aggregates — use it for
+post-aggregation filtering on a non-aggregate column.
+
 ## Aggregates
 
 Use aggregate helpers for common numeric summaries:

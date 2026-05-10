@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`HavingAggregate(fn, column, op, value)` (Phase 2)**: structured way to
+  write `HAVING COUNT(*) > 5` / `HAVING SUM(amount) >= 100` / `HAVING
+  AVG(price) < ?` etc. without falling back to `RawQuery`. Closes the
+  historical limitation where the existing `Having(column, op, value)`
+  validated `column` through `SQLGuard.ValidateIdentifier` and therefore
+  rejected anything containing parentheses (i.e. every aggregate). The
+  function name is whitelisted (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`,
+  case-insensitive); the column is validated through the guard, except
+  for `*` which is only allowed with `COUNT`. The fully composable form
+  `Having(Func("count", Col("*")), ">", 5)` arrives with the rest of the
+  Phase 2 AST.
+
 ### Fixed
 
 - **Eager-loading paths now chunk parent keys (Phase 2)**: `Preload` over a
