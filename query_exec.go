@@ -572,6 +572,42 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	return sqlStr, args, nil
 }
 
+// substitutePathMarkers walks fragment, replacing each literal '?' with the
+// dialect-specific placeholder for the next argIndex, and returns the rendered
+// fragment plus the number of substitutions made. expectedMarkers is the
+// number of '?' the caller intends to substitute (i.e. len(cond.extraArgs));
+// a mismatch is treated as a builder bug and surfaced as an error so it cannot
+// silently produce malformed SQL.
+//
+// Index arithmetic: the first '?' becomes Placeholder(argIndex+0), the second
+// Placeholder(argIndex+1), etc. After the function returns, the caller
+// advances its argIndex by the returned count and appends extraArgs to args
+// in the same order, keeping the parameters aligned with the rendered SQL.
+//
+// dialect.Quote does not introduce '?' into identifiers in any of the
+// supported dialects (`"`, backtick, `[ ]`, uppercased), so '?' inside the
+// fragment is unambiguously a bind marker placed by JSONExtract.
+func substitutePathMarkers(fragment string, expectedMarkers int, dialect Dialect, argIndex int) (string, int, error) {
+	if expectedMarkers == 0 {
+		return fragment, 0, nil
+	}
+	var b strings.Builder
+	b.Grow(len(fragment))
+	count := 0
+	for i := 0; i < len(fragment); i++ {
+		if fragment[i] == '?' {
+			b.WriteString(dialect.Placeholder(argIndex + count))
+			count++
+			continue
+		}
+		b.WriteByte(fragment[i])
+	}
+	if count != expectedMarkers {
+		return "", 0, fmt.Errorf("%w: raw fragment has %d '?' markers, expected %d (extraArgs mismatch)", ErrInvalidQuery, count, expectedMarkers)
+	}
+	return b.String(), count, nil
+}
+
 // buildWhereClause recursively builds WHERE SQL from conditions,
 // handling AND/OR logic and grouped sub-conditions.
 func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []any, error) {
@@ -630,7 +666,17 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 			condSQL.WriteString(not)
 		}
 		if cond.isRaw {
-			condSQL.WriteString(cond.column)
+			// Raw fragments may contain '?' bind markers (e.g. JSONExtract path
+			// args). Substitute each marker for the dialect placeholder and
+			// thread the corresponding extraArgs into args at the matching
+			// argIndex, so the path components land before the value bind.
+			rendered, n, err := substitutePathMarkers(cond.column, len(cond.extraArgs), q.dialect, argIndex)
+			if err != nil {
+				return "", nil, err
+			}
+			condSQL.WriteString(rendered)
+			args = append(args, cond.extraArgs...)
+			argIndex += n
 		} else {
 			condSQL.WriteString(q.dialect.Quote(cond.column))
 		}

@@ -32,6 +32,24 @@ var reservedSQLKeywords = map[string]bool{
 // identifierRegex matches valid SQL identifiers.
 var identifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
+// jsonPathRegex matches a dotted JSON path: one or more identifier-like segments
+// separated by single dots. Each segment must match the same rules as a SQL
+// identifier (letter or underscore start, letters/digits/underscores after).
+//
+// Accepted:   "name", "user.name", "user.profile.email"
+// Rejected:   "" (empty), ".x", "x.", "x..y", "1user", "$.user", "user-name",
+//             anything containing whitespace, quotes, semicolons, comments, or
+//             SQL-meaningful characters.
+//
+// Array indexes (e.g. "items.0.id") and engine-specific JSONPath syntax are out
+// of scope for WhereJSON; users that need those should reach for RawQuery.
+var jsonPathRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$`)
+
+// maxJSONPathLen caps the total length of a JSON path. Paths longer than this
+// are almost certainly an attack or a bug; legitimate paths in practice are far
+// below this bound.
+const maxJSONPathLen = 256
+
 // New creates a new SQLGuard with default settings.
 func New() *SQLGuard {
 	return &SQLGuard{
@@ -87,6 +105,64 @@ func (g *SQLGuard) QuoteIdentifier(q Quoter, name string) (string, error) {
 		return "", err
 	}
 	return q.Quote(name), nil
+}
+
+// ValidateJSONPath checks that a JSON path is shaped like a dotted identifier
+// chain (e.g. "user.profile.email") and rejects anything that could carry SQL
+// injection: empty paths, paths with quotes, semicolons, comment markers,
+// whitespace, leading "$", or paths longer than maxJSONPathLen.
+//
+// It is a package-level function (not a method) because the validation has no
+// configurable state and the dialect layer needs to call it without holding
+// an SQLGuard instance.
+//
+// The error message starts with "ErrInvalidJSONPath:" so callers in package
+// quark can wrap it with the public sentinel via errors.Join.
+func ValidateJSONPath(path string) error {
+	if len(path) == 0 {
+		return fmt.Errorf("ErrInvalidJSONPath: path is empty")
+	}
+	if len(path) > maxJSONPathLen {
+		return fmt.Errorf("ErrInvalidJSONPath: path exceeds maximum length of %d characters", maxJSONPathLen)
+	}
+	if !jsonPathRegex.MatchString(path) {
+		return fmt.Errorf("ErrInvalidJSONPath: path %q must be a dotted identifier chain (e.g. \"user.name\")", path)
+	}
+	return nil
+}
+
+// ValidateJSONPath is the SQLGuard-bound counterpart to the package-level
+// function; both share the same logic and accept the same shapes.
+func (g *SQLGuard) ValidateJSONPath(path string) error {
+	return ValidateJSONPath(path)
+}
+
+// jsonTablePathRegex matches the more permissive JSONPath grammar accepted by
+// MariaDB's JSON_TABLE root expression — it allows array iterators (`[*]`)
+// and bracket indexes (`[0]`) on top of dotted keys, but still rejects
+// quotes, semicolons, comment markers, whitespace, and other SQL-meaningful
+// characters.
+var jsonTablePathRegex = regexp.MustCompile(`^\$(\.[a-zA-Z_][a-zA-Z0-9_]*|\[(\*|[0-9]+)\])*$`)
+
+// ValidateJSONTablePath is a defensive validator for MariaDB's JSON_TABLE
+// root path. Unlike ValidateJSONPath it accepts the JSONPath shapes that
+// JSON_TABLE requires (`$`, `$[*]`, `$.items[0]`, `$.items[*].name`) but
+// rejects anything that looks like injection.
+//
+// The JSON_TABLE entry point is internal-only today; this validator exists so
+// that any caller in package quark or trusted internal code paths still gets
+// a fail-fast error if a bad value reaches the dialect.
+func ValidateJSONTablePath(path string) error {
+	if len(path) == 0 {
+		return fmt.Errorf("ErrInvalidJSONPath: JSON_TABLE path is empty")
+	}
+	if len(path) > maxJSONPathLen {
+		return fmt.Errorf("ErrInvalidJSONPath: JSON_TABLE path exceeds maximum length of %d characters", maxJSONPathLen)
+	}
+	if !jsonTablePathRegex.MatchString(path) {
+		return fmt.Errorf("ErrInvalidJSONPath: JSON_TABLE path %q must be a JSONPath rooted at $ (e.g. \"$[*]\", \"$.items[0].name\")", path)
+	}
+	return nil
 }
 
 // ValidateOperator checks if an operator is in the allowed whitelist.

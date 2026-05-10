@@ -53,8 +53,8 @@ func TestPostgresDialect_Full(t *testing.T) {
 	if d.LastInsertIDQuery("t", "id") != "" {
 		t.Error("LastInsertIDQuery")
 	}
-	if !strings.Contains(d.JSONExtract("data", "key"), "jsonb") {
-		t.Error("JSONExtract")
+	if sql, args, err := d.JSONExtract("data", "key"); err != nil || !strings.Contains(sql, "jsonb") || len(args) == 0 {
+		t.Errorf("JSONExtract: sql=%q args=%v err=%v", sql, args, err)
 	}
 	if d.CurrentTimestamp() == "" {
 		t.Error("CurrentTimestamp")
@@ -130,8 +130,8 @@ func TestMySQLDialect(t *testing.T) {
 	if d.LastInsertIDQuery("t", "id") == "" {
 		t.Error("LastInsertIDQuery")
 	}
-	if !strings.Contains(d.JSONExtract("data", "key"), "JSON_EXTRACT") {
-		t.Error("JSONExtract")
+	if sql, args, err := d.JSONExtract("data", "key"); err != nil || !strings.Contains(sql, "JSON_EXTRACT") || len(args) == 0 {
+		t.Errorf("JSONExtract: sql=%q args=%v err=%v", sql, args, err)
 	}
 	if d.CurrentTimestamp() == "" {
 		t.Error("CurrentTimestamp")
@@ -203,8 +203,8 @@ func TestSQLiteDialect(t *testing.T) {
 	if d.LastInsertIDQuery("t", "id") == "" {
 		t.Error("LastInsertIDQuery")
 	}
-	if !strings.Contains(d.JSONExtract("d", "k"), "JSON_EXTRACT") {
-		t.Error("JSONExtract")
+	if sql, args, err := d.JSONExtract("d", "k"); err != nil || !strings.Contains(sql, "JSON_EXTRACT") || len(args) == 0 {
+		t.Errorf("JSONExtract: sql=%q args=%v err=%v", sql, args, err)
 	}
 	if d.CurrentTimestamp() == "" {
 		t.Error("CurrentTimestamp")
@@ -279,8 +279,8 @@ func TestMSSQLDialect_Full(t *testing.T) {
 	if !strings.Contains(d.LastInsertIDQuery("t", "id"), "SCOPE_IDENTITY") {
 		t.Error("LastInsertIDQuery")
 	}
-	if !strings.Contains(d.JSONExtract("d", "k"), "JSON_VALUE") {
-		t.Error("JSONExtract")
+	if sql, args, err := d.JSONExtract("d", "k"); err != nil || !strings.Contains(sql, "JSON_VALUE") || len(args) == 0 {
+		t.Errorf("JSONExtract: sql=%q args=%v err=%v", sql, args, err)
 	}
 	if !strings.Contains(d.CurrentTimestamp(), "GETDATE") {
 		t.Error("CurrentTimestamp")
@@ -352,8 +352,8 @@ func TestOracleDialect_Full(t *testing.T) {
 	if d.LastInsertIDQuery("t", "id") != "" {
 		t.Error("LastInsertIDQuery")
 	}
-	if !strings.Contains(d.JSONExtract("d", "k"), "JSON_VALUE") {
-		t.Error("JSONExtract")
+	if sql, args, err := d.JSONExtract("d", "k"); err != nil || !strings.Contains(sql, "JSON_VALUE") || len(args) == 0 {
+		t.Errorf("JSONExtract: sql=%q args=%v err=%v", sql, args, err)
 	}
 	if d.CurrentTimestamp() != "SYSDATE" {
 		t.Error("CurrentTimestamp")
@@ -424,8 +424,8 @@ func TestMariaDBDialect_Full(t *testing.T) {
 	if d.LastInsertIDQuery("t", "id") == "" {
 		t.Error("LastInsertIDQuery fallback")
 	}
-	if !strings.Contains(d.JSONExtract("d", "k"), "JSON_VALUE") {
-		t.Error("JSONExtract")
+	if sql, args, err := d.JSONExtract("d", "k"); err != nil || !strings.Contains(sql, "JSON_VALUE") || len(args) == 0 {
+		t.Errorf("JSONExtract: sql=%q args=%v err=%v", sql, args, err)
 	}
 	if !d.SupportsTransactionalDDL() == false { // false means no tx DDL
 		// SupportsTransactionalDDL should return false for MariaDB

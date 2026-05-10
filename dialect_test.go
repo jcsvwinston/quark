@@ -106,9 +106,16 @@ func TestMariaDBDialect(t *testing.T) {
 		t.Error("mariadb dialect should prefer RETURNING over LastInsertID")
 	}
 
-	// JSON_VALUE (10.2.3+)
-	if got := d.JSONExtract("meta", "key"); got != "JSON_VALUE(`meta`, '$.key')" {
-		t.Errorf("JSONExtract: got %q", got)
+	// JSON_VALUE (10.2.3+) — path is bound, not interpolated.
+	gotSQL, gotArgs, err := d.JSONExtract("meta", "key")
+	if err != nil {
+		t.Fatalf("JSONExtract: %v", err)
+	}
+	if gotSQL != "JSON_VALUE(`meta`, ?)" {
+		t.Errorf("JSONExtract sql: got %q", gotSQL)
+	}
+	if len(gotArgs) != 1 || gotArgs[0] != "$.key" {
+		t.Errorf("JSONExtract args: got %v", gotArgs)
 	}
 
 	// No transactional DDL (implicit commits like MySQL)

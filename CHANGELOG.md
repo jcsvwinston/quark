@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`WhereJSON` SQL injection via path interpolation (P0-2)**: every dialect's
+  `JSONExtract` was building the SQL with `fmt.Sprintf("'%s'", path)` (or the
+  Postgres `->>'%s'` equivalent), so a path containing a single quote either
+  broke the SQL or could be weaponised when the path came from user input.
+  Fixed in two layers: (1) the path is now bound as a parameter in every
+  dialect — Postgres uses `jsonb_extract_path_text(col, VARIADIC text)` with
+  one bind per segment, the rest use `JSON_EXTRACT`/`JSON_VALUE(col, ?)` with
+  the `$.path` form; (2) `internal/guard.ValidateJSONPath` enforces the
+  grammar `^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$` (max 256
+  chars) and is called from each dialect before the bind. Invalid paths now
+  return `ErrInvalidJSONPath` (new sentinel) at execution time.
+  **Breaking**: `Dialect.JSONExtract` signature changed from
+  `(column, path string) string` to
+  `(column, path string) (sql string, args []any, err error)`. Custom
+  dialects registered via `RegisterDialect` must update.
+  Regression test `testJSONPathSecurity` wired into the shared suite covers
+  valid paths (asserts the path is in bind args, never in the SQL surface)
+  and 8 injection vectors (quotes, semicolons, comments, leading `$`, dashes,
+  whitespace, empty).
+
 - **Tenant isolation leak in `Or()` under `RowLevelSecurity` (P0-1)**: an `Or(...)`
   group used to be built on a fresh `BaseQuery` that did not carry the active
   `tenantID` / `tenantCol`. Combined with SQL operator precedence
@@ -21,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test (`testOrRLSLeak`) wired into the shared multi-engine suite that fails
   before the fix and passes after, including a nested-`Or` variant.
   No public API change.
+
+### Changed
+
+- **`Dialect.JSONExtract` signature** is now
+  `(column, path string) (sql string, args []any, err error)` (was
+  `(column, path string) string`). Required to bind the path as a parameter
+  for P0-2. Custom dialects registered via `RegisterDialect` must update.
 
 ## [0.1.1] - 2026-05-06
 

@@ -5,7 +5,8 @@ files:
   - dialect.go
 last_review: 2026-05-10
 related_adrs: [0005]
-related_p0: [P0-2]
+related_p0: []
+closed_p0: [P0-2]
 phase: 0
 ---
 
@@ -28,18 +29,15 @@ Registro de dialectos custom: `RegisterDialect("vertica", verticaDialect)` (`dia
 
 ## Bugs P0 vivos
 
-### P0-2 · `JSONExtract` concatena el path con `fmt.Sprintf` sin escapar
+(ninguno en este módulo; ver § Historial.)
 
-**Localización**: `dialect.go` — métodos `JSONExtract` por dialecto. El path JSON se interpola con `Sprintf("'%s'", path)` o equivalente.
+## Historial — bugs cerrados
 
-**Impacto**: si el path contiene una comilla simple, rompe el SQL. Si viene de input no controlado, vector de inyección.
+### P0-2 · `JSONExtract` concatenaba el path (cerrado)
 
-**Fix esperado**: validar el path contra regex `^[a-zA-Z_$][a-zA-Z0-9_$.]*$` en `internal/guard/`. O, mejor, pasarlo como bind param donde el motor lo permita:
-- PG: `jsonb_extract_path_text(col, VARIADIC text[])`.
-- MySQL/MariaDB: `JSON_EXTRACT(col, ?)`.
-- MSSQL: `JSON_VALUE(col, ?)`.
+`Dialect.JSONExtract` cambió de `(column, path string) string` a `(column, path string) (sql string, args []any, err error)`. SQL fragment usa `?` como marker neutral; `query_exec.go:substitutePathMarkers` los traduce al placeholder de cada motor en build time. Cada dialecto llama `guard.ValidateJSONPath` antes del bind. Detalles del fix y decisiones (rechazo de leading `$`, max 256 chars) en `docs/playbooks/security.md` § Historial.
 
-Por defecto, rechazar paths con `'`, `;`, `--`, `/*`, `\` y operadores SQL.
+**Impacto en custom dialects**: cualquier dialecto registrado vía `RegisterDialect("vertica", …)` debe actualizar la firma. Pre-1.0; sin uso conocido externo.
 
 ## Lo que está bien hecho (no romper)
 
@@ -72,6 +70,8 @@ sql := fmt.Sprintf("SELECT * FROM users WHERE id = %s", dialect.Placeholder(1))
 ```
 
 Cualquier SQL nuevo construido en el código debe usar `dialect.Placeholder(n)`. Buscar `?` hardcoded en el código fuera de tests es un anti-pattern detectable.
+
+**Excepción documentada**: `Dialect.JSONExtract` devuelve un fragmento con `?` como **marker neutral** que `query_exec.go:substitutePathMarkers` traduce a placeholders dialect-specific en render time. Es deliberado y centralizado — no lo extiendas a otros sitios sin discutirlo, mantén la regla general "usar `dialect.Placeholder(n)` directamente".
 
 ### Asumir un quoting
 
@@ -110,7 +110,7 @@ Mezcla SQL builder + DDL + procedures + JSON. Cuando MariaDB añade `CreateSeque
 
 ## Roadmap de mejora
 
-- **Fase 0**: cerrar P0-2 (JSON path).
+- **Fase 0**: ~~cerrar P0-2 (JSON path) — cerrado, ver § Historial.~~
 - **Fase 1**: tipos ricos — `decimal.Decimal`, `uuid.UUID`, `time.Duration`, `[]byte`/`bytea`, `JSON[T]` genérico, arrays Postgres.
 - **Fase 2**: AST permite expresar window functions, locking, CTEs por dialecto.
 - **Fase 3**: introspección completa (tipos, NOT NULL, defaults, índices, FKs, checks) por dialecto.

@@ -6,6 +6,8 @@ package quark
 import (
 	"fmt"
 	"strings"
+
+	"github.com/jcsvwinston/quark/internal/guard"
 )
 
 // Dialect defines the interface for database-specific SQL generation.
@@ -59,10 +61,25 @@ type Dialect interface {
 	// E.g., MySQL: CALL proc(?, ?)
 	BuildProcedureCall(procedure string, argCount int) string
 
-	// JSONExtract returns the SQL expression to extract a value from a JSON column.
-	// E.g., Postgres: "data"->>'key'
-	// MySQL: JSON_EXTRACT(`data`, '$.key')
-	JSONExtract(column, path string) string
+	// JSONExtract returns the SQL expression to extract a value from a JSON column,
+	// the bind args required by that expression, or an error if the path is
+	// malformed.
+	//
+	// The returned SQL fragment uses literal '?' as a neutral bind marker; the
+	// caller (typically buildWhereClause) substitutes each '?' for the dialect's
+	// placeholder syntax (`$N`, `?`, `@pN`, `:N`) at the appropriate arg index.
+	//
+	// The path is validated and passed as a bind parameter — never interpolated
+	// into the SQL surface. This closes the SQL-injection vector that existed
+	// while the path was concatenated with fmt.Sprintf.
+	//
+	// Example outputs (with column "data" and path "user.name"):
+	//   Postgres: jsonb_extract_path_text(("data")::jsonb, ?, ?) / args=["user","name"]
+	//   MySQL:    JSON_EXTRACT(`data`, ?) / args=["$.user.name"]
+	//   SQLite:   JSON_EXTRACT("data", ?) / args=["$.user.name"]
+	//   MSSQL:    JSON_VALUE([data], ?) / args=["$.user.name"]
+	//   Oracle:   JSON_VALUE("DATA", ?) / args=["$.user.name"]
+	JSONExtract(column, path string) (sql string, args []any, err error)
 
 	// AlterTableAddColumn returns SQL to add a column to a table.
 	// E.g., PostgreSQL: ALTER TABLE "users" ADD COLUMN "email" VARCHAR(255)
@@ -169,10 +186,21 @@ func (p *PostgresDialect) LastInsertIDQuery(table, pkColumn string) string {
 	return "" // Uses RETURNING
 }
 
-func (p *PostgresDialect) JSONExtract(column, path string) string {
-	// Simple path extraction for Postgres: (col)::jsonb->>'path'
-	// The cast ensures it works even if the column is TEXT.
-	return fmt.Sprintf("(%s)::jsonb->>'%s'", p.Quote(column), path)
+func (p *PostgresDialect) JSONExtract(column, path string) (string, []any, error) {
+	if err := guard.ValidateJSONPath(path); err != nil {
+		return "", nil, err
+	}
+	// Bind each path component as a separate text arg to the variadic
+	// jsonb_extract_path_text(jsonb, VARIADIC text[]). The cast lets it work
+	// on TEXT-typed columns too.
+	parts := strings.Split(path, ".")
+	markers := make([]string, len(parts))
+	args := make([]any, len(parts))
+	for i, seg := range parts {
+		markers[i] = "?"
+		args[i] = seg
+	}
+	return fmt.Sprintf("jsonb_extract_path_text((%s)::jsonb, %s)", p.Quote(column), strings.Join(markers, ", ")), args, nil
 }
 
 func (p *PostgresDialect) CurrentTimestamp() string {
@@ -249,9 +277,11 @@ func (m *MySQLDialect) Placeholder(index int) string {
 	return "?"
 }
 
-func (m *MySQLDialect) JSONExtract(column, path string) string {
-	// MySQL path: $.key
-	return fmt.Sprintf("JSON_EXTRACT(%s, '$.%s')", m.Quote(column), path)
+func (m *MySQLDialect) JSONExtract(column, path string) (string, []any, error) {
+	if err := guard.ValidateJSONPath(path); err != nil {
+		return "", nil, err
+	}
+	return fmt.Sprintf("JSON_EXTRACT(%s, ?)", m.Quote(column)), []any{"$." + path}, nil
 }
 
 func (m *MySQLDialect) Placeholders(n int) []string {
@@ -413,9 +443,11 @@ func (s *SQLiteDialect) LastInsertIDQuery(table, pkColumn string) string {
 	return "SELECT last_insert_rowid()"
 }
 
-func (s *SQLiteDialect) JSONExtract(column, path string) string {
-	// SQLite path: $.key
-	return fmt.Sprintf("JSON_EXTRACT(%s, '$.%s')", s.Quote(column), path)
+func (s *SQLiteDialect) JSONExtract(column, path string) (string, []any, error) {
+	if err := guard.ValidateJSONPath(path); err != nil {
+		return "", nil, err
+	}
+	return fmt.Sprintf("JSON_EXTRACT(%s, ?)", s.Quote(column)), []any{"$." + path}, nil
 }
 
 func (s *SQLiteDialect) CurrentTimestamp() string {
@@ -540,9 +572,11 @@ func (m *MSSQLDialect) LastInsertIDQuery(table, pkColumn string) string {
 	return "SELECT SCOPE_IDENTITY()"
 }
 
-func (m *MSSQLDialect) JSONExtract(column, path string) string {
-	// MSSQL path: $.key
-	return fmt.Sprintf("JSON_VALUE(%s, '$.%s')", m.Quote(column), path)
+func (m *MSSQLDialect) JSONExtract(column, path string) (string, []any, error) {
+	if err := guard.ValidateJSONPath(path); err != nil {
+		return "", nil, err
+	}
+	return fmt.Sprintf("JSON_VALUE(%s, ?)", m.Quote(column)), []any{"$." + path}, nil
 }
 
 func (m *MSSQLDialect) CurrentTimestamp() string {
@@ -701,9 +735,11 @@ func (o *OracleDialect) UpsertSQL(conflictCols, updateCols []string, _ int) stri
 	return ""
 }
 
-func (o *OracleDialect) JSONExtract(column, path string) string {
-	// Oracle path: $.key
-	return fmt.Sprintf("JSON_VALUE(%s, '$.%s')", o.Quote(column), path)
+func (o *OracleDialect) JSONExtract(column, path string) (string, []any, error) {
+	if err := guard.ValidateJSONPath(path); err != nil {
+		return "", nil, err
+	}
+	return fmt.Sprintf("JSON_VALUE(%s, ?)", o.Quote(column)), []any{"$." + path}, nil
 }
 
 // MariaDBDialect implements the MariaDB dialect.
@@ -760,8 +796,11 @@ func (m *MariaDBDialect) LastInsertIDQuery(table, pkColumn string) string {
 
 // JSONExtract uses the MariaDB / MySQL JSON_VALUE syntax (10.2.3+).
 // MariaDB also accepts the arrow operator col->>'$.key' from 10.4.3+.
-func (m *MariaDBDialect) JSONExtract(column, path string) string {
-	return fmt.Sprintf("JSON_VALUE(%s, '$.%s')", m.Quote(column), path)
+func (m *MariaDBDialect) JSONExtract(column, path string) (string, []any, error) {
+	if err := guard.ValidateJSONPath(path); err != nil {
+		return "", nil, err
+	}
+	return fmt.Sprintf("JSON_VALUE(%s, ?)", m.Quote(column)), []any{"$." + path}, nil
 }
 
 // CreateSequence returns the DDL to create a named sequence (MariaDB 10.3+).
@@ -799,8 +838,24 @@ func (m *MariaDBDialect) HistoryBetween(table, from, to string) string {
 
 // JSONTable returns a JSON_TABLE expression (MariaDB 10.6+).
 // source: SQL expression producing JSON; path: root path e.g. '$[*]';
-// columns: column definitions e.g. "id INT PATH '$.id'"
+// columns: column definitions e.g. "id INT PATH '$.id'".
+//
+// The path is validated against guard.ValidateJSONTablePath (JSONPath grammar
+// rooted at "$"). source and columns must be trusted strings — the JSON_TABLE
+// row syntax intermixes column types and PATH literals, so binding it as a
+// parameter is not possible. Callers MUST NOT pass user-controlled values for
+// source or columns. If invalid, the returned SQL embeds an obvious sentinel
+// that fails parsing at execution time, surfacing the misuse rather than
+// silently producing executable injection.
+//
+// TODO(public-api): when JSONTable graduates from internal-only to a public
+// builder, change the signature to return (string, error) so callers can
+// detect validation failure with errors.Is rather than scanning the SQL for
+// JSON_TABLE_PATH_INVALID.
 func (m *MariaDBDialect) JSONTable(source, path string, columns ...string) string {
+	if err := guard.ValidateJSONTablePath(path); err != nil {
+		return fmt.Sprintf("/* %s */ JSON_TABLE_PATH_INVALID", err.Error())
+	}
 	cols := strings.Join(columns, ",\n  ")
 	return fmt.Sprintf("JSON_TABLE(%s, '%s' COLUMNS (\n  %s\n))", source, path, cols)
 }

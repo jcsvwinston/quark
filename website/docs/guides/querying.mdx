@@ -210,19 +210,43 @@ users, err := quark.For[User](ctx, client).
     List()
 ```
 
-Dialect examples:
+### Path grammar
 
-| Dialect | Shape |
+Quark accepts dotted identifier paths:
+
+| Accepted | Rejected |
 | --- | --- |
-| PostgreSQL | `("metadata")::jsonb->>'plan' = $1` |
-| MySQL | `JSON_EXTRACT(\`metadata\`, '$.plan') = ?` |
-| MariaDB | `JSON_VALUE(\`metadata\`, '$.plan') = ?` |
-| SQLite | `JSON_EXTRACT("metadata", '$.plan') = ?` |
-| SQL Server | `JSON_VALUE([metadata], '$.plan') = @p1` |
-| Oracle | `JSON_VALUE("METADATA", '$.plan') = :1` |
+| `"name"` | `""` (empty) |
+| `"user.name"` | `"$.user.name"` (leading `$`) |
+| `"user.profile.email"` | `".user"` / `"user."` / `"user..name"` |
+| `"_private.field"` | `"1user"` (digit-leading segment) |
+| `"x1.y2.z3"` | `"user-name"` / `"user name"` / quotes / semicolons / SQL comments |
 
-Use simple path keys. If your engine-specific JSON query needs arrays, casts, or
-special operators, move that query to `RawQuery`.
+The exact regex is `^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$`, total
+length capped at 256 characters. Anything else returns
+[`ErrInvalidJSONPath`](/docs/reference/api/errors) at execution time. Array
+indexes (`items[0].id` / `items.0.id`) and engine-specific JSONPath operators
+are out of scope — drop down to [`RawQuery`](#raw-sql-as-an-escape-hatch) for
+those cases.
+
+### Injection safety
+
+The path is **bound as a parameter**, never interpolated into the SQL surface.
+A path that matches the grammar above produces:
+
+| Dialect | Shape (with `column = "metadata"`, `path = "plan"`) |
+| --- | --- |
+| PostgreSQL | `jsonb_extract_path_text(("metadata")::jsonb, $1) = $2` (one bind per path segment) |
+| MySQL | `JSON_EXTRACT(\`metadata\`, ?) = ?` (path bound as `"$.plan"`) |
+| MariaDB | `JSON_VALUE(\`metadata\`, ?) = ?` |
+| SQLite | `JSON_EXTRACT("metadata", ?) = ?` |
+| SQL Server | `JSON_VALUE([metadata], @p1) = @p2` |
+| Oracle | `JSON_VALUE("METADATA", :1) = :2` |
+
+Even if the path were attacker-controlled the validator rejects everything
+SQL-meaningful, and the bind-as-parameter render makes injection impossible at
+the dialect surface. If you find a path that breaks either guarantee, file an
+issue under the `security` label.
 
 ## Joins
 
