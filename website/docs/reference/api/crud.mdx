@@ -85,12 +85,14 @@ Zero values are skipped:
 :::caution Zero-value trap (P0-4)
 Because `Update` filters out zero values, it **cannot** write `false`, `0`,
 `""`, or `nil` to a column. To put `active = false` into the database use
-[`UpdateFields`](#updatefields) or [`UpdateMap`](#updatemap). When `Update`
-detects skipped zero-value fields it logs a `WARN` line so you notice the
-silent skip.
+[`Track + Save`](#track--save-dirty-tracking) (recommended; the snapshot-driven
+escape hatch added in Phase 1), [`UpdateFields`](#updatefields), or
+[`UpdateMap`](#updatemap). When `Update` detects skipped zero-value fields it
+logs a `WARN` line so you notice the silent skip.
 
-This trap will go away when dirty tracking lands in Phase 1. Until then
-treat `Update` as "partial update of explicitly-set non-zero fields".
+The trap is preserved on `Update` itself for behavioural compatibility; reach
+for `Track + Save` when you want to mutate a struct freely and let Quark
+decide what to write.
 :::
 
 `Update` merges primary-key predicates with any existing query `Where` clauses:
@@ -102,6 +104,47 @@ rows, err := quark.For[User](ctx, client).
 ```
 
 Hooks: `BeforeUpdate` and `AfterUpdate`.
+
+## Track + Save (dirty tracking)
+
+### `Query[T].Track() *TrackedQuery[T]`
+
+Opt-in dirty tracking. `Track` swaps the result type of `Find` / `First` /
+`List` from `T` / `[]T` to `*Tracked[T]` / `[]*Tracked[T]`. Each tracked
+value carries a snapshot of the column values at load time, so a later
+`Save` can emit an UPDATE that touches only the columns whose values
+actually changed — and writes them even when the new value is zero.
+
+```go
+tracked, err := quark.For[User](ctx, client).Track().Find(42)
+if err != nil { return err }
+
+tracked.Entity.Active = false
+tracked.Entity.Score = 0
+
+rows, err := tracked.Save(ctx)
+// emits: UPDATE "users" SET "active" = $1, "score" = $2 WHERE "id" = $3
+//        args = [false, 0, 42]
+```
+
+`Tracked.Changed()` returns the list of columns whose values differ from
+the snapshot; `Tracked.Save(ctx)` runs the UPDATE and refreshes the
+snapshot on success, so a second `Save` with no further mutation is a
+no-op (returns `0, nil` without touching the database).
+
+Rules:
+
+| Rule | Why |
+| --- | --- |
+| The primary-key column is never included in `SET`. | Identity is WHERE-only. |
+| The configured tenant column is never written. | RLS isolation boundary; a `Save` cannot move a row across tenants. |
+| The tenant predicate from the loading query is added to the `WHERE`. | Same isolation guarantee as the rest of the multi-tenant API. |
+| Hooks `BeforeUpdate` / `AfterUpdate` run, just like on `Update`. | Behaviour parity with the partial-update path. |
+| Save is the permanent fix for the [P0-4 zero-value trap](#update). | `Update`'s zero-value filter doesn't apply — values are written based on the diff, not on whether they're zero. |
+
+The snapshot lives on the wrapper, not in the Client, so there is no
+shared map to grow or evict. Each `Tracked` is independent — pass it
+around, mutate it, save it whenever you want.
 
 ## UpdateFields
 

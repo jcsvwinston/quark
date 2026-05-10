@@ -1,12 +1,51 @@
 # Quark — backlog táctico
 
-> Backlog vivo de **Fase 0** del plan (`docs/ANALISIS_MADUREZ.md` §4). Mientras haya items en `## Bugs P0`, no se trabaja en otras fases.
+> **Fase 0 cerrada (2026-05-10).** Los 5 P0 originales están tachados abajo;
+> el repo queda consolidado en `main` sin branches huérfanas y con todas las
+> docs al día. Backlog vivo ahora en **Fase 1** (`docs/ANALISIS_MADUREZ.md` §4).
 >
-> Convención: cada tarea lleva su archivo:línea de origen, criterio de "done" y dónde queda la documentación al cerrar.
+> Convención: cada tarea lleva su archivo:línea de origen, criterio de "done"
+> y dónde queda la documentación al cerrar.
 
 ---
 
-## Bugs P0 (bloqueantes; producción frágil o insegura)
+## Fase 1 — Tipos ricos y dirty tracking ligero
+
+### ~~F1-1 · Dirty tracking ligero (cierre permanente de P0-4)~~
+
+**Cerrado** — `Query[T].Track()` devuelve `*TrackedQuery[T]` cuyas
+`Find/First/List` envuelven cada entidad cargada en `*Tracked[T]` con un
+snapshot por columna. `Tracked.Save(ctx)` emite UPDATE sólo de columnas
+cambiadas (snapshot-vs-current; sin filtro `isZeroValue`, así que `false`/`0`/`""`
+se escriben). Snapshot vive en el wrapper — sin identity map global, sin GC
+pressure. Tenant predicate del query padre se propaga al WHERE de Save; PK
+y tenant column nunca van al SET aunque el caller los mute.
+
+Cobertura: `testDirtyTracking` (`dirty_track_test.go`) wired a `SharedSuite`
+con 5 subtests: WritesZeroValuesWhenChanged, NoChangeMeansNoSQL,
+SnapshotRefreshesAfterSave, ListReturnsTrackedSlice, PrimaryKeyNeverMutated.
+Doc: `website/docs/reference/api/crud.mdx` § "Track + Save (dirty tracking)";
+CHANGELOG `### Added`; Historial en `docs/playbooks/query-builder.md` §P0-4
+(cierre permanente).
+
+### F1-2 · Tipos ricos
+[Pendiente] `shopspring/decimal`, `google/uuid`, `time.Duration`, JSON tipado vía generics (`JSON[T]`), arrays Postgres, mapeo correcto de timezones.
+
+### F1-3 · `Nullable[T]` genérico
+[Pendiente] Reemplazo idiomático de `*time.Time` / `sql.NullString`.
+
+### F1-4 · `RegisterTypeMapper`
+[Pendiente] Sistema extensible para `internal/migrate.SQLType`. Permitir longitud por tag (`db:"name,size=512"`).
+
+### F1-5 · Soft delete real
+[Pendiente] Scope `WithTrashed()` / `OnlyTrashed()` automático cuando el modelo tiene `DeletedAt *time.Time`.
+
+### F1-6 · Optimistic locking
+[Pendiente] Tag `quark:"version"` que incrementa y añade a WHERE en cada UPDATE; error tipado `ErrStaleEntity`.
+
+---
+
+## Bugs P0 (cerrados — historial)
 
 ### ~~P0-1 · `Or()` no propaga `tenantID` → fuga de aislamiento entre tenants~~
 

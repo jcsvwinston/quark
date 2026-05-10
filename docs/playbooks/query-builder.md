@@ -11,7 +11,7 @@ last_review: 2026-05-10
 related_adrs: [0001, 0002, 0007]
 related_p0: []
 closed_p0: [P0-1, P0-3, P0-4, P0-5]
-phase: 0
+phase: 1
 ---
 
 # Playbook: Query Builder
@@ -48,30 +48,33 @@ el predicado de tenant por precedencia SQL. Fix: `(b *BaseQuery) cloneForGroup()
 copia el contexto de aislamiento al blank y pre-inyecta el predicado de tenant
 para que el grupo OR lo herede. Detalles en `docs/playbooks/tenant.md`.
 
-### P0-4 · `isZeroValue` impedía escribir `false`/`0`/`""` en `Update` (mitigado)
+### P0-4 · `isZeroValue` impedía escribir `false`/`0`/`""` en `Update` (cerrado en Fase 1)
 
-`Update(entity)` sigue saltándose campos cuyo valor es zero-value del tipo —
-ese es el diseño hasta que llegue dirty tracking en Fase 1 (decisión
-arquitectónica, no bug). Lo que sí era un P0 era no tener una salida explícita
-para escribir ceros: el usuario tenía que usar `UpdateMap` y construir el WHERE
-a mano.
+`Update(entity)` sigue saltándose zero-values por diseño (mantiene el comportamiento previo) y ahora hay dos salidas explícitas:
 
-Mitigación aplicada: nueva API `UpdateFields(entity, fields ...string) (int64,
-error)` (`query_crud.go`) que ignora el filtro `isZeroValue` y escribe sólo
-los campos nombrados. Rechaza listas vacías, nombres desconocidos, y la PK.
-Hooks `BeforeUpdate`/`AfterUpdate` siguen corriendo. Además, `Update(entity)`
-ahora loguea WARN listando los campos zero-value que se está saltando, para
-que la trampa sea visible en runtime.
+1. **`UpdateFields(entity, fields...)`** — la API explícita-por-campo añadida en P0-4 (Fase 0). Apropiada cuando sabes qué columnas quieres tocar.
+2. **`Query[T].Track().Find(id)` → `tracked.Save(ctx)`** — la API basada en snapshot añadida en Fase 1 (`dirty_track.go`). Apropiada cuando quieres mutar el struct libremente y dejar que Quark calcule el diff.
 
-Cobertura: `testUpdateZeroValues` en `update_zero_values_test.go` wired a
-`SharedSuite` — 6 subtests: confirma el comportamiento documentado de Update
-+ verifica que `UpdateFields` escribe `false`, `0`, `""`, rechaza unknown
-field, rechaza la PK, rechaza lista vacía.
+`Tracked.Save` cierra la herida P0-4 sin pedir Unit-of-Work completo: la comparación es snapshot-vs-current, así que `false`, `0`, `""` se escriben cuando el valor cambió. La snapshot vive en el wrapper, no en un identity map global — cero memoria compartida, cero GC pressure.
 
-**Cierre permanente**: dirty tracking en Fase 1 (`Track()` + snapshot al cargar
-+ `Save()` que sólo emita UPDATE de campos cambiados, ver §1 de
-ANALISIS_MADUREZ §4). Cuando llegue, `UpdateFields` puede mantenerse como
-API explícita o deprecarse — decisión a tomar entonces.
+#### Patrón Fase 0 (mitigación; sigue siendo API válida)
+
+`UpdateFields(entity, fields ...string) (int64, error)` en `query_crud.go`
+ignora el filtro `isZeroValue` y escribe sólo los campos nombrados. Rechaza
+listas vacías, nombres desconocidos, y la PK. Útil cuando ya sabes qué
+columnas tocar y no necesitas el snapshot. `Update(entity)` también loguea
+WARN listando los campos zero-value que está saltando, para que la trampa
+sea visible en runtime.
+
+Cobertura conjunta:
+- `testUpdateZeroValues` (`update_zero_values_test.go`) — 6 subtests para
+  `UpdateFields` y la trampa de `Update`.
+- `testDirtyTracking` (`dirty_track_test.go`) — 5 subtests para `Track()` +
+  `Tracked.Save`: writes-zero-when-changed, no-change-no-SQL, snapshot
+  refresh, list-returns-tracked-slice, PK-never-mutated.
+
+`UpdateFields` y `Tracked.Save` coexisten — uno es explícito-por-campo,
+el otro es snapshot-driven; cada cual sirve casos distintos.
 
 ### P0-3 · `linkM2M` swallowed every driver error (cerrado)
 
