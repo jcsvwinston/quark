@@ -38,9 +38,11 @@ func testJoinOnSecurity(ctx context.Context, t *testing.T, baseClient *quark.Cli
 
 	t.Run("ValidJoinExecutes", func(t *testing.T) {
 		// A canonical identifier-only ON clause must pass the validator and
-		// execute without error.
+		// execute without error. The typed builder form `.On(left, op, right)`
+		// is the v0.4 idiomatic shape — it composes the ON clause from
+		// validated parts and forwards through the same ValidateJoinOn path.
 		_, err := quark.For[JoinOrder](ctx, baseClient).
-			Join("join_users", "join_users.id = join_orders.user_id").
+			Join("join_users").On("join_users.id", "=", "join_orders.user_id").
 			Limit(10).
 			List()
 		if err != nil {
@@ -49,8 +51,11 @@ func testJoinOnSecurity(ctx context.Context, t *testing.T, baseClient *quark.Cli
 	})
 
 	t.Run("ValidMultiConditionJoinExecutes", func(t *testing.T) {
+		// Multi-condition ON clauses fall back to OnRaw, which still
+		// validates through guard.ValidateJoinOn (AND-chained binary
+		// identifier comparisons are accepted).
 		_, err := quark.For[JoinOrder](ctx, baseClient).
-			LeftJoin("join_users", "join_users.id = join_orders.user_id AND join_users.id = join_orders.user_id").
+			LeftJoin("join_users").OnRaw("join_users.id = join_orders.user_id AND join_users.id = join_orders.user_id").
 			Limit(10).
 			List()
 		if err != nil {
@@ -72,7 +77,7 @@ func testJoinOnSecurity(ctx context.Context, t *testing.T, baseClient *quark.Cli
 		for _, bad := range injectionClauses {
 			t.Run(bad, func(t *testing.T) {
 				_, err := quark.For[JoinOrder](ctx, baseClient).
-					Join("join_users", bad).
+					Join("join_users").OnRaw(bad).
 					Limit(10).
 					List()
 				if err == nil {
@@ -90,7 +95,7 @@ func testJoinOnSecurity(ctx context.Context, t *testing.T, baseClient *quark.Cli
 		// Count() builds the JOIN SQL on its own path (see query_exec.go)
 		// — verify the validator covers it too.
 		_, err := quark.For[JoinOrder](ctx, baseClient).
-			Join("join_users", "join_users.id = join_orders.user_id; DROP TABLE join_orders").
+			Join("join_users").OnRaw("join_users.id = join_orders.user_id; DROP TABLE join_orders").
 			Count()
 		if err == nil {
 			t.Fatal("Count with injectable ON clause should have errored")

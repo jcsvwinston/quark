@@ -506,11 +506,14 @@ issue under the `security` label.
 
 ## Joins
 
-`Join`, `LeftJoin`, and `RightJoin` add join clauses:
+`Join`, `LeftJoin`, and `RightJoin` open a structured JOIN against the
+named table; complete the JOIN by chaining `.On(left, op, right)` (the
+typed binary identifier comparison) or `.OnRaw(onClause)` (the legacy
+free-form string for compound ON clauses):
 
 ```go
 orders, err := quark.For[Order](ctx, client).
-    Join("users", "users.id = orders.user_id").
+    Join("users").On("users.id", "=", "orders.user_id").
     Where("status", "=", "paid").
     OrderBy("created_at", "DESC").
     Limit(50).
@@ -519,8 +522,9 @@ orders, err := quark.For[Order](ctx, client).
 
 ### ON-clause grammar
 
-The joined table name is validated as an identifier. The `ON` clause is also
-validated against a minimal identifier-only grammar:
+Both `.On` and `.OnRaw` route through the same validator. The joined
+table name is validated as an identifier; the `ON` clause is validated
+against a minimal identifier-only grammar:
 
 | Accepted | Rejected |
 | --- | --- |
@@ -537,10 +541,22 @@ The exact regex is in `internal/guard.ValidateJoinOn`; the operators
 allowed are `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Anything else returns
 [`ErrInvalidJoin`](/docs/reference/api/errors) at execution time.
 
-The string-raw `Join(table, on string)` API is **deprecated** as of v0.2 and
-will be replaced by a structured `Join(table).On(col, op, otherCol)` builder
-in v0.4 (Phase 2 AST). Until then drop down to [`RawQuery`](#raw-sql-as-an-escape-hatch)
-for joins that don't fit the grammar.
+For multi-condition ON clauses use `.OnRaw`:
+
+```go
+q := quark.For[Order](ctx, client).
+    Join("users").OnRaw("users.id = orders.user_id AND users.tenant_id = orders.tenant_id")
+```
+
+`.On(left, op, right)` is the typed shape and covers the
+overwhelming majority of JOINs. `.OnRaw` is the escape hatch for
+clauses outside the simple binary form — it runs the same
+validator, so injection attempts continue to surface as
+`ErrInvalidJoin`.
+
+The v0.3.x string-raw `Join(table, on)` signature is removed in v0.4 — see
+[`docs/MIGRATION_v0.4.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.4.0.md)
+for the mechanical rewrite.
 
 `Where` and `Select` identifiers are still validated as simple names, so they
 do not accept dotted identifiers such as `users.active`. For complex join

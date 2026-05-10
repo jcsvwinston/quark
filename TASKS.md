@@ -230,8 +230,30 @@ SharedPrefixDoesNotDoubleLoad (`Preload("Posts", "Posts.Comments")` ≡
 Doc: `website/docs/guides/relations.mdx` § Eager Loading with Preload con
 sub-secciones "Nested preload" y "IN-list chunking"; CHANGELOG `### Added`.
 
-### F2-join-builder · Pendiente
-Builder estructurado `Join(table).On(col, op, otherCol)` reemplazando la deprecation actual de string-raw Join.
+### ~~F2-join-builder · `Join(table).On(col, op, otherCol)`~~
+
+**Cerrado** — `query_builder.go` introduce `JoinBuilder[T]` y reemplaza
+las firmas de `Join`/`LeftJoin`/`RightJoin`: ahora reciben sólo el
+nombre de tabla y devuelven `*JoinBuilder[T]`. El builder cierra el
+JOIN con dos métodos:
+- `.On(left, op, right string) *Query[T]` — forma tipada para la
+  comparación binaria identifier-vs-identifier (la mayoría de JOINs)
+- `.OnRaw(onClause string) *Query[T]` — escape hatch para cláusulas
+  ON compuestas (AND-chained); valida con la misma regla de
+  `guard.ValidateJoinOn` que la forma legacy
+
+Breaking change: cierra la deprecation de v0.2 sobre el string-raw
+`Join(table, onClause string)`. Migration doc:
+`docs/MIGRATION_v0.4.0.md` con tabla de antes/después y reglas
+`gofmt -r` mecánicas. 6 callers internos migrados (5 tests +
+join_on_security_test).
+
+Cobertura: `testJoinBuilder` en SharedSuite con 4 subtests
+(OnTypedFormExecutes, OnRawAcceptsCompoundClause, OnRawRejectsInjection,
+LeftJoinAndRightJoinReturnBuilder).
+
+Doc: `website/docs/guides/querying.mdx` § Joins reescrita con la nueva
+API; CHANGELOG `### Changed (BREAKING)`.
 
 ---
 

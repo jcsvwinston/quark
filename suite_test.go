@@ -145,6 +145,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testSetOp(ctx, t, client)
 	})
 
+	t.Run("JoinBuilder", func(t *testing.T) {
+		testJoinBuilder(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

@@ -305,48 +305,93 @@ func (q *Query[T]) Offset(n int) *Query[T] {
 	return c
 }
 
-// Join adds an INNER JOIN clause.
+// JoinBuilder is the structured form returned by Join, LeftJoin, and
+// RightJoin. Complete the JOIN by chaining `.On(left, op, right)` (the
+// typed identifier form) or `.OnRaw(onClause)` (the legacy free-form
+// string for ON clauses outside the simple binary grammar). Both
+// chain-terminate by returning *Query[T] so subsequent builder calls
+// pick up where the JOIN left off.
 //
-// The on argument must match the minimal identifier-only grammar that
-// guard.ValidateJoinOn enforces (e.g. "users.id = orders.user_id" or
-// "users.id = orders.user_id AND users.tenant_id = orders.tenant_id").
-// Literals, function calls, subqueries, and parentheses are rejected;
-// drop down to RawQuery for shapes outside the grammar. Invalid input
-// surfaces ErrInvalidJoin at execution time (List, First, Iter, ...).
+// JoinBuilder values are immutable; the underlying *Query[T] is cloned
+// before the JOIN is appended, matching the rest of the builder's
+// thread-safety contract.
+type JoinBuilder[T any] struct {
+	q        *Query[T]
+	joinType string
+	table    string
+}
+
+// On appends an INNER/LEFT/RIGHT JOIN with a single binary identifier
+// comparison as the ON clause: `<left> <op> <right>`. The three
+// arguments are concatenated as `left + " " + op + " " + right` and
+// the resulting clause is validated as a whole against
+// `guard.ValidateJoinOn` at exec time, surfacing `ErrInvalidJoin` for
+// any shape outside the identifier-only grammar (literal RHS, function
+// calls, parens, comments, mismatched operators). The grammar accepts
+// the binary comparison operators `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`
+// and AND-chained compound clauses.
 //
-// Deprecated: the string-raw form will be removed in v0.4 in favor of a
-// structured builder Join(table).On(col, op, otherCol). Track the
-// migration in docs/MIGRATION_v0.2.0.md.
+// Most JOINs need only this form — the typical
+// `users.id = orders.user_id` shape. For multi-condition ON clauses or
+// any expression the ValidateJoinOn grammar accepts (AND-chained
+// identifier comparisons), use `OnRaw`.
 //
 // Example:
 //
 //	quark.For[Order](ctx, client).
-//	    Join("users", "users.id = orders.user_id").
+//	    Join("users").On("users.id", "=", "orders.user_id").
 //	    List()
-func (q *Query[T]) Join(table, on string) *Query[T] {
-	c := q.clone()
-	c.joins = append(c.joins, join{joinType: "INNER JOIN", table: table, onClause: on})
+func (b *JoinBuilder[T]) On(left, op, right string) *Query[T] {
+	c := b.q.clone()
+	onClause := left + " " + op + " " + right
+	c.joins = append(c.joins, join{
+		joinType: b.joinType,
+		table:    b.table,
+		onClause: onClause,
+	})
 	return c
 }
 
-// LeftJoin adds a LEFT JOIN clause. The on grammar matches Join — see its
-// docstring for accepted shapes and the v0.4 deprecation notice.
+// OnRaw appends the JOIN with a free-form ON clause string. The clause
+// must match the minimal identifier-only grammar that
+// `guard.ValidateJoinOn` enforces (AND-chained binary comparisons of
+// qualified identifiers, e.g.
+// `users.id = orders.user_id AND users.tenant_id = orders.tenant_id`).
+// Literals, function calls, subqueries, and parentheses are rejected.
+// Drop down to `RawQuery` for shapes outside this grammar.
 //
-// Deprecated: see Join.
-func (q *Query[T]) LeftJoin(table, on string) *Query[T] {
-	c := q.clone()
-	c.joins = append(c.joins, join{joinType: "LEFT JOIN", table: table, onClause: on})
+// OnRaw is the migration path for callers of the v0.3.x string-raw
+// `Join(table, onClause)`: rewrite as
+// `Join(table).OnRaw(onClause)`.
+func (b *JoinBuilder[T]) OnRaw(onClause string) *Query[T] {
+	c := b.q.clone()
+	c.joins = append(c.joins, join{
+		joinType: b.joinType,
+		table:    b.table,
+		onClause: onClause,
+	})
 	return c
 }
 
-// RightJoin adds a RIGHT JOIN clause. The on grammar matches Join — see its
-// docstring for accepted shapes and the v0.4 deprecation notice.
+// Join opens an INNER JOIN against `table`. Complete the JOIN with
+// `.On(left, op, right)` (typed binary identifier comparison) or
+// `.OnRaw(onClause)` (free-form, validated through the same identifier
+// grammar as `On`).
 //
-// Deprecated: see Join.
-func (q *Query[T]) RightJoin(table, on string) *Query[T] {
-	c := q.clone()
-	c.joins = append(c.joins, join{joinType: "RIGHT JOIN", table: table, onClause: on})
-	return c
+// The structured form replaces the v0.3.x string-raw `Join(table, on)`
+// signature; see `MIGRATION_v0.4.0.md` for the mechanical rewrite.
+func (q *Query[T]) Join(table string) *JoinBuilder[T] {
+	return &JoinBuilder[T]{q: q, joinType: "INNER JOIN", table: table}
+}
+
+// LeftJoin opens a LEFT JOIN. See Join for ON-clause grammar.
+func (q *Query[T]) LeftJoin(table string) *JoinBuilder[T] {
+	return &JoinBuilder[T]{q: q, joinType: "LEFT JOIN", table: table}
+}
+
+// RightJoin opens a RIGHT JOIN. See Join for ON-clause grammar.
+func (q *Query[T]) RightJoin(table string) *JoinBuilder[T] {
+	return &JoinBuilder[T]{q: q, joinType: "RIGHT JOIN", table: table}
 }
 
 // Cache enables caching for this query results with the given TTL.

@@ -155,8 +155,8 @@ func TestMaxJoinsEnforced(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := quark.For[User](ctx, client).
-		Join("orders", "orders.user_id = users.id").
-		Join("products", "products.id = orders.product_id"). // 2nd join exceeds limit
+		Join("orders").On("orders.user_id", "=", "users.id").
+		Join("products").On("products.id", "=", "orders.product_id"). // 2nd join exceeds limit
 		Limit(10).List()
 	if err == nil {
 		t.Fatal("expected error for exceeding MaxJoins, got nil")
@@ -195,7 +195,7 @@ func TestRightJoin(t *testing.T) {
 	// RIGHT JOIN: SQLite doesn't support RIGHT JOIN natively but the builder must not panic.
 	// We verify that the SQL is generated (even if SQLite emulates it or errors gracefully).
 	_, execErr := quark.For[OrderRow](ctx, client).
-		RightJoin("users", "users.id = orders.user_id").
+		RightJoin("users").On("users.id", "=", "orders.user_id").
 		Limit(5).List()
 
 	// SQLite doesn't support RIGHT JOIN — we accept either a result or a DB-level error,
