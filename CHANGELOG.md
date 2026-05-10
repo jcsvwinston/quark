@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (BREAKING)
+
+- **`Join` / `LeftJoin` / `RightJoin` now return a `*JoinBuilder[T]`**:
+  the v0.3.x string-raw form `q.Join(table, onClause)` is replaced by
+  the structured `q.Join(table).On(left, op, right)` (or
+  `.OnRaw(onClause)` for compound ON clauses that need the legacy
+  free-form). Both new methods route through the same
+  `guard.ValidateJoinOn` grammar the old form used, so the validation
+  surface is identical — only the call shape changed. See
+  [`docs/MIGRATION_v0.4.0.md`](docs/MIGRATION_v0.4.0.md) for the
+  mechanical rewrite (a `gofmt -r` rule covers it). Closes the v0.2
+  deprecation notice.
+
 ### Added
 
 - **Set operators via `Union` / `UnionAll` / `Intersect` / `Except`

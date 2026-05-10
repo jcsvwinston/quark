@@ -406,7 +406,7 @@ func TestQueryJoinMethods(t *testing.T) {
 
 	// Join
 	posts, err := quark.For[JoinPost](ctx, c).
-		Join("join_users", "join_users.id = join_posts.user_id").
+		Join("join_users").On("join_users.id", "=", "join_posts.user_id").
 		List()
 	if err != nil {
 		t.Fatalf("Join: %v", err)
@@ -417,7 +417,7 @@ func TestQueryJoinMethods(t *testing.T) {
 
 	// LeftJoin
 	posts2, err := quark.For[JoinPost](ctx, c).
-		LeftJoin("join_users", "join_users.id = join_posts.user_id").
+		LeftJoin("join_users").On("join_users.id", "=", "join_posts.user_id").
 		List()
 	if err != nil {
 		t.Fatalf("LeftJoin: %v", err)
@@ -636,7 +636,7 @@ func TestQueryRightJoin(t *testing.T) {
 	}
 	// RIGHT JOIN not supported in old SQLite — just test the SQL builder doesn't panic
 	_, err = quark.For[RJB](ctx, c).
-		RightJoin("rj_a", "rj_a.id = rj_b.a_id").
+		RightJoin("rj_a").On("rj_a.id", "=", "rj_b.a_id").
 		List()
 	if err != nil {
 		t.Logf("RightJoin error (may be unsupported in SQLite): %v", err)

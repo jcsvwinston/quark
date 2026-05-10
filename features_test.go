@@ -247,7 +247,7 @@ func TestInnerJoin(t *testing.T) {
 
 	// Use Join — just verify it doesn't error and generates valid SQL
 	results, err := quark.For[Order](ctx, client).
-		Join("users", "users.id = orders.user_id").
+		Join("users").On("users.id", "=", "orders.user_id").
 		Where("status", "=", "paid").
 		Limit(10).List()
 	if err != nil {
@@ -274,7 +274,7 @@ func TestLeftJoin(t *testing.T) {
 
 	// LeftJoin — count users, including those without orders
 	count, err := quark.For[User](ctx, client).
-		LeftJoin("orders", "orders.user_id = users.id").
+		LeftJoin("orders").On("orders.user_id", "=", "users.id").
 		Count()
 	if err != nil {
 		t.Fatalf("left join: %v", err)

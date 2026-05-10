@@ -115,7 +115,7 @@ func testCTE(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 
 		got, err := quark.For[cteUser](ctx, client).
 			With("top_orders", topOrders).
-			Join("top_orders", "cte_users.id = top_orders.user_id").
+			Join("top_orders").On("cte_users.id", "=", "top_orders.user_id").
 			Limit(50).
 			List()
 		if err != nil {
@@ -222,7 +222,7 @@ func testCTE(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 
 		got, err := quark.For[cteUser](ctx, client).
 			With("top_orders", topOrders).
-			Join("top_orders", "cte_users.id = top_orders.user_id").
+			Join("top_orders").On("cte_users.id", "=", "top_orders.user_id").
 			Count()
 		if err != nil {
 			t.Fatalf("Count: %v", err)
