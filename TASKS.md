@@ -51,18 +51,19 @@ Docs: CHANGELOG `### Security` + `### Changed`; `website/docs/guides/querying.md
 sección "JSON Predicates" con la grammar y la garantía de bind; Historial en
 `docs/playbooks/security.md` y `docs/playbooks/dialects.md`.
 
-### P0-3 · `linkM2M` traga errores silenciosamente
+### ~~P0-3 · `linkM2M` traga errores silenciosamente~~
 
-- **Origen**: `query_crud.go:~1697`, comentario `// Ignore duplicate key errors - already linked` que retorna `nil` para cualquier error, no sólo duplicados.
-- **Impacto**: una FK violation, conexión rota o constraint violation se enmascara como éxito. Corrupción silenciosa.
-- **Fix esperado**: discriminar el error por código del driver:
-  - PG: `*pgconn.PgError` con `Code == "23505"` (unique violation) → ignorar; otros → propagar.
-  - MySQL: `*mysql.MySQLError` con `Number == 1062` → ignorar; otros → propagar.
-  - SQLite: `errors.Is(err, sqlite3.ErrConstraintUnique)` (con modernc, comprobar el equivalente).
-  - MSSQL: número 2627 / 2601 → ignorar.
-  - Oracle: ORA-00001 → ignorar.
-- **Test de regresión**: insertar la misma relación dos veces (debe ser idempotente, ok); luego provocar una FK violation (apuntar a un ID inexistente con FK habilitada) y asertar que `linkM2M` devuelve `ErrConstraint` envuelto, no `nil`. En los 6 motores.
-- **Doc**: documentar la semántica idempotente de M2M link en `website/docs/relations/many-to-many.md`.
+**Cerrado** — helper `isUniqueViolation(err)` en `db_errors.go` que usa
+`errors.As` contra los tipos de los 6 drivers (PG `*pgconn.PgError` SQLSTATE
+23505, MySQL `*mysql.MySQLError` 1062, MSSQL `mssql.Error` 2627/2601, Oracle
+`*network.OracleError` ErrCode 1, SQLite extended codes 2067/1555 en mattn y
+modernc). `linkM2M` retorna `nil` sólo cuando matchea, propaga el resto envuelto
+en `wrapDBError`. Cobertura: `testM2MLinkErrors` en `m2m_link_test.go` wired a
+`SharedSuite` — subtests `IdempotentRelink` (re-save mismo (book, author) sin
+duplicar la fila join) y `MissingJoinTablePropagates` (drop tabla join + Update
+debe devolver error, no nil). Doc en `website/docs/guides/relations.mdx`
+sección "Idempotent linking"; CHANGELOG `### Fixed`; Historial en
+`docs/playbooks/query-builder.md`.
 
 ### P0-4 · `isZeroValue` impide `Update` con valores cero (false / 0 / "")
 

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Silent error swallowing in `linkM2M` (P0-3)**: when Quark inserted into a
+  many-to-many join table, every driver error was returned as `nil` under the
+  comment `// Ignore duplicate key errors - already linked`. The intent was
+  to keep re-linking idempotent for unique-key violations, but the
+  implementation masked foreign-key violations, missing tables, broken
+  connections, and any other failure as success. Fixed: only real unique-key
+  violations (PG SQLSTATE 23505, MySQL 1062, MSSQL 2627/2601, Oracle ORA-00001,
+  SQLite extended codes 2067/1555 — both mattn and modernc drivers) are now
+  treated as idempotent; everything else is wrapped with `wrapDBError` and
+  propagated. Added `testM2MLinkErrors` to the shared suite (idempotent
+  re-link + missing-join-table propagation). No public API change.
+
 ### Security
 
 - **`WhereJSON` SQL injection via path interpolation (P0-2)**: every dialect's
