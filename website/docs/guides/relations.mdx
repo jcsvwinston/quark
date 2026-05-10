@@ -72,6 +72,38 @@ For each relation, Quark collects parent keys and loads related rows with an
 `IN` predicate. That means the query count grows with the number of relation
 types you preload, not with the number of parent rows.
 
+### Nested preload
+
+Dotted paths walk multiple levels in a single Preload chain:
+
+```go
+authors, err := quark.For[Author](ctx, client).
+    Preload("Posts.Comments").
+    Limit(50).
+    List()
+// loads authors, then posts, then comments — three IN-batched SELECTs
+// regardless of the parent count.
+```
+
+Multiple paths sharing a prefix are merged so the prefix loads only once:
+
+```go
+.Preload("Posts", "Posts.Comments")
+// → equivalent to .Preload("Posts.Comments"); Posts is fetched only once.
+```
+
+Each path segment is a Go field name (not a `db` tag). Quark walks the
+relation chain at execution time using the model registry; an unknown
+segment surfaces as `relation X not found` at runtime.
+
+### IN-list chunking
+
+Eager loading splits parent keys into chunks of 1000 before issuing each
+SELECT. The cap is conservative for the six dialects: Oracle's hard
+1000-IN ceiling and SQL Server's ~2100 bind-parameter limit are the
+binding constraints. Tenant predicates and polymorphic-type
+discriminators are re-applied per chunk.
+
 ## Belongs To
 
 Use `belongs_to` when the current model stores the foreign key.

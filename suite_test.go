@@ -121,6 +121,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testHavingAggregate(ctx, t, client)
 	})
 
+	t.Run("NestedPreload", func(t *testing.T) {
+		testNestedPreload(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

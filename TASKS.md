@@ -82,8 +82,27 @@ Doc: `website/docs/guides/querying.mdx` § Grouped Aggregates and HAVING
 con tabla de reglas; CHANGELOG `### Added`. La forma plenamente componible
 `Having(Func("count", Col("*")), ">", 5)` aterrizará con el AST de Fase 2.
 
-### F2-nested-preload · Pendiente
-`.Preload("Orders.Items.Product")` con planificación batch.
+### ~~F2-nested-preload · `.Preload("Orders.Items.Product")`~~
+
+**Cerrado** — `parsePreloads` (`preload_tree.go`) parsea las paths dotted en
+un árbol de `preloadNode` y fusiona prefijos compartidos. `loadRelations`
+ahora delega a `loadPreloadTree` que itera el árbol: por cada nodo, llama
+al loader correspondiente (loadStandard/loadM2M/loadPolymorphic), y si tiene
+`children` recolecta el slice cargado vía `gatherLoadedChildren` (devuelve
+`[]*RefType` para que las mutaciones aliasen back al padre) y recurse.
+
+Refactor estructural: los 3 loaders + 2 scan-and-map funciones movidos de
+`*Query[T]` a `*BaseQuery` aceptando `parents reflect.Value, ownerMeta *ModelMeta`.
+La generic-erasure permite la recursión sin instanciar Query[T] por nivel.
+
+Cobertura: `testNestedPreload` en SharedSuite (3 subtests):
+DottedPathLoadsBothLevels (2 authors × 2 posts × 2 comments),
+FirstLevelStillWorks (single-level Preload no recurse),
+SharedPrefixDoesNotDoubleLoad (`Preload("Posts", "Posts.Comments")` ≡
+`Preload("Posts.Comments")`).
+
+Doc: `website/docs/guides/relations.mdx` § Eager Loading with Preload con
+sub-secciones "Nested preload" y "IN-list chunking"; CHANGELOG `### Added`.
 
 ### F2-join-builder · Pendiente
 Builder estructurado `Join(table).On(col, op, otherCol)` reemplazando la deprecation actual de string-raw Join.
