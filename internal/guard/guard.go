@@ -38,8 +38,9 @@ var identifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 //
 // Accepted:   "name", "user.name", "user.profile.email"
 // Rejected:   "" (empty), ".x", "x.", "x..y", "1user", "$.user", "user-name",
-//             anything containing whitespace, quotes, semicolons, comments, or
-//             SQL-meaningful characters.
+//
+//	anything containing whitespace, quotes, semicolons, comments, or
+//	SQL-meaningful characters.
 //
 // Array indexes (e.g. "items.0.id") and engine-specific JSONPath syntax are out
 // of scope for WhereJSON; users that need those should reach for RawQuery.
