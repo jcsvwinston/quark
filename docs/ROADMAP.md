@@ -1,36 +1,80 @@
 # Quark ORM Roadmap
 
-This document outlines the current state and future development goals for the Quark ORM.
+> Aligned with the phased plan in [`docs/ANALISIS_MADUREZ.md`](ANALISIS_MADUREZ.md) §4. Each Phase ends with a release tag.
 
-## Completed Features (v0.1)
+## v0.1.x (baseline) — completed
 
-- [x] **Type-Safe API**: Generic-based `Query[T]` builders.
-- [x] **Database Dialects**: Initial support for SQLite, PostgreSQL, and MySQL.
-- [x] **Nested Transactions**: Support for transactions and Savepoints.
-- [x] **Eager Loading**: Prevent N+1 queries using `.Preload()`.
-- [x] **Lifecycle Hooks**: Interfaces for `BeforeCreate`, `AfterUpdate`, etc.
-- [x] **Model Validation**: Tag-based and programmatic struct validation via `validator/v10`.
-- [x] **Schema Migrations**: Automatic table creation based on struct fields via `client.Migrate()`.
-- [x] **Multi-Tenant Routing**: `TenantRouter` supporting Database-per-tenant, Schema-per-tenant, and Row-level strategies.
-- [x] **Data Streaming**: Efficient iteration over large datasets via `.Iter()`.
+- [x] Type-safe `Query[T]` API.
+- [x] Six dialects: SQLite, PostgreSQL, MySQL, MariaDB, MSSQL, Oracle.
+- [x] Nested transactions with savepoints.
+- [x] Eager loading via `.Preload()`.
+- [x] Lifecycle hooks (`BeforeCreate` / `AfterUpdate` / …).
+- [x] Tag- and method-based validation (`validator/v10`).
+- [x] Schema migrations (auto + versioned via CLI).
+- [x] Multi-tenant routing (database / schema / row-level strategies).
+- [x] Streaming via `Iter` and `Cursor`.
+- [x] M2M and polymorphic relations.
+- [x] Custom dialects (`RegisterDialect`).
+- [x] OpenTelemetry tracing + query observers.
+- [x] L2 query cache (memory + Redis).
+- [x] JSON column queries (now bound, not interpolated — see Phase 0).
 
-## Completed Features (v0.2)
+## v0.3.0 — Phase 0 + Phase 1 (this release)
 
-- [x] **Quark CLI**: Standalone tool for project initialization and code generation.
-- [x] **Advanced Migrations**: Version-controlled migration files (Up/Down) via CLI.
-- [x] **Model Introspection**: Automated generation of Go models from existing DB schemas.
-- [x] **Many-to-Many Relations**: Support for M2M associations via join tables with `m2m` tags.
-- [x] **Polymorphic Relations**: Support for polymorphic associations with `polymorphic` tags.
-- [x] **Custom Dialects**: Public API to register custom database dialects via `RegisterDialect()`.
-- [x] **Evolutionary Migrations**: ALTER TABLE support for adding, dropping, and modifying columns.
+### Phase 0 — security & correctness
 
-- [x] **Observability**: Added native OpenTelemetry tracing (Spans) and centralized query observers.
-- [x] **Level 2 Query Caching**: Integrated pluggable cache stores (Memory/Redis) with tag-based invalidation.
-- [x] **Extended Dialects**: Full production support for Microsoft SQL Server and Oracle databases.
-- [x] **JSON Fields**: Native support for querying JSON/JSONB fields across all dialects.
+- [x] **P0-1** — Tenant isolation in `Or()` (closed via `cloneForGroup`).
+- [x] **P0-2** — `WhereJSON` SQL injection (path validated + bound; `ErrInvalidJSONPath`).
+- [x] **P0-3** — `linkM2M` swallowed errors (driver-aware `isUniqueViolation`).
+- [x] **P0-4** — `Update` zero-value trap (`UpdateFields` + Phase 1 `Tracked.Save`).
+- [x] **P0-5** — `JOIN ... ON` raw concatenation (`ValidateJoinOn` + `ErrInvalidJoin`).
 
-## Long-Term Goals
+### Phase 1 — rich types + dirty tracking
 
-- [ ] **Standalone GoFrame Module**: Release Quark as an entirely decoupled `go-quark` module outside the GoFrame core.
-- [ ] **Read/Write Splitting**: Automatic routing to read-replicas for SELECT queries.
-- [ ] **Query Optimizer Hints**: Add specific builder methods to force index usage.
+- [x] **F1-1** — Dirty tracking (`Track().Find().Save()` snapshot pipeline).
+- [x] **F1-2** — Rich types core: `JSON[T]` typed wrapper, `[]byte` → BLOB / BYTEA / VARBINARY mapping.
+- [x] **F1-3** — `Nullable[T]` generic + auto migrate detection.
+- [x] **F1-4** — `RegisterTypeMapper` + db-tag sizing options (`size=N`, `precision=N`, `scale=N`); `time.Duration` shipped.
+- [x] **F1-5** — Soft-delete scopes: `WithTrashed` / `OnlyTrashed` / `Restore`.
+- [x] **F1-6** — Optimistic locking (`quark:"version"` + `ErrStaleEntity`).
+
+## v0.4.0 — Phase 2 (next)
+
+- [ ] Composable expression AST (`Expr`, `Col`, `Lit`, `Func`, `And/Or/Not`, `In`, `Exists`).
+- [ ] Typed subqueries (`AsSubquery()` integrable in WHERE/JOIN).
+- [ ] CTEs (`WITH`, `WITH RECURSIVE`).
+- [ ] Window functions, `UNION` / `INTERSECT` / `EXCEPT`.
+- [ ] Pessimistic locking (`ForUpdate`, `ForShare`, `SkipLocked`, `NoWait`).
+- [ ] Nested preload with batch planning.
+- [ ] Automatic `IN(...)` chunking (Oracle 1000, MSSQL 2100).
+- [ ] Structured `Join(table).On(col, op, otherCol)` replaces the deprecated string-raw form.
+
+## Phase 3 — schema diff + migrations (v0.5)
+
+- [ ] Real introspection-based schema diff (types, NOT NULL, defaults, indexes, FKs).
+- [ ] Distributed migration locking (`pg_advisory_xact_lock` / `GET_LOCK` / `sp_getapplock` / `DBMS_LOCK`).
+- [ ] Transactional migrations where the engine allows; resumable migrations on MySQL.
+- [ ] Backfill orchestration with resume tokens.
+
+## Phase 4 — observability + cache (v0.6)
+
+- [ ] OTel metrics (counters, histograms).
+- [ ] SQL redaction in spans.
+- [ ] Cache stampede protection + granular invalidation.
+- [ ] Deadlock retry with exponential backoff.
+
+## Phase 5 — RLS + hooks + events (v0.7)
+
+- [ ] Real Postgres RLS (`SET LOCAL app.tenant_id` + `CREATE POLICY` template).
+- [ ] Transactional hooks (`OnCommit` / `OnRollback`, `BeforeFind` / `AfterFind`).
+- [ ] Real `EventBus`.
+- [ ] Optional audit log.
+
+## Phase 6 — codegen + HA (v1.0)
+
+- [ ] Codegen path (typed scanners, no reflect).
+- [ ] Read replicas / pool routing / failover.
+- [ ] Sharding pluggable.
+- [ ] Real benchmarks vs `database/sql` / GORM / ent / sqlc.
+
+The v1.0 honest checklist is in [`docs/ANALISIS_MADUREZ.md`](ANALISIS_MADUREZ.md) §3 (gaps).

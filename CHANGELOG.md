@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+(empty — next changes go here.)
+
+## [0.3.0] - 2026-05-10
+
+First proper tag since `v0.1.1`. Bundles Phase 0 P0 fixes (security, correctness)
+with the Phase 1 deliverables (rich types, dirty tracking, optimistic locking,
+soft-delete scopes). Full release notes in
+[`docs/RELEASE_NOTES_v0.3.0.md`](docs/RELEASE_NOTES_v0.3.0.md). Migration
+steps for breaking changes in
+[`docs/MIGRATION_v0.3.0.md`](docs/MIGRATION_v0.3.0.md).
+
 ### Added
 
 - **`JSON[T any]` generic + `[]byte` BLOB mapping (Phase 1 F1-2)**:

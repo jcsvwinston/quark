@@ -1,6 +1,6 @@
 # Quark ORM Architecture
 
-Quark is an enterprise-grade, generic-based Object-Relational Mapper for Go. It is designed around safety, immutability, and modularity.
+Quark is a generics-based Object-Relational Mapper for Go, designed around safety, immutability, and modularity. It is **late-alpha** today (v0.3); this document describes the architecture as it stands, with the gap analysis between current state and the planned v1.0 in [`ANALISIS_MADUREZ.md`](ANALISIS_MADUREZ.md).
 
 ## Core Design Principles
 

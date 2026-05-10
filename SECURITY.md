@@ -2,12 +2,15 @@
 
 ## Supported Versions
 
-Quark is currently in pre-1.0 development. Security fixes are backported to the latest minor release only.
+Quark is in **v0.x** — late-alpha. Security fixes land on `main` and on the
+latest tagged minor release; older tags are not patched. Upgrade to the
+current tag for security updates.
 
 | Version | Supported |
 |---------|-----------|
-| latest `main` | ✅ |
-| older tags | ❌ — please upgrade |
+| `main` | ✅ |
+| `v0.3.x` | ✅ |
+| `v0.2.x` and earlier | ❌ — please upgrade |
 
 ---
 

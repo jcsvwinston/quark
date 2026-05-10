@@ -1,9 +1,9 @@
-# Migration to v0.2.0
+# Migration to v0.3.0
 
-> Target tag: **v0.2.0** (Fase 0 — see `docs/ANALISIS_MADUREZ.md` §4).
-> This document tracks breaking changes accumulated on `main` after `v0.1.1`
-> and is updated in the same PR as each change. The actual tag is cut once
-> the Fase 0 backlog (`TASKS.md`) is empty.
+> Target tag: **v0.3.0** (Phase 0 + Phase 1 — see `docs/ANALISIS_MADUREZ.md` §4).
+> Documents the breaking changes accumulated on `main` since `v0.1.1`.
+> Originally written as `MIGRATION_v0.2.0.md`; renamed when v0.2 was rolled
+> into v0.3 because Phase 1 deliverables landed on the same release branch.
 
 ## Breaking changes
 

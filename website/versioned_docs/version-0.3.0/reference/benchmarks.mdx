@@ -1,0 +1,54 @@
+---
+sidebar_position: 2
+title: Benchmarks
+description: Local benchmark results across SQLite, PostgreSQL, MySQL, MSSQL, and Oracle.
+---
+
+# Benchmarks
+
+:::note Local benchmarks only
+These results were generated against local Docker containers and in-memory SQLite — **not a substitute for production profiling**. Results will vary significantly with real network latency, connection pool sizing, and concurrent load. Reproduce locally with:
+
+```bash
+go test -bench=. -benchmem ./...
+```
+
+See [`benchmark_test.go`](https://github.com/jcsvwinston/quark/blob/main/benchmark_test.go) in the main repository for the full benchmark suite.
+:::
+
+The current benchmark report was generated on 2026-05-02 using local Docker
+instances for server databases and in-memory SQLite.
+
+## Average operation time
+
+| Engine | Operation | Average time | Total run |
+| --- | --- | ---: | ---: |
+| SQLite in-memory | Insert | 6.12 microseconds | 61.19 ms |
+| SQLite in-memory | Update | 3.24 microseconds | 16.18 ms |
+| SQLite in-memory | Delete | 1.92 microseconds | 9.59 ms |
+| PostgreSQL | Insert | 198.55 microseconds | 1.99 s |
+| PostgreSQL | Update | 129.76 microseconds | 648.82 ms |
+| PostgreSQL | Delete | 128.53 microseconds | 642.63 ms |
+| MySQL | Insert | 979.43 microseconds | 9.79 s |
+| MySQL | Update | 275.57 microseconds | 1.38 s |
+| MySQL | Delete | 266.18 microseconds | 1.33 s |
+| MSSQL | Insert | 651.50 microseconds | 6.52 s |
+| MSSQL | Update | 266.88 microseconds | 1.33 s |
+| MSSQL | Delete | 265.41 microseconds | 1.33 s |
+| Oracle | Insert | 431.73 microseconds | 4.32 s |
+| Oracle | Update | 271.94 microseconds | 1.36 s |
+| Oracle | Delete | 269.34 microseconds | 1.35 s |
+
+## Benchmark notes
+
+- SQLite used in-memory mode.
+- PostgreSQL, MySQL, MSSQL, and Oracle ran against local Docker services.
+- Insert tests used 10,000 operations.
+- Update and delete tests used 5,000 operations each.
+- Progress logs were emitted every 1,000 operations to verify sustained progress.
+
+## Design takeaway
+
+QUARK's reflection cache keeps the ORM overhead low after model metadata is
+parsed. The query builder keeps application ergonomics close to dynamic ORMs
+while using generics for typed results.

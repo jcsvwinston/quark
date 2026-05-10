@@ -1,0 +1,118 @@
+---
+sidebar_position: 1
+title: SQLGuard
+description: Identifier validation, injection prevention, and AllowRawQueries opt-in.
+---
+
+# SQLGuard — Security by Default
+
+SQLGuard is Quark's built-in layer that validates every SQL identifier — column names,
+table names, and operators — **before any SQL is assembled**. It is not a replacement
+for parameterized queries; it is a complementary layer that covers the attack surface
+that parameterized queries cannot reach.
+
+## Why identifier validation matters
+
+Parameterized queries protect *values* (the `?` or `$N` placeholders). They do **not**
+protect identifiers: column names, table names, and operators that must appear literally
+in the SQL text.
+
+```go
+// This is safe in GORM/ent — the value "x" is parameterized
+db.Where("name = ?", userInput)
+
+// But this is NOT protected by parameterization in any ORM:
+db.Order(userInput)  // userInput = "name; DROP TABLE users--"
+```
+
+Quark validates every identifier at the API layer before it reaches the SQL builder.
+An unknown column, an unrecognized operator, or a suspicious keyword causes
+`ErrInvalidQuery` to be returned — the statement is never executed.
+
+## What gets validated
+
+| Category | Examples | Validation |
+|----------|----------|-----------|
+| Column names | `"name"`, `"created_at"` | Checked against registered model fields |
+| Table names | `"users"`, `"orders"` | Checked against known schema |
+| Operators | `"="`, `">="`, `"LIKE"`, `"IN"` | Checked against allowed operator set |
+| Keywords | `"ASC"`, `"DESC"` | Checked against allowed keyword list |
+
+## Runtime examples
+
+```go
+// Invalid operator — ErrInvalidQuery returned
+_, err := quark.For[User](ctx, client).
+    Where("name", "drop_table", "x").
+    List()
+// → ErrInvalidQuery: operator "drop_table" not allowed
+
+// Unknown column — ErrInvalidQuery returned
+_, err = quark.For[User](ctx, client).
+    Where("nonexistent_column", "=", "x").
+    List()
+// → ErrInvalidQuery: column "nonexistent_column" not found on model User
+```
+
+## Raw subqueries require explicit opt-in
+
+```go
+// This will fail unless AllowRawQueries is true
+_, err = quark.For[User](ctx, client).
+    WhereSubquery("id", "IN", "SELECT user_id FROM orders WHERE total > 100").
+    List()
+// → ErrInvalidQuery: WhereSubquery requires AllowRawQueries to be enabled
+```
+
+## Enabling raw queries
+
+Raw queries should only be enabled when you deliberately need them and can vouch for the
+safety of the raw SQL:
+
+```go
+lims := quark.DefaultLimits()
+lims.AllowRawQueries = true
+
+client, _ := quark.New(db,
+    quark.WithDialect(quark.PostgreSQL()),
+    quark.WithLimits(lims),
+)
+```
+
+## Comparison with other ORMs
+
+| Injection surface | Quark | GORM | ent | sqlx |
+|-------------------|:-----:|:----:|:---:|:----:|
+| Value injection (parameterized) | ✅ | ✅ | ✅ | ✅ |
+| Identifier injection (column/table names) | ✅ | ❌ | ❌ | ❌ (manual) |
+| Operator injection | ✅ | ❌ | ❌ | ❌ (manual) |
+| Raw subquery guard | ✅ (opt-in) | ❌ | ❌ | N/A |
+
+GORM and ent use parameterized queries that protect *values* against SQL injection.
+Quark additionally validates *identifiers* (column and table names) and *operators* at
+the API layer. `sqlx` provides no guard at all — the caller is responsible for sanitizing
+every string that enters a query.
+
+## ErrInvalidQuery
+
+All SQLGuard violations return `quark.ErrInvalidQuery`. Check for it explicitly when
+you want to distinguish validation errors from database errors:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where(untrustedColumn, "=", value).
+    List()
+
+if errors.Is(err, quark.ErrInvalidQuery) {
+    http.Error(w, "invalid query parameters", http.StatusBadRequest)
+    return
+}
+```
+
+## Design intent
+
+SQLGuard is not designed to replace careful input validation in your application layer.
+Its purpose is to make the ORM itself the last line of defense — so that even if an
+identifier slips through your application's validation, Quark refuses to execute it.
+This defense-in-depth approach is especially valuable in dynamic query builders where
+column names or sort fields come from user-controlled input.
