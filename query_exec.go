@@ -374,6 +374,13 @@ func (q *Query[T]) Count() (int64, error) {
 	var sqlBuf strings.Builder
 	var args []any
 
+	if cteSQL, cteArgs, err := q.buildCTEPrefix(1); err != nil {
+		return 0, err
+	} else if cteSQL != "" {
+		sqlBuf.WriteString(cteSQL)
+		args = append(args, cteArgs...)
+	}
+
 	sqlBuf.WriteString("SELECT COUNT(*) FROM ")
 	sqlBuf.WriteString(q.fullTableName())
 
@@ -400,7 +407,9 @@ func (q *Query[T]) Count() (int64, error) {
 	}
 
 	if len(whereConds) > 0 {
-		argIndex := 1
+		// Start the WHERE arg index after any CTE args already enqueued so
+		// dialect placeholders ($N / @pN / :N) line up with args slice.
+		argIndex := len(args) + 1
 		whereSQL, whereArgs, err := q.buildWhereClause(whereConds, argIndex)
 		if err != nil {
 			return 0, err
@@ -422,10 +431,59 @@ func (q *Query[T]) Count() (int64, error) {
 	return count, nil
 }
 
+// buildCTEPrefix renders the `WITH ... AS (...)` (or `WITH RECURSIVE ...`)
+// prefix and returns the SQL plus the inner args, in the same order they
+// must appear in the final args slice. Returns ("", nil, nil) when the
+// query has no CTE definitions. Shared by buildSelect, Count, and
+// aggregate so any caller emitting SELECT against the table inherits the
+// CTE prefix and the correct argIndex offset.
+func (q *BaseQuery) buildCTEPrefix(startArgIndex int) (string, []any, error) {
+	if len(q.ctes) == 0 {
+		return "", nil, nil
+	}
+	anyRecursive := false
+	for _, e := range q.ctes {
+		if e.recursive {
+			anyRecursive = true
+			break
+		}
+	}
+	var sqlBuf strings.Builder
+	if anyRecursive {
+		sqlBuf.WriteString("WITH RECURSIVE ")
+	} else {
+		sqlBuf.WriteString("WITH ")
+	}
+	args := make([]any, 0)
+	for i, e := range q.ctes {
+		if i > 0 {
+			sqlBuf.WriteString(", ")
+		}
+		rendered, _, err := substitutePathMarkers(e.sql, len(e.args), q.dialect, startArgIndex+len(args))
+		if err != nil {
+			return "", nil, err
+		}
+		sqlBuf.WriteString(q.dialect.Quote(e.name))
+		sqlBuf.WriteString(" AS (")
+		sqlBuf.WriteString(rendered)
+		sqlBuf.WriteString(")")
+		args = append(args, e.args...)
+	}
+	sqlBuf.WriteString(" ")
+	return sqlBuf.String(), args, nil
+}
+
 // buildSelect constructs the SELECT SQL query.
 func (q *Query[T]) buildSelect() (string, []any, error) {
 	var sqlBuf strings.Builder
 	var args []any
+
+	if cteSQL, cteArgs, err := q.buildCTEPrefix(1); err != nil {
+		return "", nil, err
+	} else if cteSQL != "" {
+		sqlBuf.WriteString(cteSQL)
+		args = append(args, cteArgs...)
+	}
 
 	// SELECT clause
 	sqlBuf.WriteString("SELECT ")
@@ -496,7 +554,9 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	}
 
 	if len(whereConds) > 0 {
-		argIndex := 1
+		// Start the WHERE arg index after any CTE args already enqueued so
+		// dialect placeholders ($N / @pN / :N) line up with the args slice.
+		argIndex := len(args) + 1
 		whereSQL, whereArgs, err := q.buildWhereClause(whereConds, argIndex)
 		if err != nil {
 			return "", nil, err
@@ -909,6 +969,13 @@ func (q *Query[T]) aggregate(fn, column string) (float64, error) {
 	var sqlBuf strings.Builder
 	var args []any
 
+	if cteSQL, cteArgs, err := q.buildCTEPrefix(1); err != nil {
+		return 0, err
+	} else if cteSQL != "" {
+		sqlBuf.WriteString(cteSQL)
+		args = append(args, cteArgs...)
+	}
+
 	sqlBuf.WriteString("SELECT ")
 	sqlBuf.WriteString(fn)
 	sqlBuf.WriteString("(")
@@ -921,7 +988,8 @@ func (q *Query[T]) aggregate(fn, column string) (float64, error) {
 		whereConds = append([]condition{*pred}, whereConds...)
 	}
 	if len(whereConds) > 0 {
-		whereSQL, whereArgs, err := q.buildWhereClause(whereConds, 1)
+		// Start arg index after any CTE args already enqueued.
+		whereSQL, whereArgs, err := q.buildWhereClause(whereConds, len(args)+1)
 		if err != nil {
 			return 0, err
 		}

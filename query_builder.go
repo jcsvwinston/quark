@@ -72,6 +72,7 @@ type BaseQuery struct {
 	having      []condition // HAVING conditions
 	distinct    bool        // SELECT DISTINCT
 	lock        LockOptions // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
+	ctes        []cteEntry  // common table expressions (WITH ...) prepended to the SELECT
 	err         error       // stores initialization error from ClientProvider
 }
 
@@ -108,6 +109,7 @@ func (q *Query[T]) clone() *Query[T] {
 	c.tenantCol = q.tenantCol
 	c.cache = q.cache
 	c.lock = q.lock
+	c.ctes = append([]cteEntry(nil), q.ctes...)
 	return &c
 }
 
