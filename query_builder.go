@@ -74,6 +74,7 @@ type BaseQuery struct {
 	lock        LockOptions       // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
 	ctes        []cteEntry        // common table expressions (WITH ...) prepended to the SELECT
 	selectExprs []selectExprEntry // AST projections rendered in the SELECT list (window funcs, scalar subqueries, aliased computations)
+	setOps      []setOpEntry      // UNION / INTERSECT / EXCEPT operands appended after the base SELECT
 	err         error             // stores initialization error from ClientProvider
 }
 
@@ -121,6 +122,7 @@ func (q *Query[T]) clone() *Query[T] {
 	c.lock = q.lock
 	c.ctes = append([]cteEntry(nil), q.ctes...)
 	c.selectExprs = append([]selectExprEntry(nil), q.selectExprs...)
+	c.setOps = append([]setOpEntry(nil), q.setOps...)
 	return &c
 }
 

@@ -172,6 +172,57 @@ AST emits `?` as a neutral bind marker; Quark substitutes it for the
 dialect's placeholder syntax (`$1`, `@p1`, `:1`, `?`) at render time, so a
 single AST renders correctly across every supported engine.
 
+## Set Operators (UNION, INTERSECT, EXCEPT)
+
+`Union`, `UnionAll`, `Intersect`, and `Except` combine two `Query[T]`
+queries through the standard SQL compound-select form:
+
+```go
+adminEmails := quark.For[User](ctx, client).
+    Select("email").
+    Where("role", "=", "admin")
+
+ownerEmails := quark.For[User](ctx, client).
+    Select("email").
+    Where("role", "=", "owner")
+
+privileged, err := adminEmails.UnionAll(ownerEmails).List()
+// SELECT "email" FROM "users" WHERE "role" = $1
+//   UNION ALL
+// SELECT "email" FROM "users" WHERE "role" = $2
+```
+
+| Method | Renders |
+| --- | --- |
+| `Union(other)` | `... UNION ...` (deduplicated) |
+| `UnionAll(other)` | `... UNION ALL ...` (multiset) |
+| `Intersect(other)` | `... INTERSECT ...` |
+| `Except(other)` | `... EXCEPT ...` (Oracle: `MINUS`) |
+
+The rendered form is flat, without parentheses around individual
+operands — SQLite's compound-select grammar rejects parenthesised
+operands, so the SQL standard's flat shape is the portable form.
+
+Operand restrictions (each violation surfaces as
+`ErrUnsupportedFeature`):
+
+- Operand cannot have `ORDER BY`, `LIMIT`, `OFFSET`, lock options,
+  its own CTEs, or nested set-ops.
+- Base cannot have pessimistic locks.
+
+`ORDER BY` / `LIMIT` on the outer (base) query apply to the combined
+result, which is the SQL standard binding.
+
+Dialect coverage:
+
+- **MySQL / MariaDB**: only `UNION` / `UNION ALL` are supported. `Intersect`
+  and `Except` return `ErrUnsupportedFeature` — rewrite as a JOIN.
+- **Oracle**: `EXCEPT` renders as `MINUS`. `INTERSECT ALL` and `MINUS ALL`
+  are not supported.
+- **SQLite**: `INTERSECT ALL` and `EXCEPT ALL` are not supported (use the
+  non-`ALL` variants).
+- **PostgreSQL**, **MSSQL**: full support.
+
 ## Window Functions
 
 Window functions live in the SELECT list, so they need an alias to be

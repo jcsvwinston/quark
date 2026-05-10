@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Set operators via `Union` / `UnionAll` / `Intersect` / `Except`
+  (Phase 2)**: any `Query[T]` can be combined with another `Query[T]`
+  through the standard SQL compound-select form. Renders flat (no
+  parens around operands) — `SELECT ... UNION ALL SELECT ...` — which
+  is the only shape SQLite accepts and is portable across PG, MySQL,
+  MariaDB, MSSQL, Oracle, SQLite. Dialect-keyword translation lives
+  in a package-level `setOpKeyword` helper (kept out of the Dialect
+  interface to avoid breaking custom implementations downstream):
+  Oracle maps `EXCEPT` to `MINUS`; MySQL/MariaDB return
+  `ErrUnsupportedFeature` for `INTERSECT`/`EXCEPT`; SQLite rejects
+  `INTERSECT ALL`/`EXCEPT ALL`. Operand restrictions enforced at
+  attach time (each surfaces as `ErrUnsupportedFeature`):
+  - Operand cannot have `ORDER BY`, `LIMIT`, `OFFSET`, lock options,
+    its own CTEs, or nested set-ops.
+  - Base cannot have pessimistic locks (the dialect-specific lock
+    suffix would bind to the combined result).
+  Outer ORDER BY / LIMIT on the base apply to the combined result.
+
 - **Window functions via `SelectExpr` + `Over` / `Window` / `RowNumber` /
   `Rank` / `DenseRank` / `Lag` / `Lead` (Phase 2)**: a typed surface for
   windowed projections that fits inside the AST. `Window` is a

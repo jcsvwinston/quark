@@ -625,6 +625,36 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 		args = append(args, havingArgs...)
 	}
 
+	// Set operations (UNION / INTERSECT / EXCEPT). The standard SQL
+	// compound-select form is `SELECT ... <op> SELECT ... ORDER BY ...
+	// LIMIT ...` — flat, no parens around operands (SQLite rejects
+	// parens here). Operands are guaranteed to be core-only (no ORDER /
+	// LIMIT / lock / nested set-ops / CTEs) by the attachSetOp guards,
+	// so splicing them in flat is portable across all six dialects.
+	// The outer query's ORDER BY / LIMIT then bind to the combined
+	// result.
+	if len(q.setOps) > 0 {
+		for _, op := range q.setOps {
+			kw, err := setOpKeyword(q.dialect, op.kind, op.all)
+			if err != nil {
+				return "", nil, err
+			}
+			rendered, n, err := substitutePathMarkers(op.sql, len(op.args), q.dialect, len(args)+1)
+			if err != nil {
+				return "", nil, err
+			}
+			if n != len(op.args) {
+				return "", nil, fmt.Errorf("%w: %s operand expected %d markers, substituted %d",
+					ErrInvalidQuery, op.kind, len(op.args), n)
+			}
+			sqlBuf.WriteString(" ")
+			sqlBuf.WriteString(kw)
+			sqlBuf.WriteString(" ")
+			sqlBuf.WriteString(rendered)
+			args = append(args, op.args...)
+		}
+	}
+
 	// ORDER BY clause
 	if len(q.orderBy) > 0 {
 		sqlBuf.WriteString(" ORDER BY ")

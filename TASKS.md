@@ -153,8 +153,41 @@ pasan por middleware `windowCapturing`.
 Doc: `website/docs/guides/querying.mdx` § Window Functions con tabla
 de helpers; CHANGELOG `### Added`.
 
-### F2-set · Pendiente
-`UNION` / `INTERSECT` / `EXCEPT` entre `Query[T]`.
+### ~~F2-set · `UNION` / `INTERSECT` / `EXCEPT` entre `Query[T]`~~
+
+**Cerrado** — `setop.go` introduce `Query[T].Union(other)`,
+`UnionAll(other)`, `Intersect(other)`, `Except(other)`. El operando se
+captura con `qmarkDialect` y se renderiza flat (sin paréntesis) porque
+SQLite rechaza paréntesis alrededor de operandos en compound-selects;
+la forma estándar `SELECT ... UNION ... SELECT ... ORDER BY ... LIMIT
+...` es portable a las 6 bases.
+
+`setOpKeyword(d, kind, all)` mapea por dialecto: Oracle EXCEPT→MINUS,
+MySQL/MariaDB rechazan INTERSECT/EXCEPT con ErrUnsupportedFeature,
+SQLite rechaza INTERSECT ALL/EXCEPT ALL. Se mantiene como helper
+package-level (no método del interface Dialect) para no romper
+implementaciones custom de Dialect downstream.
+
+Restricciones enforced en `attachSetOp` (cada una surfacea
+ErrUnsupportedFeature):
+- Operand: sin ORDER BY / LIMIT / OFFSET / lock / CTEs propias /
+  set-ops anidadas
+- Base: sin pessimistic-lock options (el suffix se anclaría al
+  resultado combinado)
+- ORDER BY / LIMIT del Query[T] outer aplican al resultado combinado.
+
+`buildSelect` inserta el rendering set-op entre HAVING y ORDER BY —
+splice limpio, sin re-wrapping del buffer.
+
+Cobertura: `testSetOp` en SharedSuite con 8 subtests
+(UnionAllRendersFlatCompoundSelect, UnionDeduplicates,
+IntersectFiltersCommonRows, ExceptFiltersUnique, RejectsLockOnBase,
+NilOperandRejected, OperandWithOrderByRejected,
+OperandWithLimitRejected). Verificación de SQL via middleware
+`setOpCapturing`.
+
+Doc: `website/docs/guides/querying.mdx` § Set Operators con tabla de
+métodos y matriz de soporte por dialecto; CHANGELOG `### Added`.
 
 ### ~~F2-having-agg · HAVING sobre agregados~~
 
