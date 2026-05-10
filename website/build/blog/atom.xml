@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/xsl" href="atom.xsl"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+    <id>https://jcsvwinston.github.io/quark-docs/blog</id>
+    <title>QUARK ORM Blog</title>
+    <updated>2026-05-05T00:00:00.000Z</updated>
+    <generator>https://github.com/jpmonette/feed</generator>
+    <link rel="alternate" href="https://jcsvwinston.github.io/quark-docs/blog"/>
+    <subtitle>QUARK ORM Blog</subtitle>
+    <icon>https://jcsvwinston.github.io/quark-docs/img/quark-logo.svg</icon>
+    <entry>
+        <title type="html"><![CDATA[Docs realignment — v0.x reality, correct imports, and new reference pages]]></title>
+        <id>https://jcsvwinston.github.io/quark-docs/blog/quark-docs-realignment</id>
+        <link href="https://jcsvwinston.github.io/quark-docs/blog/quark-docs-realignment"/>
+        <updated>2026-05-05T00:00:00.000Z</updated>
+        <summary type="html"><![CDATA[This post documents the corrections and additions made to align the quark-docs site]]></summary>
+        <content type="html"><![CDATA[<p>This post documents the corrections and additions made to align the quark-docs site
+with the actual <code>github.com/jcsvwinston/quark</code> repository.</p>
+<!-- -->
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-was-wrong">What was wrong<a href="https://jcsvwinston.github.io/quark-docs/blog/quark-docs-realignment#what-was-wrong" class="hash-link" aria-label="Direct link to What was wrong" title="Direct link to What was wrong" translate="no">​</a></h2>
+<p>The initial site was written with incorrect module paths and an outdated version claim:</p>
+<ul>
+<li class="">Every import used <code>github.com/jcsvwinston/GoFrame/pkg/quark</code> — the wrong module path.</li>
+<li class="">The overview declared "v1.0 — production ready" when the repo is <code>v0.x</code>.</li>
+<li class="">Cache API used <code>memory.NewStore(10000)</code> and <code>WithCache(store)</code> instead of the real <code>memory.New()</code> and <code>WithCacheStore(store)</code>.</li>
+<li class="">The CLI page instructed <code>go build -o quark ./cmd/quark/main.go</code> as the primary install path.</li>
+<li class="">The footer "Getting Started" link pointed to <code>/docs/intro</code> instead of <code>/docs/guides/getting-started</code>.</li>
+<li class="">The comparison table omitted <code>sqlx</code>.</li>
+</ul>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="files-modified">Files modified<a href="https://jcsvwinston.github.io/quark-docs/blog/quark-docs-realignment#files-modified" class="hash-link" aria-label="Direct link to Files modified" title="Direct link to Files modified" translate="no">​</a></h2>
+<ul>
+<li class=""><strong><code>docusaurus.config.ts</code></strong> — updated tagline, added <code>API ↗</code> navbar link to pkg.go.dev, fixed footer Getting Started link, replaced duplicate "More" items with Repo · Releases · Issues · pkg.go.dev · Apache 2.0, added <code>@docusaurus/theme-mermaid</code> and <code>@easyops-cn/docusaurus-search-local</code>.</li>
+<li class=""><strong><code>sidebars.ts</code></strong> — added <code>guides/installation</code>, <code>reference/sqlguard</code>, <code>reference/comparison</code>, <code>reference/configuration</code>, <code>reference/release-notes</code>.</li>
+<li class=""><strong><code>docs/intro.mdx</code></strong> — replaced v1.0 claim with v0.x status, fixed install commands, added "Why I built this", expanded documentation map.</li>
+<li class=""><strong><code>docs/guides/getting-started.mdx</code></strong> — fixed import to <code>github.com/jcsvwinston/quark</code>, added PostgreSQL switch example, added <code>Upsert</code>, <code>DeleteBy</code>, <code>HardDelete</code>, <code>UpdateMap</code> examples.</li>
+<li class=""><strong><code>docs/guides/cli.mdx</code></strong> — rewritten with correct install (<code>go install github.com/jcsvwinston/quark/cmd/quark@latest</code>), full command reference table from README.</li>
+<li class=""><strong><code>docs/guides/querying.mdx</code></strong> — added <code>Min</code>/<code>Max</code> examples, <code>Paginate</code> result field docs, <code>Apply</code> clarification.</li>
+<li class=""><strong><code>docs/guides/migrations.mdx</code></strong> — replaced <code>go build</code> with <code>migrate.Register</code> API, added CLI commands, <code>SafeMigrations</code> and <code>quark:"rename:..."</code> docs.</li>
+<li class=""><strong><code>docs/advanced/multi-tenant.mdx</code></strong> — added <code>DatabasePerTenant</code> example, CLI tenant commands, link to <code>MULTI-TENANT-CONSIDERATIONS.md</code>.</li>
+<li class=""><strong><code>docs/advanced/caching-observability.mdx</code></strong> — fixed all imports to <code>github.com/jcsvwinston/quark/cache/memory</code>, <code>github.com/jcsvwinston/quark/otel</code>; fixed <code>memory.NewStore</code> → <code>memory.New()</code>, <code>WithCache</code> → <code>WithCacheStore</code>.</li>
+<li class=""><strong><code>docs/reference/architecture.mdx</code></strong> — added Mermaid request lifecycle diagram.</li>
+<li class=""><strong><code>docs/reference/dialects.mdx</code></strong> — expanded MariaDB row, added <code>DetectDialectByName</code> explanation.</li>
+<li class=""><strong><code>docs/reference/benchmarks.mdx</code></strong> — added disclaimer and link to <code>benchmark_test.go</code>.</li>
+<li class=""><strong><code>docs/reference/roadmap.mdx</code></strong> — replaced v1.0 claim with v0.x, fixed section labels, removed GoFrame reference, added canonical source link.</li>
+<li class=""><strong><code>src/pages/index.tsx</code></strong> — removed v1.0 badge (now "For Go · Open Source · Apache 2.0"), added <code>sqlx</code> column to comparison table, added footnotes, added "Why I built this" and "Try it locally" sections, expanded DocsNav with SQLGuard / Comparison / Configuration / CLI / Release Notes cards.</li>
+</ul>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="files-created">Files created<a href="https://jcsvwinston.github.io/quark-docs/blog/quark-docs-realignment#files-created" class="hash-link" aria-label="Direct link to Files created" title="Direct link to Files created" translate="no">​</a></h2>
+<ul>
+<li class=""><strong><code>docs/guides/installation.mdx</code></strong> — requirements, drivers, CLI install, verification, test env vars.</li>
+<li class=""><strong><code>docs/reference/sqlguard.mdx</code></strong> — full SQLGuard documentation with injection comparison table.</li>
+<li class=""><strong><code>docs/reference/comparison.mdx</code></strong> — cell-by-cell comparison vs GORM, sqlx, Ent with code examples.</li>
+<li class=""><strong><code>docs/reference/configuration.mdx</code></strong> — full <code>quark.Limits</code> reference and all <code>With*</code> options.</li>
+<li class=""><strong><code>docs/reference/release-notes.mdx</code></strong> — port of <code>docs/RELEASE_NOTES_V1.md</code>.</li>
+</ul>]]></content>
+        <author>
+            <name>QUARK Maintainers</name>
+            <uri>https://github.com/jcsvwinston/GoFrame/tree/main/pkg/quark</uri>
+        </author>
+        <category label="Docs" term="Docs"/>
+        <category label="Changelog" term="Changelog"/>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[QUARK ORM documentation site]]></title>
+        <id>https://jcsvwinston.github.io/quark-docs/blog/quark-orm-docs</id>
+        <link href="https://jcsvwinston.github.io/quark-docs/blog/quark-orm-docs"/>
+        <updated>2026-05-03T00:00:00.000Z</updated>
+        <summary type="html"><![CDATA[QUARK now has a dedicated Docusaurus site for its ORM documentation.]]></summary>
+        <content type="html"><![CDATA[<p>QUARK now has a dedicated Docusaurus site for its ORM documentation.</p>
+<!-- -->
+<p>The first version focuses on the core adoption path: getting started, modeling,
+querying, relations, migrations, transactions, CLI usage, multi-tenancy, caching,
+observability, dialects, benchmarks, architecture, and roadmap.</p>
+<p>The docs are sourced from the <code>github.com/jcsvwinston/quark</code> repository and
+reshaped into a website structure that is easier to browse and extend.</p>]]></content>
+        <author>
+            <name>QUARK Maintainers</name>
+            <uri>https://github.com/jcsvwinston/GoFrame/tree/main/pkg/quark</uri>
+        </author>
+        <category label="Release" term="Release"/>
+        <category label="Docs" term="Docs"/>
+    </entry>
+</feed>

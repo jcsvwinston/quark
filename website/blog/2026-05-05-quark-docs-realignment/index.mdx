@@ -1,0 +1,47 @@
+---
+slug: quark-docs-realignment
+title: Docs realignment — v0.x reality, correct imports, and new reference pages
+authors: [quark]
+tags: [docs, changelog]
+---
+
+This post documents the corrections and additions made to align the quark-docs site
+with the actual `github.com/jcsvwinston/quark` repository.
+
+{/* truncate */}
+
+## What was wrong
+
+The initial site was written with incorrect module paths and an outdated version claim:
+
+- Every import used `github.com/jcsvwinston/GoFrame/pkg/quark` — the wrong module path.
+- The overview declared "v1.0 — production ready" when the repo is `v0.x`.
+- Cache API used `memory.NewStore(10000)` and `WithCache(store)` instead of the real `memory.New()` and `WithCacheStore(store)`.
+- The CLI page instructed `go build -o quark ./cmd/quark/main.go` as the primary install path.
+- The footer "Getting Started" link pointed to `/docs/intro` instead of `/docs/guides/getting-started`.
+- The comparison table omitted `sqlx`.
+
+## Files modified
+
+- **`docusaurus.config.ts`** — updated tagline, added `API ↗` navbar link to pkg.go.dev, fixed footer Getting Started link, replaced duplicate "More" items with Repo · Releases · Issues · pkg.go.dev · Apache 2.0, added `@docusaurus/theme-mermaid` and `@easyops-cn/docusaurus-search-local`.
+- **`sidebars.ts`** — added `guides/installation`, `reference/sqlguard`, `reference/comparison`, `reference/configuration`, `reference/release-notes`.
+- **`docs/intro.mdx`** — replaced v1.0 claim with v0.x status, fixed install commands, added "Why I built this", expanded documentation map.
+- **`docs/guides/getting-started.mdx`** — fixed import to `github.com/jcsvwinston/quark`, added PostgreSQL switch example, added `Upsert`, `DeleteBy`, `HardDelete`, `UpdateMap` examples.
+- **`docs/guides/cli.mdx`** — rewritten with correct install (`go install github.com/jcsvwinston/quark/cmd/quark@latest`), full command reference table from README.
+- **`docs/guides/querying.mdx`** — added `Min`/`Max` examples, `Paginate` result field docs, `Apply` clarification.
+- **`docs/guides/migrations.mdx`** — replaced `go build` with `migrate.Register` API, added CLI commands, `SafeMigrations` and `quark:"rename:..."` docs.
+- **`docs/advanced/multi-tenant.mdx`** — added `DatabasePerTenant` example, CLI tenant commands, link to `MULTI-TENANT-CONSIDERATIONS.md`.
+- **`docs/advanced/caching-observability.mdx`** — fixed all imports to `github.com/jcsvwinston/quark/cache/memory`, `github.com/jcsvwinston/quark/otel`; fixed `memory.NewStore` → `memory.New()`, `WithCache` → `WithCacheStore`.
+- **`docs/reference/architecture.mdx`** — added Mermaid request lifecycle diagram.
+- **`docs/reference/dialects.mdx`** — expanded MariaDB row, added `DetectDialectByName` explanation.
+- **`docs/reference/benchmarks.mdx`** — added disclaimer and link to `benchmark_test.go`.
+- **`docs/reference/roadmap.mdx`** — replaced v1.0 claim with v0.x, fixed section labels, removed GoFrame reference, added canonical source link.
+- **`src/pages/index.tsx`** — removed v1.0 badge (now "For Go · Open Source · Apache 2.0"), added `sqlx` column to comparison table, added footnotes, added "Why I built this" and "Try it locally" sections, expanded DocsNav with SQLGuard / Comparison / Configuration / CLI / Release Notes cards.
+
+## Files created
+
+- **`docs/guides/installation.mdx`** — requirements, drivers, CLI install, verification, test env vars.
+- **`docs/reference/sqlguard.mdx`** — full SQLGuard documentation with injection comparison table.
+- **`docs/reference/comparison.mdx`** — cell-by-cell comparison vs GORM, sqlx, Ent with code examples.
+- **`docs/reference/configuration.mdx`** — full `quark.Limits` reference and all `With*` options.
+- **`docs/reference/release-notes.mdx`** — port of `docs/RELEASE_NOTES_V1.md`.

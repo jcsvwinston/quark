@@ -1,0 +1,261 @@
+---
+sidebar_position: 6
+title: Relations
+description: Use Preload and association persistence with has-one, has-many, belongs-to, many-to-many, and polymorphic relations.
+---
+
+# Relations
+
+Quark relations are declared on normal struct fields with `rel` tags. They are
+not hidden behind generated methods: you can see the foreign key fields, the
+relationship fields, and the persisted columns in one place.
+
+```go
+type User struct {
+    ID      int64     `db:"id" pk:"true"`
+    Email   string    `db:"email"`
+    Profile *Profile `rel:"has_one" join:"user_id"`
+    Posts   []Post   `rel:"has_many" join:"user_id"`
+}
+
+type Profile struct {
+    ID     int64  `db:"id" pk:"true"`
+    UserID int64  `db:"user_id"`
+    Bio    string `db:"bio"`
+}
+
+type Post struct {
+    ID     int64  `db:"id" pk:"true"`
+    UserID int64  `db:"user_id"`
+    Title  string `db:"title"`
+}
+```
+
+Relation fields use `rel` instead of `db`, so they are not treated as table
+columns. They are filled by `Preload` and can be recursively saved by `Create`
+and `Update`.
+
+## Relation Tag Matrix
+
+| Relation | Parent field shape | Foreign key location | Tags |
+| --- | --- | --- | --- |
+| Has one | `Profile *Profile` or `Profile Profile` | Related table | `rel:"has_one" join:"user_id"` |
+| Has many | `Posts []Post` | Related table | `rel:"has_many" join:"user_id"` |
+| Belongs to | `Team *Team` or `Team Team` | Current table | `rel:"belongs_to" join:"team_id"` |
+| Many to many | `Roles []Role` | Join table | `rel:"many_to_many" m2m:"user_roles:user_id:role_id"` |
+| Polymorphic | `Comments []Comment` | Related table | `rel:"polymorphic" polymorphic:"poly_type:post" join:"polyable_id"` |
+
+If `join` is omitted, Quark infers it:
+
+| Relation | Inferred join column |
+| --- | --- |
+| `belongs_to` from `Order` to `User` | `user_id` |
+| `has_one` / `has_many` from `User` to `Post` | `user_id` |
+
+Being explicit is often clearer in production models, especially when database
+names are legacy or not purely conventional.
+
+## Eager Loading with Preload
+
+`Preload` loads related rows in additional batched queries instead of issuing a
+query per parent row.
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Preload("Profile", "Posts").
+    Limit(50).
+    List()
+```
+
+For each relation, Quark collects parent keys and loads related rows with an
+`IN` predicate. That means the query count grows with the number of relation
+types you preload, not with the number of parent rows.
+
+## Belongs To
+
+Use `belongs_to` when the current model stores the foreign key.
+
+```go
+type Order struct {
+    ID     int64 `db:"id" pk:"true"`
+    UserID int64 `db:"user_id"`
+    User   *User `rel:"belongs_to" join:"user_id"`
+    Total  int64 `db:"total"`
+}
+
+orders, err := quark.For[Order](ctx, client).
+    Preload("User").
+    Limit(100).
+    List()
+```
+
+When saving an object graph, `belongs_to` dependencies are saved first so Quark
+can copy the related primary key into the parent foreign key.
+
+```go
+order := Order{
+    User:  &User{Email: "alice@example.com", Name: "Alice"},
+    Total: 4200,
+}
+
+err := quark.For[Order](ctx, client).Create(&order)
+// order.User is inserted first; order.UserID is populated before order is inserted.
+```
+
+## Has One and Has Many
+
+Use `has_one` and `has_many` when the related table stores the foreign key.
+
+```go
+type Author struct {
+    ID      int64   `db:"id" pk:"true"`
+    Name    string  `db:"name"`
+    Profile Profile `rel:"has_one" join:"author_id"`
+    Posts   []Post  `rel:"has_many" join:"author_id"`
+}
+
+type Post struct {
+    ID       int64  `db:"id" pk:"true"`
+    AuthorID int64  `db:"author_id"`
+    Title    string `db:"title"`
+}
+```
+
+During recursive saves, Quark inserts or updates the parent first, then writes
+the parent's primary key into each child foreign key.
+
+```go
+author := Author{
+    Name: "Ada",
+    Profile: Profile{Bio: "Compiler notes"},
+    Posts: []Post{
+        {Title: "Parsing"},
+        {Title: "Optimization"},
+    },
+}
+
+err := quark.For[Author](ctx, client).Create(&author)
+```
+
+This is useful for aggregate-style writes. For highly controlled domain logic,
+you can still save each table explicitly inside a transaction.
+
+## Many to Many
+
+Use `rel:"many_to_many"` for full many-to-many support:
+
+```go
+type User struct {
+    ID    int64  `db:"id" pk:"true"`
+    Email string `db:"email"`
+    Roles []Role `rel:"many_to_many" m2m:"user_roles:user_id:role_id"`
+}
+
+type Role struct {
+    ID   int64  `db:"id" pk:"true"`
+    Name string `db:"name"`
+}
+```
+
+The `m2m` tag has three parts:
+
+```text
+join_table:this_model_fk:related_model_fk
+```
+
+`client.Migrate(ctx, &User{}, &Role{})` creates the `users`, `roles`, and
+`user_roles` tables. The join table uses a composite primary key over the two
+link columns.
+
+```go
+users, err := quark.For[User](ctx, client).
+    Preload("Roles").
+    Limit(100).
+    List()
+```
+
+When creating a user with roles, Quark saves new related records and inserts
+rows into the join table. Duplicate join rows are ignored.
+
+```go
+user := User{
+    Email: "alice@example.com",
+    Roles: []Role{
+        {Name: "admin"},
+        {Name: "editor"},
+    },
+}
+
+err := quark.For[User](ctx, client).Create(&user)
+```
+
+`rel:"m2m"` is recognized by the eager-loading path for compatibility, but
+`Migrate` and recursive association persistence expect `rel:"many_to_many"`.
+Use the long form in new models.
+
+## Polymorphic Relations
+
+Polymorphic relations use a type discriminator column plus a parent ID column:
+
+```go
+type Comment struct {
+    ID         int64  `db:"id" pk:"true"`
+    Body       string `db:"body"`
+    PolyableID int64  `db:"polyable_id"`
+    PolyType   string `db:"poly_type"`
+}
+
+type Post struct {
+    ID       int64     `db:"id" pk:"true"`
+    Title    string    `db:"title"`
+    Comments []Comment `rel:"polymorphic" polymorphic:"poly_type:post" join:"polyable_id"`
+}
+```
+
+`polymorphic:"poly_type:post"` means:
+
+| Part | Meaning |
+| --- | --- |
+| `poly_type` | Column on `comments` that stores the discriminator. |
+| `post` | Discriminator value for this parent type. |
+| `join:"polyable_id"` | Column on `comments` that stores the parent ID. |
+
+```go
+posts, err := quark.For[Post](ctx, client).
+    Preload("Comments").
+    Limit(20).
+    List()
+```
+
+Quark loads comments where `poly_type = 'post'` and `polyable_id IN (...)`.
+
+## Multi-Tenant Relations
+
+When `TenantRouter` uses row-level isolation, Quark propagates tenant filtering
+into relation loading if the related model has the tenant column.
+
+```go
+type Post struct {
+    ID       int64  `db:"id" pk:"true"`
+    TenantID string `db:"tenant_id"`
+    UserID   int64  `db:"user_id"`
+    Title    string `db:"title"`
+}
+```
+
+This prevents a parent row from preloading children that belong to another
+tenant, as long as both models include the configured tenant column.
+
+## Common Pitfalls
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `relation X not found` | `Preload` uses the Go field name, not the table name. | Use `Preload("Posts")`, not `Preload("posts")`. |
+| Empty relation slice | Parent key or foreign key is zero. | Ensure parent rows have persisted primary keys. |
+| Many-to-many join table missing | Used `rel:"m2m"` or forgot `Migrate` on parent. | Use `rel:"many_to_many"` and run `Migrate`. |
+| Belongs-to foreign key not set | Related value is zero or relation field omitted. | Provide the related struct or set the FK manually. |
+| Cross-tenant preload leakage risk | Related model lacks tenant column. | Add the tenant column to related models when using RLS. |
+
+For write-heavy workflows with complex invariants, wrap association saves in
+`client.Tx` so the parent, children, and join rows commit or roll back together.

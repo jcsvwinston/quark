@@ -1,0 +1,8 @@
+quark:
+  name: QUARK Maintainers
+  title: GoFrame QUARK ORM
+  url: https://github.com/jcsvwinston/GoFrame/tree/main/pkg/quark
+  image_url: /img/quark-logo.svg
+  page: true
+  socials:
+    github: jcsvwinston

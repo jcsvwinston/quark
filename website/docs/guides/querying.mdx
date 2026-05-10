@@ -1,0 +1,344 @@
+---
+sidebar_position: 4
+title: Query Builder
+description: Build safe immutable queries with filters, scopes, pagination, streaming, aggregates, JSON predicates, and controlled raw SQL.
+---
+
+# Query Builder
+
+`quark.For[Model](ctx, client)` returns a `*quark.Query[Model]`. The builder is
+immutable: every method that changes query state returns a clone.
+
+```go
+base := quark.For[User](ctx, client).
+    Where("active", "=", true)
+
+admins := base.Where("role", "=", "admin")
+editors := base.Where("role", "=", "editor")
+```
+
+`base`, `admins`, and `editors` are independent. This makes it comfortable to
+package common filters as scopes or reuse a base query across service methods.
+
+## Execution Methods
+
+| Method | Use it when |
+| --- | --- |
+| `List()` | You want a slice. Call `Limit` deliberately. |
+| `First()` | You want one matching row or `ErrNotFound`. |
+| `Find(id)` | You want one row by a simple primary key. |
+| `Count()` | You need a matching-row count. |
+| `Paginate(size, page)` | You need rows plus total/page metadata. |
+| `Iter(fn)` | You want streaming callback processing. |
+| `Cursor()` | You want manual streaming control. |
+
+`List` applies a safe default limit of 100 when no explicit `Limit` is present.
+For exports, backfills, or queues, use `Iter` or `Cursor` so rows are streamed
+instead of collected into memory.
+
+## Basic Filters
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Where("age", ">=", 18).
+    Where("email", "LIKE", "%@acme.com").
+    OrderBy("created_at", "DESC").
+    Limit(25).
+    List()
+```
+
+Column names and operators are validated before SQL is generated. Values are
+sent as bound parameters.
+
+| Operator family | Examples |
+| --- | --- |
+| Equality | `=`, `!=`, `<>` |
+| Comparison | `<`, `<=`, `>`, `>=` |
+| Pattern | `LIKE`, `NOT LIKE` |
+| Null | `IS NULL`, `IS NOT NULL` |
+| Set/range | `IN`, `NOT IN`, `BETWEEN`, `NOT BETWEEN` |
+
+Null checks do not consume a value:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("deleted_at", "IS NULL", nil).
+    List()
+```
+
+## Set and Range Predicates
+
+```go
+users, err := quark.For[User](ctx, client).
+    WhereIn("role", []any{"admin", "editor"}).
+    WhereBetween("created_at", start, end).
+    List()
+```
+
+Avoid calling `WhereIn` with an empty slice. Most SQL engines reject `IN ()`, and
+an empty input is usually better handled in application code:
+
+```go
+if len(ids) == 0 {
+    return []User{}, nil
+}
+
+users, err := quark.For[User](ctx, client).WhereIn("id", ids).List()
+```
+
+## Negation and OR Groups
+
+`WhereNot` wraps the condition in `NOT`:
+
+```go
+users, err := quark.For[User](ctx, client).
+    WhereNot("banned", "=", true).
+    List()
+```
+
+`Or` accepts a callback. Conditions inside the callback are grouped together and
+joined with `AND`, then the group is attached to the outer query with `OR`.
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Or(func(q *quark.Query[User]) *quark.Query[User] {
+        return q.Where("role", "=", "admin").
+            Where("verified", "=", true)
+    }).
+    List()
+```
+
+This produces the shape:
+
+```sql
+WHERE active = ? OR (role = ? AND verified = ?)
+```
+
+## Ordering, Limits, and Pagination
+
+```go
+users, err := quark.For[User](ctx, client).
+    OrderBy("created_at", "DESC").
+    OrderBy("id", "ASC").
+    Limit(20).
+    Offset(40).
+    List()
+```
+
+`Paginate(pageSize, page)` runs a count query and a limited select:
+
+```go
+page, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    OrderBy("id", "ASC").
+    Paginate(20, 0)
+
+fmt.Println(page.Total)
+fmt.Println(page.TotalPages)
+fmt.Println(page.Items)
+```
+
+Pages are zero-indexed. `Paginate(20, 0)` returns the first page.
+
+## Selecting Columns
+
+`Select` accepts column identifiers from the model table:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Select("id", "email", "name").
+    Limit(100).
+    List()
+```
+
+Because selected columns are validated as identifiers, `Select` is intentionally
+not a raw SQL projection API. Expressions such as `COUNT(*) AS count`,
+`users.id`, or `orders.total AS order_total` should be handled by the aggregate
+helpers, a view model over a database view, or `RawQuery` with explicit
+`AllowRawQueries`.
+
+`Distinct` works with simple selected columns:
+
+```go
+roles, err := quark.For[User](ctx, client).
+    Select("role").
+    Distinct().
+    Limit(50).
+    List()
+```
+
+## Aggregates
+
+Use aggregate helpers for common numeric summaries:
+
+```go
+total, err := quark.For[Order](ctx, client).
+    Where("status", "=", "paid").
+    Sum("amount")
+
+avg, err := quark.For[Order](ctx, client).Avg("amount")
+min, err := quark.For[Order](ctx, client).Min("amount")
+max, err := quark.For[Order](ctx, client).Max("amount")
+```
+
+`Count`, `Sum`, `Avg`, `Min`, and `Max` respect `Where`, soft-delete filters,
+and tenant isolation.
+
+`GroupBy` and `Having` are available for simple grouped model queries:
+
+```go
+rows, err := quark.For[Order](ctx, client).
+    Select("status").
+    GroupBy("status").
+    Having("status", "!=", "cancelled").
+    Limit(20).
+    List()
+```
+
+For grouped aggregate projections, prefer a database view plus a typed model or
+controlled raw SQL until Quark grows a typed expression API.
+
+## JSON Predicates
+
+`WhereJSON` asks the dialect to build a JSON extraction expression:
+
+```go
+users, err := quark.For[User](ctx, client).
+    WhereJSON("metadata", "plan", "=", "enterprise").
+    List()
+```
+
+Dialect examples:
+
+| Dialect | Shape |
+| --- | --- |
+| PostgreSQL | `("metadata")::jsonb->>'plan' = $1` |
+| MySQL | `JSON_EXTRACT(\`metadata\`, '$.plan') = ?` |
+| MariaDB | `JSON_VALUE(\`metadata\`, '$.plan') = ?` |
+| SQLite | `JSON_EXTRACT("metadata", '$.plan') = ?` |
+| SQL Server | `JSON_VALUE([metadata], '$.plan') = @p1` |
+| Oracle | `JSON_VALUE("METADATA", '$.plan') = :1` |
+
+Use simple path keys. If your engine-specific JSON query needs arrays, casts, or
+special operators, move that query to `RawQuery`.
+
+## Joins
+
+`Join`, `LeftJoin`, and `RightJoin` add join clauses:
+
+```go
+orders, err := quark.For[Order](ctx, client).
+    Join("users", "users.id = orders.user_id").
+    Where("status", "=", "paid").
+    OrderBy("created_at", "DESC").
+    Limit(50).
+    List()
+```
+
+The joined table name is validated, while the `ON` clause is a raw SQL fragment.
+Keep it static and under your control.
+
+Current `Where` and `Select` identifiers are validated as simple names, so they
+do not accept dotted identifiers such as `users.active`. For complex join
+filters or projections, use a database view, add columns to a dedicated read
+model, or opt into `RawQuery`.
+
+## Reusable Scopes
+
+Scopes are plain functions:
+
+```go
+var ActiveUsers = quark.Scope[User](func(q *quark.Query[User]) *quark.Query[User] {
+    return q.Where("active", "=", true)
+})
+
+func CreatedAfter(t time.Time) quark.Scope[User] {
+    return func(q *quark.Query[User]) *quark.Query[User] {
+        return q.Where("created_at", ">=", t)
+    }
+}
+
+users, err := quark.For[User](ctx, client).
+    Apply(ActiveUsers, CreatedAfter(time.Now().AddDate(0, -1, 0))).
+    Limit(100).
+    List()
+```
+
+Scopes are useful for authorization boundaries, soft business filters, feature
+flags, and repeated dashboard queries.
+
+## Subqueries and Raw SQL
+
+`WhereSubquery` is intentionally disabled unless the client allows raw SQL:
+
+```go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true
+
+client, err := quark.New(db,
+    quark.WithDialect(quark.PostgreSQL()),
+    quark.WithLimits(limits),
+)
+```
+
+Then:
+
+```go
+users, err := quark.For[User](ctx, client).
+    WhereSubquery("id", "IN", "SELECT user_id FROM orders WHERE total > 100").
+    List()
+```
+
+Only use this for static or carefully constructed SQL. Bound parameters protect
+values, but a raw subquery can still encode unsafe identifiers or SQL structure.
+
+For full raw reads, use `client.RawQuery`:
+
+```go
+rows, err := client.RawQuery(ctx,
+    "SELECT id, email FROM users WHERE active = $1",
+    true,
+)
+```
+
+`RawQuery` requires placeholders when validation asks for them.
+
+## Streaming
+
+`Iter` scans one row at a time and calls your callback:
+
+```go
+err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    OrderBy("id", "ASC").
+    Iter(func(user User) error {
+        return sendToSearchIndex(ctx, user)
+    })
+```
+
+`Cursor` gives manual control:
+
+```go
+cursor, err := quark.For[User](ctx, client).
+    OrderBy("id", "ASC").
+    Cursor()
+if err != nil {
+    return err
+}
+defer cursor.Close()
+
+for cursor.Next() {
+    var user User
+    if err := cursor.Scan(&user); err != nil {
+        return err
+    }
+    process(user)
+}
+
+return cursor.Err()
+```
+
+Always close cursors so the underlying `sql.Rows` and context cancellation are
+released.

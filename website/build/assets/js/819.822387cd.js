@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkquark_orm_site=self.webpackChunkquark_orm_site||[]).push([["819"],{5390(e,r,s){s.d(r,{createArchitectureServices:()=>c.S});var c=s(5530);s(3345)}}]);

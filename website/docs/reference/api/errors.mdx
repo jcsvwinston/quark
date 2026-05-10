@@ -1,0 +1,47 @@
+# Errors API Reference
+
+## Sentinel Errors
+
+```go
+var (
+    ErrNotFound            = errors.New("record not found")
+    ErrInvalidModel        = errors.New("invalid model")
+    ErrInvalidQuery        = errors.New("invalid query")
+    ErrInvalidIdentifier   = errors.New("invalid identifier")
+    ErrDialectNotSupported = errors.New("dialect not supported")
+    ErrConnection          = errors.New("database connection error")
+    ErrTimeout             = errors.New("query timeout")
+    ErrConstraintViolation = errors.New("constraint violation")
+)
+```
+
+## Error Checking
+
+```go
+user, err := quark.For[User](ctx, client).Find(id)
+if errors.Is(err, quark.ErrNotFound) {
+    return nil, fmt.Errorf("user %d not found", id)
+}
+if errors.Is(err, quark.ErrTimeout) {
+    // Retry with backoff
+}
+if errors.Is(err, quark.ErrConstraintViolation) {
+    // Handle duplicate key, FK violation, etc.
+}
+```
+
+## Error Wrapping
+
+Quark wraps database errors with context:
+
+```go
+// Timeout errors wrap context.DeadlineExceeded
+if errors.Is(err, context.DeadlineExceeded) {
+    // Detected as ErrTimeout
+}
+
+// Constraint violations detected across dialects
+// PostgreSQL: "unique constraint", "foreign key constraint"
+// MySQL: "duplicate entry", "foreign key constraint fails"
+// SQLite: "unique constraint failed"
+```

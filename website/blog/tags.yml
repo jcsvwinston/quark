@@ -1,0 +1,14 @@
+release:
+  label: Release
+  permalink: /release
+  description: QUARK release notes and project updates.
+
+docs:
+  label: Docs
+  permalink: /docs
+  description: Documentation updates for QUARK.
+
+changelog:
+  label: Changelog
+  permalink: /changelog
+  description: Changelog and compatibility notes for QUARK.

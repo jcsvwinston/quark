@@ -1,0 +1,110 @@
+import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
+
+// This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
+
+/**
+ * Creating a sidebar enables you to:
+ - create an ordered group of docs
+ - render a sidebar for each doc of that group
+ - provide next/previous navigation
+
+ The sidebars can be generated from the filesystem, or explicitly defined here.
+
+ Create as many sidebars as you want.
+ */
+const sidebars: SidebarsConfig = {
+  quarkSidebar: [
+    'intro',
+    {
+      type: 'category',
+      label: 'Guides',
+      collapsed: false,
+      items: [
+        'guides/installation',
+        'guides/getting-started',
+        'guides/modeling',
+        'guides/querying',
+        'guides/batch-operations',
+        'guides/relations',
+        'guides/migrations',
+        'guides/transactions',
+        'guides/cli',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Advanced',
+      collapsed: false,
+      items: [
+        'advanced/multi-tenant',
+        'advanced/caching-observability',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'API Reference',
+      collapsed: false,
+      items: [
+        'reference/api/index',
+        {
+          type: 'category',
+          label: 'Core API',
+          collapsed: true,
+          items: [
+            'reference/api/client',
+            'reference/api/query-builder',
+            'reference/api/crud',
+            'reference/api/querying',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Schema & Data',
+          collapsed: true,
+          items: [
+            'reference/api/modeling',
+            'reference/api/transactions',
+            'reference/api/migrations',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Advanced Features',
+          collapsed: true,
+          items: [
+            'reference/api/caching',
+            'reference/api/multi-tenant',
+            'reference/api/observability',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Reference',
+          collapsed: true,
+          items: [
+            'reference/api/dialects',
+            'reference/api/errors',
+            'reference/api/routines',
+          ],
+        },
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Reference',
+      collapsed: false,
+      items: [
+        'reference/sqlguard',
+        'reference/comparison',
+        'reference/configuration',
+        'reference/dialects',
+        'reference/benchmarks',
+        'reference/architecture',
+        'reference/roadmap',
+        'reference/release-notes',
+      ],
+    },
+  ],
+};
+
+export default sidebars;

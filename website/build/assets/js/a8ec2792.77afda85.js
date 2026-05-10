@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkquark_orm_site=self.webpackChunkquark_orm_site||[]).push([["9621"],{3970(e){e.exports=JSON.parse('{"metadata":{"permalink":"/quark-docs/blog","page":1,"postsPerPage":10,"totalPages":1,"totalCount":2,"blogDescription":"Blog","blogTitle":"Blog"}}')}}]);

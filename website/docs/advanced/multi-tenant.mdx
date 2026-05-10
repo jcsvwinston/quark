@@ -1,0 +1,197 @@
+---
+sidebar_position: 1
+title: Multi-Tenant
+description: Use TenantRouter with database, schema, or row-level isolation.
+---
+
+# Multi-Tenant
+
+`TenantRouter` implements Quark's `ClientProvider` interface, so the same query
+entry point works for single-tenant and multi-tenant code:
+
+```go
+users, err := quark.For[User](ctx, client).List()
+users, err = quark.For[User](tenantCtx, router).List()
+```
+
+The router resolves a tenant ID from `context.Context` and chooses one of three
+isolation strategies.
+
+## Strategy Matrix
+
+| Strategy | How it isolates | Requires | Best fit |
+| --- | --- | --- | --- |
+| `DatabasePerTenant` | Separate `*sql.DB` / `Client` per tenant. | `factory func(tenantID string) (*Client, error)` | Strong isolation, custom DSNs, tenant-specific scaling. |
+| `SchemaPerTenant` | Prefixes table names with the tenant ID as schema. | `BaseClient` | Shared database with schema namespaces. |
+| `RowLevelSecurity` | Injects `WHERE tenant_id = ?` into every query. | `BaseClient`, `TenantColumn` | Shared tables, application-level tenant filters. |
+
+Tenant IDs must match `^[a-z0-9_-]+$`. This protects schema names and cache keys
+from unsafe values.
+
+## Resolve Tenants from Context
+
+Keep tenant resolution small and deterministic:
+
+```go
+type tenantKey struct{}
+
+func WithTenant(ctx context.Context, tenantID string) context.Context {
+    return context.WithValue(ctx, tenantKey{}, tenantID)
+}
+
+func ResolveTenant(ctx context.Context) string {
+    tenantID, _ := ctx.Value(tenantKey{}).(string)
+    return tenantID
+}
+```
+
+Pass `ResolveTenant` to the router. If it returns an empty string or an invalid
+tenant ID, query execution returns an error before SQL is built.
+
+## Row-Level Isolation
+
+Row-level isolation uses one shared client and injects a tenant predicate:
+
+```go
+type Document struct {
+    ID       int64  `db:"id" pk:"true"`
+    TenantID string `db:"tenant_id"`
+    Title    string `db:"title"`
+}
+
+cfg := quark.DefaultTenantConfig()
+cfg.Strategy = quark.RowLevelSecurity
+cfg.BaseClient = client
+cfg.TenantColumn = "tenant_id"
+
+router := quark.NewTenantRouter(cfg, ResolveTenant, nil)
+
+tenantCtx := WithTenant(ctx, "acme")
+
+docs, err := quark.For[Document](tenantCtx, router).
+    Where("title", "LIKE", "Invoice%").
+    Limit(50).
+    List()
+```
+
+The effective query includes `tenant_id = 'acme'` even though application code
+does not repeat that filter.
+
+Writes also inherit tenant context. If the model has the configured tenant
+column and the field is zero, Quark fills it before insert.
+
+```go
+doc := Document{Title: "Invoice 1001"}
+err := quark.For[Document](tenantCtx, router).Create(&doc)
+// doc.TenantID == "acme"
+```
+
+## Schema-per-Tenant
+
+Schema-per-tenant uses a shared client and prefixes table names with the resolved
+tenant ID:
+
+```go
+cfg := quark.DefaultTenantConfig()
+cfg.Strategy = quark.SchemaPerTenant
+cfg.BaseClient = client
+
+router := quark.NewTenantRouter(cfg, ResolveTenant, nil)
+
+users, err := quark.For[User](WithTenant(ctx, "tenant_acme"), router).List()
+```
+
+For tenant `tenant_acme`, Quark builds table references like:
+
+```sql
+"tenant_acme"."users"
+```
+
+The current router uses the tenant ID directly as the schema name. If your
+database uses a prefix such as `tenant_acme`, return that full schema name from
+the resolver.
+
+Run schema creation and migrations once per tenant schema. `client.Migrate`
+operates on the base client; tenant-schema migration orchestration is an
+application concern in the current release.
+
+## Database-per-Tenant
+
+Database-per-tenant asks your factory to create a client for each tenant:
+
+```go
+cfg := quark.DefaultTenantConfig()
+cfg.Strategy = quark.DatabasePerTenant
+cfg.MaxCachedPools = 100
+
+router := quark.NewTenantRouter(
+    cfg,
+    ResolveTenant,
+    func(tenantID string) (*quark.Client, error) {
+        db, err := sql.Open("postgres", dsnForTenant(tenantID))
+        if err != nil {
+            return nil, err
+        }
+        db.SetMaxOpenConns(10)
+        db.SetMaxIdleConns(10)
+        return quark.New(db, quark.WithDialect(quark.PostgreSQL()))
+    },
+)
+
+users, err := quark.For[User](WithTenant(ctx, "acme"), router).Limit(100).List()
+```
+
+The router keeps an LRU cache of tenant clients. When the cache exceeds
+`MaxCachedPools`, the least recently used client is evicted and its underlying
+database connection is closed.
+
+```go
+active := router.ActiveTenants()
+```
+
+Use database-per-tenant only after you have a clear pool budget. With 100 active
+tenants and `db.SetMaxOpenConns(10)`, the process may open up to 1000 database
+connections.
+
+## TenantConfig Reference
+
+```go
+type TenantConfig struct {
+    Strategy       TenantStrategy
+    MaxCachedPools int
+    BaseClient     *quark.Client
+    TenantColumn   string
+}
+```
+
+| Field | Used by | Default | Notes |
+| --- | --- | --- | --- |
+| `Strategy` | All | `DatabasePerTenant` | One of `DatabasePerTenant`, `SchemaPerTenant`, `RowLevelSecurity`. |
+| `MaxCachedPools` | Database per tenant | `100` | Maximum cached clients before LRU eviction. |
+| `BaseClient` | Schema / row-level | `nil` | Required for shared-database strategies. |
+| `TenantColumn` | Row-level | `tenant_id` | Column injected into queries and writes. |
+
+## Relations and Cache Isolation
+
+Tenant context is carried into relation loading. If a preloaded related model has
+the configured tenant column, Quark adds the tenant predicate to the relation
+query too.
+
+Cache keys include tenant ID and schema, so two tenants do not share cached
+results for the same SQL shape.
+
+## Operational Guidance
+
+| Concern | Guidance |
+| --- | --- |
+| Missing tenant | Fail fast. Do not silently default to a public tenant. |
+| Tenant ID format | Return only lowercase letters, digits, underscores, and hyphens. |
+| Row-level models | Include `tenant_id` on every tenant-owned table. |
+| Shared lookup tables | Use the base client for truly global tables. |
+| Migrations | Run migrations per database or schema before routing traffic. |
+| Reporting | Use explicit reporting clients instead of bypassing tenant filters accidentally. |
+| Defense in depth | Combine app-level row filters with native database RLS where required. |
+
+`TenantRouter` centralizes tenant selection, but it does not replace database
+permissions, audit logging, backups, or operational safeguards. Treat it as the
+ORM layer in a broader tenancy design.

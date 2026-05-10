@@ -1,0 +1,267 @@
+---
+sidebar_position: 3
+title: Modeling
+description: Model structs, table names, field tags, primary keys, validation, hooks, and schema metadata.
+---
+
+# Modeling
+
+Quark models are plain Go structs. There is no code generation step and no base
+model type to embed. A field participates in persistence when it has a `db` tag;
+relations participate when they have a `rel` tag.
+
+```go
+type Product struct {
+    ID        int64      `db:"id" pk:"true"`
+    SKU       string     `db:"sku" quark:"unique,not_null" validate:"required"`
+    Name      string     `db:"name" quark:"not_null"`
+    Price     float64    `db:"price" default:"0.00" quark:"not_null"`
+    Stock     int        `db:"stock" default:"0"`
+    CreatedAt time.Time  `db:"created_at"`
+    UpdatedAt time.Time  `db:"updated_at"`
+    DeletedAt *time.Time `db:"deleted_at"`
+}
+```
+
+## Table Names
+
+By default Quark pluralizes and snake-cases the struct name:
+
+| Struct | Default table |
+| --- | --- |
+| `User` | `users` |
+| `Category` | `categories` |
+| `APIKey` | `api_keys` |
+| `Address` | `addresses` |
+
+Implement `TableName() string` when your database name is explicit or legacy:
+
+```go
+func (Product) TableName() string {
+    return "catalog_products"
+}
+```
+
+The metadata is cached per Go type after the first parse, so repeated queries do
+not repeatedly reflect over the same struct shape.
+
+## Field Tags
+
+| Tag | Read by | Purpose |
+| --- | --- | --- |
+| `db:"column"` | CRUD, queries, migrations | Maps a Go field to a SQL column. |
+| `db:"-"` | Metadata parser | Ignores the field. |
+| `pk:"true"` | CRUD, migrations | Marks the primary key or a composite-key member. |
+| `quark:"not_null"` | `Migrate` | Emits `NOT NULL`. |
+| `nullable:"false"` | `Migrate` | Also emits `NOT NULL`. |
+| `default:"value"` | `Migrate` | Emits `DEFAULT value` exactly as written. |
+| `quark:"unique"` | `Migrate` | Emits `UNIQUE`. |
+| `quark:"rename:old_col"` | `Sync` | Renames `old_col` to the current `db` column. |
+| `validate:"rule"` | `Create`, `Upsert`, batch writes | Runs `go-playground/validator/v10` rules. |
+
+The `quark` tag accepts comma-separated values:
+
+```go
+Email string `db:"email" quark:"unique,not_null"`
+```
+
+`default` is inserted into DDL without quoting. Use the form your database
+expects:
+
+```go
+Status    string    `db:"status" default:"'draft'"`
+CreatedAt time.Time `db:"created_at" default:"CURRENT_TIMESTAMP"`
+Active    bool      `db:"active" default:"1"`
+```
+
+## Primary Keys
+
+Use `pk:"true"` for explicit primary keys:
+
+```go
+type User struct {
+    ID int64 `db:"id" pk:"true"`
+}
+```
+
+If no field is tagged with `pk:"true"`, Quark falls back to a field tagged
+`db:"id"`. Integer single-column primary keys are treated as database-generated
+when their value is zero on insert.
+
+String primary keys are caller-supplied:
+
+```go
+type Session struct {
+    ID     string `db:"id" pk:"true"`
+    UserID int64  `db:"user_id"`
+}
+```
+
+## Composite Primary Keys
+
+Tag more than one field with `pk:"true"`:
+
+```go
+type OrderItem struct {
+    OrderID   int64 `db:"order_id" pk:"true"`
+    ProductID int64 `db:"product_id" pk:"true"`
+    Quantity  int   `db:"quantity"`
+}
+```
+
+`Migrate` emits a table-level `PRIMARY KEY (order_id, product_id)` constraint.
+`Update`, `Delete`, and `HardDelete` include every key column in the predicate.
+
+```go
+item := OrderItem{OrderID: 1001, ProductID: 42, Quantity: 3}
+if err := quark.For[OrderItem](ctx, client).Create(&item); err != nil {
+    return err
+}
+
+item.Quantity = 5
+rows, err := quark.For[OrderItem](ctx, client).Update(&item)
+```
+
+`Find(id)` is for simple primary keys. For composite keys, query with explicit
+predicates:
+
+```go
+item, err := quark.For[OrderItem](ctx, client).
+    Where("order_id", "=", 1001).
+    Where("product_id", "=", 42).
+    First()
+```
+
+## Zero-Value Update Semantics
+
+`Update` and `UpdateBatch` perform partial updates. Fields with zero values are
+not included in the `SET` clause:
+
+```go
+user := User{ID: 7, Name: "New Name"}
+rows, err := quark.For[User](ctx, client).Update(&user)
+```
+
+This updates `name` and leaves `active`, `score`, pointer fields, and empty
+strings untouched. To write a zero value intentionally, use `UpdateMap`:
+
+```go
+rows, err := quark.For[User](ctx, client).
+    Where("id", "=", 7).
+    UpdateMap(map[string]any{
+        "active": false,
+        "score":  0,
+    })
+```
+
+## Soft Deletes
+
+A nullable `deleted_at` column enables soft delete for `Delete`:
+
+```go
+type User struct {
+    ID        int64      `db:"id" pk:"true"`
+    Email     string     `db:"email"`
+    DeletedAt *time.Time `db:"deleted_at"`
+}
+```
+
+Normal reads add `deleted_at IS NULL` automatically. `Unscoped` includes deleted
+rows:
+
+```go
+users, err := quark.For[User](ctx, client).Unscoped().List()
+```
+
+Use `HardDelete` for a single permanent deletion. `DeleteBy` and `DeleteBatch`
+perform hard deletes in the current API and require explicit IDs or predicates.
+
+## Validation
+
+Quark validates models before `Create`, `Upsert`, `CreateBatch`, and
+`UpsertBatch`. It uses `go-playground/validator/v10` tags by default:
+
+```go
+type Account struct {
+    ID    int64  `db:"id" pk:"true"`
+    Email string `db:"email" validate:"required,email"`
+    Role  string `db:"role" validate:"oneof=admin member viewer"`
+}
+```
+
+For rules that need code, implement a `Validate(context.Context) error` method.
+Quark calls it before falling back to tag validation:
+
+```go
+func (a *Account) Validate(ctx context.Context) error {
+    if strings.HasSuffix(a.Email, "@example.invalid") {
+        return errors.New("reserved test domain")
+    }
+    return nil
+}
+```
+
+## Lifecycle Hooks
+
+Model methods can run around writes:
+
+```go
+func (u *User) BeforeCreate(ctx context.Context) error {
+    now := time.Now()
+    u.CreatedAt = now
+    u.UpdatedAt = now
+    return nil
+}
+
+func (u *User) BeforeUpdate(ctx context.Context) error {
+    u.UpdatedAt = time.Now()
+    return nil
+}
+```
+
+Available hook interfaces are:
+
+| Hook | Called by |
+| --- | --- |
+| `BeforeCreate(ctx)` | `Create` |
+| `AfterCreate(ctx)` | `Create` |
+| `BeforeUpdate(ctx)` | `Update` |
+| `AfterUpdate(ctx)` | `Update` |
+| `BeforeDelete(ctx)` | `Delete`, `HardDelete` |
+| `AfterDelete(ctx)` | `Delete`, `HardDelete` |
+
+`UpdateMap`, `CreateBatch`, `Upsert`, and batch operations validate data, but do
+not run every entity lifecycle hook in the same way as `Create`, `Update`, and
+`Delete`. Use service-level code when a bulk workflow needs per-row side effects.
+
+## Relation Fields
+
+Relation fields use `rel` tags instead of `db` tags:
+
+```go
+type User struct {
+    ID      int64     `db:"id" pk:"true"`
+    Profile *Profile `rel:"has_one" join:"user_id"`
+    Posts   []Post   `rel:"has_many" join:"user_id"`
+    TeamID  int64    `db:"team_id"`
+    Team    *Team    `rel:"belongs_to" join:"team_id"`
+}
+```
+
+Because relation fields do not have `db` tags, they are not treated as columns.
+They are loaded with `Preload` and can be recursively persisted during
+association saves. See [Relations](relations) for the full tag matrix.
+
+## Inspecting Metadata
+
+`GetModelMeta[T]` exposes the cached model metadata:
+
+```go
+meta := quark.GetModelMeta[User]()
+fmt.Println(meta.Table)
+fmt.Println(meta.PK.Column)
+fmt.Println(meta.FieldByCol["email"].Index)
+```
+
+This is useful for framework integration, diagnostics, custom tooling, and tests
+that need to assert how Quark interpreted a model.

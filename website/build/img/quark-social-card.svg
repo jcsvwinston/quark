@@ -1,0 +1,17 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#F7FBF8"/>
+  <rect x="78" y="72" width="1044" height="486" rx="28" fill="#FFFFFF" stroke="#D8E6E1" stroke-width="2"/>
+  <rect x="118" y="112" width="118" height="118" rx="24" fill="#0D7A68"/>
+  <path d="M177 135L214 156V199L177 221L140 199V156L177 135Z" fill="#F7FBF8" stroke="#10221B" stroke-width="5" stroke-linejoin="round"/>
+  <circle cx="177" cy="178" r="8" fill="#D58922" stroke="#10221B" stroke-width="4"/>
+  <text x="118" y="330" fill="#10221B" font-family="Inter, Arial, sans-serif" font-size="84" font-weight="800">QUARK ORM</text>
+  <text x="118" y="404" fill="#45534D" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="500">A type-safe ORM for Go with immutable queries,</text>
+  <text x="118" y="452" fill="#45534D" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="500">multi-dialect SQL, and production hooks.</text>
+  <rect x="790" y="128" width="278" height="346" rx="18" fill="#0C1614"/>
+  <rect x="820" y="170" width="178" height="14" rx="7" fill="#44D6BF"/>
+  <rect x="820" y="214" width="206" height="14" rx="7" fill="#D8EFE6"/>
+  <rect x="820" y="258" width="126" height="14" rx="7" fill="#D58922"/>
+  <rect x="820" y="302" width="190" height="14" rx="7" fill="#D8EFE6"/>
+  <rect x="820" y="346" width="150" height="14" rx="7" fill="#44D6BF"/>
+  <rect x="820" y="390" width="218" height="14" rx="7" fill="#D8EFE6"/>
+</svg>

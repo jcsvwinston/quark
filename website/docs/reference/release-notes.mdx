@@ -1,0 +1,61 @@
+---
+sidebar_position: 8
+title: Release Notes
+description: Quark ORM release notes and compatibility notes.
+---
+
+# Release Notes
+
+Quark is documented here as a **v0.x** project. The public surface is useful and
+broad, but some APIs may still move before v1.0.
+
+The main repository also contains historical release notes at
+[`docs/RELEASE_NOTES_V1.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_V1.md).
+
+## v0.1.0
+
+Public release baseline.
+
+### Core
+
+- Generic `Query[T]` entry point through `quark.For[T](ctx, provider)`.
+- Immutable builder methods for predictable query composition.
+- CRUD helpers for create, update, delete, hard delete, upsert, and map updates.
+- Read helpers for `Find`, `First`, `List`, `Count`, aggregates, pagination, streaming, and cursors.
+- Validation through `validate` tags and model-level `Validate(context.Context) error`.
+- Lifecycle hooks for create, update, and delete paths.
+
+### Dialects
+
+- SQLite, PostgreSQL, MySQL, MariaDB, SQL Server, and Oracle dialects.
+- Dialect-specific placeholders, identifier quoting, pagination, upsert SQL, generated-ID handling, JSON extraction, and DDL helpers.
+- Custom dialect registration through `RegisterDialect`.
+
+### Schema
+
+- `Migrate` for table and many-to-many join-table creation.
+- `Sync` for additive changes, renames, and controlled destructive drops.
+- `CreateIndex` and `AddForeignKey` helpers.
+- Versioned Go migrations through `github.com/jcsvwinston/quark/migrate`.
+
+### Relations
+
+- `Preload` for `has_one`, `has_many`, `belongs_to`, many-to-many, and polymorphic relations.
+- Recursive association persistence for common aggregate saves.
+- Tenant context propagation through association loads and saves where tenant columns are present.
+
+### Production Features
+
+- Transactions, manual transactions, savepoints, and nested savepoint-style callbacks.
+- `TenantRouter` with database-per-tenant, schema-per-tenant, and row-level strategies.
+- Cache abstraction with memory and Redis stores.
+- Query observers, middleware, and OpenTelemetry middleware.
+- SQLGuard validation for identifiers, operators, and raw-query escape hatches.
+
+## Compatibility Notes
+
+- The current module tree does not include a standalone `cmd/quark` CLI.
+- `DeleteBy` and `DeleteBatch` perform hard deletes.
+- `Select` accepts simple identifiers rather than arbitrary SQL expressions.
+- Raw SQL APIs require `AllowRawQueries: true`.
+- Migration commands that use `migrate.Migrator` should use a client configured with `AllowRawQueries: true`.
