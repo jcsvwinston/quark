@@ -334,7 +334,7 @@ func (q *BaseQuery) buildInsert(v reflect.Value) (string, []any, error) {
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		dbTag := field.Tag.Get("db")
+		dbTag := columnFromDBTag(field.Tag.Get("db"))
 		if dbTag == "" || dbTag == "-" {
 			continue // Skip fields without db tag
 		}
@@ -497,7 +497,7 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 	idxByName := make(map[string]int, t.NumField())
 	for i := 0; i < t.NumField(); i++ {
 		fld := t.Field(i)
-		dbTag := fld.Tag.Get("db")
+		dbTag := columnFromDBTag(fld.Tag.Get("db"))
 		if dbTag == "" || dbTag == "-" {
 			continue
 		}
@@ -525,7 +525,7 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		if !ok {
 			return 0, fmt.Errorf("%w: UpdateFields: unknown field %q on %s", ErrInvalidQuery, name, t.Name())
 		}
-		dbTag := t.Field(idx).Tag.Get("db")
+		dbTag := columnFromDBTag(t.Field(idx).Tag.Get("db"))
 		if dbTag == "" {
 			dbTag = name
 		}
@@ -663,7 +663,7 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		dbTag := field.Tag.Get("db")
+		dbTag := columnFromDBTag(field.Tag.Get("db"))
 		if dbTag == "" || dbTag == "-" {
 			continue
 		}
@@ -867,7 +867,7 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 
 	hasDeletedAt := false
 	for i := 0; i < t.NumField(); i++ {
-		if t.Field(i).Tag.Get("db") == "deleted_at" {
+		if columnFromDBTag(t.Field(i).Tag.Get("db")) == "deleted_at" {
 			hasDeletedAt = true
 			break
 		}
@@ -1261,7 +1261,7 @@ func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCol
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		dbTag := field.Tag.Get("db")
+		dbTag := columnFromDBTag(field.Tag.Get("db"))
 		if dbTag == "" || dbTag == "-" {
 			continue
 		}
@@ -1396,7 +1396,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 	var colIndexes []int
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		dbTag := field.Tag.Get("db")
+		dbTag := columnFromDBTag(field.Tag.Get("db"))
 		if dbTag == "" || dbTag == "-" {
 			continue
 		}
@@ -1597,7 +1597,7 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 	var cols []batchColDef
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		dbTag := field.Tag.Get("db")
+		dbTag := columnFromDBTag(field.Tag.Get("db"))
 		if dbTag == "" || dbTag == "-" {
 			continue
 		}

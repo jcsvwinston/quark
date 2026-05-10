@@ -42,3 +42,10 @@ func toSnakeCase(s string) string {
 func pluralize(s string) string {
 	return schema.Pluralize(s)
 }
+
+// columnFromDBTag returns the column-name portion of a db tag, stripping
+// sizing options like ",size=512". Used wherever code reads the raw db tag
+// off a reflect.StructField and needs a clean identifier for the SQL guard.
+func columnFromDBTag(tag string) string {
+	return schema.ColumnFromDBTag(tag)
+}

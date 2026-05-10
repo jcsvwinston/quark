@@ -2,8 +2,128 @@
 package migrate
 
 import (
+	"fmt"
 	"reflect"
+	"sync"
 )
+
+// TypeOptions carry the SQL-type sizing hints parsed from a struct's db tag,
+// e.g. db:"name,size=512" or db:"price,precision=18,scale=4". A zero value
+// means "use the dialect default".
+type TypeOptions struct {
+	Size      int
+	Precision int
+	Scale     int
+	IsPK      bool
+}
+
+// TypeMapper produces a dialect-specific SQL type for a Go type. The caller
+// supplies the dialect name (lower-case: "postgres", "mysql", ...) and the
+// sizing hints from the field's tag. Implementations should fall back to
+// sensible defaults if Size/Precision/Scale are zero.
+type TypeMapper func(dialect string, opts TypeOptions) string
+
+// typeMapperRegistry stores the registered mappings. Keyed by reflect.Type
+// (the canonical, pointer-stripped form). Using sync.Map keeps reads
+// lock-free on the hot path of every CREATE TABLE statement.
+var typeMapperRegistry sync.Map // map[reflect.Type]TypeMapper
+
+// RegisterTypeMapper registers a custom Go-type → SQL-type mapping. The
+// public API in package quark forwards to this; the registry lives here
+// because internal/migrate.SQLType is the only consumer and we want the
+// lookup to stay close to the lookup site.
+//
+// Pointer types are stripped before registration: registering for
+// time.Duration also covers *time.Duration. Re-registering the same type
+// overwrites the previous mapper.
+func RegisterTypeMapper(t reflect.Type, m TypeMapper) {
+	if t == nil || m == nil {
+		return
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	typeMapperRegistry.Store(t, m)
+}
+
+// LookupTypeMapper returns the registered mapper for t (pointer stripped).
+// Returns nil if no mapping is registered.
+func LookupTypeMapper(t reflect.Type) TypeMapper {
+	if t == nil {
+		return nil
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if v, ok := typeMapperRegistry.Load(t); ok {
+		return v.(TypeMapper)
+	}
+	return nil
+}
+
+// SQLTypeWithOpts is the extended form of SQLType that propagates the field's
+// sizing hints to the type mapper. It is the preferred entry point for the
+// migrate / sync layers; SQLType remains as a convenience wrapper for
+// callers that don't (yet) have TypeOptions.
+func SQLTypeWithOpts(dialectName string, t reflect.Type, opts TypeOptions) string {
+	// Custom mappers take precedence over the built-in switch — except for
+	// PK columns, which need the dialect-specific PRIMARY KEY suffix the
+	// SQLType builder appends. Custom mappers can opt in to PK handling by
+	// reading opts.IsPK and emitting the suffix themselves.
+	if mapper := LookupTypeMapper(t); mapper != nil {
+		return mapper(dialectName, opts)
+	}
+	// Apply size/precision overrides where they apply naturally to the
+	// built-in switch. This wraps SQLType so the existing big switch stays
+	// intact.
+	base := SQLType(dialectName, t, opts.IsPK)
+	if opts.Size > 0 {
+		base = applySize(base, dialectName, opts.Size)
+	}
+	if opts.Precision > 0 {
+		base = applyPrecisionScale(base, dialectName, opts.Precision, opts.Scale)
+	}
+	return base
+}
+
+// applySize rewrites a VARCHAR/CHAR/NVARCHAR family default with an explicit
+// size. Engines that emit TEXT for the default (postgres/sqlite) get a
+// VARCHAR(N) instead, matching what callers usually mean when they ask for
+// a sized string.
+func applySize(base, dialectName string, size int) string {
+	switch dialectName {
+	case "postgres", "sqlite":
+		if base == "TEXT" {
+			return fmt.Sprintf("VARCHAR(%d)", size)
+		}
+	case "oracle":
+		if base == "VARCHAR2(255)" {
+			return fmt.Sprintf("VARCHAR2(%d)", size)
+		}
+	case "mssql":
+		if base == "NVARCHAR(255)" {
+			return fmt.Sprintf("NVARCHAR(%d)", size)
+		}
+	default:
+		if base == "VARCHAR(255)" {
+			return fmt.Sprintf("VARCHAR(%d)", size)
+		}
+	}
+	return base
+}
+
+// applyPrecisionScale rewrites the DECIMAL family default. Today the built-in
+// switch never emits DECIMAL itself (it is not in the Go-kind switch), so
+// this is reachable only when a custom type mapper has produced a DECIMAL
+// expression and the field tag adds extra precision hints. Kept here for
+// symmetry with applySize.
+func applyPrecisionScale(base, dialectName string, precision, scale int) string {
+	_ = dialectName
+	if scale == 0 {
+		return fmt.Sprintf("DECIMAL(%d)", precision)
+	}
+	return fmt.Sprintf("DECIMAL(%d,%d)", precision, scale)
+}
 
 // SQLType maps Go types to SQL types for the given dialect name.
 //

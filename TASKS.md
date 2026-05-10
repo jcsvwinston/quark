@@ -34,8 +34,24 @@ CHANGELOG `### Added`; Historial en `docs/playbooks/query-builder.md` §P0-4
 ### F1-3 · `Nullable[T]` genérico
 [Pendiente] Reemplazo idiomático de `*time.Time` / `sql.NullString`.
 
-### F1-4 · `RegisterTypeMapper`
-[Pendiente] Sistema extensible para `internal/migrate.SQLType`. Permitir longitud por tag (`db:"name,size=512"`).
+### ~~F1-4 · `RegisterTypeMapper`~~
+
+**Cerrado** — `quark.RegisterTypeMapper(reflect.Type, TypeMapper)` enrutado
+a `internal/migrate.RegisterTypeMapper` (sync.Map por reflect.Type, pointer
+stripping al registrar). `internal/migrate.SQLTypeWithOpts` consulta el
+registry antes del switch built-in, propagando `TypeOptions{Size, Precision,
+Scale, IsPK}`. Tag db extendido: `db:"name,size=512"`, `db:"price,precision=18,scale=4"`
+parseado en `internal/schema.parseDBTag`. `FieldMeta` lleva ahora `Size`,
+`Precision`, `Scale`. Helper `internal/schema.ColumnFromDBTag` strippea
+opciones para el guard en hot paths (`query_crud.go` ×8 sites + `query_exec.go` ×1).
+`time.Duration` registrado por defecto → BIGINT (NUMBER(19) en Oracle).
+
+Cobertura: `testTypeMapper` (`type_mapper_test.go`) wired a `SharedSuite`,
+4 subtests: DurationMapsToBigInt (round-trip), CustomMapperHonored (IPAddr
+custom type), SizeTagOptionRespected (500-char bio en `db:"bio,size=512"`),
+PointerTypeStrippedOnRegistration (`*time.Duration`). Doc en
+`website/docs/guides/modeling.mdx` § Field Tags + § Custom type mappers;
+CHANGELOG `### Added`.
 
 ### F1-5 · Soft delete real
 [Pendiente] Scope `WithTrashed()` / `OnlyTrashed()` automático cuando el modelo tiene `DeletedAt *time.Time`.

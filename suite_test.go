@@ -89,6 +89,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testDirtyTracking(ctx, t, client)
 	})
 
+	t.Run("TypeMapper", func(t *testing.T) {
+		testTypeMapper(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

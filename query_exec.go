@@ -779,7 +779,7 @@ func (q *Query[T]) findField(elem reflect.Value, column string) reflect.Value {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 
-		dbTag := field.Tag.Get("db")
+		dbTag := columnFromDBTag(field.Tag.Get("db"))
 		if strings.EqualFold(dbTag, column) {
 			return elem.Field(i)
 		}
