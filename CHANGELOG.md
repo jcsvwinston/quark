@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`UpdateFields(entity, fields ...string)` API (P0-4 escape hatch)**:
+  explicit partial-update method that writes only the named fields, bypassing
+  the zero-value filter `Update(entity)` applies. Recommended path for
+  writing `false`, `0`, `""`, or `nil` until dirty tracking lands in Phase 1.
+  Refuses to overwrite the primary key, errors on unknown field names or an
+  empty list. Hooks `BeforeUpdate`/`AfterUpdate` still run.
+
+### Changed
+
+- **`Update(entity)` logs a WARN when it skips zero-value fields**, listing
+  the skipped column names. Lets users see the P0-4 trap instead of having
+  values silently disappear. The behaviour itself does not change.
+
 ### Fixed
 
 - **Silent error swallowing in `linkM2M` (P0-3)**: when Quark inserted into a

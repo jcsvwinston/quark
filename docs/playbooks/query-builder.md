@@ -9,8 +9,8 @@ files:
   - cursor.go
 last_review: 2026-05-10
 related_adrs: [0001, 0002, 0007]
-related_p0: [P0-4, P0-5]
-closed_p0: [P0-1, P0-3]
+related_p0: [P0-5]
+closed_p0: [P0-1, P0-3, P0-4]
 phase: 0
 ---
 
@@ -28,14 +28,6 @@ Esto es deuda conocida; el plan es introducir un AST en Fase 2 (ver `docs/ANALIS
 
 ## Bugs P0 vivos
 
-### P0-4 · `isZeroValue` impide `Update` con `false`/`0`/`""`
-
-**Localización**: `query_crud.go:649` (`isZeroValue`).
-
-**Impacto**: `Update(entity)` salta los campos cuyo valor es zero-value del tipo. No se puede poner un bool a `false`, un int a `0`, un string a `""`.
-
-**Workaround actual**: `UpdateMap(map[string]any{...})` con `Where` manual. Documentar la trampa visiblemente. Fix permanente con dirty tracking ligero llega en Fase 1.
-
 ### P0-5 · `JOIN ... ON` se concatena raw
 
 **Localización**: `query_builder.go:229` (firma `Join(table, onClause)`) + `query_exec.go:467` (concatena el `onClause`).
@@ -52,6 +44,31 @@ Esto es deuda conocida; el plan es introducir un AST en Fase 2 (ver `docs/ANALIS
 el predicado de tenant por precedencia SQL. Fix: `(b *BaseQuery) cloneForGroup()`
 copia el contexto de aislamiento al blank y pre-inyecta el predicado de tenant
 para que el grupo OR lo herede. Detalles en `docs/playbooks/tenant.md`.
+
+### P0-4 · `isZeroValue` impedía escribir `false`/`0`/`""` en `Update` (mitigado)
+
+`Update(entity)` sigue saltándose campos cuyo valor es zero-value del tipo —
+ese es el diseño hasta que llegue dirty tracking en Fase 1 (decisión
+arquitectónica, no bug). Lo que sí era un P0 era no tener una salida explícita
+para escribir ceros: el usuario tenía que usar `UpdateMap` y construir el WHERE
+a mano.
+
+Mitigación aplicada: nueva API `UpdateFields(entity, fields ...string) (int64,
+error)` (`query_crud.go`) que ignora el filtro `isZeroValue` y escribe sólo
+los campos nombrados. Rechaza listas vacías, nombres desconocidos, y la PK.
+Hooks `BeforeUpdate`/`AfterUpdate` siguen corriendo. Además, `Update(entity)`
+ahora loguea WARN listando los campos zero-value que se está saltando, para
+que la trampa sea visible en runtime.
+
+Cobertura: `testUpdateZeroValues` en `update_zero_values_test.go` wired a
+`SharedSuite` — 6 subtests: confirma el comportamiento documentado de Update
++ verifica que `UpdateFields` escribe `false`, `0`, `""`, rechaza unknown
+field, rechaza la PK, rechaza lista vacía.
+
+**Cierre permanente**: dirty tracking en Fase 1 (`Track()` + snapshot al cargar
++ `Save()` que sólo emita UPDATE de campos cambiados, ver §1 de
+ANALISIS_MADUREZ §4). Cuando llegue, `UpdateFields` puede mantenerse como
+API explícita o deprecarse — decisión a tomar entonces.
 
 ### P0-3 · `linkM2M` swallowed every driver error (cerrado)
 
