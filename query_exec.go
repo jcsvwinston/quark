@@ -395,14 +395,8 @@ func (q *Query[T]) Count() (int64, error) {
 
 	// WHERE clause
 	whereConds := q.where
-	if !q.unscoped {
-		if _, hasDeletedAt := q.meta.FieldByCol["deleted_at"]; hasDeletedAt {
-			whereConds = append([]condition{{
-				column:   "deleted_at",
-				operator: "IS NULL",
-				logic:    "AND",
-			}}, whereConds...)
-		}
+	if pred := q.softDeletePredicate(); pred != nil {
+		whereConds = append([]condition{*pred}, whereConds...)
 	}
 
 	if len(whereConds) > 0 {
@@ -486,14 +480,8 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	}
 
 	whereConds := q.where
-	if !q.unscoped {
-		if _, hasDeletedAt := q.meta.FieldByCol["deleted_at"]; hasDeletedAt {
-			whereConds = append([]condition{{
-				column:   "deleted_at",
-				operator: "IS NULL",
-				logic:    "AND",
-			}}, whereConds...)
-		}
+	if pred := q.softDeletePredicate(); pred != nil {
+		whereConds = append([]condition{*pred}, whereConds...)
 	}
 
 	if len(whereConds) > 0 {
@@ -1195,10 +1183,8 @@ func (q *Query[T]) aggregate(fn, column string) (float64, error) {
 	sqlBuf.WriteString(q.fullTableName())
 
 	whereConds := q.where
-	if !q.unscoped {
-		if _, hasDeletedAt := q.meta.FieldByCol["deleted_at"]; hasDeletedAt {
-			whereConds = append([]condition{{column: "deleted_at", operator: "IS NULL", logic: "AND"}}, whereConds...)
-		}
+	if pred := q.softDeletePredicate(); pred != nil {
+		whereConds = append([]condition{*pred}, whereConds...)
 	}
 	if len(whereConds) > 0 {
 		whereSQL, whereArgs, err := q.buildWhereClause(whereConds, 1)

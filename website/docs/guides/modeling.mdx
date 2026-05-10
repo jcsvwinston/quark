@@ -250,15 +250,44 @@ type User struct {
 }
 ```
 
-Normal reads add `deleted_at IS NULL` automatically. `Unscoped` includes deleted
-rows:
+### Automatic scope
+
+Reads, counts, and aggregates add `deleted_at IS NULL` automatically — soft-
+deleted rows are invisible by default. Three scope modifiers shift the
+filter:
+
+| Modifier | Predicate added | Use |
+| --- | --- | --- |
+| (default) | `deleted_at IS NULL` | Normal application reads. |
+| `WithTrashed()` | (no filter) | Listings that should include trashed rows (admin / audit). |
+| `OnlyTrashed()` | `deleted_at IS NOT NULL` | Show only the trash; pre-step for restore or hard-delete UIs. |
+| `Unscoped()` | (no filter) | Backward-compatible alias of `WithTrashed`. |
 
 ```go
-users, err := quark.For[User](ctx, client).Unscoped().List()
+trash, _ := quark.For[User](ctx, client).OnlyTrashed().List()
+all,   _ := quark.For[User](ctx, client).WithTrashed().Limit(100).List()
+live,  _ := quark.For[User](ctx, client).List()             // default
 ```
 
-Use `HardDelete` for a single permanent deletion. `DeleteBy` and `DeleteBatch`
-perform hard deletes in the current API and require explicit IDs or predicates.
+### Restore
+
+`Restore` clears `deleted_at` on the row identified by the entity's primary
+key. Restoring a row that is already live is a 0-row no-op rather than a
+stealth NULL write — so a misuse can't corrupt non-trashed data:
+
+```go
+got, _ := quark.For[User](ctx, client).OnlyTrashed().Find(42)
+rows, err := quark.For[User](ctx, client).Restore(&got)
+```
+
+On success the entity's `DeletedAt` field is cleared in memory too so the
+in-process struct reflects the restored state.
+
+### Hard delete
+
+Use `HardDelete` for a permanent deletion. `DeleteBy` and `DeleteBatch`
+perform hard deletes in the current API and require explicit IDs or
+predicates.
 
 ## Validation
 
