@@ -17,10 +17,12 @@ const config: Config = {
   url: 'https://jcsvwinston.github.io',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: '/website/',
+  baseUrl: '/quark/',
 
   // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
+  // The site source lives in this repo under website/. The
+  // .github/workflows/deploy.yml workflow builds and uploads it via
+  // actions/deploy-pages, so the legacy `gh-pages` branch is not used.
   organizationName: 'jcsvwinston',
   projectName: 'quark',
   trailingSlash: false,
@@ -57,7 +59,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           editUrl:
-            'https://github.com/jcsvwinston/quark/tree/main/',
+            'https://github.com/jcsvwinston/quark/tree/main/website/',
         },
         blog: {
           showReadingTime: true,
@@ -66,7 +68,7 @@ const config: Config = {
             xslt: true,
           },
           editUrl:
-            'https://github.com/jcsvwinston/quark/tree/main/',
+            'https://github.com/jcsvwinston/quark/tree/main/website/',
           // Useful options to enforce blogging best practices
           onInlineTags: 'warn',
           onInlineAuthors: 'warn',
