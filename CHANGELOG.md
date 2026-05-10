@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-10
+
+Phase 2 release: composable query builder. Introduces a typed expression
+AST and the structured query primitives (subqueries, CTEs, window
+functions, set operators) that build on it, plus a structured Join
+builder that retires the v0.3.x string-raw deprecation. Full release
+notes in [`docs/RELEASE_NOTES_v0.4.0.md`](docs/RELEASE_NOTES_v0.4.0.md);
+breaking-change migration in
+[`docs/MIGRATION_v0.4.0.md`](docs/MIGRATION_v0.4.0.md).
+
 ### Changed (BREAKING)
 
 - **`Join` / `LeftJoin` / `RightJoin` now return a `*JoinBuilder[T]`**:

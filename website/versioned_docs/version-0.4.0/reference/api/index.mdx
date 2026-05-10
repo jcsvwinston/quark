@@ -1,0 +1,78 @@
+# API Reference
+
+Complete API documentation for the Quark ORM.
+
+## Core API
+
+- **[Client](/docs/reference/api/client)** - Creating and configuring the ORM client
+- **[Query Builder](/docs/reference/api/query-builder)** - Fluent type-safe query construction
+- **[CRUD](/docs/reference/api/crud)** - Create, Read, Update, Delete operations
+- **[Querying](/docs/reference/api/querying)** - Retrieving data: List, Find, aggregates, pagination
+
+## Model Definition
+
+- **[Modeling](/docs/reference/api/modeling)** - Struct tags, relations, hooks
+
+## Schema & Data
+
+- **[Transactions](/docs/reference/api/transactions)** - ACID transactions and savepoints
+- **[Migrations](/docs/reference/api/migrations)** - Schema migrations and sync
+
+## Advanced Features
+
+- **[Caching](/docs/reference/api/caching)** - Query result caching with Redis/Memory
+- **[Multi-Tenant](/docs/reference/api/multi-tenant)** - Row-level, schema, and database isolation
+- **[Observability](/docs/reference/api/observability)** - Middleware, OpenTelemetry, events
+
+## Reference
+
+- **[Dialects](/docs/reference/api/dialects)** - Database dialect interface
+- **[Errors](/docs/reference/api/errors)** - Error types and handling
+- **[Routines](/docs/reference/api/routines)** - Stored procedures and functions
+
+## Quick Example
+
+```go
+package main
+
+import (
+    "context"
+    "database/sql"
+    "log"
+    
+    _ "github.com/lib/pq"
+    "github.com/jcsvwinston/quark"
+)
+
+type User struct {
+    ID    int64  `db:"id" pk:"true"`
+    Name  string `db:"name"`
+    Email string `db:"email" quark:"unique"`
+}
+
+func main() {
+    db, _ := sql.Open("postgres", "...")
+    client, _ := quark.New(db)
+    ctx := context.Background()
+    
+    // Create
+    user := &User{Name: "Alice", Email: "alice@example.com"}
+    quark.For[User](ctx, client).Create(user)
+    
+    // Read
+    u, _ := quark.For[User](ctx, client).Find(user.ID)
+    
+    // Query
+    users, _ := quark.For[User](ctx, client).
+        Where("active", "=", true).
+        OrderBy("created_at", "DESC").
+        List()
+    
+    // Update
+    u.Name = "Alice Smith"
+    quark.For[User](ctx, client).Update(&u)
+    
+    // Delete
+    quark.For[User](ctx, client).Delete(&u)
+}
+```

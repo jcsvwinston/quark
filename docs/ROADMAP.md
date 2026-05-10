@@ -38,16 +38,18 @@
 - [x] **F1-5** — Soft-delete scopes: `WithTrashed` / `OnlyTrashed` / `Restore`.
 - [x] **F1-6** — Optimistic locking (`quark:"version"` + `ErrStaleEntity`).
 
-## v0.4.0 — Phase 2 (next)
+## v0.4.0 — Phase 2 (this release)
 
-- [ ] Composable expression AST (`Expr`, `Col`, `Lit`, `Func`, `And/Or/Not`, `In`, `Exists`).
-- [ ] Typed subqueries (`AsSubquery()` integrable in WHERE/JOIN).
-- [ ] CTEs (`WITH`, `WITH RECURSIVE`).
-- [ ] Window functions, `UNION` / `INTERSECT` / `EXCEPT`.
-- [ ] Pessimistic locking (`ForUpdate`, `ForShare`, `SkipLocked`, `NoWait`).
-- [ ] Nested preload with batch planning.
-- [ ] Automatic `IN(...)` chunking (Oracle 1000, MSSQL 2100).
-- [ ] Structured `Join(table).On(col, op, otherCol)` replaces the deprecated string-raw form.
+- [x] **F2-AST** — Composable expression AST (`Expr`, `Col`, `Lit`, `Func`, `And`/`Or`/`Not`, `In`, `Cmp` + `Eq`/`Ne`/`Lt`/`Gt`/`Lte`/`Gte`); `Query[T].WhereExpr` / `HavingExpr` integration.
+- [x] **F2-subqueries** — Typed subqueries (`AsSubquery()` + `Sub` / `Exists` / `NotExists` / `InSub` / `NotInSub`).
+- [x] **F2-CTE** — `With(name, sub)` / `WithRecursive(name, sub)` prefix on outer SELECT.
+- [x] **F2-window** — `SelectExpr(alias, e)` projection + `Over(inner, w)` + `RowNumber` / `Rank` / `DenseRank` / `Lag` / `Lead`.
+- [x] **F2-set** — `Union` / `UnionAll` / `Intersect` / `Except` between `Query[T]` operands.
+- [x] **F2-locking** — Pessimistic locking (`ForUpdate`, `ForShare`, `SkipLocked`, `NoWait`) + `Dialect.LockSuffix`.
+- [x] **F2-nested-preload** — Dotted-path `.Preload("A.B.C")` walks the chain in one pass; shared prefixes deduped.
+- [x] **F2-IN-chunking** — Eager-loading paths chunk parent keys at 1000 (Oracle/MSSQL caps).
+- [x] **F2-having-agg** — `HavingAggregate(fn, column, op, value)` with COUNT/SUM/AVG/MIN/MAX whitelist.
+- [x] **F2-join-builder** — Structured `Join(table).On(col, op, otherCol)` retires the v0.3.x string-raw form (BREAKING; see [`MIGRATION_v0.4.0.md`](MIGRATION_v0.4.0.md)).
 
 ## Phase 3 — schema diff + migrations (v0.5)
 
