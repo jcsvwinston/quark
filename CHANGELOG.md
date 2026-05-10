@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`RegisterTypeMapper(reflect.Type, TypeMapper)` (Phase 1 F1-4)**: extensible
+  Go-type → SQL-type mapping for `client.Migrate` and `client.Sync`. Custom
+  types (decimal.Decimal, uuid.UUID, IP addresses, vector types, …) can plug
+  their own DDL emission without forking Quark. Pointer types are stripped
+  before registration so registering for `time.Duration` also covers
+  `*time.Duration`. The migrate layer also accepts new sizing options on the
+  db tag — `db:"name,size=512"`, `db:"price,precision=18,scale=4"` — that
+  flow into `TypeOptions` and are propagated to mappers and to the built-in
+  VARCHAR/DECIMAL emitters. As the canonical example, Quark now ships with
+  `time.Duration` registered to `BIGINT` (or `NUMBER(19)` on Oracle) so
+  `Duration` columns stop falling back to `TEXT`.
+
 - **Dirty tracking ligero (Phase 1)**: new `Query[T].Track()` modifier returns
   a `*TrackedQuery[T]` whose `Find` / `First` / `List` yield `*Tracked[T]`
   wrappers carrying a column-value snapshot taken at load time. Calling

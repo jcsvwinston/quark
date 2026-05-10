@@ -103,7 +103,12 @@ func (c *Client) syncModel(ctx context.Context, model any, opts SyncOptions, exe
 			}
 
 			// Not a rename, just add it.
-			sqlType := migrate.SQLType(c.dialect.Name(), field.Type, field.IsPK)
+			sqlType := migrate.SQLTypeWithOpts(c.dialect.Name(), field.Type, migrate.TypeOptions{
+				Size:      field.Size,
+				Precision: field.Precision,
+				Scale:     field.Scale,
+				IsPK:      field.IsPK,
+			})
 			sqlStr := c.dialect.AlterTableAddColumn(meta.Table, field.Column, sqlType)
 			if opts.DryRun {
 				c.logger.Info("sync dry-run: add column", "table", meta.Table, "sql", sqlStr)

@@ -52,7 +52,12 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 		// For composite PKs, never mark individual columns as PRIMARY KEY —
 		// we'll append a table-level constraint below instead.
 		isPK := field.IsPK && !meta.HasCompositePK
-		colDef := c.dialect.Quote(field.Column) + " " + migrate.SQLType(c.dialect.Name(), field.Type, isPK)
+		colDef := c.dialect.Quote(field.Column) + " " + migrate.SQLTypeWithOpts(c.dialect.Name(), field.Type, migrate.TypeOptions{
+			Size:      field.Size,
+			Precision: field.Precision,
+			Scale:     field.Scale,
+			IsPK:      isPK,
+		})
 
 		// Append NOT NULL constraint (skip for PKs — already included in SQLType)
 		if !isPK && field.NotNull {

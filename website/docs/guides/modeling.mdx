@@ -50,6 +50,8 @@ not repeatedly reflect over the same struct shape.
 | Tag | Read by | Purpose |
 | --- | --- | --- |
 | `db:"column"` | CRUD, queries, migrations | Maps a Go field to a SQL column. |
+| `db:"column,size=512"` | `Migrate`, `Sync` | Sets VARCHAR/CHAR length (or NVARCHAR/VARCHAR2 per dialect). |
+| `db:"column,precision=18,scale=4"` | `Migrate`, `Sync`, custom mappers | Forwards precision/scale to DECIMAL emitters and `TypeMapper` callbacks. |
 | `db:"-"` | Metadata parser | Ignores the field. |
 | `pk:"true"` | CRUD, migrations | Marks the primary key or a composite-key member. |
 | `quark:"not_null"` | `Migrate` | Emits `NOT NULL`. |
@@ -64,6 +66,46 @@ The `quark` tag accepts comma-separated values:
 ```go
 Email string `db:"email" quark:"unique,not_null"`
 ```
+
+The `db` tag accepts the column name first, followed by sizing options. Unknown
+options are ignored, so existing tags keep working as features are added:
+
+```go
+type Profile struct {
+    ID    int64           `db:"id" pk:"true"`
+    Bio   string          `db:"bio,size=512"`
+    Price decimal.Decimal `db:"price,precision=18,scale=4"`
+}
+```
+
+### Custom type mappers
+
+For Go types beyond the built-in primitives (`shopspring/decimal.Decimal`,
+`google/uuid.UUID`, your own value types), register a mapper at process
+startup with `quark.RegisterTypeMapper`. The mapper receives the dialect
+name and the parsed `TypeOptions`; return the dialect-specific SQL type:
+
+```go
+func init() {
+    quark.RegisterTypeMapper(reflect.TypeOf(uuid.UUID{}), func(d string, _ quark.TypeOptions) string {
+        if d == "postgres" {
+            return "UUID"
+        }
+        return "VARCHAR(36)"
+    })
+}
+```
+
+Pointer types are stripped before registration, so the mapper above also
+covers `*uuid.UUID`. Re-registering the same type overwrites the previous
+mapper. The `time.Duration` mapper ships with Quark and emits `BIGINT`
+(`NUMBER(19)` on Oracle) — override it if you'd rather store durations as
+text or in a different unit.
+
+The mapper handles only the DDL side. Round-trip read/write goes through
+`database/sql` — the type must implement `sql.Scanner` + `driver.Valuer`,
+or already be supported by the underlying driver, for `Create` / `Find`
+to work with it.
 
 `default` is inserted into DDL without quoting. Use the form your database
 expects:

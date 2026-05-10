@@ -5,6 +5,7 @@ package schema
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -57,7 +58,7 @@ func FindPKs(v reflect.Value) []PKMeta {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		if field.Tag.Get("pk") == "true" {
-			dbTag := field.Tag.Get("db")
+			dbTag := ColumnFromDBTag(field.Tag.Get("db"))
 			if dbTag == "" || dbTag == "-" {
 				dbTag = ToSnakeCase(field.Name)
 			}
@@ -71,7 +72,7 @@ func FindPKs(v reflect.Value) []PKMeta {
 	// Fallback: db:"id"
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		if field.Tag.Get("db") == "id" {
+		if ColumnFromDBTag(field.Tag.Get("db")) == "id" {
 			return []PKMeta{{Column: "id", Index: i, Kind: field.Type.Kind()}}
 		}
 	}
@@ -95,7 +96,7 @@ type ModelMeta struct {
 // FieldMeta holds metadata about a single struct field.
 type FieldMeta struct {
 	Index     int
-	Column    string // value of the db:"" tag
+	Column    string // value of the db:"" tag (without options)
 	Kind      reflect.Kind
 	Type      reflect.Type
 	IsPK      bool
@@ -103,6 +104,16 @@ type FieldMeta struct {
 	NotNull   bool   // from tag: quark:"not_null" or nullable:"false"
 	Default   string // from tag: default:"value"
 	Unique    bool   // from tag: quark:"unique"
+
+	// SQL-type sizing options parsed from the db tag, e.g.
+	//   db:"name,size=512"
+	//   db:"price,precision=18,scale=4"
+	// A zero value means "use the dialect default for the Go type". The
+	// migrate layer applies these to VARCHAR/CHAR sizing and DECIMAL
+	// precision/scale; custom type mappers can read them via TypeOptions.
+	Size      int
+	Precision int
+	Scale     int
 }
 
 // modelRegistry caches ModelMeta by reflect.Type.
@@ -174,7 +185,7 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 	}
 	if len(pkIndices) == 0 {
 		for i := 0; i < t.NumField(); i++ {
-			if t.Field(i).Tag.Get("db") == "id" {
+			if ColumnFromDBTag(t.Field(i).Tag.Get("db")) == "id" {
 				pkIndices = append(pkIndices, i)
 				break
 			}
@@ -261,6 +272,11 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 			continue
 		}
 
+		// Split the db tag into the column name plus optional sizing
+		// options: db:"name,size=512" or db:"price,precision=18,scale=4".
+		colName, fieldSize, fieldPrecision, fieldScale := parseDBTag(dbTag)
+		dbTag = colName
+
 		isPK := false
 		for _, idx := range pkIndices {
 			if i == idx {
@@ -301,6 +317,9 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 			NotNull:   notNull,
 			Default:   defaultVal,
 			Unique:    unique,
+			Size:      fieldSize,
+			Precision: fieldPrecision,
+			Scale:     fieldScale,
 		}
 		meta.Fields = append(meta.Fields, fm)
 		meta.FieldByCol[strings.ToLower(dbTag)] = &meta.Fields[len(meta.Fields)-1]
@@ -353,4 +372,50 @@ func ToSnakeCase(s string) string {
 		result.WriteRune(r)
 	}
 	return strings.ToLower(result.String())
+}
+
+// ColumnFromDBTag returns just the column-name portion of a db tag, stripping
+// any sizing options (e.g. "name,size=512" → "name"). Tags without a comma
+// are returned unchanged. Used by hot paths in package quark that read the
+// raw struct tag and need to feed identifiers to the SQL guard.
+func ColumnFromDBTag(tag string) string {
+	if i := strings.IndexByte(tag, ','); i >= 0 {
+		return strings.TrimSpace(tag[:i])
+	}
+	return tag
+}
+
+// parseDBTag splits a db tag like "name,size=512" into the column name and
+// optional SQL-type sizing options. Unknown options are ignored (forward-
+// compatible with custom-type-mapper extensions). Numeric values that fail
+// to parse are skipped silently — the field's mapper falls back to dialect
+// defaults — rather than crashing schema computation.
+func parseDBTag(tag string) (col string, size, precision, scale int) {
+	if tag == "" {
+		return "", 0, 0, 0
+	}
+	parts := strings.Split(tag, ",")
+	col = strings.TrimSpace(parts[0])
+	for _, opt := range parts[1:] {
+		opt = strings.TrimSpace(opt)
+		eq := strings.IndexByte(opt, '=')
+		if eq <= 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(opt[:eq]))
+		val := strings.TrimSpace(opt[eq+1:])
+		n, err := strconv.Atoi(val)
+		if err != nil || n <= 0 {
+			continue
+		}
+		switch key {
+		case "size":
+			size = n
+		case "precision":
+			precision = n
+		case "scale":
+			scale = n
+		}
+	}
+	return col, size, precision, scale
 }
