@@ -6,7 +6,8 @@ files:
   - internal/guard/guard.go
 last_review: 2026-05-10
 related_adrs: []
-related_p0: [P0-2, P0-5]
+related_p0: [P0-5]
+closed_p0: [P0-2]
 phase: 0
 ---
 
@@ -30,18 +31,6 @@ El guard **NO es defensa completa contra inyección SQL** — eso requeriría un
 
 ## Bugs P0 vivos
 
-### P0-2 · `JSONExtract` concatena el path con `fmt.Sprintf` sin escapar
-
-**Localización**: `dialect.go` (módulo dialects, pero el fix vive aquí). El path JSON se interpola con `Sprintf("'%s'", path)` o equivalente.
-
-**Impacto**: Si el path contiene comilla simple, rompe el SQL. Si viene de input no controlado, vector de inyección.
-
-**Fix esperado en este módulo**:
-
-1. Añadir `ValidateJSONPath(path string) error` en `internal/guard/guard.go` con regex `^[a-zA-Z_$][a-zA-Z0-9_$.]*$`.
-2. Hacer que cada implementación de `JSONExtract` por dialecto llame a `ValidateJSONPath` antes de interpolar.
-3. Documentar la regla en `website/docs/queries/json.md`.
-
 ### P0-5 · `JOIN ... ON` se concatena raw
 
 **Localización**: `query_builder.go:229` y `query_exec.go:467`. La string `onClause` no pasa por el guard.
@@ -53,6 +42,23 @@ El guard **NO es defensa completa contra inyección SQL** — eso requeriría un
 1. Añadir `ValidateJoinOn(expr string) error` en `internal/guard/guard.go` con un parser mínimo que acepte el patrón `[ident.]ident OP [ident.]ident [AND/OR …]` y rechace lo demás.
 2. Marcar la firma string-raw de `Join` como deprecated en godoc.
 3. (Fase 2) Introducir API estructurada `Join(table).On(col, op, otherCol)` con AST.
+
+## Historial — bugs cerrados
+
+### P0-2 · `JSONExtract` concatenaba el path con `fmt.Sprintf` (cerrado)
+
+**Era**: `dialect.go` interpolaba el path JSON con `Sprintf("'%s'", path)` (PG) o `'$.%s'` (resto). Una comilla simple rompía el SQL; con path desde input no controlado, vector de inyección.
+
+**Fix aplicado** (defense-in-depth, 2 capas):
+
+1. **Bind del path** en cada dialecto. Nueva firma `Dialect.JSONExtract(column, path string) (sql string, args []any, err error)`. SQL fragment usa `?` como marker neutral; `query_exec.go:substitutePathMarkers` los sustituye por `dialect.Placeholder(N)` al render. PG usa `jsonb_extract_path_text(col, ?, ?, …)` con un bind por segmento; el resto usa `JSON_EXTRACT`/`JSON_VALUE(col, ?)` con `$.path`.
+2. **`ValidateJSONPath`** (función libre en `internal/guard/guard.go`) — regex `^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$`, max 256 chars. Cada dialecto la llama antes de construir el bind. Path inválido → error envuelto con `ErrInvalidJSONPath` (sentinel nuevo en `errors.go`).
+
+**Decisión sobre `$.user.name`**: rechazado. La API expone `user.name`; el dialecto añade el prefijo `$.` o construye el variadic. Razón: API uniforme, sin obligar al usuario a conocer la sintaxis de cada motor.
+
+**Cobertura de regresión**: `testJSONPathSecurity` en `json_path_security_test.go` wired a `SharedSuite` (los 6 motores). Aserciones: (a) path en bind args, no en SQL; (b) 8 vectores de inyección rechazados (comillas, `;`, `--`, `/*`, leading `$`, dash, espacios, vacío).
+
+**Anti-pattern a evitar al construir nuevas funciones JSON**: cualquier path o expresión proveniente de input del usuario que se interpole con `Sprintf %s` en lugar de pasarse como bind. Si añades soporte JSON nuevo (containment ops, JSONB queries, arrays), sigue el patrón `Dialect.JSONExtract`: validar + retornar args + bind marker neutro.
 
 ## Limitaciones reconocidas (NO publicitar como completas)
 
@@ -113,7 +119,7 @@ El guard valida lo que se le pasa explícitamente. **Si tu nuevo código constru
 ## Roadmap de mejora
 
 - **Fase 0**:
-  - `ValidateJSONPath` (cierra P0-2).
+  - ~~`ValidateJSONPath` (cerró P0-2 — ver Historial).~~
   - `ValidateJoinOn` (cierra P0-5 hasta que llegue Fase 2 con AST).
 - **Fase 1**:
   - `maxIdentifierLen` por dialecto.

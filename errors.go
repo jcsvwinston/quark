@@ -25,6 +25,13 @@ var (
 	// ErrInvalidIdentifier indicates that a table or column identifier is invalid.
 	ErrInvalidIdentifier = errors.New("invalid identifier")
 
+	// ErrInvalidJSONPath indicates that a JSON path passed to WhereJSON is malformed
+	// or contains characters that could enable SQL injection. Quark accepts dotted
+	// paths shaped like "user.name"; see guard.ValidateJSONPath for the grammar.
+	// Array indexes and engine-specific syntax are out of scope for WhereJSON;
+	// use RawQuery for those.
+	ErrInvalidJSONPath = errors.New("invalid JSON path")
+
 	// ErrDialectNotSupported indicates that the database dialect is not supported.
 	ErrDialectNotSupported = errors.New("dialect not supported")
 

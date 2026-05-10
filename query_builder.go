@@ -5,6 +5,7 @@ package quark
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -14,12 +15,16 @@ type Scope[T any] func(*Query[T]) *Query[T]
 
 // condition represents a WHERE clause condition.
 type condition struct {
-	column   string
-	operator string
-	value    any
-	logic    string      // "AND" or "OR" (default "AND")
-	group    []condition // sub-conditions for grouping
-	isRaw    bool        // if true, column is not quoted (used for JSON/Expressions)
+	column    string
+	operator  string
+	value     any
+	logic     string      // "AND" or "OR" (default "AND")
+	group     []condition // sub-conditions for grouping
+	isRaw     bool        // if true, column is not quoted (used for JSON/Expressions)
+	extraArgs []any       // additional bind args carried by the column SQL fragment
+	// (e.g. JSON path components). The fragment uses '?' as a neutral
+	// bind marker that buildWhereClause substitutes for the dialect's
+	// placeholder syntax at the correct argIndex.
 }
 
 // order represents an ORDER BY clause.
@@ -359,15 +364,30 @@ func (q *Query[T]) Apply(scopes ...Scope[T]) *Query[T] {
 }
 
 // WhereJSON adds a WHERE condition for a JSON field.
-// column is the JSON column name, path is the key or path within the JSON object.
+// column is the JSON column name, path is a dotted key path within the JSON
+// object (e.g. "user.name"). The path is validated and bound as a parameter
+// — never interpolated into the SQL surface — so it cannot carry SQL
+// injection. See guard.ValidateJSONPath for the accepted grammar.
+//
+// On invalid path the error is stashed on the query and surfaces at execution
+// time (List, First, etc.), wrapping ErrInvalidJSONPath.
 func (q *Query[T]) WhereJSON(column, path, operator string, value any) *Query[T] {
 	c := q.clone()
+	frag, pathArgs, err := q.dialect.JSONExtract(column, path)
+	if err != nil {
+		// guard.ValidateJSONPath returns a descriptive message; wrap with the
+		// public sentinel so callers can errors.Is(err, ErrInvalidJSONPath)
+		// and reach the underlying detail with errors.Unwrap.
+		c.err = fmt.Errorf("%w: %v", ErrInvalidJSONPath, err)
+		return c
+	}
 	c.where = append(c.where, condition{
-		column:   q.dialect.JSONExtract(column, path),
-		operator: operator,
-		value:    value,
-		logic:    "AND",
-		isRaw:    true,
+		column:    frag,
+		operator:  operator,
+		value:     value,
+		logic:     "AND",
+		isRaw:     true,
+		extraArgs: pathArgs,
 	})
 	return c
 }

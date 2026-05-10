@@ -21,13 +21,35 @@ con doble inyección intencional (en `client.go:For[T]` para el outer y en
 `CHANGELOG.md` bajo `[Unreleased] / ### Security`; nota en
 `website/docs/advanced/multi-tenant.mdx` sobre la garantía de aislamiento en `Or()`.
 
-### P0-2 · `WhereJSON` concatena el path con `fmt.Sprintf` sin escapar
+### ~~P0-2 · `WhereJSON` concatena el path con `fmt.Sprintf` sin escapar~~
 
-- **Origen**: `dialect.go` — método `JSONExtract` por dialecto. El path se interpola con `Sprintf("'%s'", path)` o equivalente, sin escapar comillas simples.
-- **Impacto**: si el path JSON viene de input no controlado, vector de inyección SQL.
-- **Fix esperado**: validar el path contra una regex `^[a-zA-Z_$][a-zA-Z0-9_$.]*$` antes de interpolarlo (o pasar el path como bind param donde el motor lo permita: PG `jsonb_extract_path_text(col, VARIADIC)`, MySQL `JSON_EXTRACT(col, ?)`). El validador vive en `internal/guard/`. Por defecto, rechazar paths con `'`, `;`, `--`, `/*`.
-- **Test de regresión**: tabla con columna JSON; asertar que `WhereJSON("data", "x'; DROP TABLE--", "=", "y")` devuelve un error tipado `ErrInvalidIdentifier`, no ejecuta SQL.
-- **Doc**: actualizar `website/docs/` sección "JSON queries" con la regla de paths permitidos. Entrada en CHANGELOG bajo `### Security`.
+**Cerrado** — defense-in-depth en dos capas:
+
+1. **Bind del path** en cada dialecto. `Dialect.JSONExtract` cambió a
+   `(column, path string) (sql string, args []any, err error)`. PG usa
+   `jsonb_extract_path_text(col, ?, ?, …)` con un bind por segmento del path;
+   MySQL/MariaDB/SQLite/MSSQL/Oracle usan `JSON_EXTRACT`/`JSON_VALUE(col, ?)`
+   con `$.path` bound. SQL fragment usa `?` neutral; `query_exec.go:substitutePathMarkers`
+   lo traduce al placeholder de cada motor en build time.
+2. **`internal/guard.ValidateJSONPath`** — regex `^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$`,
+   max 256 chars. Cada `JSONExtract` la llama antes del bind.
+
+Decisión: leading `$` rechazado en la API (path es `user.name` style, no
+`$.user.name`). Razón: API uniforme, sin obligar a conocer la sintaxis interna
+de cada motor.
+
+Sentinel: `ErrInvalidJSONPath` (nuevo en `errors.go`).
+
+**Breaking**: dialectos custom registrados vía `RegisterDialect` deben
+actualizar la firma de `JSONExtract`.
+
+Regresión: `testJSONPathSecurity` en `json_path_security_test.go` wired a
+`SharedSuite` (6 motores). Cubre path bound, dotted bound, y 8 vectores de
+inyección. Unit tests adicionales en `internal/guard/guard_test.go`.
+
+Docs: CHANGELOG `### Security` + `### Changed`; `website/docs/guides/querying.mdx`
+sección "JSON Predicates" con la grammar y la garantía de bind; Historial en
+`docs/playbooks/security.md` y `docs/playbooks/dialects.md`.
 
 ### P0-3 · `linkM2M` traga errores silenciosamente
 

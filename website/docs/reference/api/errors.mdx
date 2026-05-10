@@ -8,12 +8,20 @@ var (
     ErrInvalidModel        = errors.New("invalid model")
     ErrInvalidQuery        = errors.New("invalid query")
     ErrInvalidIdentifier   = errors.New("invalid identifier")
+    ErrInvalidJSONPath     = errors.New("invalid JSON path")
     ErrDialectNotSupported = errors.New("dialect not supported")
     ErrConnection          = errors.New("database connection error")
     ErrTimeout             = errors.New("query timeout")
     ErrConstraintViolation = errors.New("constraint violation")
 )
 ```
+
+`ErrInvalidJSONPath` is returned when [`WhereJSON`](/docs/guides/querying#json-predicates)
+receives a path that does not match the dotted identifier grammar
+`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$` (max 256 chars). Quark
+binds the path as a parameter in every dialect, but rejects malformed paths
+at the API surface so callers fail fast with a clear error rather than
+producing surprising SQL.
 
 ## Error Checking
 

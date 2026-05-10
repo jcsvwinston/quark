@@ -69,6 +69,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testOrRLSLeak(ctx, t, client)
 	})
 
+	t.Run("JSONPathSecurity", func(t *testing.T) {
+		testJSONPathSecurity(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

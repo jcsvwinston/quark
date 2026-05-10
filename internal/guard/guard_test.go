@@ -240,3 +240,62 @@ func TestValidateRawQuery_SuspiciousDelete(t *testing.T) {
 		t.Error("expected error for ; DELETE pattern, got nil")
 	}
 }
+
+// --- ValidateJSONPath ---
+
+func TestValidateJSONPath_Valid(t *testing.T) {
+	cases := []string{
+		"name",
+		"user_id",
+		"user.name",
+		"user.profile.email",
+		"a.b.c.d",
+		"_private.field",
+		"x1.y2.z3",
+	}
+	for _, p := range cases {
+		if err := guard.ValidateJSONPath(p); err != nil {
+			t.Errorf("expected %q to be valid, got: %v", p, err)
+		}
+	}
+}
+
+func TestValidateJSONPath_Invalid(t *testing.T) {
+	cases := []struct {
+		path string
+		why  string
+	}{
+		{"", "empty"},
+		{".x", "leading dot"},
+		{"x.", "trailing dot"},
+		{"x..y", "double dot"},
+		{"1user", "leading digit"},
+		{"$.user", "leading dollar (JSONPath syntax not accepted)"},
+		{"user-name", "dash"},
+		{"user name", "space"},
+		{"x'; DROP TABLE users--", "SQL injection attempt"},
+		{"x; SELECT 1", "semicolon"},
+		{"x/*y*/z", "block comment"},
+		{"x\"y", "double quote"},
+		{"x'y", "single quote"},
+		{"x\\y", "backslash"},
+		{"x\ny", "newline"},
+		{"x\ty", "tab"},
+		{strings.Repeat("a", 257), "exceeds max length"},
+	}
+	for _, c := range cases {
+		if err := guard.ValidateJSONPath(c.path); err == nil {
+			t.Errorf("expected error for %q (%s), got nil", c.path, c.why)
+		}
+	}
+}
+
+func TestValidateJSONPath_BoundMethod(t *testing.T) {
+	g := guard.New()
+	if err := g.ValidateJSONPath("user.name"); err != nil {
+		t.Errorf("bound ValidateJSONPath rejected valid path: %v", err)
+	}
+	if err := g.ValidateJSONPath("x';--"); err == nil {
+		t.Error("bound ValidateJSONPath accepted injectable path")
+	}
+}
