@@ -96,6 +96,12 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 
 # Release (usa el slash command)
 /release v=0.3.0
+
+# Arranque de sesión (usa el slash command)
+/next-session            # auto: audita estado y propone foco
+/next-session f0         # bloque A: auditar y cerrar Fase 0 (limpieza/infra)
+/next-session tipos      # bloque B: tipos diferidos de Fase 1 (arrays PG, timezones)
+/next-session fase3      # bloque C: apertura formal de Fase 3 (sólo si A está cerrado)
 ```
 
 ## Memoria estructurada — léeme ANTES de tocar código
@@ -138,14 +144,16 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 - **Roadmap público**: `docs/ROADMAP.md` (mantén alineado con el plan de fases del análisis).
 - **Comparativa con otros ORMs**: §2 de ANALISIS_MADUREZ y `docs/comparison.md`.
 - **Definition of Done de release**: `.claude/commands/release.md`.
+- **Arranque de sesión enfocado en pendiente**: `.claude/commands/next-session.md`.
 - **Anti-patterns codificados**: invoca el subagente `code-reviewer` (`.claude/agents/code-reviewer.md`) antes de cerrar cualquier PR.
 
 ## Cómo arrancar una sesión productiva
 
-1. Lee `TASKS.md`. Si tiene items en `## Bugs P0`, trabaja uno de esos antes de cualquier otra cosa.
-2. Identifica el módulo donde vas a tocar y **lee su playbook** (`docs/playbooks/<modulo>.md`).
-3. Si el playbook menciona una decisión arquitectónica que te resulta extraña, lee el ADR correspondiente (`docs/adr/`).
-4. Di explícitamente qué archivo:línea vas a tocar y pega el extracto antes de proponer el cambio. No "exploras"; vas con un objetivo concreto.
-5. Tras cada cambio en API: invoca `code-reviewer` antes del PR; usa `/release` cuando toque tag.
+1. **Invoca `/next-session [foco]`** (definido en `.claude/commands/next-session.md`). El comando audita el estado real del repo y te ancla a un bloque concreto (Bloque A — Fase 0 limpieza/infra, Bloque B — tipos diferidos, Bloque C — Fase 3). Si tras leerlo necesitas saltarlo, justifícalo en el primer mensaje.
+2. Si `TASKS.md ## Bugs P0` tiene items vivos, **abandona el foco del slash command** y trabaja un P0 primero — esa regla manda sobre todo lo demás.
+3. Identifica el módulo donde vas a tocar y **lee su playbook** (`docs/playbooks/<modulo>.md`).
+4. Si el playbook menciona una decisión arquitectónica que te resulta extraña, lee el ADR correspondiente (`docs/adr/`).
+5. Di explícitamente qué archivo:línea vas a tocar y pega el extracto antes de proponer el cambio. No "exploras"; vas con un objetivo concreto.
+6. Tras cada cambio en API: invoca `code-reviewer` antes del PR; usa `/release` cuando toque tag. Cierra la sesión con la plantilla del `/next-session` (items cerrados / heredados / próximo foco) para no romper el contexto a la siguiente sesión.
 
 **No sintetices el análisis al usuario.** Si el playbook ya cubre una trampa, cita la línea: "Según `docs/playbooks/query-builder.md` §Bugs P0, P0-1 está vivo en `query_builder.go:175-186`. Voy a aplicar el patrón `cloneForGroup` que sugiere."

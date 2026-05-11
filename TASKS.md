@@ -9,6 +9,36 @@
 
 ---
 
+## Próxima sesión — arranque automatizado
+
+> **No empieces "explorando".** Invoca `/next-session [foco]` (definido en
+> `.claude/commands/next-session.md`) y trabaja el bloque que indique.
+>
+> Foco admitido: `f0` | `tipos` | `fase3` | `auto`. Si dudas, usa `auto`.
+
+Estado real del backlog post-v0.4.0 (release 2026-05-10, Fase 2 cerrada):
+
+1. **Bloque A — Cerrar Fase 0 de verdad (PRIORIDAD).** El header de arriba
+   declara "Fase 0 cerrada" pero los items de **## Limpieza de Fase 0**
+   (F0-1..F0-5) y **## Setup de infraestructura** (F0-6..F0-10) **siguen sin
+   tachar**. Hasta auditarlos uno a uno con los comandos del slash command,
+   no se promueve nada a Fase 3. Item de mayor impacto sin cerrar:
+   **F0-8 (testcontainers)** — sin esto la Regla Dura #1 ("6 motores verdes
+   antes de mergear") es honor system.
+2. **Bloque B — Tipos diferidos de Fase 1** (`TASKS.md:329-336`): arrays
+   Postgres con wrapper neutro, timezones por columna. Abrir issue de diseño
+   antes de implementar timezones.
+3. **Bloque C — Apertura formal de Fase 3** (migraciones serias). Sólo tras
+   Bloque A. El plan vive en `docs/ANALISIS_MADUREZ.md` §4 Fase 3 — no se
+   duplica aquí; se descompone en `F3-1, F3-2, …` con la misma granularidad
+   que F1/F2 cuando se abra.
+
+Nada de Bloque C hasta que Bloque A esté **realmente** cerrado y CI corra
+los 6 motores verde. Esto extiende la coletilla del CLAUDE.md "Cuándo pasar
+a Fase 1".
+
+---
+
 ## Fase 2 — Query builder componible y locking
 
 ### ~~F2-locking · Pessimistic locking~~
