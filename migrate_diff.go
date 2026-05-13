@@ -480,7 +480,54 @@ func columnsEqual(a, b Column) bool {
 	return a.Name == b.Name &&
 		normalizeType(a.Type) == normalizeType(b.Type) &&
 		a.Nullable == b.Nullable &&
-		stringPtrEqual(a.Default, b.Default)
+		defaultsEqual(a.Default, b.Default)
+}
+
+// defaultsEqual returns true when two Column.Default values are
+// logically equivalent, with cross-dialect awareness for engine-
+// generated defaults that don't have a Go-side counterpart.
+//
+// Handled equivalences:
+//
+//   - nil == nil → equal (no default on either side).
+//   - identical non-nil strings → equal.
+//   - one side nil, other side a PG SERIAL-generated `nextval(...)`
+//     expression → equal. PG creates a sequence + sets the default
+//     to `nextval('table_col_seq'::regclass)` for SERIAL / IDENTITY
+//     columns; the Go-side desired Schema has Default=nil because
+//     models never declare nextval. Treating these as equal closes
+//     the spurious-alter loop that would otherwise fire on every
+//     PlanMigration round-trip for any PG model with an int PK.
+//
+// Why this isn't done in the introspector (set Default=nil when
+// it sees nextval): the catalog reader is meant to faithfully
+// report what's in the database; the diff layer is where dialect
+// awareness lives (per the F3-3 godoc — same pattern as the
+// MariaDB RESTRICT ≡ MySQL NO ACTION decision).
+func defaultsEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil {
+		return isAutoincrementDefault(*b)
+	}
+	if b == nil {
+		return isAutoincrementDefault(*a)
+	}
+	return *a == *b
+}
+
+// isAutoincrementDefault reports whether a Column.Default string is
+// an engine-generated autoincrement marker rather than a logical
+// user-specified default. Currently matches PG's
+// `nextval(...)` expressions, which is the only engine that exposes
+// autoincrement plumbing via the DEFAULT clause (MySQL uses the
+// EXTRA field; MSSQL uses IDENTITY as a separate property; SQLite
+// uses INTEGER PRIMARY KEY AUTOINCREMENT — none of those produce a
+// COLUMN_DEFAULT row in the catalog).
+func isAutoincrementDefault(s string) bool {
+	low := strings.ToLower(strings.TrimSpace(s))
+	return strings.HasPrefix(low, "nextval(")
 }
 
 // normalizeType produces a comparable canonical form for a SQL type
@@ -528,6 +575,17 @@ func normalizeType(t string) string {
 	s = strings.ReplaceAll(s, "character varying", "varchar")
 	s = strings.ReplaceAll(s, "character(", "char(")
 	s = stripMySQLDisplayWidth(s)
+	// `int` ≡ `integer` — SQL standard `INTEGER` vs engine-
+	// vernacular `INT`. The migrator emits `INTEGER` for int kinds
+	// (see internal/migrate/migrate.go); MySQL/MariaDB/MSSQL
+	// catalogs return `int` / `int(11)` (the latter already
+	// stripped above); PG catalog returns `integer`. Collapse to
+	// the shorter form. Anchored to the whole string so we don't
+	// substring-mangle types like `pointinteger` (which doesn't
+	// exist but the discipline is cheap).
+	if s == "integer" {
+		s = "int"
+	}
 	return s
 }
 

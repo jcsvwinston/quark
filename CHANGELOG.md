@@ -40,30 +40,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
-- **Cross-dialect type-string normalisation (F3-3-types)**: the
-  diff's `columnsEqual` now normalises type strings before comparing,
-  so the migrator's canonical UPPERCASE (`BIGINT`, `VARCHAR(255)`)
-  compares equal to the catalog's lowercase (`bigint`,
-  `varchar(255)` / `character varying(255)`). Three normalisation
-  steps: case-fold + trim; PG alias `character varying` → `varchar`
-  (PG's information_schema returns the SQL-standard form while the
-  migrator emits the engine alias); MySQL display-width strip
-  (`int(11)` → `int`) for old MySQL 5.7 / mixed-version clusters.
+- **Cross-dialect type + default normalisation (F3-3-types)**: the
+  diff's `columnsEqual` now normalises both type strings AND
+  default values before comparing, so the migrator's canonical forms
+  compare equal to what each engine's catalog actually stores.
+
+  Type normalisation (`normalizeType`):
+  - Case-fold + trim.
+  - PG alias `character varying` → `varchar` (PG's information_schema
+    returns the SQL-standard form while the migrator emits the
+    engine alias).
+  - MySQL display-width strip (`int(11)` → `int`) for old MySQL 5.7 /
+    mixed-version clusters.
+  - `int` ≡ `integer` collapse. The migrator emits `INTEGER` (SQL
+    standard); MySQL / MariaDB / MSSQL catalogs return `int`; PG
+    catalog returns `integer`. Without this, an `int64` field on
+    any of those engines produced a perpetual spurious
+    `OpAlterColumn`.
+
+  Default normalisation (`defaultsEqual`):
+  - PG `nextval(...)` ≡ nil. PG SERIAL / IDENTITY columns expose
+    their autoincrement sequence via the DEFAULT clause
+    (`nextval('table_col_seq'::regclass)`); the Go-side desired
+    Schema has `Default=nil` because models don't declare nextval
+    as a default. Treating these as equal closes the loop for any
+    PG model with an int PK. MySQL / MSSQL / SQLite use other
+    mechanisms (EXTRA field, IDENTITY property, AUTOINCREMENT
+    keyword) that don't produce a COLUMN_DEFAULT row, so they need
+    no normalisation.
 
   Headline contract: **`PlanMigration` round-trip is now empty on
-  all 5 motors** after `Migrate(model)` — previously only SQLite
-  passed because of the type-string drift. The integration test
-  `PlanMigration_RoundTripScopedToFixture` now runs on PG / MySQL /
+  all 5 motors** after `Migrate(model)`. Integration test
+  `PlanMigration_RoundTripScopedToFixture` runs on PG / MySQL /
   MariaDB / MSSQL / SQLite via SharedSuite (scoped to its own
   fixture because the SharedSuite leaves unrelated tables behind
-  that the diff legitimately wants to drop). The CLI plan command (F3-5)
-  can now be built on this; without the normaliser, the CLI would
-  emit noisy plans on production engines.
+  that the diff legitimately wants to drop). The CLI plan command
+  (F3-5) can now be built on this without producing noisy plans on
+  production engines.
 
-  Not yet normalised (documented as TODO): PG `int8`/`int4`/`int2`
-  ↔ `bigint`/`integer`/`smallint` — `information_schema` returns
-  the SQL-standard names so this never arises from introspection,
-  but users hand-constructing desired Schemas may see drift.
+  Not yet normalised: PG `int8`/`int4`/`int2` ↔ `bigint`/`integer`/
+  `smallint` (information_schema returns SQL-standard names so this
+  never arises from introspection; only relevant for hand-constructed
+  Schemas).
 
 - **`Client.ApplyPlan(ctx, plan)` — Plan executor (F3-3-execute)**:
   walks the operations in a [Plan] in order and dispatches each to
