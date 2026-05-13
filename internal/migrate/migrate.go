@@ -96,6 +96,14 @@ func SQLTypeWithOpts(dialectName string, t reflect.Type, opts TypeOptions) strin
 		return jsonColumnType(dialectName)
 	}
 
+	// quark.Array[T]: same JSON wire format as JSON[T], so same column
+	// type per dialect. The semantic split (Array for lists, JSON for
+	// arbitrary documents) is purely on the Go side; on the SQL side
+	// both serialise to the same JSON-shaped column.
+	if isQuarkArray(t) {
+		return jsonColumnType(dialectName)
+	}
+
 	// Apply size/precision overrides where they apply naturally to the
 	// built-in switch. This wraps SQLType so the existing big switch stays
 	// intact.
@@ -136,6 +144,19 @@ func isQuarkJSON(t reflect.Type) bool {
 	}
 	name := t.Name()
 	return name == "JSON" || strings.HasPrefix(name, "JSON[")
+}
+
+// isQuarkArray reports whether t is quark.Array[T]. Detection mirrors
+// isQuarkJSON — same package, same prefix-on-instantiation pattern.
+func isQuarkArray(t reflect.Type) bool {
+	if t == nil || t.Kind() != reflect.Struct {
+		return false
+	}
+	if t.PkgPath() != "github.com/jcsvwinston/quark" {
+		return false
+	}
+	name := t.Name()
+	return name == "Array" || strings.HasPrefix(name, "Array[")
 }
 
 // jsonColumnType returns the dialect-native column type for a JSON payload.

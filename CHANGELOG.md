@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Array[T]` generic** — typed wrapper for SQL columns holding a list of `T`.
+  Round-trips through JSON regardless of dialect (same wire format as
+  `JSON[T]`; migrate maps to the per-dialect JSON column type). Helpers
+  `Len()` / `Slice()` over the underlying `[]T`. Semantically clearer than
+  `JSON[[]T]` for list-shaped columns and gives the project a single
+  upgrade path if PG-native `INT[]` / `TEXT[]` support lands later.
+  Intentionally **not** tied to `pgx`/`pgtype` — neutral-wrapper design
+  per TASKS § Bloque B. Inherits the MSSQL JSON Scan skip until the
+  NVARCHAR(MAX) encoding bug (F0-8 followup E) is resolved.
+
 ## [0.5.0] - 2026-05-13
 
 Phase 0 cleanup release. No new public API — every change is

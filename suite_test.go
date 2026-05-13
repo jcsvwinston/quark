@@ -109,6 +109,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testJSONField(ctx, t, client)
 	})
 
+	t.Run("Array", func(t *testing.T) {
+		testArray(ctx, t, client)
+	})
+
 	t.Run("PessimisticLocking", func(t *testing.T) {
 		testPessimisticLocking(ctx, t, client)
 	})
