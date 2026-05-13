@@ -68,6 +68,53 @@ func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		}
 	})
 
+	t.Run("ApplyPlan_AddColumnRoundTrip", func(t *testing.T) {
+		// F3-3-execute contract on real engines: build a one-op
+		// plan that adds a column, apply it, then re-introspect
+		// and verify the column exists. We use raw DDL for the
+		// initial seed and a hand-built Plan for the apply so the
+		// test is independent of model-reflection drift.
+		dropTable(baseClient, "plan_apply_fixture")
+		defer dropTable(baseClient, "plan_apply_fixture")
+
+		if _, err := baseClient.Raw().ExecContext(ctx,
+			`CREATE TABLE plan_apply_fixture (id INTEGER PRIMARY KEY)`); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+
+		// Different dialects accept different "text" type strings;
+		// use TEXT which all 5 engines accept (PG/SQLite/SQL Server
+		// via type alias, MySQL/MariaDB via the TEXT BLOB family).
+		addCol := quark.Plan{Ops: []quark.Operation{
+			quark.OpAddColumn{
+				Table:  "plan_apply_fixture",
+				Column: quark.Column{Name: "label", Type: "TEXT", Nullable: true},
+			},
+		}}
+		if err := baseClient.ApplyPlan(ctx, addCol); err != nil {
+			t.Fatalf("ApplyPlan add: %v", err)
+		}
+
+		// Verify via introspection.
+		schema, err := baseClient.IntrospectSchema(ctx)
+		if err != nil {
+			t.Fatalf("introspect: %v", err)
+		}
+		var sawLabel bool
+		for _, table := range schema.Tables {
+			if table.Name == "plan_apply_fixture" {
+				for _, col := range table.Columns {
+					if col.Name == "label" {
+						sawLabel = true
+					}
+				}
+			}
+		}
+		if !sawLabel {
+			t.Errorf("after ApplyPlan(AddColumn), 'label' column should be present")
+		}
+	})
+
 	t.Run("PlanFromModels_DropsUnknown", func(t *testing.T) {
 		// Seed a known-extraneous table, then run PlanMigration
 		// with zero models. Every table in the DB is "unknown" and

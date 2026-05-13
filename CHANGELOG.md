@@ -40,6 +40,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **`Client.ApplyPlan(ctx, plan)` — Plan executor (F3-3-execute)**:
+  walks the operations in a [Plan] in order and dispatches each to
+  the appropriate per-dialect DDL. Closes the F3-3 trio: with
+  `IntrospectSchema` + `Diff` + `PlanMigration` + `ApplyPlan`,
+  users can now do the full round-trip (model → plan → apply →
+  verify) without writing DDL by hand. Dispatch per op type:
+  CreateTable rebuilds DDL from the neutral `Table` struct;
+  DropTable / AddColumn / DropColumn / AlterColumn (type only)
+  use the dialect helpers from F3-2; CreateIndex / AddForeignKey
+  reuse the existing F2-era helpers; DropIndex / DropForeignKey /
+  AddCheck / DropCheck have new per-dialect dispatch inline.
+
+  Surface limitations documented:
+  - **OpAlterColumn**: only emits DDL for type changes today.
+    Nullable / Default deltas are no-ops (TODO F3-3-execute-alter).
+  - **SQLite + DropForeignKey / DropCheck**: returns
+    `ErrUnsupportedFeature` — SQLite has no `ALTER TABLE DROP
+    CONSTRAINT`, the workaround is the 12-step table-rebuild
+    procedure, which is its own follow-up (F3-3-execute-sqlite-
+    rebuild).
+  - **MySQL/MariaDB <8.0.16 / <10.2.1 + AddCheck**: same Error
+    1146 path as F3-2-checks would surface; not specifically
+    handled here since the catalog state would prevent the diff
+    from emitting the AddCheck op in the first place.
+
+  Not transactional in this PR — F3-4 (resumable migrations) adds
+  the BEGIN/COMMIT wrapper. Today a mid-plan failure leaves the
+  schema partially applied; the returned error carries the op
+  index + the op's String() so the caller can identify the
+  failure point.
+
 - **`Client.PlanMigration(ctx, models...)` — models-to-plan
   pipeline (F3-3-plan)**: takes one or more Go model structs and
   returns a `Plan{Ops []Operation}` describing what the database
