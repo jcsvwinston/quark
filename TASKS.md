@@ -208,20 +208,36 @@ Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
 
 ### F3-3 · Schema diff core
 
-- **Objetivo**: comparador que toma el schema Go (derivado de los modelos)
-  y el schema DB (devuelto por F3-2) y emite operaciones bidireccionales
-  con `RiskLevel` (`safe` / `lossy` / `breaking`).
-- **Acción**:
-  1. `migrate.Diff(go, db Schema) []Operation`.
-  2. `Operation` interface: `AddColumn`, `DropColumn`, `AlterColumnType`,
-     `AddIndex`, `DropIndex`, `AddForeignKey`, etc. Cada uno con su
-     `RiskLevel()`, `UpSQL(dialect)` y `DownSQL(dialect)`.
-  3. Heurísticas para casos ambiguos:
-     - Rename column = drop + add con la misma posición y tipo similar.
-       Opt-in via comment-style hint en el modelo (`db:"new,old_name=old"`).
-     - Drop column = `lossy` warning explícito.
-- **Done**: tests unit-level con pares (go, db) inputs sintetizados y
-  output esperado.
+- ~~**F3-3-core**~~ **Cerrado** — `Diff(desired, current Schema) []Operation`
+  en `migrate_diff.go`. Operation types sealed y dialect-neutrales
+  (`OpCreateTable`, `OpDropTable`, `OpAddColumn`, `OpDropColumn`,
+  `OpAlterColumn`, `OpCreateIndex`, `OpDropIndex`, `OpAddForeignKey`,
+  `OpDropForeignKey`, `OpAddCheck`, `OpDropCheck`). Algoritmo puro
+  y determinista. Equality functions con awareness cross-dialect:
+  MariaDB RESTRICT ≡ MySQL NO ACTION; SQLite Checks=nil skip
+  comparison. Op ordering documentado en godoc de Diff. Cobertura:
+  12 unit tests en `migrate_diff_test.go`.
+
+- **F3-3-plan** (follow-up): `Client.PlanMigration(ctx, models...) (Plan, error)`.
+  Construye `desired Schema` desde Go models (reflect sobre struct
+  tags como el migrator existente), llama a `IntrospectSchema` para
+  el `current`, llama a `Diff()`. Devuelve `Plan{Ops []Operation}`
+  con `String()` para output human-readable (base de F3-5 CLI).
+  No incluido en F3-3-core porque requiere extraer la lógica
+  reflect-de-modelos-a-Schema del migrator actual, que es un PR
+  independiente.
+
+- **F3-3-execute** (follow-up): aplicar el plan via per-dialect
+  helpers (CreateTable / AddColumn / AlterColumn / CreateIndex /
+  AddForeignKey + raw DDL para CHECK). Riesgo / dry-run / fallback
+  son parte de F3-4 + F3-5, no de execute.
+
+- **Heurísticas pendientes** para casos ambiguos (no F3-3-core):
+  - Rename column = drop + add. Opt-in via tag hint
+    (`db:"new,old_name=old"`). Pendiente para F3-3-plan.
+  - Risk levels (`safe` / `lossy` / `breaking`) — pendiente para
+    F3-4 + F3-5 (el plan / executor decide cómo gate destructive
+    ops, no la diff layer).
 
 ### F3-4 · Migración transaccional + resumable
 
