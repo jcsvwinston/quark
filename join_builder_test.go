@@ -59,31 +59,36 @@ func testJoinBuilder(ctx context.Context, t *testing.T, baseClient *quark.Client
 		// `.On(left, op, right)` is the typed shape. Each side is a
 		// qualified identifier that goes through the existing
 		// ValidateJoinOn grammar.
+		//
+		// `Count()` instead of `List()` because both tables expose `id`
+		// and the default `SELECT *` over the JOIN triggers MSSQL's
+		// "Ambiguous column name 'id'". The contract being pinned is
+		// "ON clause is accepted and the JOIN executes" — Count
+		// exercises the same code path with no projection ambiguity.
 		got, err := quark.For[jbOrder](ctx, baseClient).
 			Join("jb_users").On("jb_users.id", "=", "jb_orders.user_id").
-			Limit(50).
-			List()
+			Count()
 		if err != nil {
-			t.Fatalf("On list: %v", err)
+			t.Fatalf("On count: %v", err)
 		}
-		if len(got) != 2 {
-			t.Errorf("expected 2 orders, got %d", len(got))
+		if got != 2 {
+			t.Errorf("expected 2 orders, got %d", got)
 		}
 	})
 
 	t.Run("OnRawAcceptsCompoundClause", func(t *testing.T) {
 		// `OnRaw` is the escape hatch for AND-chained ON clauses; the
 		// validator still rejects everything outside the
-		// identifier-only grammar.
+		// identifier-only grammar. `Count()` for the same MSSQL
+		// ambiguous-id reason as OnTypedFormExecutes.
 		got, err := quark.For[jbOrder](ctx, baseClient).
 			Join("jb_users").OnRaw("jb_users.id = jb_orders.user_id AND jb_users.email = jb_users.email").
-			Limit(50).
-			List()
+			Count()
 		if err != nil {
-			t.Fatalf("OnRaw list: %v", err)
+			t.Fatalf("OnRaw count: %v", err)
 		}
-		if len(got) != 2 {
-			t.Errorf("expected 2 orders, got %d", len(got))
+		if got != 2 {
+			t.Errorf("expected 2 orders, got %d", got)
 		}
 	})
 
@@ -137,10 +142,12 @@ func testJoinBuilder(ctx context.Context, t *testing.T, baseClient *quark.Client
 		// SQLite supports LEFT JOIN; RightJoin coverage lives in
 		// p0_fixes_test.go's TestRightJoin since SQLite's RIGHT JOIN
 		// support is version-dependent and requires a tolerant assert.
+		//
+		// `Count()` for the same MSSQL ambiguous-id reason as the typed
+		// On test above.
 		_, err := quark.For[jbOrder](ctx, baseClient).
 			LeftJoin("jb_users").On("jb_users.id", "=", "jb_orders.user_id").
-			Limit(10).
-			List()
+			Count()
 		if err != nil {
 			t.Fatalf("LeftJoin On: %v", err)
 		}

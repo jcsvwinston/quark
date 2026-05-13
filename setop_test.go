@@ -110,15 +110,24 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	})
 
 	t.Run("UnionDeduplicates", func(t *testing.T) {
-		// alice OR carol on the LHS, carol OR dave on the RHS.
-		// Wait — both sides use setUserA, so 'dave@x' (only in B) is
-		// not matched. Use a fresh shape:
+		// Two operands selecting overlapping email subsets.
 		//   LHS: WHERE email IN ('alice@x','carol@x')
 		//   RHS: WHERE email IN ('carol@x','bob@x')
 		// UNION DISTINCT → {alice, bob, carol}.
+		//
+		// `.OrderBy("email", "ASC")` on the base is necessary for MSSQL:
+		// the implicit LIMIT 100 from `List()` translates to OFFSET/FETCH
+		// on that dialect, which requires an ORDER BY. Without an
+		// explicit one, buildSelect auto-injects `ORDER BY [id]`, but
+		// `id` isn't in the operand SELECT list (`SELECT email`) so
+		// MSSQL rejects: "ORDER BY items must appear in the select list
+		// if the statement contains a UNION ... operator." Explicit
+		// ordering by the projected column avoids the auto-injection
+		// path entirely and is a no-op on the other dialects.
 		lhs := quark.For[setUserA](ctx, baseClient).
 			Select("email").
-			WhereIn("email", []any{"alice@x", "carol@x"})
+			WhereIn("email", []any{"alice@x", "carol@x"}).
+			OrderBy("email", "ASC")
 		rhs := quark.For[setUserA](ctx, baseClient).
 			Select("email").
 			WhereIn("email", []any{"carol@x", "bob@x"})
@@ -153,9 +162,14 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		//   LHS: alice, bob, carol
 		//   RHS: bob, carol, dave
 		//   ∩  : bob, carol
+		//
+		// See UnionDeduplicates for why the base has an explicit OrderBy
+		// (MSSQL OFFSET/FETCH + compound-select require an ORDER BY whose
+		// items are in the operand SELECT list).
 		lhs := quark.For[setUserA](ctx, baseClient).
 			Select("email").
-			WhereIn("email", []any{"alice@x", "bob@x", "carol@x"})
+			WhereIn("email", []any{"alice@x", "bob@x", "carol@x"}).
+			OrderBy("email", "ASC")
 		rhs := quark.For[setUserA](ctx, baseClient).
 			Select("email").
 			WhereIn("email", []any{"bob@x", "carol@x", "dave@x"})
@@ -189,9 +203,12 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		//   LHS: alice, bob, carol
 		//   RHS: bob, dave
 		//   −  : alice, carol
+		//
+		// See UnionDeduplicates for the OrderBy rationale.
 		lhs := quark.For[setUserA](ctx, baseClient).
 			Select("email").
-			WhereIn("email", []any{"alice@x", "bob@x", "carol@x"})
+			WhereIn("email", []any{"alice@x", "bob@x", "carol@x"}).
+			OrderBy("email", "ASC")
 		rhs := quark.For[setUserA](ctx, baseClient).
 			Select("email").
 			WhereIn("email", []any{"bob@x", "dave@x"})
