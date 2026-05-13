@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Client.IntrospectSchema(ctx)` — neutral schema introspection
+  (F3-2 core)**: returns the current database's schema as a
+  dialect-neutral `Schema{Tables[]Table{Name, Columns[]Column}}`.
+  Foundation for the F3-3 diff comparator. New optional
+  `SchemaIntrospector` interface on Dialect (same opt-in pattern as
+  `MigrationLocker`). Implementations land in this PR for
+  **SQLite** (`sqlite_master` + `PRAGMA table_info`) and
+  **PostgreSQL** (`information_schema.tables` /
+  `information_schema.columns` with `current_schema()` scoping +
+  type-parameter reassembly for `varchar(N)` / `numeric(P,S)`).
+  MySQL / MariaDB / MSSQL / Oracle return `ErrUnsupportedFeature`
+  until their respective F3-2-* follow-up PRs land. Indexes,
+  foreign keys, and check constraints are deferred to F3-2-{indexes,
+  fks, checks} — `Table` ships with column-only metadata for now.
+
 - **`Client.AcquireMigrationLock(ctx, name, timeout)` — distributed
   migration lock (F3-1)**: cluster-wide advisory lock for migration
   operations. First caller wins; subsequent callers block up to

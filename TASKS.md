@@ -103,24 +103,38 @@ Doc: `website/docs/guides/migrations.mdx` § Distributed Migration
 Lock con la tabla per-dialect y notas sobre opt-in / sub-second
 timeout / session-level advisory; CHANGELOG `### Added`.
 
-### F3-2 · Schema introspection (per-dialect)
+### F3-2 · Schema introspection (per-dialect) — en progreso
 
-- **Objetivo**: devolver una representación neutral del schema actual del
-  DB. Equivalente a `pg_dump --schema-only` pero estructurado en Go.
-- **Acción**:
-  1. Nuevos tipos en `migrate/schema.go`: `Schema{Tables []Table}`,
-     `Table{Name, Columns, Indexes, ForeignKeys, Checks}`, `Column{Name, Type, Nullable, Default}`, etc.
-  2. `Dialect.IntrospectSchema(ctx, exec) (Schema, error)` por motor:
-     - PG: `pg_catalog` queries.
-     - MySQL/MariaDB: `INFORMATION_SCHEMA.{TABLES, COLUMNS, KEY_COLUMN_USAGE, …}`.
-     - MSSQL: `sys.tables`, `sys.columns`, `sys.foreign_keys`, etc.
-     - Oracle: `USER_TABLES`, `USER_TAB_COLUMNS`, `USER_CONS_COLUMNS`.
-     - SQLite: `sqlite_master` + `PRAGMA table_info` / `PRAGMA index_list` / `PRAGMA foreign_key_list`.
-  3. Schema normalizado: el comparador (F3-3) opera sobre la representación
-     neutral, no sobre los catalogs raw.
-- **Done**: test cross-engine que crea una tabla de fixture, ejecuta
-  `IntrospectSchema`, y verifica que la representación incluye columnas,
-  índices, FK con los campos esperados.
+**Core (SQLite + PG) cerrado**. `schema.go` introduce los tipos
+neutrales `Schema{Tables}`, `Table{Name, Columns}`, `Column{Name, Type, Nullable, Default}`,
+la interface opcional `SchemaIntrospector`, y `Client.IntrospectSchema(ctx)`.
+`dialect_introspection.go` implementa SQLite (`sqlite_master` + `PRAGMA
+table_info`) y PostgreSQL (`information_schema.tables` / `columns` con
+`current_schema()` scope + reassembly de `varchar(N)`/`numeric(P,S)`).
+MySQL/MariaDB/MSSQL/Oracle devuelven `ErrUnsupportedFeature` por ahora.
+
+Pendientes para cerrar F3-2 entero:
+- **F3-2-mysql** / **F3-2-mariadb**: `INFORMATION_SCHEMA.{TABLES,COLUMNS,KEY_COLUMN_USAGE,…}`. MySQL y MariaDB comparten la mayor parte; un solo PR.
+- **F3-2-mssql**: `sys.tables`, `sys.columns`, `sys.foreign_keys`.
+- **F3-2-oracle**: `USER_TABLES`, `USER_TAB_COLUMNS`, `USER_CONS_COLUMNS`. Deferred — Oracle no está en CI hasta que el `gvenzl/oracle-free` image se debuguee.
+- **F3-2-indexes**: añadir `Table.Indexes` + introspection cross-dialect.
+- **F3-2-fks**: añadir `Table.ForeignKeys` + introspection.
+- **F3-2-checks**: añadir `Table.Checks` + introspection.
+
+Indexes/FKs/Checks llegan **después** de cerrar los 4 motores CI con
+la superficie column-only — la matriz blocking exige verde en
+los 4 antes de extender el schema struct, para no propagar bugs
+cross-dialect al diff (F3-3).
+
+Cobertura actual: 2 unit tests (`TestSchema_DialectInterfaceConformance`
+pin la lista de soporte; `TestSchema_StringDefaultRoundTrip` pin la
+distinción nil-vs-empty-string) + `testSchemaIntrospection` en
+SharedSuite (2 subtests `ListsFixtureTable` /
+`FiltersInternalTables` en dialects soportados; verifica
+`ErrUnsupportedFeature` en MySQL/MariaDB/MSSQL/Oracle).
+
+Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
+(añadido en este PR). CHANGELOG `### Added`.
 
 ### F3-3 · Schema diff core
 

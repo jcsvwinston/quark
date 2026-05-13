@@ -336,6 +336,49 @@ Implementation notes:
   can run any number of statements under the lock — including
   transactions — without conflict.
 
+## Schema Introspection
+
+`Client.IntrospectSchema(ctx)` returns the current state of the
+database as a dialect-neutral `Schema` value. It's the foundation for
+the upcoming `quark schema diff` comparator (F3-3): both the Go-side
+model layout and the live DB layout are reduced to the same
+representation, and the diff engine emits the operations needed to
+align them.
+
+```go
+schema, err := client.IntrospectSchema(ctx)
+if err != nil {
+    return err
+}
+for _, table := range schema.Tables {
+    fmt.Println(table.Name)
+    for _, col := range table.Columns {
+        fmt.Printf("  %s %s nullable=%v\n", col.Name, col.Type, col.Nullable)
+    }
+}
+```
+
+Dialect coverage (F3-2 progress):
+
+| Dialect | Status |
+| --- | --- |
+| PostgreSQL | ✅ supported (this release) |
+| SQLite | ✅ supported (this release) |
+| MySQL | ⚠️ returns `ErrUnsupportedFeature` — F3-2-mysql follow-up |
+| MariaDB | ⚠️ returns `ErrUnsupportedFeature` — F3-2-mariadb follow-up |
+| SQL Server | ⚠️ returns `ErrUnsupportedFeature` — F3-2-mssql follow-up |
+| Oracle | ⚠️ returns `ErrUnsupportedFeature` — F3-2-oracle deferred (no CI) |
+
+Schema surface currently covers **tables and columns only**. Indexes,
+foreign keys, and check constraints land in subsequent F3-2-*
+follow-ups once the column-only path is verified across the 4 CI
+engines. Code that consumes `Schema` should treat unpopulated
+constraint slices as "not yet introspected", not "no constraints".
+
+Internal tables (`quark_*` for migration state, plus `sqlite_*` on
+SQLite) are filtered out — the introspection result is the user-facing
+schema, not the system one.
+
 ## Recommended Production Flow
 
 1. Use `Migrate` freely in tests and local prototypes.
