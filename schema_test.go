@@ -24,10 +24,10 @@ func TestSchema_DialectInterfaceConformance(t *testing.T) {
 		want    bool
 		reason  string
 	}{
-		{&SQLiteDialect{}, true, "SQLite must implement SchemaIntrospector (F3-2 PR landed first)"},
-		{&PostgresDialect{}, true, "Postgres must implement SchemaIntrospector (F3-2 PR landed first)"},
-		{&MySQLDialect{}, false, "MySQL introspector is in F3-2-mysql (follow-up)"},
-		{&MariaDBDialect{}, false, "MariaDB introspector is in F3-2-mariadb (follow-up; typically shares MySQL impl)"},
+		{&SQLiteDialect{}, true, "SQLite must implement SchemaIntrospector (F3-2 core)"},
+		{&PostgresDialect{}, true, "Postgres must implement SchemaIntrospector (F3-2 core)"},
+		{&MySQLDialect{}, true, "MySQL must implement SchemaIntrospector (F3-2-mysql)"},
+		{&MariaDBDialect{}, true, "MariaDB must implement SchemaIntrospector (F3-2-mysql — shares impl with MySQL)"},
 		{&MSSQLDialect{}, false, "MSSQL introspector is in F3-2-mssql (follow-up)"},
 		{&OracleDialect{}, false, "Oracle introspector is deferred (no CI coverage; needs local DBMS access)"},
 	}

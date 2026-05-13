@@ -362,10 +362,10 @@ Dialect coverage (F3-2 progress):
 
 | Dialect | Status |
 | --- | --- |
-| PostgreSQL | ✅ supported (this release) |
-| SQLite | ✅ supported (this release) |
-| MySQL | ⚠️ returns `ErrUnsupportedFeature` — F3-2-mysql follow-up |
-| MariaDB | ⚠️ returns `ErrUnsupportedFeature` — F3-2-mariadb follow-up |
+| PostgreSQL | ✅ supported — `information_schema.tables` / `columns` with `current_schema()` |
+| SQLite | ✅ supported — `sqlite_master` + `PRAGMA table_info` |
+| MySQL | ✅ supported — `INFORMATION_SCHEMA.{TABLES,COLUMNS}` scoped to `DATABASE()`, `COLUMN_TYPE` verbatim |
+| MariaDB | ✅ supported — shares the MySQL implementation |
 | SQL Server | ⚠️ returns `ErrUnsupportedFeature` — F3-2-mssql follow-up |
 | Oracle | ⚠️ returns `ErrUnsupportedFeature` — F3-2-oracle deferred (no CI) |
 
