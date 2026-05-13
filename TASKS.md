@@ -131,7 +131,11 @@ table_info`) y PostgreSQL (`information_schema.tables` / `columns` con
 MySQL/MariaDB/MSSQL/Oracle devuelven `ErrUnsupportedFeature` por ahora.
 
 Pendientes para cerrar F3-2 entero:
-- **F3-2-mysql** / **F3-2-mariadb**: `INFORMATION_SCHEMA.{TABLES,COLUMNS,KEY_COLUMN_USAGE,…}`. MySQL y MariaDB comparten la mayor parte; un solo PR.
+- ~~**F3-2-mysql** / **F3-2-mariadb**~~. **Cerrado** —
+  `INFORMATION_SCHEMA.{TABLES,COLUMNS}` con scope `DATABASE()` y
+  `COLUMN_TYPE` para tipo verbose (`varchar(255)`, `int(11) unsigned`).
+  Ambos motores comparten un único impl
+  `mysqlLikeIntrospect`; los dos Dialect types delegan a él.
 - **F3-2-mssql**: `sys.tables`, `sys.columns`, `sys.foreign_keys`.
 - **F3-2-oracle**: `USER_TABLES`, `USER_TAB_COLUMNS`, `USER_CONS_COLUMNS`. Deferred — Oracle no está en CI hasta que el `gvenzl/oracle-free` image se debuguee.
 - **F3-2-indexes**: añadir `Table.Indexes` + introspection cross-dialect.

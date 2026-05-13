@@ -119,6 +119,114 @@ func sqliteListColumns(ctx context.Context, exec Executor, table string) ([]Colu
 	return out, rows.Err()
 }
 
+// --- MySQL / MariaDB ---------------------------------------------------------
+
+// IntrospectSchema reads the MySQL/MariaDB schema using
+// `INFORMATION_SCHEMA.TABLES` and `INFORMATION_SCHEMA.COLUMNS`. Both
+// engines share the same catalog structure for the column-level
+// surface, so a single implementation covers them (the two Dialect
+// types just delegate here).
+//
+// MySQL caveats handled here:
+//   - Scope: `TABLE_SCHEMA = DATABASE()` — the current database, which
+//     is MySQL's analogue of PG's `current_schema()`. Cross-database
+//     introspection is out of scope (caller would need to switch DBs
+//     explicitly).
+//   - Type representation: we use `COLUMN_TYPE` (full type string with
+//     parameters and modifiers — `int(11) unsigned`, `varchar(255)`,
+//     `decimal(10,2)`) instead of reassembling from `DATA_TYPE`. MySQL
+//     returns this verbatim, which means the round-trip vs the Go
+//     migrate-side DDL is comparable without per-type switches.
+//   - System tables: MySQL exposes `mysql`, `information_schema`,
+//     `performance_schema`, `sys` as system databases. Our scope is
+//     the user's current DB, so those don't surface; we additionally
+//     filter `quark_%` for our internal tables.
+func (d *MySQLDialect) IntrospectSchema(ctx context.Context, exec Executor) (Schema, error) {
+	return mysqlLikeIntrospect(ctx, exec, "mysql")
+}
+
+func (d *MariaDBDialect) IntrospectSchema(ctx context.Context, exec Executor) (Schema, error) {
+	return mysqlLikeIntrospect(ctx, exec, "mariadb")
+}
+
+func mysqlLikeIntrospect(ctx context.Context, exec Executor, dialectName string) (Schema, error) {
+	tableNames, err := mysqlListTables(ctx, exec)
+	if err != nil {
+		return Schema{}, fmt.Errorf("%s introspect: list tables: %w", dialectName, err)
+	}
+	tables := make([]Table, 0, len(tableNames))
+	for _, name := range tableNames {
+		cols, err := mysqlListColumns(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("%s introspect: list columns for %q: %w", dialectName, name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols})
+	}
+	return Schema{Tables: tables}, nil
+}
+
+func mysqlListTables(ctx context.Context, exec Executor) ([]string, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT TABLE_NAME
+		  FROM INFORMATION_SCHEMA.TABLES
+		 WHERE TABLE_SCHEMA = DATABASE()
+		   AND TABLE_TYPE = 'BASE TABLE'
+		   AND TABLE_NAME NOT LIKE 'quark_%'
+		 ORDER BY TABLE_NAME`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+func mysqlListColumns(ctx context.Context, exec Executor, table string) ([]Column, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT COLUMN_NAME,
+		       COLUMN_TYPE,
+		       IS_NULLABLE,
+		       COLUMN_DEFAULT
+		  FROM INFORMATION_SCHEMA.COLUMNS
+		 WHERE TABLE_SCHEMA = DATABASE()
+		   AND TABLE_NAME = ?
+		 ORDER BY ORDINAL_POSITION`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Column
+	for rows.Next() {
+		var (
+			name     string
+			colType  string
+			nullable string
+			dflt     sql.NullString
+		)
+		if err := rows.Scan(&name, &colType, &nullable, &dflt); err != nil {
+			return nil, err
+		}
+		col := Column{
+			Name:     name,
+			Type:     colType,
+			Nullable: nullable == "YES",
+		}
+		if dflt.Valid {
+			s := dflt.String
+			col.Default = &s
+		}
+		out = append(out, col)
+	}
+	return out, rows.Err()
+}
+
 // --- PostgreSQL --------------------------------------------------------------
 
 // IntrospectSchema reads the PG schema by querying `information_schema`
