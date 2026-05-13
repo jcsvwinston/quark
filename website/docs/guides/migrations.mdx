@@ -424,7 +424,7 @@ schema, not the system one.
 of operations needed to bring `current` into alignment with `desired`.
 Both arguments are dialect-neutral [`Schema`](#schema-introspection)
 values typically produced by `IntrospectSchema` (for `current`) and
-by a future models-to-schema pass (`Client.PlanMigration`, follow-up).
+by `Client.PlanMigration` (for `desired`, see below).
 
 ```go
 ops := quark.Diff(desired, current)
@@ -468,6 +468,44 @@ Expression-level equivalence for CHECK constraints (e.g.
 `((age > 0))` PG vs `` (`age` > 0) `` MariaDB) is **not** AST-normalised
 in this PR — `Diff` matches checks by name alone. AST-level
 expression equivalence is out of scope for F3-3-core.
+
+### Plan from models
+
+`Client.PlanMigration(ctx, models...)` is the convenience entrypoint
+that builds the desired Schema from Go model structs, introspects
+the current DB, runs `Diff`, and returns a `Plan{Ops []Operation}`.
+
+```go
+plan, err := client.PlanMigration(ctx, &User{}, &Order{})
+if err != nil {
+    return err
+}
+if plan.IsEmpty() {
+    fmt.Println("schema is in sync")
+    return nil
+}
+fmt.Println("pending changes:")
+fmt.Println(plan.String())
+```
+
+The Plan is **inert** — it doesn't apply itself (`Plan.Apply` lands
+with F3-3-execute). The CLI plan command (F3-5) will be the typical
+consumer; in user code you can use `IsEmpty()` as a "did anything
+drift?" probe in health checks or CI gates.
+
+`PlanMigration` carries indexes / FKs / checks from the current
+schema over to the desired one before diffing, because struct tags
+don't yet declare schema-level objects beyond columns. So a plan
+on a stable schema is empty even if indexes / FKs / checks exist
+in the DB but not in the models. F3-3-plan-indexes will lift this
+limitation by letting struct tags drive indexes.
+
+**Known type-string drift**: the migrator's `SQLTypeWithOpts` emits
+canonical forms (`BIGINT`, `VARCHAR(255)`) while the catalog readers
+return whatever the engine stores (PG `bigint`, MySQL `int`, MSSQL
+`varchar`). On SQLite the round-trip is clean; on PG/MySQL/MSSQL
+expect spurious `OpAlterColumn` ops until the type-normalisation
+follow-up lands. Use SQLite for round-trip-clean test suites today.
 
 ## Recommended Production Flow
 

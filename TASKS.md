@@ -218,14 +218,33 @@ Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
   comparison. Op ordering documentado en godoc de Diff. Cobertura:
   12 unit tests en `migrate_diff_test.go`.
 
-- **F3-3-plan** (follow-up): `Client.PlanMigration(ctx, models...) (Plan, error)`.
-  Construye `desired Schema` desde Go models (reflect sobre struct
-  tags como el migrator existente), llama a `IntrospectSchema` para
-  el `current`, llama a `Diff()`. Devuelve `Plan{Ops []Operation}`
-  con `String()` para output human-readable (base de F3-5 CLI).
-  No incluido en F3-3-core porque requiere extraer la lógica
-  reflect-de-modelos-a-Schema del migrator actual, que es un PR
-  independiente.
+- ~~**F3-3-plan**~~ **Cerrado** — `Client.PlanMigration(ctx, models...) (Plan, error)`
+  en `migrate_plan.go`. Pipeline: models → `desired Schema` (reflect
+  vía `GetModelMetaByType` + `migrate.SQLTypeWithOpts`) → `IntrospectSchema`
+  para el current → `Diff()` → `Plan`. Plan inert (no Apply hasta
+  F3-3-execute). `Plan.IsEmpty()` y `Plan.String()` para uso en
+  health checks / CI gates / F3-5 CLI.
+
+  Round-trip identity es el contrato headline: Migrate(model) →
+  PlanMigration(model) devuelve Plan vacío en SQLite. Cobertura: 6
+  unit tests en `migrate_plan_test.go`.
+
+  Fix colateral de F3-2 incluido: SQLite introspector reportaba PK
+  columns como `Nullable=true` (PRAGMA `notnull=0` para PKs
+  implícitas); ahora ORs en el campo `pk` del PRAGMA para emitir
+  `Nullable=false`. Sin este fix, el round-trip diff emitía un
+  spurious `nullable true→false` alter en cada PK.
+
+  Gaps conocidos documentados en godoc + migrations.mdx:
+  - **Type string drift cross-dialect**: migrador emite `BIGINT`,
+    catálogos devuelven `bigint`/`int`/`bigint`. Round-trip clean
+    en SQLite; ruido en PG/MySQL/MSSQL hasta que aterrice el
+    type-normalisation follow-up.
+  - **Indexes/FKs/Checks no declarados en modelos**: `PlanMigration`
+    copia el surface non-column del current al desired antes de
+    diffear para evitar drops espurios. F3-3-plan-indexes
+    levantará esta limitación cuando struct tags soporten
+    declarar indexes.
 
 - **F3-3-execute** (follow-up): aplicar el plan via per-dialect
   helpers (CreateTable / AddColumn / AlterColumn / CreateIndex /

@@ -1,0 +1,230 @@
+// Copyright 2026 jcsvwinston
+// SPDX-License-Identifier: Apache-2.0
+
+package quark
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+	"strings"
+
+	"github.com/jcsvwinston/quark/internal/migrate"
+)
+
+// Plan is the result of [Client.PlanMigration]: the ordered list of
+// [Operation]s that, applied to the database, would bring it into
+// alignment with the Go-side models.
+//
+// A Plan is inert — it doesn't execute itself. F3-3-execute (the
+// follow-up PR) will add a Plan.Apply method that walks Ops and
+// dispatches each to the per-dialect migrator helpers. The CLI plan
+// command (F3-5) renders the Plan via [Plan.String] without ever
+// touching SQL.
+type Plan struct {
+	// Ops is the diff between the desired schema (derived from
+	// models) and the current schema (from [Client.IntrospectSchema]).
+	// See the [Diff] godoc for ordering guarantees.
+	Ops []Operation
+}
+
+// IsEmpty reports whether the Plan would be a no-op when applied.
+// Equivalent to `len(p.Ops) == 0` but more readable in user code.
+//
+// Use this as the "did anything drift?" check in CI / health
+// endpoints — a non-empty Plan means the Go models and the database
+// schema have diverged.
+func (p Plan) IsEmpty() bool { return len(p.Ops) == 0 }
+
+// String renders the Plan as a multi-line human-readable report.
+// Each Op contributes one line via its own [Operation.String].
+// Empty plans render as "(no changes)".
+//
+// The format is intentionally minimal so the F3-5 CLI can wrap it
+// without parsing — table or coloured output is the CLI's
+// responsibility, not the Plan's.
+func (p Plan) String() string {
+	if p.IsEmpty() {
+		return "(no changes)"
+	}
+	lines := make([]string, len(p.Ops))
+	for i, op := range p.Ops {
+		lines[i] = fmt.Sprintf("  %d. %s", i+1, op.String())
+	}
+	return strings.Join(lines, "\n")
+}
+
+// PlanMigration computes the [Plan] of operations needed to align
+// the database schema with the Go-side models. It does NOT execute
+// anything — the returned Plan is inert.
+//
+// The pipeline is:
+//
+//  1. Build a `desired` [Schema] by reflecting on the model structs
+//     (the same metadata path [Client.Migrate] uses to render
+//     CREATE TABLE DDL).
+//  2. Read the `current` [Schema] via [Client.IntrospectSchema].
+//  3. Call [Diff] to produce the ordered op list.
+//  4. Wrap the ops in a [Plan].
+//
+// Surface caveats — known asymmetries between desired and current
+// that may produce noisy plans today:
+//
+//   - **Type strings**: the desired Schema uses the migrator's
+//     `SQLTypeWithOpts` output (`BIGINT`, `VARCHAR(255)`) while the
+//     introspector returns whatever the catalog stores (lowercase,
+//     parameter-bearing, or canonical form per dialect). Spurious
+//     OpAlterColumn ops will appear for round-tripped tables where
+//     the strings differ. Normalising types across the two sides is
+//     planned as a follow-up; users running F3-3-plan today should
+//     review the alter ops manually.
+//   - **Indexes / FKs / CHECK** declared on the model: struct tags
+//     don't yet carry index or FK metadata (CreateIndex /
+//     AddForeignKey are explicit calls). PlanMigration's `desired`
+//     Schema is column-only — indexes and FKs present in the
+//     database but not in the model would show up as OpDropIndex /
+//     OpDropForeignKey if Diff were left to its own devices. To
+//     avoid that, PlanMigration **copies** the indexes / FKs / checks
+//     from the current schema into the desired schema before
+//     diffing, on the assumption that schema-level objects not
+//     declared in models are managed manually. A future
+//     F3-3-plan-indexes follow-up will let struct tags drive these.
+//
+// SQLite quirk: same Checks=nil handling as the rest of F3-3-core —
+// no spurious drops when the database doesn't introspect checks.
+func (c *Client) PlanMigration(ctx context.Context, models ...any) (Plan, error) {
+	desired, err := c.modelsToSchema(models...)
+	if err != nil {
+		return Plan{}, fmt.Errorf("PlanMigration: build desired schema: %w", err)
+	}
+	current, err := c.IntrospectSchema(ctx)
+	if err != nil {
+		return Plan{}, fmt.Errorf("PlanMigration: introspect current schema: %w", err)
+	}
+
+	// Carry over the non-column surface from current → desired. The
+	// rationale lives in the godoc above: struct tags don't yet
+	// declare indexes / FKs / checks, so a strict Diff would emit
+	// DROP ops for every catalog object the model is silent about.
+	// Until F3-3-plan-indexes adds tag-driven indexes, the safe
+	// default is "leave catalog-level objects alone".
+	mergeNonColumnSurface(&desired, current)
+
+	return Plan{Ops: Diff(desired, current)}, nil
+}
+
+// modelsToSchema builds a dialect-neutral [Schema] from Go model
+// structs by reflecting on the cached [ModelMeta] for each. The
+// resulting Schema carries columns only — see the [PlanMigration]
+// godoc for why indexes / FKs / checks aren't surfaced from models.
+//
+// The SQL type strings come from the same `migrate.SQLTypeWithOpts`
+// helper [Client.Migrate] uses, so the desired and (eventually)
+// migrator-emitted DDL stay in lockstep. The caveat is that those
+// strings don't always match what the catalog returns from
+// [Client.IntrospectSchema] — see the type-strings note in the
+// PlanMigration godoc.
+func (c *Client) modelsToSchema(models ...any) (Schema, error) {
+	tables := make([]Table, 0, len(models))
+	for _, model := range models {
+		t := reflect.TypeOf(model)
+		// `reflect.TypeOf(nil)` returns `nil`, which would panic on
+		// the `t.Kind()` call below. Guard explicitly so the caller
+		// who passes a stray `nil` (easy mistake with variadic args)
+		// gets a clean error rather than a stack trace.
+		if t == nil {
+			return Schema{}, fmt.Errorf("model must not be nil")
+		}
+		if t.Kind() == reflect.Ptr {
+			t = t.Elem()
+		}
+		if t.Kind() != reflect.Struct {
+			return Schema{}, fmt.Errorf("model must be a struct, got %s", t.Kind())
+		}
+		meta := GetModelMetaByType(t)
+		if meta == nil {
+			return Schema{}, fmt.Errorf("no metadata for model %s", t.Name())
+		}
+		columns := make([]Column, 0, len(meta.Fields))
+		for _, f := range meta.Fields {
+			if f.Column == "" {
+				// Field not mapped to a DB column (no db tag) — skip.
+				continue
+			}
+			// Critical: pass `IsPK: false` here regardless of whether
+			// the field is the PK. The migrator passes `IsPK: true`
+			// when emitting CREATE TABLE so SQLTypeWithOpts returns a
+			// full constraint-bearing fragment (`INTEGER PRIMARY KEY
+			// AUTOINCREMENT` on SQLite, `SERIAL PRIMARY KEY` on PG,
+			// etc.). That's correct for DDL but wrong here — Column.Type
+			// is meant to carry the bare data type (`INTEGER`,
+			// `bigint`) so it can compare 1:1 against what the
+			// introspector reads from the catalog. The PK status will
+			// live in a future PrimaryKey field on Column once F3-2-pk
+			// adds it; until then, the diff layer doesn't need to see
+			// PK status in Type to do its job.
+			sqlType := migrate.SQLTypeWithOpts(c.dialect.Name(), f.Type, migrate.TypeOptions{
+				Size:      f.Size,
+				Precision: f.Precision,
+				Scale:     f.Scale,
+				IsPK:      false,
+			})
+			col := Column{
+				Name: f.Column,
+				Type: sqlType,
+				// A column is nullable when neither the not_null tag
+				// nor the PK marker forbid it. The catalog readers
+				// surface PK columns as Nullable=false too, so this
+				// matches the introspector.
+				Nullable: !f.NotNull && !f.IsPK,
+			}
+			if f.Default != "" {
+				s := f.Default
+				col.Default = &s
+			}
+			columns = append(columns, col)
+		}
+		if len(columns) == 0 {
+			return Schema{}, fmt.Errorf("no database columns for model %s", t.Name())
+		}
+		tables = append(tables, Table{Name: meta.Table, Columns: columns})
+	}
+	return Schema{Tables: tables}, nil
+}
+
+// mergeNonColumnSurface copies indexes, foreign keys, and checks
+// from `current` into the matching tables of `desired`, so the diff
+// doesn't emit spurious drops for catalog objects that the model
+// can't yet declare (indexes, FKs, checks via struct tags is a
+// future feature). Tables present in current but not in desired
+// are NOT added — that case is a real "this table exists in the DB
+// but not in the models" delta, which Diff legitimately surfaces
+// as OpDropTable.
+//
+// Defensive copy: each slice is duplicated rather than aliased so
+// F3-3-execute's future `Plan.Apply` can mutate the Plan's tables
+// without corrupting the caller's `current` schema. The cost is
+// negligible (schemas have small fan-out) and the alternative is a
+// silent aliasing footgun.
+func mergeNonColumnSurface(desired *Schema, current Schema) {
+	curByName := make(map[string]Table, len(current.Tables))
+	for _, t := range current.Tables {
+		curByName[t.Name] = t
+	}
+	for i := range desired.Tables {
+		dt := &desired.Tables[i]
+		ct, ok := curByName[dt.Name]
+		if !ok {
+			continue
+		}
+		dt.Indexes = append([]Index(nil), ct.Indexes...)
+		dt.ForeignKeys = append([]ForeignKey(nil), ct.ForeignKeys...)
+		// Preserve the nil/empty distinction for Checks — Diff
+		// treats nil as "not introspected" (SQLite contract) and
+		// skips the comparison. Copying a nil slice as `append(nil,
+		// nil...)` would yield an empty slice, breaking the skip.
+		if ct.Checks != nil {
+			dt.Checks = append([]Check(nil), ct.Checks...)
+		}
+	}
+}

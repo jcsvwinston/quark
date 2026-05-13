@@ -121,6 +121,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testSchemaIntrospection(ctx, t, client)
 	})
 
+	t.Run("PlanMigration", func(t *testing.T) {
+		testPlanMigration(ctx, t, client)
+	})
+
 	t.Run("PessimisticLocking", func(t *testing.T) {
 		testPessimisticLocking(ctx, t, client)
 	})

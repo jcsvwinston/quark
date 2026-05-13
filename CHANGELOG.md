@@ -40,6 +40,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **`Client.PlanMigration(ctx, models...)` — models-to-plan
+  pipeline (F3-3-plan)**: takes one or more Go model structs and
+  returns a `Plan{Ops []Operation}` describing what the database
+  would need to change to align with the models. The pipeline is
+  models → desired Schema (reflect on the cached ModelMeta /
+  FieldMeta, reusing the migrator's `SQLTypeWithOpts` for type
+  strings) → `IntrospectSchema` for the current state →
+  `Diff(desired, current)` → `Plan`. The Plan is **inert** — no
+  side effects; F3-3-execute is the follow-up that adds Apply.
+  `Plan.IsEmpty()` and `Plan.String()` make the result trivially
+  consumable by health endpoints, CI checks, and the F3-5 CLI.
+
+  Round-trip identity is the headline contract: after
+  `Migrate(model)`, `PlanMigration(model)` returns an empty Plan
+  on SQLite. The contract test is in `migrate_plan_test.go`.
+  Cross-dialect type-string drift (PG `bigint` vs migrator
+  `BIGINT`) is documented as a known gap with a normalisation
+  follow-up planned; spurious OpAlterColumn ops on PG/MySQL/MSSQL
+  are expected today.
+
+  PlanMigration intentionally **copies** the index / FK / check
+  surface from the current schema into the desired one before
+  diffing, because struct tags don't yet declare schema-level
+  objects beyond columns. That keeps the plan honest until
+  F3-3-plan-indexes lets tags drive them.
+
+- **SQLite introspector fix — PK columns now report Nullable=false**:
+  the PRAGMA `notnull` field is 0 for `INTEGER PRIMARY KEY`
+  columns even though they're implicitly NOT NULL in SQLite. The
+  fix ORs in the PRAGMA's `pk` field so the introspector output
+  is symmetric cross-dialect (PG/MySQL/MSSQL already report
+  is_nullable=false for PKs via their catalog). Visible to F3-3-plan
+  callers because without this fix the round-trip diff would emit
+  a spurious `nullable true→false` alter on every PK column.
+
 - **Pure-Go schema diff algorithm (F3-3-core)**: `Diff(desired,
   current Schema) []Operation` returns the ordered list of changes
   needed to bring `current` into alignment with `desired`. Operations

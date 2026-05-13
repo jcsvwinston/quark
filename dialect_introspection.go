@@ -120,10 +120,20 @@ func sqliteListColumns(ctx context.Context, exec Executor, table string) ([]Colu
 		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
 			return nil, err
 		}
+		// SQLite quirk: the PRAGMA's `notnull` field is 0 even for
+		// `INTEGER PRIMARY KEY [AUTOINCREMENT]` columns, which are
+		// implicitly NOT NULL in practice (`INSERT NULL` into them
+		// allocates a rowid). Other dialects (PG/MySQL/MSSQL) report
+		// PK columns as NOT NULL via their catalog's is_nullable
+		// column, so to keep the introspector output symmetric
+		// cross-dialect we OR in the `pk` field here. `pk > 0`
+		// indicates PK rank (1 for single-col PK, 1..N for composite),
+		// so any non-zero value means "this column is part of the PK"
+		// and is therefore NOT NULL.
 		col := Column{
 			Name:     name,
 			Type:     typ,
-			Nullable: notnull == 0,
+			Nullable: notnull == 0 && pk == 0,
 		}
 		if dflt.Valid {
 			s := dflt.String
