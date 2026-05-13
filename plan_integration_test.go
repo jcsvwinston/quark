@@ -64,6 +64,7 @@ func opTouchesTable(op quark.Operation, table string) bool {
 // as a SQLite-only test where the strings happen to align today.
 func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	t.Helper()
+	dialect := baseClient.Dialect().Name()
 
 	t.Run("PlanFromModels_CreatesTable", func(t *testing.T) {
 		// Empty DB → expect at least one OpCreateTable for the
@@ -126,6 +127,69 @@ func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		for _, op := range plan.Ops {
 			if opTouchesTable(op, "plan_fixtures") {
 				t.Errorf("plan after Migrate should NOT touch plan_fixtures, got: %s", op.String())
+			}
+		}
+	})
+
+	t.Run("ApplyPlan_TransactionalRollback", func(t *testing.T) {
+		// F3-4-tx contract: when a plan fails mid-execution on a
+		// transactional-DDL engine (PG / MSSQL / SQLite), the whole
+		// plan rolls back. We feed a 2-op plan where the first
+		// would succeed in isolation and the second is guaranteed
+		// to fail; after the call the schema must show NO sign of
+		// the first op (transaction rolled back).
+		//
+		// MySQL / MariaDB / Oracle do NOT support transactional
+		// DDL — every statement implicitly commits. On those
+		// engines the first op DOES land and the second fails.
+		// The test branches per-dialect to assert the right
+		// contract for each.
+		dropTable(baseClient, "tx_rollback_probe")
+		defer dropTable(baseClient, "tx_rollback_probe")
+
+		plan := quark.Plan{Ops: []quark.Operation{
+			quark.OpCreateTable{Table: quark.Table{
+				Name:    "tx_rollback_probe",
+				Columns: []quark.Column{{Name: "id", Type: "INTEGER", Nullable: false}},
+			}},
+			quark.OpDropTable{Table: "doesnt_exist_xyz_for_rollback_test"},
+		}}
+
+		err := baseClient.ApplyPlan(ctx, plan)
+		if err == nil {
+			t.Fatalf("plan with guaranteed-fail op should error, got nil")
+		}
+
+		schema, ierr := baseClient.IntrospectSchema(ctx)
+		if ierr != nil {
+			t.Fatalf("introspect: %v", ierr)
+		}
+		var sawProbe bool
+		for _, table := range schema.Tables {
+			if table.Name == "tx_rollback_probe" {
+				sawProbe = true
+				break
+			}
+		}
+
+		switch dialect {
+		case "postgres", "mssql", "sqlite":
+			// Transactional DDL — rollback should erase the probe.
+			if sawProbe {
+				t.Errorf("dialect %s supports transactional DDL — tx_rollback_probe should NOT exist after rollback", dialect)
+			}
+		default:
+			// Non-transactional DDL (mysql / mariadb / oracle /
+			// anything not in the transactional list) — the first
+			// op committed implicitly. The probe SHOULD exist; this
+			// pins the behaviour for every engine in the matrix so
+			// future improvements (F3-4-resumable checkpoint state)
+			// have a clear contract to flip. Using `default:` rather
+			// than enumerating each engine means Oracle (currently
+			// out of CI) is automatically covered when its container
+			// image issue is unblocked — no test maintenance needed.
+			if !sawProbe {
+				t.Errorf("dialect %s does NOT support transactional DDL — tx_rollback_probe should exist (first op implicitly committed)", dialect)
 			}
 		}
 	})

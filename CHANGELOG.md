@@ -40,6 +40,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **Transactional `ApplyPlan` (F3-4-tx)**: on engines with
+  transactional DDL — **PostgreSQL, MSSQL, SQLite** — `Client.ApplyPlan`
+  now wraps the op loop in `BEGIN ... COMMIT`. A mid-plan failure
+  rolls back the whole plan, leaving the schema in its pre-plan
+  state. This is the safety net users should rely on when running
+  migrations against production on these engines.
+
+  **MySQL, MariaDB, Oracle**: DDL implicitly commits on every
+  statement, so wrapping is pointless. ApplyPlan on these engines
+  retains the original no-tx behaviour — a mid-plan failure leaves
+  the schema partially applied. The eventual F3-4-resumable
+  follow-up adds a `quark_migration_state` checkpoint table for
+  these engines so a manual resume can pick up where the plan
+  left off.
+
+  Internal refactor: `Client.CreateIndex` and `Client.AddForeignKey`
+  now wrap private `createIndexOn` / `addForeignKeyOn` helpers
+  that take an `Executor`. Public API unchanged; the tx path
+  routes its DDL through the underlying `*sql.Tx` while the public
+  helpers continue to use `c.db`. All per-dialect drop / add /
+  alter helpers in the executor follow the same pattern.
+
+  Integration contract: new `ApplyPlan_TransactionalRollback`
+  test in SharedSuite asserts the right behaviour per dialect
+  (rollback erases the probe table on PG/MSSQL/SQLite; probe
+  persists on MySQL/MariaDB because of implicit commits — the
+  test pins both, so future improvements have a clear contract
+  to flip).
+
 - **Cross-dialect type + default normalisation (F3-3-types)**: the
   diff's `columnsEqual` now normalises both type strings AND
   default values before comparing, so the migrator's canonical forms

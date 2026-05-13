@@ -15,13 +15,27 @@ import (
 // index / FK / table ops via inline dispatch using the existing
 // `Client.CreateIndex` / `Client.AddForeignKey` where applicable.
 //
-// ApplyPlan is NOT transactional. F3-4 (resumable migrations) will
-// add the wrapper that opens a transaction (for engines that support
-// transactional DDL: PG, MSSQL, SQLite) and falls back to checkpoint
-// state (MySQL/MariaDB don't support transactional DDL). For now,
-// a mid-plan failure leaves the schema partially-applied — the
-// returned error carries the index of the op that failed and the
-// caller can decide whether to retry or roll back manually.
+// **Transactional behaviour** (F3-4-tx):
+//
+//   - **PostgreSQL, MSSQL, SQLite** — DDL is transactional on these
+//     engines. ApplyPlan opens a BEGIN, runs all ops, and COMMITs.
+//     On ANY failure the transaction is rolled back, leaving the
+//     schema in its pre-plan state. This is the safety net users
+//     should rely on when running migrations against production.
+//
+//   - **MySQL, MariaDB, Oracle** — DDL implicitly commits the
+//     current transaction on every statement, so wrapping is
+//     pointless: a failure mid-plan still leaves the schema
+//     partially applied, and the executor follows the old
+//     no-transaction path (return the error with op index, let
+//     the caller resume manually). The eventual F3-4-resumable
+//     follow-up adds a `quark_migration_state` checkpoint table
+//     for these engines so a manual resume can pick up where the
+//     plan left off.
+//
+// The returned error carries the index of the op that failed and
+// the op's String() rendering for debuggability, regardless of
+// which path was taken.
 //
 // Operation-specific caveats:
 //
@@ -44,8 +58,86 @@ import (
 // All other ops work uniformly across the 4 CI dialects + SQLite
 // (for the supported subset).
 func (c *Client) ApplyPlan(ctx context.Context, plan Plan) error {
+	if supportsTransactionalDDL(c.dialect.Name()) {
+		return c.applyPlanTx(ctx, plan)
+	}
+	return c.applyPlanNoTx(ctx, plan)
+}
+
+// TODO(F3-4-resumable): elevate to `Dialect.SupportsTransactionalDDL() bool`
+// when the checkpoint path needs the same info — see TASKS.md
+// §F3-4-resumable. For now a private function is enough.
+//
+// supportsTransactionalDDL reports whether the named dialect can
+// run DDL inside a transaction with the usual all-or-nothing
+// semantics. The list is empirically driven, not aspirational:
+//
+//   - **postgres**: full transactional DDL — including ALTER TABLE,
+//     CREATE/DROP INDEX, ADD/DROP CONSTRAINT. ROLLBACK reverts every
+//     DDL since BEGIN. PG's signature feature.
+//   - **mssql**: most DDL is transactional. Notable exceptions
+//     (CREATE DATABASE, CREATE FULLTEXT INDEX) are outside Quark's
+//     migration surface.
+//   - **sqlite**: DDL is transactional EXCEPT for VACUUM and a few
+//     PRAGMA-driven cases. Our migration ops don't touch those.
+//   - **mysql / mariadb**: NO — every DDL implicitly commits the
+//     transaction. Wrapping is harmless but pointless.
+//   - **oracle**: NO — same implicit-commit behaviour as MySQL.
+//
+// The dialect-name check is intentional rather than a method on
+// the Dialect interface; F3-4-resumable will likely lift this to
+// the interface once it needs the same info for the checkpoint
+// path, but as a single private helper it's fine for now.
+func supportsTransactionalDDL(dialect string) bool {
+	switch dialect {
+	case "postgres", "mssql", "sqlite":
+		return true
+	default:
+		return false
+	}
+}
+
+// applyPlanTx wraps the op loop in BEGIN/COMMIT. On any error the
+// transaction is rolled back and the schema returns to its pre-plan
+// state. The defer-Rollback pattern is the canonical Go form: it
+// no-ops after a successful Commit (sql.ErrTxDone) but salvages the
+// state if Commit was never reached.
+func (c *Client) applyPlanTx(ctx context.Context, plan Plan) error {
+	// Pass nil opts → driver default isolation level (READ COMMITTED
+	// on PostgreSQL and MSSQL, deferred on SQLite). For DDL-only
+	// workloads this is appropriate: schema-level locks are
+	// orthogonal to row-level isolation, and elevating to
+	// SERIALIZABLE would only add deadlock risk on MSSQL without
+	// any semantic gain. Callers who need a different level should
+	// wrap with their own BeginTx + manual op loop rather than
+	// asking ApplyPlan for tunability — the helper is intentionally
+	// opinionated for the common path.
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("ApplyPlan: begin tx: %w", err)
+	}
+	defer func() {
+		// Rollback is idempotent w.r.t. a committed tx — it returns
+		// sql.ErrTxDone which we don't propagate.
+		_ = tx.Rollback()
+	}()
 	for i, op := range plan.Ops {
-		if err := c.applyOne(ctx, op); err != nil {
+		if err := c.applyOne(ctx, tx, op); err != nil {
+			return fmt.Errorf("ApplyPlan: op %d (%s): %w", i, op.String(), err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ApplyPlan: commit: %w", err)
+	}
+	return nil
+}
+
+// applyPlanNoTx runs the ops without a transaction wrapper. Used on
+// engines where DDL implicitly commits (MySQL / MariaDB / Oracle).
+// A mid-plan failure here leaves the schema partially applied.
+func (c *Client) applyPlanNoTx(ctx context.Context, plan Plan) error {
+	for i, op := range plan.Ops {
+		if err := c.applyOne(ctx, c.db, op); err != nil {
 			return fmt.Errorf("ApplyPlan: op %d (%s): %w", i, op.String(), err)
 		}
 	}
@@ -66,15 +158,15 @@ func (c *Client) ApplyPlan(ctx context.Context, plan Plan) error {
 // reaching `ExecContext`. The Op values are public, so they are
 // untrusted input from the SQLGuard perspective even when produced
 // by `Diff` (a defensive layer above `Diff`).
-func (c *Client) applyOne(ctx context.Context, op Operation) error {
+func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) error {
 	switch o := op.(type) {
 	case OpCreateTable:
-		return c.applyCreateTable(ctx, o.Table)
+		return c.applyCreateTable(ctx, exec, o.Table)
 	case OpDropTable:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
 			return fmt.Errorf("drop table: %w", err)
 		}
-		_, err := c.db.ExecContext(ctx, fmt.Sprintf("DROP TABLE %s", c.dialect.Quote(o.Table)))
+		_, err := exec.ExecContext(ctx, fmt.Sprintf("DROP TABLE %s", c.dialect.Quote(o.Table)))
 		return err
 	case OpAddColumn:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
@@ -84,7 +176,7 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 			return fmt.Errorf("add column: %w", err)
 		}
 		ddl := c.dialect.AlterTableAddColumn(o.Table, o.Column.Name, o.Column.Type)
-		_, err := c.db.ExecContext(ctx, ddl)
+		_, err := exec.ExecContext(ctx, ddl)
 		return err
 	case OpDropColumn:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
@@ -94,7 +186,7 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 			return fmt.Errorf("drop column: %w", err)
 		}
 		ddl := c.dialect.AlterTableDropColumn(o.Table, o.Column)
-		_, err := c.db.ExecContext(ctx, ddl)
+		_, err := exec.ExecContext(ctx, ddl)
 		return err
 	case OpAlterColumn:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
@@ -110,17 +202,14 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 		// confuse the user re-running PlanMigration), fail loud
 		// with ErrUnsupportedFeature so the caller knows the gap
 		// is real. F3-3-execute-alter follow-up will close this.
-		if o.Old.Type == o.New.Type {
+		if normalizeType(o.Old.Type) == normalizeType(o.New.Type) {
 			return fmt.Errorf("%w: OpAlterColumn for %s.%s: nullable/default-only changes need F3-3-execute-alter (only type changes are emitted today)",
 				ErrUnsupportedFeature, o.Table, o.New.Name)
 		}
 		ddl := c.dialect.AlterTableAlterColumn(o.Table, o.New.Name, o.New.Type)
-		_, err := c.db.ExecContext(ctx, ddl)
+		_, err := exec.ExecContext(ctx, ddl)
 		return err
 	case OpCreateIndex:
-		// CreateIndex internally validates via dialect.Quote on
-		// each input; the SQLGuard layer is here for symmetry and
-		// to fail-fast before any helper is called.
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
 			return fmt.Errorf("create index: %w", err)
 		}
@@ -132,7 +221,7 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 				return fmt.Errorf("create index: %w", err)
 			}
 		}
-		return c.CreateIndex(ctx, o.Table, o.Index.Name, o.Index.Columns, o.Index.Unique)
+		return c.createIndexOn(ctx, exec, o.Table, o.Index.Name, o.Index.Columns, o.Index.Unique)
 	case OpDropIndex:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
 			return fmt.Errorf("drop index: %w", err)
@@ -140,7 +229,7 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 		if err := c.guard.ValidateIdentifier(o.Index); err != nil {
 			return fmt.Errorf("drop index: %w", err)
 		}
-		return c.dropIndex(ctx, o.Table, o.Index)
+		return c.dropIndex(ctx, exec, o.Table, o.Index)
 	case OpAddForeignKey:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
 			return fmt.Errorf("add fk: %w", err)
@@ -164,7 +253,7 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 			}
 		}
 		fk := o.ForeignKey
-		return c.AddForeignKey(ctx, o.Table, fk.Name, fk.Columns, fk.RefTable, fk.RefColumns, fk.OnDelete, fk.OnUpdate)
+		return c.addForeignKeyOn(ctx, exec, o.Table, fk.Name, fk.Columns, fk.RefTable, fk.RefColumns, fk.OnDelete, fk.OnUpdate)
 	case OpDropForeignKey:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
 			return fmt.Errorf("drop fk: %w", err)
@@ -174,7 +263,7 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 				return fmt.Errorf("drop fk: %w", err)
 			}
 		}
-		return c.dropForeignKey(ctx, o.Table, o.ForeignKey)
+		return c.dropForeignKey(ctx, exec, o.Table, o.ForeignKey)
 	case OpAddCheck:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
 			return fmt.Errorf("add check: %w", err)
@@ -182,7 +271,7 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 		if err := c.guard.ValidateIdentifier(o.Check.Name); err != nil {
 			return fmt.Errorf("add check: %w", err)
 		}
-		return c.addCheck(ctx, o.Table, o.Check.Name, o.Check.Expression)
+		return c.addCheck(ctx, exec, o.Table, o.Check.Name, o.Check.Expression)
 	case OpDropCheck:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
 			return fmt.Errorf("drop check: %w", err)
@@ -190,7 +279,7 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 		if err := c.guard.ValidateIdentifier(o.Check); err != nil {
 			return fmt.Errorf("drop check: %w", err)
 		}
-		return c.dropCheck(ctx, o.Table, o.Check)
+		return c.dropCheck(ctx, exec, o.Table, o.Check)
 	default:
 		return fmt.Errorf("%w: unknown Operation type %T", ErrUnsupportedFeature, op)
 	}
@@ -207,7 +296,7 @@ func (c *Client) applyOne(ctx context.Context, op Operation) error {
 // (OpCreateIndex / OpAddForeignKey / OpAddCheck). This keeps the
 // dispatch single-op-per-DDL — F3-4 transactional wrapper, when it
 // lands, will batch them cleanly.
-func (c *Client) applyCreateTable(ctx context.Context, t Table) error {
+func (c *Client) applyCreateTable(ctx context.Context, exec Executor, t Table) error {
 	if len(t.Columns) == 0 {
 		return fmt.Errorf("applyCreateTable %q: table has no columns", t.Name)
 	}
@@ -243,14 +332,14 @@ func (c *Client) applyCreateTable(ctx context.Context, t Table) error {
 		cols = append(cols, piece)
 	}
 	ddl := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", c.dialect.Quote(t.Name), strings.Join(cols, ",\n  "))
-	_, err := c.db.ExecContext(ctx, ddl)
+	_, err := exec.ExecContext(ctx, ddl)
 	return err
 }
 
 // dropIndex renders the per-dialect DROP INDEX DDL. SQLite and PG
 // use `DROP INDEX <name>`; MySQL/MariaDB and MSSQL require the
 // table qualification `DROP INDEX <name> ON <table>`.
-func (c *Client) dropIndex(ctx context.Context, table, index string) error {
+func (c *Client) dropIndex(ctx context.Context, exec Executor, table, index string) error {
 	var ddl string
 	switch c.dialect.Name() {
 	case "sqlite", "postgres":
@@ -262,7 +351,7 @@ func (c *Client) dropIndex(ctx context.Context, table, index string) error {
 	default:
 		return fmt.Errorf("%w: dropIndex not implemented for dialect %s", ErrUnsupportedFeature, c.dialect.Name())
 	}
-	_, err := c.db.ExecContext(ctx, ddl)
+	_, err := exec.ExecContext(ctx, ddl)
 	return err
 }
 
@@ -276,7 +365,7 @@ func (c *Client) dropIndex(ctx context.Context, table, index string) error {
 // PG / MSSQL use `ALTER TABLE ... DROP CONSTRAINT <name>`; MySQL /
 // MariaDB use `ALTER TABLE ... DROP FOREIGN KEY <name>`. Oracle
 // matches PG / MSSQL.
-func (c *Client) dropForeignKey(ctx context.Context, table, fk string) error {
+func (c *Client) dropForeignKey(ctx context.Context, exec Executor, table, fk string) error {
 	if fk == "" {
 		return fmt.Errorf("dropForeignKey: empty constraint name (SQLite inline FK?); cannot drop without rebuild")
 	}
@@ -291,7 +380,7 @@ func (c *Client) dropForeignKey(ctx context.Context, table, fk string) error {
 	default:
 		return fmt.Errorf("%w: dropForeignKey not implemented for dialect %s", ErrUnsupportedFeature, c.dialect.Name())
 	}
-	_, err := c.db.ExecContext(ctx, ddl)
+	_, err := exec.ExecContext(ctx, ddl)
 	return err
 }
 
@@ -300,13 +389,13 @@ func (c *Client) dropForeignKey(ctx context.Context, table, fk string) error {
 // MySQL 8.0.16+ / MariaDB 10.2.1+ same. SQLite returns
 // `ErrUnsupportedFeature` for the same reason as drop FK (no
 // `ALTER TABLE ADD CONSTRAINT` — requires rebuild).
-func (c *Client) addCheck(ctx context.Context, table, name, expression string) error {
+func (c *Client) addCheck(ctx context.Context, exec Executor, table, name, expression string) error {
 	if c.dialect.Name() == "sqlite" {
 		return fmt.Errorf("%w: addCheck on SQLite requires the 12-step table-rebuild procedure (F3-3-execute-sqlite-rebuild)", ErrUnsupportedFeature)
 	}
 	ddl := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s CHECK %s",
 		c.dialect.Quote(table), c.dialect.Quote(name), wrapExpressionInParens(expression))
-	_, err := c.db.ExecContext(ctx, ddl)
+	_, err := exec.ExecContext(ctx, ddl)
 	return err
 }
 
@@ -314,7 +403,7 @@ func (c *Client) addCheck(ctx context.Context, table, name, expression string) e
 // Oracle: `ALTER TABLE ... DROP CONSTRAINT <name>`. MySQL 8.0.16+
 // uses `ALTER TABLE ... DROP CHECK <name>`; MariaDB 10.2.1+ does
 // too. SQLite returns `ErrUnsupportedFeature`.
-func (c *Client) dropCheck(ctx context.Context, table, name string) error {
+func (c *Client) dropCheck(ctx context.Context, exec Executor, table, name string) error {
 	var ddl string
 	switch c.dialect.Name() {
 	case "postgres", "mssql", "oracle":
@@ -326,7 +415,7 @@ func (c *Client) dropCheck(ctx context.Context, table, name string) error {
 	default:
 		return fmt.Errorf("%w: dropCheck not implemented for dialect %s", ErrUnsupportedFeature, c.dialect.Name())
 	}
-	_, err := c.db.ExecContext(ctx, ddl)
+	_, err := exec.ExecContext(ctx, ddl)
 	return err
 }
 
