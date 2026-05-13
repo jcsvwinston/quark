@@ -73,11 +73,16 @@ jobs:
             run: 'TestSuiteMariaDB|TestMariaDBCache'
           - engine: mssql
             run: TestSuiteMSSQL
-          - engine: oracle
-            run: TestSuiteOracle
-            # Oracle initialises ~3 min on cold boot from gvenzl/oracle-free:23-slim
-            # (the -faststart variant crashed on ubuntu-latest, see F0-8 followup F).
-            timeout: 35
+          # Oracle is intentionally excluded from the matrix. Both
+          # `gvenzl/oracle-free:23-slim` and `:23-slim-faststart` exit
+          # with code 1 inside ~5 seconds on ubuntu-latest runners with
+          # no startup log emitted. Likely a memory cap / kernel quirk
+          # on hosted runners; gvenzl issue tracker has similar reports.
+          # The `setupOracleContainer` helper stays in
+          # `containers_test.go` so a developer with a working Oracle
+          # runtime locally can still run
+          # `go test -tags=integration -run TestSuiteOracle ./...`.
+          # F0-8 followup F tracks the open investigation.
     steps:
       - uses: actions/checkout@v4
 
