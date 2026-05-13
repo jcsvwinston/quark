@@ -1,0 +1,33 @@
+name: Release Please
+
+# F0-9. Watches `main` for Conventional Commit messages and keeps a
+# rolling "Release PR" open with the next version bump and the
+# CHANGELOG entries derived from the commits since the last tag.
+# Merging that PR creates the tag and the GitHub Release.
+#
+# This automates the version-bump + CHANGELOG portion of the release
+# process. The Docusaurus docs-versioning step (`docs:version` +
+# `versioned_docs/` snapshot) is NOT covered here — that still lives
+# in `.claude/commands/release.md` and runs manually before merging
+# the release-please PR. See `CLAUDE.md § "Regla de release"` for the
+# full DoD.
+#
+# Config: `release-please-config.json` + `.release-please-manifest.json`
+# at the repo root. release-type is Go (single module).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
