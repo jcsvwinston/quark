@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/jcsvwinston/quark/compare/v0.4.0...v0.5.0) (2026-05-13)
+
+
+### Added
+
+* **test:** per-engine integration matrix via testcontainers-go (F0-8) ([#28](https://github.com/jcsvwinston/quark/issues/28)) ([3340701](https://github.com/jcsvwinston/quark/commit/334070122a9c6f39c856650530937d3ac11511e7))
+
+
+### Fixed
+
+* **docs:** replace outdated quark.New(db, ...) examples with the real constructor ([#27](https://github.com/jcsvwinston/quark/issues/27)) ([9fbd592](https://github.com/jcsvwinston/quark/commit/9fbd592d89c5877bea40ab9762007d37457e1dcd))
+* **test:** swap Oracle container image to plain :23-slim (F0-8 followup F) ([#34](https://github.com/jcsvwinston/quark/issues/34)) ([fbe90e0](https://github.com/jcsvwinston/quark/commit/fbe90e0b4030f62ded047fdaefbe4908510bde98))
+
+
+### Documentation
+
+* close Phase 0 cosmetic backlog (F0-1..F0-5) ([#37](https://github.com/jcsvwinston/quark/issues/37)) ([1c5b369](https://github.com/jcsvwinston/quark/commit/1c5b369a8d836a5f4268e0c25ff1fcc338a56114))
+* mark Phase 0 fully closed in TASKS header (Bloque A wrap-up) ([#40](https://github.com/jcsvwinston/quark/issues/40)) ([6592935](https://github.com/jcsvwinston/quark/commit/6592935c3454e0fdcf8e9e4ed22b04a82fb54d4b))
+
+
+### Tests
+
+* dialect-aware quote assertions in AST/CTE/Window integration tests ([#29](https://github.com/jcsvwinston/quark/issues/29)) ([f659edf](https://github.com/jcsvwinston/quark/commit/f659edfa69db661b87f222b4afd6d4c1bc20dced))
+* dialect-skip / dialect-assert in setop tests (F0-8 followup C) ([#31](https://github.com/jcsvwinston/quark/issues/31)) ([56dedf1](https://github.com/jcsvwinston/quark/commit/56dedf1a88a035d0173ad4a405fc9b5f76806ddf))
+* explicit projection on grouped/joined queries (F0-8 followup B) ([#30](https://github.com/jcsvwinston/quark/issues/30)) ([a7db4bf](https://github.com/jcsvwinston/quark/commit/a7db4bf44a79396f95cbda29dc999d324e75bef3))
+* MSSQL setop ORDER BY + JoinBuilder ambiguous id (F0-8 followup G) ([#35](https://github.com/jcsvwinston/quark/issues/35)) ([43405ae](https://github.com/jcsvwinston/quark/commit/43405aeca9c92de708101d23f8d6d6cc7a81e6b0))
+* skip JSON[T] roundtrip on MSSQL with diagnosis (F0-8 followup E) ([#33](https://github.com/jcsvwinston/quark/issues/33)) ([ded5546](https://github.com/jcsvwinston/quark/commit/ded554638369b04602f0539fe3f3e09097042be0))
+* tolerance-based float comparison in nullable roundtrip (F0-8 followup D) ([#32](https://github.com/jcsvwinston/quark/issues/32)) ([8096dba](https://github.com/jcsvwinston/quark/commit/8096dbae82d07c7d48af371d537ad413a33e0988))
+
 ## [Unreleased]
 
 ### Added
