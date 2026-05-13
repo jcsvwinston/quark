@@ -80,16 +80,20 @@ MARKETING_PATTERN='production-ready|enterprise-grade|battle-tested'
 while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   if is_exempt "$f"; then continue; fi
-  # Capture lines matching any forbidden phrase. Strip the ones that are
-  # explicitly negated ("not ... production-ready"). The negation check
-  # accepts English ("not yet"/"isn't") and Spanish ("no es"/"todavía no").
+  # Capture lines matching any forbidden phrase. We strip backtick-wrapped
+  # spans first — `production-ready` inside backticks is the linter
+  # describing the rule, not a marketing claim. Then we drop lines that
+  # are explicitly negated ("not ... production-ready"). The negation
+  # check accepts English ("not yet"/"isn't"/"Not v1.0") and Spanish
+  # ("no es"/"todavía no").
   matches=$(grep -niE "$MARKETING_PATTERN" "$f" 2>/dev/null || true)
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    # Negation patterns that flag the phrase as a "not this" disclaimer
-    # rather than a marketing claim. Covers English ("not yet",
-    # "Not v1", "isn't"), Spanish ("no es", "todavía no", "tampoco",
-    # "no v1"), and the explicit warning shape ("not yet v1.0").
+    stripped=$(printf '%s' "$line" | sed 's/`[^`]*`//g')
+    if ! printf '%s' "$stripped" | grep -qiE "$MARKETING_PATTERN"; then
+      # Match was entirely inside backticks (meta description).
+      continue
+    fi
     if grep -qiE "(not (yet|a|v[0-9])|not v[0-9]|isn't|no es|todavía no|tampoco|never|no v[0-9])" <<<"$line"; then
       continue
     fi
@@ -100,13 +104,24 @@ done <<<"$ALL_DOCS"
 # --- Check 2: RELEASE_NOTES_V1 leak ------------------------------------------
 echo
 echo "→ check 2: RELEASE_NOTES_V1 leak"
+# A "leak" is the symbol appearing as a real reference — a markdown link
+# target or unadorned prose mention — not when the doc is *discussing*
+# the symbol inside backticks (`RELEASE_NOTES_V1`). Release notes and
+# CHANGELOG entries that describe the F0-1 cleanup or the F0-10 linter
+# rule itself mention the symbol legitimately; those are inside
+# backticks and shouldn't trigger.
 while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   if is_exempt "$f"; then continue; fi
   matches=$(grep -nE 'RELEASE_NOTES_V1' "$f" 2>/dev/null || true)
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    report "  release-notes-v1-leak: $f:$line"
+    # Strip backtick-wrapped spans before checking — `RELEASE_NOTES_V1`
+    # is a meta reference (code-quoted symbol), not a real link.
+    stripped=$(printf '%s' "$line" | sed 's/`[^`]*`//g')
+    if printf '%s' "$stripped" | grep -qE 'RELEASE_NOTES_V1'; then
+      report "  release-notes-v1-leak: $f:$line"
+    fi
   done <<<"$matches"
 done <<<"$ALL_DOCS"
 

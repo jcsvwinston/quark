@@ -1,0 +1,224 @@
+---
+sidebar_position: 2
+title: Comparison
+description: Cell-by-cell comparison of Quark vs GORM, sqlx, and Ent with code examples.
+---
+
+# Quark vs Other Go ORMs
+
+This page justifies every cell in the comparison table with code examples and precise
+reasoning. The goal is not to disparage other projects but to articulate clearly where
+the trade-offs lie.
+
+The canonical version of this comparison is in
+[`docs/comparison.md`](https://github.com/jcsvwinston/quark/blob/main/docs/comparison.md)
+in the main repository.
+
+## Summary table
+
+| | Quark | GORM | sqlx | Ent |
+|---|:---:|:---:|:---:|:---:|
+| Native Generics (no `interface{}`) | ✅ | partial¹ | ❌ | ✅ |
+| SQL Injection Guard | identifier + value | value only² | manual | value only² |
+| 6 Dialects, zero config switch | ✅ | ✅ | ❌ | partial |
+| Native Multi-Tenant (DB/Schema/RLS) | ✅ | manual/plugin | manual | manual/interceptor |
+| Immutable Query Builder | ✅ | mutable³ | N/A | ✅ |
+| Integrated L2 Cache | ✅ | plugin | ❌ | ❌ |
+| `stdlib` `*sql.DB` — no magic pool | ✅ | ✅ | ✅ | ❌ |
+| OpenTelemetry built-in | ✅ | plugin | ❌ | plugin |
+| Batch Ops (Delete/Upsert/Update) | ✅ | partial⁴ | ❌ | partial⁴ |
+
+> ¹ GORM v2 core API uses `interface{}`; generic wrappers exist but are not part of the primary API.
+> ² GORM and ent use parameterized queries that protect *values* against injection. Quark additionally validates *identifiers* (column/table names) at the API layer. See [SQLGuard](sqlguard) for a detailed breakdown.
+> ³ GORM queries can mutate shared state when chained; `Session(&gorm.Session{NewDB: true})` mitigates this but is opt-in.
+> ⁴ GORM supports `CreateInBatches`; batch DELETE and batch UPDATE require custom loops. Ent supports batch create; batch UPDATE/DELETE require raw queries or custom extensions.
+
+---
+
+## 1. Native Generics
+
+### Quark
+
+```go
+// Fully typed — no interface{} cast, compiler enforces T
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    List()
+// users is []User
+```
+
+### GORM v2
+
+```go
+var users []User
+result := db.Where("active = ?", true).Find(&users)
+// Find takes interface{} — wrong type compiles silently
+```
+
+GORM v2 ships generic wrappers (`db.Find[T]`) but they are not part of the core primary API; the predominant documentation uses `interface{}`.
+
+### sqlx
+
+```go
+var users []User
+err := db.SelectContext(ctx, &users, "SELECT * FROM users WHERE active = $1", true)
+// []User is correct, but the query itself is a raw string
+```
+
+sqlx has no generics-based query builder; all queries are raw SQL strings.
+
+### Ent
+
+```go
+users, err := client.User.Query().
+    Where(user.Active(true)).
+    All(ctx)
+// users is []*ent.User — typed, but requires code generation
+```
+
+Ent provides a typed API through generated code. The generation step is a required build dependency.
+
+---
+
+## 2. SQL Injection Guard
+
+### Quark — identifier + value protection
+
+```go
+// Operator is validated at the API layer — never reaches the DB
+_, err := quark.For[User](ctx, client).
+    Where("name", "drop_table", "x").List()
+// → ErrInvalidQuery: operator "drop_table" not allowed
+
+// Unknown column is caught before SQL generation
+_, err = quark.For[User](ctx, client).
+    Where(userInput, "=", "value").List()
+// → ErrInvalidQuery: column "injected--" not found
+```
+
+### GORM — value protection only
+
+```go
+// Value is parameterized — safe
+db.Where("name = ?", userInput).Find(&users)
+
+// But ORDER BY identifier is NOT protected
+db.Order(userInput).Find(&users) // injection vector if userInput is untrusted
+```
+
+### sqlx — fully manual
+
+```go
+// Developer is responsible for every identifier that enters the query
+query := fmt.Sprintf("SELECT * FROM users ORDER BY %s", sanitize(userInput))
+db.SelectContext(ctx, &users, query)
+```
+
+---
+
+## 3. Immutable Query Builder
+
+### Quark
+
+```go
+base := quark.For[User](ctx, client).Where("active", "=", true)
+
+// Each call returns a new clone — base is unchanged
+admins, _ := base.Where("role", "=", "admin").List()
+editors, _ := base.Where("role", "=", "editor").List()
+```
+
+### GORM (mutable)
+
+```go
+base := db.Where("active = ?", true)
+
+// Without NewDB session, chained calls mutate shared state
+admins := base.Where("role = ?", "admin")   // modifies base
+editors := base.Where("role = ?", "editor") // may accumulate conditions
+```
+
+The `Session(&gorm.Session{NewDB: true})` workaround exists but is opt-in and easy to forget.
+
+---
+
+## 4. Native Multi-Tenancy
+
+### Quark
+
+```go
+cfg := quark.DefaultTenantConfig()
+cfg.Strategy = quark.RowLevelSecurity
+cfg.BaseClient = client
+
+router := quark.NewTenantRouter(cfg, func(ctx context.Context) string {
+    return ctx.Value("tenant_id").(string)
+}, nil)
+
+// Tenant isolation is automatic — no WHERE clause needed
+users, _ := quark.For[User](tenantCtx, router).List()
+```
+
+### GORM (manual)
+
+```go
+// Developer must remember to scope every query
+db.Where("tenant_id = ?", tenantID).Find(&users)
+// Forgetting this line leaks data across tenants
+```
+
+---
+
+## 5. Integrated L2 Cache
+
+### Quark
+
+```go
+import "github.com/jcsvwinston/quark/cache/memory"
+
+store := memory.New()
+client, _ := quark.New("postgres", dsn, quark.WithCacheStore(store))
+
+users, _ := quark.For[User](ctx, client).
+    Cache(5*time.Minute, "users").
+    List()
+
+store.InvalidateTags(ctx, "users") // after a write
+```
+
+### GORM
+
+GORM has no built-in L2 cache. Community plugins exist but they are external dependencies with separate maintenance.
+
+---
+
+## 6. Batch Operations
+
+### Quark
+
+```go
+// Batch delete — chunked IN clauses, respects dialect limits
+affected, err := quark.For[User](ctx, client).DeleteBatch([]int64{1, 2, 3})
+
+// Batch upsert — dialect-optimal SQL (ON CONFLICT / ON DUPLICATE KEY / MERGE)
+err = quark.For[User](ctx, client).UpsertBatch(users, []string{"email"}, []string{"name"})
+
+// Batch update — N partial updates in a single transaction
+affected, err = quark.For[User](ctx, client).UpdateBatch(users)
+```
+
+### GORM
+
+```go
+// GORM supports CreateInBatches
+db.CreateInBatches(users, 100)
+
+// Batch DELETE requires a custom loop or raw SQL
+for _, id := range ids {
+    db.Delete(&User{}, id)
+}
+```
+
+### Ent
+
+Ent supports bulk create via `client.User.CreateBulk(...)`. Batch UPDATE and DELETE require raw queries or custom extensions.

@@ -1,0 +1,68 @@
+---
+sidebar_position: 7
+title: Roadmap
+description: Implemented Quark capabilities and planned future work.
+---
+
+# Roadmap
+
+Quark is currently documented as **v0.x**: the core is usable, but public APIs may
+still change before a stable v1.0. This page separates implemented capabilities
+from planned work so the docs do not read like a promise that every idea already
+ships.
+
+The main repository roadmap lives at
+[`docs/ROADMAP.md`](https://github.com/jcsvwinston/quark/blob/main/docs/ROADMAP.md).
+
+## Implemented Core
+
+- Type-safe `Query[T]` builders.
+- Immutable query composition.
+- SQLite, PostgreSQL, MySQL, MariaDB, SQL Server, and Oracle dialects.
+- SQLGuard identifier, operator, and raw-query validation.
+- CRUD operations with validation and lifecycle hooks.
+- Soft delete for entity-level `Delete` when `deleted_at` exists.
+- `UpdateMap` for explicit zero-value updates.
+- `CreateBatch`, `UpsertBatch`, `UpdateBatch`, and `DeleteBatch`.
+- Transactions, manual transactions, nested savepoint-style callbacks, and explicit savepoints.
+- Eager loading with `Preload`.
+- Recursive association persistence for common aggregate saves.
+- Many-to-many and polymorphic relation loading.
+- `Migrate`, `Sync`, `CreateIndex`, and `AddForeignKey`.
+- Versioned Go migration registry and migrator.
+- L2 cache interface with memory and Redis implementations.
+- Query observers, middleware, and OpenTelemetry middleware.
+- `TenantRouter` for database, schema, and row-level strategies.
+- Cross-database JSON predicates through `WhereJSON`.
+- Stored routine helpers.
+
+## Known Current Boundaries
+
+- The current module tree does not include a standalone `cmd/quark` CLI.
+- `Select` and `Where` validate simple identifiers, so dotted columns and SQL
+  expressions require views or controlled raw SQL.
+- `DeleteBy` and `DeleteBatch` are hard-delete APIs in the current implementation.
+- `Sync` handles add, rename, and controlled drop operations; type rewrites and
+  complex constraint changes belong in versioned migrations.
+- Routine execution currently bypasses the normal query middleware and observer path.
+- Event listening is experimental; `Notify` supports PostgreSQL notifications,
+  while `EventBus.CreateListener` is not implemented.
+
+## Near-Term Goals
+
+- Restore/undelete helper for soft-deleted rows.
+- Predicate-based bulk soft delete.
+- More expressive, typed projection API for aggregate reports.
+- Better join support for qualified identifiers.
+- Migration plan preview as structured data instead of log output.
+- Observer events for routine execution.
+- Expanded examples for web-service, worker, and multi-tenant deployment layouts.
+
+## Long-Term Goals
+
+- Standalone CLI for model generation, migrations, inspection, seeders, and tenant jobs.
+- Schema diffing with reviewable migration generation.
+- Read/write splitting and replica routing.
+- Connection pool metrics surfaced through observers.
+- Pluggable ID strategies such as UUID, ULID, and Snowflake.
+- More database-native features behind dialect-specific extension points.

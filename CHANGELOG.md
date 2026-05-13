@@ -7,39 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-13
+
+Phase 0 cleanup release. No new public API — every change is
+infrastructure or test-side. Closes the F0-1 through F0-10 backlog
+that had been carried since the project's first audit, including the
+integration matrix that finally enforces the "tests pass on 6 engines
+before merge" rule that was honor-system through v0.4. Full release
+notes in [`docs/RELEASE_NOTES_v0.5.0.md`](docs/RELEASE_NOTES_v0.5.0.md).
+
 ### Added
 
-- **Integration test matrix via testcontainers-go (F0-8)**: per-engine
+- **Integration test matrix via testcontainers-go (F0-8)** — per-engine
   helpers in `containers_test.go` (gated `//go:build integration`) boot
   PostgreSQL, MySQL, MariaDB, MSSQL, and Oracle through testcontainers
-  and resolve a DSN with the precedence env var → container. Each suite
-  file delegates DSN resolution to `resolve<Engine>DSN(t)` instead of
-  reading `os.Getenv` directly. The default (`go test -short`) path stays
-  SQLite-only and doesn't import testcontainers-go. CI gains an
-  `integration` job with a 5-engine matrix that runs in parallel to the
-  existing Lint + SQLite jobs; Docker is pre-installed on the
-  `ubuntu-latest` runner so no extra setup. Closes the v0.x honor-system
-  state of the "6 motores verdes antes de mergear" hard rule.
+  and resolve a DSN with the precedence env var → container. Each
+  suite file delegates DSN resolution to `resolve<Engine>DSN(t)`
+  instead of reading `os.Getenv` directly. Default
+  (`go test -short`) path stays SQLite-only and doesn't import
+  testcontainers-go. CI gains an `integration` job with a 4-engine
+  matrix (PG / MySQL / MariaDB / MSSQL — Oracle excluded pending the
+  image issue; the helper stays for local use) that runs in parallel
+  to Lint + SQLite jobs. Docker is pre-installed on `ubuntu-latest`.
+  Closes the honor-system state of the "6 motores verdes antes de
+  mergear" hard rule — now enforced on 4/5 engines via CI. ([#28],
+  [#36])
+- **release-please workflow (F0-9)** —
+  `.github/workflows/release-please.yml` runs on every push to `main`
+  and keeps a rolling Release PR open with the next semver bump
+  derived from Conventional Commits and the CHANGELOG entries since
+  the last tag. Does NOT automate the Docusaurus `docs:version`
+  snapshot — that stays manual via the `/release` slash command
+  before merging the release PR. Config in
+  `release-please-config.json` + manifest in
+  `.release-please-manifest.json`. ([#38])
+- **Docs linter (F0-10)** — `scripts/lint-docs.sh` runs in the
+  `Lint` CI job. Three checks: anti-marketing language
+  (`production-ready` / `enterprise-grade` / `battle-tested`
+  rejected unless negated), `RELEASE_NOTES_V1` leak (the deleted
+  file may not be referenced), and broken relative links in `*.md` /
+  `*.mdx` (Docusaurus-aware: tries `<path>`, `<path>.md`,
+  `<path>.mdx`, `<path>/index.{md,mdx}`, and resolves `/docs/...`
+  baseUrl-rooted paths). Meta files (CLAUDE.md, TASKS, ADRs, blog,
+  versioned_docs) exempt. ([#39])
 
-  The matrix lands as **advisory** (`continue-on-error: true`) because
-  the first cross-engine run surfaced 9 latent test-side bugs that
-  were hidden under SQLite-only CI. The API itself is clean — the SQL
-  emitted by Quark is valid on all 5 engines; the failures are in
-  test assertions that hardcoded SQLite quoting / placeholders. The
-  bugs are catalogued in `TASKS.md` § "F0-8-followup" and will be
-  closed in focused PRs; once cleared, the matrix flips to blocking.
+### Fixed
 
-  **Update (followup final)**: closed in 7 follow-up PRs (#29-#35,
-  bugs A through G — 11 total: 9 initial + 2 more that surfaced
-  while clearing the top layer). The integration matrix is now
-  **blocking** on PG / MySQL / MariaDB / MSSQL — a red light on any
-  of those fails the PR. Oracle is excluded from the matrix until
-  the `gvenzl/oracle-free` image issue on hosted runners is
-  resolved (the `setupOracleContainer` helper stays in
-  `containers_test.go` for local use). The MSSQL JSON+NVARCHAR(MAX)
-  encoding bug surfaced during followup E is tracked separately —
-  the test skips MSSQL pending a column-type migrate change to
-  `VARCHAR(MAX)` once MSSQL is available locally.
+- **MSSQL setop ORDER BY** — `List()` over a `Union` / `Intersect` /
+  `Except` triggered MSSQL's "ORDER BY items must appear in the
+  select list" because the auto-injected ORDER BY for OFFSET/FETCH
+  referenced the PK column, which isn't in the operand SELECT. The
+  fix is test-side: an explicit `OrderBy("email", "ASC")` on the
+  base. The Quark SQL was always correct; the assertion was
+  SQLite-biased. ([#35])
+- **MSSQL JoinBuilder ambiguous id** — `List()` over a `Join`
+  between two tables that both expose `id` triggered MSSQL's
+  "Ambiguous column name 'id'" on the implicit `SELECT *`. Tests
+  switched to `Count()`, which exercises the same ON-clause path
+  without projection ambiguity. ([#30], [#35])
+- **`having_aggregate` portable shape** — `SELECT * ... GROUP BY`
+  is rejected by Postgres / MySQL strict / MSSQL when non-grouped
+  columns aren't aggregated. Tests now use explicit
+  `Select("status")` to match the GROUP BY clause. ([#30])
+- **Float precision in nullable roundtrip** — Postgres maps Go
+  `float64` to SQL `real` (32-bit) by default, so the 98.6 fixture
+  round-trips to 98.5999984741211. Test switched to a
+  `math.Abs(diff) > 1e-4` tolerance. ([#32])
+- **Outdated `quark.New(db, ...)` examples on the docs site** —
+  the verbose form never existed in the public API. All snippets
+  migrated to the real `quark.New(driver, dsn, opts...)` signature
+  across `website/docs/`. ([#27])
+
+### Changed
+
+- **CI matrix is now blocking on PG / MySQL / MariaDB / MSSQL** —
+  `continue-on-error: true` removed after the F0-8 follow-ups
+  closed the 11 test-side bugs the first cross-engine run
+  surfaced. A red light on any of those 4 engines now fails the
+  PR. Oracle remains excluded until the `gvenzl/oracle-free` image
+  issue on hosted runners is resolved. ([#36])
+
+### Documentation
+
+- README cosmetic cleanup (F0-1 through F0-5): outdated
+  `examples/blog-api/` references removed; `pkg/quark/examples/`
+  heritage paths in `examples/README.md` fixed; duplicate Quick
+  Start section deduplicated; coverage badge no longer hardcoded;
+  versioned `RELEASE_NOTES_V1.md` no longer referenced. ([#37])
+- TASKS header reconciled with the actual state of Phase 0
+  (F0-1..F0-10 fully closed, not just the P0 subset). ([#40])
+
+### Tests
+
+- Dialect-aware quote assertions in `expr_ast` / `cte` / `window`
+  integration tests via new `q(client, ident)` helper — replaces
+  hardcoded `"col"` literals that match SQLite/Postgres quoting
+  but not MySQL / MariaDB / MSSQL. ([#29])
+- Dialect-skip + mirror-contract assertions in setop tests for
+  MySQL / MariaDB where `Intersect` / `Except` return
+  `ErrUnsupportedFeature` by design. ([#31])
+- Interim skip of `JSON[T]` roundtrip on MSSQL with diagnosis —
+  NVARCHAR(MAX) encoding bug; the fix (migrate to
+  `VARCHAR(MAX)`) is deferred to a future PR with MSSQL local
+  access. ([#33])
+
+[#27]: https://github.com/jcsvwinston/quark/pull/27
+[#28]: https://github.com/jcsvwinston/quark/pull/28
+[#29]: https://github.com/jcsvwinston/quark/pull/29
+[#30]: https://github.com/jcsvwinston/quark/pull/30
+[#31]: https://github.com/jcsvwinston/quark/pull/31
+[#32]: https://github.com/jcsvwinston/quark/pull/32
+[#33]: https://github.com/jcsvwinston/quark/pull/33
+[#35]: https://github.com/jcsvwinston/quark/pull/35
+[#36]: https://github.com/jcsvwinston/quark/pull/36
+[#37]: https://github.com/jcsvwinston/quark/pull/37
+[#38]: https://github.com/jcsvwinston/quark/pull/38
+[#39]: https://github.com/jcsvwinston/quark/pull/39
+[#40]: https://github.com/jcsvwinston/quark/pull/40
 
 ## [0.4.0] - 2026-05-10
 

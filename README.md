@@ -20,9 +20,9 @@
 
 ## 📌 Status
 
-Quark is in **v0.4** — late-alpha. The Phase 0 P0 backlog is closed, the Phase 1 deliverables (dirty tracking, `Nullable[T]`, `JSON[T]`, `RegisterTypeMapper`, optimistic locking, soft-delete scopes) shipped in v0.3, and v0.4 lands the Phase 2 composable query builder: a typed expression AST (`WhereExpr` / `HavingExpr`), subqueries (`AsSubquery` + `Sub` / `Exists` / `InSub`), CTEs (`With` / `WithRecursive`), window functions (`SelectExpr` + `Over` / `Rank` / `Lag`), set operators (`Union` / `Intersect` / `Except`), pessimistic locking (`ForUpdate` / `ForShare` / `SkipLocked` / `NoWait`), nested-Preload dotted paths, IN(...) chunking at 1000 keys, `HavingAggregate`, and a structured `Join(table).On(...)` builder that retires the v0.3.x string-raw form. **It is not yet v1.0 production-ready** — see [`docs/ANALISIS_MADUREZ.md`](docs/ANALISIS_MADUREZ.md) for the honest gap analysis and the path to a real v1.0.
+Quark is in **v0.5** — late-alpha. v0.5 is a Phase 0 cleanup release: no new public API, but the cross-engine integration matrix (PostgreSQL, MySQL, MariaDB, MSSQL via testcontainers; Oracle excluded pending an image issue) is now **blocking** in CI, so the "tests pass on 6 engines before merge" rule is finally enforced. v0.4 landed the composable query builder (typed expression AST, subqueries, CTEs, window functions, set operators, pessimistic locking, structured Join builder, nested-Preload dotted paths, IN(...) chunking, `HavingAggregate`); v0.3 landed the rich-type / dirty-tracking layer (`Nullable[T]`, `JSON[T]`, `RegisterTypeMapper`, optimistic locking, soft-delete scopes). **It is not yet v1.0 production-ready** — see [`docs/ANALISIS_MADUREZ.md`](docs/ANALISIS_MADUREZ.md) for the honest gap analysis and the path to a real v1.0.
 
-Breaking changes are documented in [`docs/MIGRATION_v0.4.0.md`](docs/MIGRATION_v0.4.0.md) (Join builder) with a migration path; release notes per version live under [`docs/RELEASE_NOTES_*.md`](docs/).
+Breaking changes are documented in `docs/MIGRATION_vX.Y.Z.md` per version (none for v0.5; [`MIGRATION_v0.4.0.md`](docs/MIGRATION_v0.4.0.md) covers the Join builder rename). Release notes per version live under [`docs/RELEASE_NOTES_*.md`](docs/).
 
 ---
 
