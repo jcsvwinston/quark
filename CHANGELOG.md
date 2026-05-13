@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bugs are catalogued in `TASKS.md` § "F0-8-followup" and will be
   closed in focused PRs; once cleared, the matrix flips to blocking.
 
+  **Update (followup final)**: closed in 7 follow-up PRs (#29-#35,
+  bugs A through G — 11 total: 9 initial + 2 more that surfaced
+  while clearing the top layer). The integration matrix is now
+  **blocking** on PG / MySQL / MariaDB / MSSQL — a red light on any
+  of those fails the PR. Oracle is excluded from the matrix until
+  the `gvenzl/oracle-free` image issue on hosted runners is
+  resolved (the `setupOracleContainer` helper stays in
+  `containers_test.go` for local use). The MSSQL JSON+NVARCHAR(MAX)
+  encoding bug surfaced during followup E is tracked separately —
+  the test skips MSSQL pending a column-type migrate change to
+  `VARCHAR(MAX)` once MSSQL is available locally.
+
 ## [0.4.0] - 2026-05-10
 
 Phase 2 release: composable query builder. Introduces a typed expression

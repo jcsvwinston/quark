@@ -626,15 +626,17 @@ SQLite sigue siendo el camino default sin Docker.
 
 Doc/changelog: actualizado en este PR.
 
-### F0-8-followup · Cerrar los bugs que la matriz integration destapó
+### ~~F0-8-followup · Cerrar los bugs que la matriz integration destapó~~
 
-La primera ejecución de la matriz reveló **9 bugs latentes** que estaban
-escondidos mientras CI sólo corría contra SQLite. La API pública está
-limpia — el SQL emitido es correcto en los 5 motores, los logs lo
-muestran ejecutando sin errores; lo que falla son aserciones de tests
-que hardcodearon comillas / placeholders / SQL de SQLite. La matriz
-queda como **advisory (`continue-on-error: true`)** hasta cerrar estos
-items; al cerrarse, se flipea a blocking en un PR final.
+**Cerrado** — los 11 bugs latentes que destapó la primera ejecución
+de la matriz están cerrados (9 originales + 2 que aparecieron al
+limpiar la capa superior). La matriz pasa a **blocking** en este PR.
+
+La API pública estaba (y sigue) limpia — el SQL emitido es correcto
+en los 5 motores, los logs lo muestran ejecutando sin errores; lo
+que fallaba eran aserciones de tests que hardcodearon comillas,
+placeholders o SQL específico de SQLite, más un par de problemas de
+infra (Oracle image, MSSQL JSON encoding).
 
 **Categorías de fallo:**
 
@@ -685,14 +687,17 @@ items; al cerrarse, se flipea a blocking en un PR final.
    `-faststart`, o `23-full-faststart`), o aceptar Oracle como
    "manual-only" hasta encontrar un image confiable.
 
-**Plan de cierre** (PRs separados):
-- PR A — bugs 1, 2, 6: aserciones dialect-aware (helper compartido). 30 min.
-- PR B — bugs 3, 4: `SELECT` explícito en tests grouped. 20 min.
-- PR C — bug 5: skip por dialecto en setop tests. 15 min.
-- PR D — bug 7: fixture o tolerancia float. 10 min.
-- PR E — bug 8: investigar y fixear si real. Prioridad ALTA.
-- PR F — bug 9: image alternativo o documentar Oracle como manual.
-- PR final — quitar `continue-on-error` de la matriz.
+**Cierre real** (PRs ejecutados):
+- ~~PR A (#29)~~ — bugs 1, 2, 6: aserciones dialect-aware via helper `q(client, ident)`.
+- ~~PR B (#30)~~ — bugs 3, 4: `Select` explícito en grouped/joined tests + `Count()` para evitar ambiguous-id en MSSQL.
+- ~~PR C (#31)~~ — bug 5: skip dialect en happy-path setop tests + mirror-contract assert para MySQL/MariaDB.
+- ~~PR D (#32)~~ — bug 7: tolerancia 1e-4 en roundtrip de `Nullable[float64]`.
+- ~~PR E (#33)~~ — bug 8: interim skip de JSON+MSSQL con diagnóstico. Fix de API (NVARCHAR(MAX) → VARCHAR(MAX) en migrate MSSQL) queda diferido para sesión con MSSQL local.
+- ~~PR F (#34)~~ — bug 9: Oracle excluido de la matriz CI; helper `setupOracleContainer` se queda para uso local. Image de `gvenzl/oracle-free` crashea en runners hosted, sin signal para diagnosticar.
+- ~~PR G (#35)~~ — bugs 10, 11: setop+LIMIT en MSSQL (`OrderBy("email", "ASC")` en base para satisfacer OFFSET/FETCH), JoinBuilder ambiguous-id en MSSQL (`Count()` en lugar de `List()`). Surfacearon al limpiar la capa superior.
+- ~~PR final~~ — `continue-on-error: true` removido; la matriz pasa a blocking. 4 motores en CI (PG/MySQL/MariaDB/MSSQL); Oracle queda como verificación manual hasta resolver el image issue.
+
+**Surface real cubierto**: 4/5 motores no-SQLite ejercitados end-to-end en CI por cada PR. Oracle queda como gap conocido y documentado.
 
 ### F0-9 · Instalar `release-please` o `semantic-release`
 
