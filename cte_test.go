@@ -126,21 +126,24 @@ func testCTE(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 			t.Fatalf("expected 2 users, got %d (%+v)", len(got), got)
 		}
 
-		// Captured SQL must start with `WITH "top_orders" AS (...)` and
-		// reference the CTE by name in the FROM/JOIN of the outer SELECT.
+		// Captured SQL must start with `WITH <q>top_orders</q> AS (...)`
+		// and reference the CTE by name in the FROM/JOIN of the outer
+		// SELECT. The quote character is dialect-specific (q() handles
+		// it). We don't assert on the placeholder shape — the literal
+		// `?` only renders on SQLite/MySQL/MariaDB; PG/MSSQL/Oracle
+		// emit ordinal placeholders — so we assert on column-name
+		// presence which is dialect-agnostic once quoted.
 		captured := mw.snapshot()
 		if len(captured) == 0 {
 			t.Fatalf("no WITH-prefixed SQL captured, middleware saw nothing")
 		}
 		sql := captured[0]
-		if !strings.Contains(sql, `WITH "top_orders" AS (`) {
-			t.Errorf("expected WITH \"top_orders\" AS ( ... ) prefix, got %q", sql)
+		cteName := q(client, "top_orders")
+		if !strings.Contains(sql, "WITH "+cteName+" AS (") {
+			t.Errorf("expected WITH %s AS ( ... ) prefix, got %q", cteName, sql)
 		}
-		if !strings.Contains(sql, `JOIN "top_orders"`) {
-			t.Errorf("expected outer JOIN to reference top_orders, got %q", sql)
-		}
-		if !strings.Contains(sql, "?") {
-			t.Errorf("expected '?' bind marker after substitution, got %q", sql)
+		if !strings.Contains(sql, "JOIN "+cteName) {
+			t.Errorf("expected outer JOIN to reference %s, got %q", cteName, sql)
 		}
 	})
 
@@ -235,7 +238,8 @@ func testCTE(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		if len(captured) == 0 {
 			t.Fatalf("Count middleware saw no WITH-prefixed SQL")
 		}
-		if !strings.Contains(captured[0], `WITH "top_orders" AS (`) {
+		cteName := q(client, "top_orders")
+		if !strings.Contains(captured[0], "WITH "+cteName+" AS (") {
 			t.Errorf("Count SQL missing CTE prefix: %q", captured[0])
 		}
 		if !strings.Contains(captured[0], "SELECT COUNT(*)") {

@@ -290,6 +290,21 @@ func dropTable(client *quark.Client, tableName string) {
 	}
 }
 
+// q is the cross-dialect quote helper used by suite-level SQL
+// assertions. SQLite/Postgres quote with `"col"`, MySQL/MariaDB with
+// “ `col` “, MSSQL with `[col]`, Oracle with `"COL"`. Tests that
+// build assertion strings literally hardcoded the SQLite form, which
+// fails the integration matrix on every other engine; this helper
+// makes the assertion dialect-aware so a single test passes the
+// 5-engine matrix.
+//
+// Use it whenever an integration test asserts that the rendered SQL
+// contains a column or table identifier — never `t.Errorf("expected
+// \"col\"")` directly.
+func q(client *quark.Client, ident string) string {
+	return client.Dialect().Quote(ident)
+}
+
 func testCRUD(ctx context.Context, t *testing.T, client *quark.Client) {
 	dropTable(client, "suite_users")
 	type SuiteUser struct {

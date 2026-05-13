@@ -114,7 +114,9 @@ func testWindow(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 				break
 			}
 		}
-		want := `RANK() OVER (PARTITION BY "region" ORDER BY "amount" DESC) AS "rk"`
+		want := "RANK() OVER (PARTITION BY " + q(client, "region") +
+			" ORDER BY " + q(client, "amount") + " DESC) AS " +
+			q(client, "rk")
 		if !strings.Contains(sel, want) {
 			t.Errorf("missing window projection in SELECT.\n got: %q\nwant: containing %q", sel, want)
 		}
@@ -153,9 +155,11 @@ func testWindow(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 				break
 			}
 		}
-		// Expect comma-joined: "region", ROW_NUMBER() OVER (...) AS "rn"
-		if !strings.Contains(sel, `"region", ROW_NUMBER() OVER (`) {
-			t.Errorf("expected regular cols and AST projection comma-joined, got %q", sel)
+		// Expect comma-joined: <q>region</q>, ROW_NUMBER() OVER (...) AS <q>rn</q>
+		expectPrefix := q(client, "region") + ", ROW_NUMBER() OVER ("
+		if !strings.Contains(sel, expectPrefix) {
+			t.Errorf("expected regular cols and AST projection comma-joined (looking for %q), got %q",
+				expectPrefix, sel)
 		}
 	})
 
@@ -203,9 +207,10 @@ func testWindow(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		if first != 2 || second != 5 {
 			t.Errorf("args[0..1] = (%v, %v), want (2, 5) — sql=%q", first, second, sel)
 		}
-		// Both LAG fragments must be present.
-		if !strings.Contains(sel, `LAG("amount", `) {
-			t.Errorf("missing LAG fragment in SELECT, got %q", sel)
+		// Both LAG fragments must be present (dialect-quoted column).
+		lagFrag := "LAG(" + q(client, "amount") + ", "
+		if !strings.Contains(sel, lagFrag) {
+			t.Errorf("missing LAG fragment %q in SELECT, got %q", lagFrag, sel)
 		}
 	})
 }
