@@ -700,11 +700,27 @@ infra (Oracle image, MSSQL JSON encoding).
 
 **Surface real cubierto**: 4/5 motores no-SQLite ejercitados end-to-end en CI por cada PR. Oracle queda como gap conocido y documentado.
 
-### F0-9 · Instalar `release-please` o `semantic-release`
+### ~~F0-9 · `release-please` workflow~~
 
-- **Objetivo**: automatizar bump de versión + CHANGELOG desde Conventional Commits.
-- **Acción**: añadir `.github/workflows/release-please.yml`. Configurar release type `go` (single-module).
-- **Done**: tras un merge a `main` con commits `feat:`/`fix:`, aparece un PR de release automático con CHANGELOG y version bump.
+**Cerrado** — `.github/workflows/release-please.yml` corre en cada
+push a `main`. Mantiene un PR rolling "Release PR" abierto con el
+próximo version bump (semver desde commits Conventional) y las
+entradas del CHANGELOG derivadas de los commits desde la última tag.
+Merge de ese PR crea el tag + GitHub Release automáticamente.
+
+Configuración:
+- `release-please-config.json` — release-type Go (single module),
+  `include-v-in-tag: true`, `bump-minor-pre-major: true` (porque
+  estamos en 0.x.y → cada `feat:` bumpea minor; con 1.x.y bumpearía
+  major).
+- `.release-please-manifest.json` — versión actual: `0.4.0`.
+- Workflow con permisos `contents: write` + `pull-requests: write`.
+
+**Interacción con `/release` slash command**: release-please **NO**
+hace el `npm run docusaurus docs:version` que congela el snapshot
+de `website/docs/` en `website/versioned_docs/version-X.Y.Z/`. Ese
+paso sigue siendo manual via `/release` antes de mergear el PR de
+release-please. Documentado en el comentario del workflow.
 
 ### F0-10 · Linter de docs
 
