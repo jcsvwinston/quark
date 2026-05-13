@@ -1,0 +1,138 @@
+---
+sidebar_position: 6
+title: Transactions
+description: Use callback transactions, manual transactions, and savepoints.
+---
+
+# Transactions
+
+QUARK exposes callback-style transactions for the common case and manual
+transactions when the calling code needs full control.
+
+## Callback transactions
+
+The callback style commits when the function returns nil and rolls back when it
+returns an error.
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    user := User{Name: "Charlie", Email: "charlie@example.com"}
+    if err := quark.ForTx[User](ctx, tx).Create(&user); err != nil {
+        return err
+    }
+
+    order := Order{UserID: user.ID, Total: 42}
+    return quark.ForTx[Order](ctx, tx).Create(&order)
+})
+```
+
+Callback transactions also roll back safely when a panic is intercepted.
+
+## Savepoints
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    if err := tx.Savepoint("before_optional_work"); err != nil {
+        return err
+    }
+
+    if err := runOptionalWork(ctx, tx); err != nil {
+        return tx.RollbackTo("before_optional_work")
+    }
+
+    return nil
+})
+```
+
+Savepoint support depends on the underlying database engine.
+
+## Manual transactions
+
+```go
+tx, err := client.BeginTx(ctx, nil)
+if err != nil {
+    return err
+}
+defer tx.Rollback()
+
+if err := quark.ForTx[User](ctx, tx).Create(&user); err != nil {
+    return err
+}
+
+return tx.Commit()
+```
+
+Manual transactions are useful when transaction lifetime is owned by a larger
+workflow or framework integration.
+
+## Transaction isolation levels
+
+```go
+import "database/sql"
+
+tx, err := client.BeginTx(ctx, &sql.TxOptions{
+    Isolation: sql.LevelSerializable,
+    ReadOnly:  false,
+})
+```
+
+Available levels depend on the database engine:
+
+| Level | PostgreSQL | MySQL | SQLite | MSSQL |
+|---|---|---|---|---|
+| `LevelReadUncommitted` | ✓ | ✓ | — | ✓ |
+| `LevelReadCommitted` | ✓ | ✓ | — | ✓ |
+| `LevelRepeatableRead` | ✓ | ✓ | — | ✓ |
+| `LevelSerializable` | ✓ | ✓ | ✓ | ✓ |
+
+## Batch operations in transactions
+
+`UpdateBatch` internally wraps all updates in a single transaction. For scenarios
+where you need `CreateBatch` and `DeleteBatch` to share a transaction, use the
+manual style with `ForTx`:
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    // Bulk insert new records
+    if err := quark.ForTx[Order](ctx, tx).CreateBatch(newOrders); err != nil {
+        return err
+    }
+
+    // Remove cancelled orders atomically
+    _, err := quark.ForTx[Order](ctx, tx).DeleteBatch(cancelledIDs)
+    return err
+})
+```
+
+## Error handling and retry
+
+Callback transactions automatically rollback on any non-nil error return.
+For transient failures (e.g. deadlocks), wrap in a retry loop:
+
+```go
+var err error
+for attempt := 0; attempt < 3; attempt++ {
+    err = client.Tx(ctx, func(tx *quark.Tx) error {
+        // ...operations...
+        return nil
+    })
+    if err == nil {
+        break
+    }
+    if !isRetriable(err) {
+        break
+    }
+}
+```
+
+## Read-only transactions
+
+Mark transactions as read-only to let the engine optimize for non-mutating queries:
+
+```go
+tx, err := client.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+defer tx.Rollback()
+
+users, err := quark.ForTx[User](ctx, tx).Where("active", "=", true).List()
+_ = tx.Commit()
+```

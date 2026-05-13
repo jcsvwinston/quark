@@ -38,7 +38,18 @@
 - [x] **F1-5** — Soft-delete scopes: `WithTrashed` / `OnlyTrashed` / `Restore`.
 - [x] **F1-6** — Optimistic locking (`quark:"version"` + `ErrStaleEntity`).
 
-## v0.4.0 — Phase 2 (this release)
+## v0.5.0 — Phase 0 cleanup (this release)
+
+No new public API. Closes the F0-1 through F0-10 backlog:
+
+- [x] **F0-1..F0-5** — README / examples / ROADMAP / SECURITY / version-doc cosmetic alignment.
+- [x] **F0-6** — gh-pages deploy workflow for `website/`.
+- [x] **F0-7** — Docusaurus versioning initialised.
+- [x] **F0-8** — Per-engine integration matrix via testcontainers-go. CI **blocking** on PG / MySQL / MariaDB / MSSQL; Oracle excluded pending image fix. The "tests pass on 6 engines before merge" rule is now enforced (4/5 in CI).
+- [x] **F0-9** — release-please workflow for automated version bumps + CHANGELOG generation from Conventional Commits.
+- [x] **F0-10** — Docs linter (`scripts/lint-docs.sh`) in CI: anti-marketing, `RELEASE_NOTES_V1` leak detection, broken relative links (Docusaurus-aware).
+
+## v0.4.0 — Phase 2
 
 - [x] **F2-AST** — Composable expression AST (`Expr`, `Col`, `Lit`, `Func`, `And`/`Or`/`Not`, `In`, `Cmp` + `Eq`/`Ne`/`Lt`/`Gt`/`Lte`/`Gte`); `Query[T].WhereExpr` / `HavingExpr` integration.
 - [x] **F2-subqueries** — Typed subqueries (`AsSubquery()` + `Sub` / `Exists` / `NotExists` / `InSub` / `NotInSub`).
@@ -51,21 +62,21 @@
 - [x] **F2-having-agg** — `HavingAggregate(fn, column, op, value)` with COUNT/SUM/AVG/MIN/MAX whitelist.
 - [x] **F2-join-builder** — Structured `Join(table).On(col, op, otherCol)` retires the v0.3.x string-raw form (BREAKING; see [`MIGRATION_v0.4.0.md`](MIGRATION_v0.4.0.md)).
 
-## Phase 3 — schema diff + migrations (v0.5)
+## Phase 3 — schema diff + migrations (v0.6)
 
 - [ ] Real introspection-based schema diff (types, NOT NULL, defaults, indexes, FKs).
 - [ ] Distributed migration locking (`pg_advisory_xact_lock` / `GET_LOCK` / `sp_getapplock` / `DBMS_LOCK`).
 - [ ] Transactional migrations where the engine allows; resumable migrations on MySQL.
 - [ ] Backfill orchestration with resume tokens.
 
-## Phase 4 — observability + cache (v0.6)
+## Phase 4 — observability + cache (v0.7)
 
 - [ ] OTel metrics (counters, histograms).
 - [ ] SQL redaction in spans.
 - [ ] Cache stampede protection + granular invalidation.
 - [ ] Deadlock retry with exponential backoff.
 
-## Phase 5 — RLS + hooks + events (v0.7)
+## Phase 5 — RLS + hooks + events (v0.8)
 
 - [ ] Real Postgres RLS (`SET LOCAL app.tenant_id` + `CREATE POLICY` template).
 - [ ] Transactional hooks (`OnCommit` / `OnRollback`, `BeforeFind` / `AfterFind`).

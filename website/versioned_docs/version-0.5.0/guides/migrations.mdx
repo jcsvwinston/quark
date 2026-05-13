@@ -1,0 +1,301 @@
+---
+sidebar_position: 7
+title: Migrations and Sync
+description: Create tables from models, evolve schemas safely, add indexes and foreign keys, and run versioned Go migrations.
+---
+
+# Migrations and Sync
+
+Quark has two schema paths:
+
+| Path | Best for |
+| --- | --- |
+| `client.Migrate` / `client.Sync` | Development, tests, prototypes, additive schema evolution. |
+| `github.com/jcsvwinston/quark/migrate` | Reviewable, ordered, reversible production migrations written in Go. |
+
+There is no standalone migration CLI in the current module tree. Run migrations
+from a small Go command, your application startup, CI, or an admin job.
+
+## Create Tables with Migrate
+
+`Migrate` creates missing tables from model metadata:
+
+```go
+err := client.Migrate(ctx, &User{}, &Order{}, &Product{})
+```
+
+It reads:
+
+| Metadata | DDL effect |
+| --- | --- |
+| `db:"column"` | Creates a column. |
+| `pk:"true"` | Creates a primary key. Multiple PK tags create a composite PK. |
+| Go field type | Maps to a dialect-specific SQL type. |
+| `quark:"not_null"` / `nullable:"false"` | Adds `NOT NULL`. |
+| `default:"value"` | Adds `DEFAULT value`. |
+| `quark:"unique"` | Adds `UNIQUE`. |
+| `rel:"many_to_many" m2m:"..."` | Creates a join table. |
+
+Example:
+
+```go
+type User struct {
+    ID        int64     `db:"id" pk:"true"`
+    Email     string    `db:"email" quark:"unique,not_null"`
+    Name      string    `db:"name" quark:"not_null"`
+    Active    bool      `db:"active" default:"1"`
+    CreatedAt time.Time `db:"created_at" default:"CURRENT_TIMESTAMP"`
+}
+
+if err := client.Migrate(ctx, &User{}); err != nil {
+    return err
+}
+```
+
+`Migrate` is idempotent for engines that support `CREATE TABLE IF NOT EXISTS`.
+Oracle handles “already exists” errors specially because its syntax differs.
+
+## Type Mapping
+
+Quark maps Go types through the selected dialect:
+
+| Go kind | Typical SQL type |
+| --- | --- |
+| Integer PK | Auto-increment / identity primary key. |
+| String PK | `VARCHAR(36)` / `NVARCHAR(36)` primary key. |
+| `string` | Text or varying character type. |
+| `int`, `int64`, unsigned ints | Integer / number type. |
+| `float32`, `float64` | Real / double / float type. |
+| `bool` | Boolean, bit, or numeric boolean depending on dialect. |
+| `time.Time` | Timestamp / datetime type. |
+| Pointer fields | Unwrapped for type mapping and nullable unless constrained. |
+
+For advanced column types, create them with a versioned migration or raw DDL and
+map the resulting column with a normal `db` tag.
+
+## Evolve Tables with Sync
+
+`Sync` compares the current model to the current database table:
+
+```go
+err := client.Sync(ctx, quark.SyncOptions{}, &User{})
+```
+
+Supported changes in the current implementation:
+
+| Change | Behavior |
+| --- | --- |
+| Missing table | `Sync` calls `Migrate` first unless `DryRun` is true. |
+| New field with `db` tag | Adds a column. |
+| `quark:"rename:old_col"` | Renames an existing column to the current `db` name. |
+| Removed field | Drops the column only when `SafeMigrations` is false. |
+
+`Sync` does not currently perform automatic type changes or constraint rewrites
+after a column already exists. Use a versioned migration for those changes.
+
+## Rename a Column Safely
+
+Use `quark:"rename:old_col"` when a field is renamed in Go and in SQL:
+
+```go
+type User struct {
+    ID       int64  `db:"id" pk:"true"`
+    FullName string `db:"full_name" quark:"rename:name"`
+}
+
+err := client.Sync(ctx, quark.SyncOptions{}, &User{})
+```
+
+If the table has `name` but not `full_name`, Quark emits dialect-specific rename
+DDL. If neither column exists, it adds `full_name`.
+
+## Safe Migrations
+
+`SafeMigrations` defaults to `true`:
+
+```go
+limits := quark.DefaultLimits()
+limits.SafeMigrations = true
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLimits(limits),
+)
+```
+
+With safe mode enabled, `Sync` will not drop columns that exist in the database
+but no longer exist in the model. To allow destructive drops, opt in explicitly:
+
+```go
+limits := quark.DefaultLimits()
+limits.SafeMigrations = false
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLimits(limits),
+)
+
+err = client.Sync(ctx, quark.SyncOptions{}, &User{})
+```
+
+Prefer a versioned migration for destructive changes so the review includes the
+data migration, rollback strategy, and operational plan.
+
+## Dry Runs and Transactions
+
+`SyncOptions` controls execution:
+
+```go
+err := client.Sync(ctx, quark.SyncOptions{
+    DryRun:        true,
+    NoTransaction: false,
+}, &User{})
+```
+
+| Option | Effect |
+| --- | --- |
+| `DryRun` | Logs planned column add/rename/drop SQL without executing it. |
+| `NoTransaction` | Disables transactional DDL wrapping even if the dialect supports it. |
+
+PostgreSQL, SQLite, SQL Server, and Oracle report transactional DDL support.
+MySQL and MariaDB perform implicit commits around many DDL statements, so Quark
+runs their sync steps without a transaction.
+
+## Indexes
+
+Use `CreateIndex` for simple indexes:
+
+```go
+err := client.CreateIndex(
+    ctx,
+    "users",
+    "idx_users_email",
+    []string{"email"},
+    true,
+)
+```
+
+The last argument controls uniqueness. The helper quotes identifiers and ignores
+“already exists” errors for dialects where Quark can recognize them.
+
+For partial indexes, expression indexes, included columns, or engine-specific
+index options, use a versioned migration with explicit SQL.
+
+## Foreign Keys
+
+```go
+err := client.AddForeignKey(
+    ctx,
+    "orders",
+    "fk_orders_user",
+    []string{"user_id"},
+    "users",
+    []string{"id"},
+    "CASCADE",
+    "",
+)
+```
+
+`columns` and `refColumns` are matched by position. `onDelete` and `onUpdate`
+are appended directly, so pass values supported by your engine, such as
+`CASCADE`, `RESTRICT`, `NO ACTION`, or `SET NULL`.
+
+## Versioned Go Migrations
+
+Use the `migrate` package when schema changes must be ordered, reviewed, and
+reversible.
+
+```go
+package migrations
+
+import (
+    "context"
+
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/migrate"
+)
+
+func init() {
+    migrate.Register(&migrate.Migration{
+        ID:   "202605050001_add_users_email_index",
+        Name: "add users email index",
+        Up: func(ctx context.Context, client *quark.Client) error {
+            return client.CreateIndex(ctx, "users", "idx_users_email", []string{"email"}, true)
+        },
+        Down: func(ctx context.Context, client *quark.Client) error {
+            return client.Exec(ctx, `DROP INDEX idx_users_email`)
+        },
+    })
+}
+```
+
+`ID` strings are sorted lexicographically. Use timestamp-like IDs so migration
+order is obvious and stable.
+
+### Running Migrations
+
+Create a small command that imports your migration package for side effects:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/migrate"
+    _ "github.com/lib/pq"
+
+    _ "your/app/migrations"
+)
+
+func main() {
+    ctx := context.Background()
+
+    limits := quark.DefaultLimits()
+    limits.AllowRawQueries = true
+
+    client, err := quark.New("postgres", "postgres://user:pass@localhost/app?sslmode=disable",
+        quark.WithLimits(limits),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Close()
+
+    migrator := migrate.NewMigrator(client)
+    if err := migrator.Up(ctx, 0); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+The migrator stores applied IDs in `quark_migrations`. It uses `client.Exec`
+internally, so configure the migration client with `AllowRawQueries: true`.
+
+### Preview and Rollback
+
+```go
+migrator := migrate.NewMigrator(client)
+
+// Preview all pending migrations.
+err := migrator.UpDryRun(ctx, 0)
+
+// Apply all pending migrations.
+err = migrator.Up(ctx, 0)
+
+// Revert one applied migration.
+err = migrator.Down(ctx, 1)
+```
+
+Pass `steps > 0` to limit how many migrations are applied or reverted. Pass `0`
+to apply or revert every eligible migration.
+
+## Recommended Production Flow
+
+1. Use `Migrate` freely in tests and local prototypes.
+2. Use `Sync` for additive changes while the schema is still young.
+3. Use `quark:"rename:old_col"` for non-destructive renames.
+4. Move production DDL into versioned Go migrations once the table has real data.
+5. Keep `SafeMigrations` enabled for app clients.
+6. Use a separate migration client with `AllowRawQueries: true`.
+7. Make destructive changes explicit and reversible, with a tested `Down`.
