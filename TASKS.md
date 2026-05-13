@@ -20,22 +20,39 @@
 > Foco admitido: `tipos` | `fase3` | `auto`. Si dudas, usa `auto`. El foco
 > `f0` ya no aplica — está cerrado.
 
-Estado real del backlog post-v0.4.0 + Bloque-A cerrado:
+Estado real del backlog post-v0.5.0 (release 2026-05-13, sesión que
+cerró Fase 0 + abrió Phase 3):
 
-1. ~~**Bloque A — Cerrar Fase 0 de verdad**~~. Hecho. F0-1..F0-10
-   tachados (PRs #28-#39). Integration matrix en CI bloqueante.
-   release-please workflow activo. Doc linter en CI.
-2. **Bloque B — Tipos diferidos de Fase 1** (sección "Fase 1" más abajo):
-   arrays Postgres con wrapper neutro, timezones por columna. Abrir issue
-   de diseño antes de implementar timezones.
-3. **Bloque C — Apertura formal de Fase 3** (migraciones serias). El plan
-   vive en `docs/ANALISIS_MADUREZ.md` §4 Fase 3 — no se duplica aquí; se
-   descompone en `F3-1, F3-2, …` con la misma granularidad que F1/F2
-   cuando se abra.
+1. ~~**Bloque A — Cerrar Fase 0 de verdad**~~. Cerrado. F0-1..F0-10
+   tachados. v0.5.0 publicada.
+2. **Bloque B — Tipos diferidos de Fase 1** (sección "Fase 1" más abajo).
+   - `Array[T]` cerrado en v0.6-Unreleased (PR #42).
+   - **Timezones por columna** sigue abierto — necesita ADR de diseño
+     antes de implementar (tag `quark:"tz=UTC"` vs Client option vs híbrido).
+3. **Bloque C — Phase 3 (apertura formal hecha)**. ADR-0009 ancla la
+   estrategia (code-first + diff bidireccional). F3-1..F3-7
+   decompuestos en este TASKS más abajo. Progreso:
+   - ~~**F3-1** Distributed migration lock~~ — PR #44 merged.
+   - **F3-2 core** (SQLite + PG) — PR #45 abierto, awaiting CI tras
+     pasar code-reviewer con 3 fixes (commit `5a85efb8`).
+   - **F3-2 follow-ups** pendientes: -mysql, -mariadb, -mssql,
+     -oracle (diferido sin CI), -indexes, -fks, -checks.
+   - **F3-3..F3-7** pendientes.
 
-Bloque B o C — la elección depende de qué presione más el caller del ORM
-en producción. Por defecto del slash command: `auto` elige el de mayor
-leverage según el estado del repo.
+**Próxima acción concreta** (al arrancar sesión nueva):
+1. `gh pr checks 45` — si CI verde, mergear PR #45.
+2. Decidir: ¿seguir F3-2 follow-ups (mysql/mariadb es un buen
+   próximo paso, comparten 90% código) o saltar a F3-3 (diff core)?
+   F3-3 puede arrancar con sólo PG+SQLite y los follow-ups
+   completar el matrix después.
+
+**Foco sugerido** del slash command: `fase3` (Phase 3 en curso, sigue
+siendo el siguiente macro-deliverable).
+
+**Disciplina recordada**: `code-reviewer` subagent obligatorio antes
+de cada PR (regla CLAUDE.md #6); `/next-session` plantilla de cierre
+al final de cada sesión. En la sesión que cerró v0.5.0 + abrió Phase
+3 ambos slippearon — recuperados al final.
 
 ---
 
