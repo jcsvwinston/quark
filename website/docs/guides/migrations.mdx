@@ -369,20 +369,34 @@ Dialect coverage (F3-2 progress):
 | SQL Server | ✅ supported — `sys.tables` / `sys.columns` / `sys.types` + `sys.default_constraints` LEFT JOIN; type reassembly from `max_length` / `precision` / `scale` with nvarchar byte→char halving and `MAX` for `max_length = -1` |
 | Oracle | ⚠️ returns `ErrUnsupportedFeature` — F3-2-oracle deferred (no CI) |
 
-Schema surface currently covers **tables, columns, and non-primary-key
-indexes** (`Index{Name, Columns, Unique}`). Each dialect uses its
-native index catalog: SQLite `PRAGMA index_list` / `PRAGMA index_info`
-(origin `pk` filtered); PostgreSQL `pg_index` joined with
-`pg_attribute` via `unnest(indkey) WITH ORDINALITY` for stable
-column order; MySQL/MariaDB `INFORMATION_SCHEMA.STATISTICS`
-(`INDEX_NAME != 'PRIMARY'`); MSSQL `sys.indexes` / `sys.index_columns`
-(`is_primary_key = 0`, `is_included_column = 0`). Expression /
-functional indexes surface their expression slot as `""` — the diff
-layer (F3-3) decides whether to treat them as opaque.
+Schema surface currently covers **tables, columns, non-primary-key
+indexes, and foreign keys**:
 
-Foreign keys and check constraints land in subsequent F3-2-*
-follow-ups. Code that consumes `Schema` should treat unpopulated
-constraint slices as "not yet introspected", not "no constraints".
+- **Indexes** (`Index{Name, Columns, Unique}`) — SQLite
+  `PRAGMA index_list` / `PRAGMA index_info` (origin `pk` filtered);
+  PostgreSQL `pg_index` joined with `pg_attribute` via
+  `unnest(indkey) WITH ORDINALITY` for stable column order;
+  MySQL/MariaDB `INFORMATION_SCHEMA.STATISTICS`
+  (`INDEX_NAME != 'PRIMARY'`); MSSQL `sys.indexes` /
+  `sys.index_columns` (`is_primary_key = 0`,
+  `is_included_column = 0`). Expression / functional indexes
+  surface their expression slot as `""` — the diff layer (F3-3)
+  decides whether to treat them as opaque.
+- **Foreign keys** (`ForeignKey{Name, Columns, RefTable,
+  RefColumns, OnDelete, OnUpdate}`) — SQLite
+  `PRAGMA foreign_key_list` (Name is `""` for inline FKs; the diff
+  layer matches on column-tuple); PostgreSQL `pg_constraint`
+  (contype='f') with composite-FK column matching via paired
+  `unnest(conkey/confkey)`; MySQL/MariaDB
+  `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` + `REFERENTIAL_CONSTRAINTS`;
+  MSSQL `sys.foreign_keys` + `sys.foreign_key_columns`. `OnDelete`
+  / `OnUpdate` are normalised to the SQL-standard verbose form
+  (`CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`, `NO ACTION`)
+  regardless of how the catalog encodes them.
+
+Check constraints land in F3-2-checks. Code that consumes `Schema`
+should treat unpopulated constraint slices as "not yet introspected",
+not "no constraints".
 
 Internal tables (`quark_*` for migration state, plus `sqlite_*` on
 SQLite) are filtered out — the introspection result is the user-facing

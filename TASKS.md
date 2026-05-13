@@ -159,7 +159,19 @@ Pendientes para cerrar F3-2 entero:
   `type>0`, `is_included_column=0`). Expression indexes
   surface el slot como `""` para que F3-3 decida si los
   trata como opacos.
-- **F3-2-fks**: añadir `Table.ForeignKeys` + introspection.
+- ~~**F3-2-fks**~~. **Cerrado** — `Table.ForeignKeys`
+  poblado en SQLite / PG / MySQL / MariaDB / MSSQL con
+  `ForeignKey{Name, Columns, RefTable, RefColumns, OnDelete, OnUpdate}`.
+  Catálogos: SQLite `PRAGMA foreign_key_list` (Name="" para inline
+  FKs, diff layer hace match por column-tuple);
+  PG `pg_constraint` (contype='f') con `unnest(conkey/confkey) WITH
+  ORDINALITY` para column matching en composites; MySQL/MariaDB
+  `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` + `REFERENTIAL_CONSTRAINTS`
+  agrupado por CONSTRAINT_NAME; MSSQL `sys.foreign_keys` +
+  `sys.foreign_key_columns` con `delete_referential_action_desc`
+  underscored normalizado a verbose. `OnDelete`/`OnUpdate` se
+  emiten siempre en forma SQL-standard verbose (`CASCADE`,
+  `SET NULL`, `SET DEFAULT`, `RESTRICT`, `NO ACTION`).
 - **F3-2-checks**: añadir `Table.Checks` + introspection.
 
 Indexes/FKs/Checks llegan **después** de cerrar los 4 motores CI con

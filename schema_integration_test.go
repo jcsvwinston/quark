@@ -165,6 +165,97 @@ func testSchemaIntrospection(ctx context.Context, t *testing.T, baseClient *quar
 		}
 	})
 
+	t.Run("ListsCreatedForeignKey", func(t *testing.T) {
+		// F3-2-fks contract: an FK declared in DDL must surface in
+		// Table.ForeignKeys with the right shape (name, columns,
+		// ref_table, ref_columns, on_delete, on_update).
+		//
+		// Seeding strategy: raw inline-FK DDL rather than the
+		// AddForeignKey helper, because SQLite doesn't support
+		// `ALTER TABLE ADD CONSTRAINT FOREIGN KEY` — using
+		// AddForeignKey would gate this whole test on a migrator
+		// quirk unrelated to the introspector's contract. The same
+		// inline-FK syntax (`CONSTRAINT <name> FOREIGN KEY (...)
+		// REFERENCES ...`) works on all 5 dialects.
+		dropTable(baseClient, "schema_fk_child")
+		dropTable(baseClient, "schema_fk_parent")
+		defer dropTable(baseClient, "schema_fk_child")
+		defer dropTable(baseClient, "schema_fk_parent")
+
+		if _, err := baseClient.Raw().ExecContext(ctx,
+			`CREATE TABLE schema_fk_parent (id INTEGER PRIMARY KEY)`); err != nil {
+			// CLAUDE.md rule 7: no t.Skip to gate per-engine.
+			// If the seed fails on a supported dialect, that's a
+			// real bug we want to surface, not a SKIP that lets it
+			// slip through CI.
+			t.Fatalf("seed schema_fk_parent failed on %s: %v", dialect, err)
+		}
+		// Inline FK: `CONSTRAINT <name> FOREIGN KEY (parent_id) REFERENCES schema_fk_parent(id) ON DELETE CASCADE`
+		// works on SQLite/PG/MySQL/MariaDB/MSSQL. SQLite doesn't
+		// preserve constraint names from inline FKs (returns ""),
+		// which the introspector documents and the diff layer
+		// handles by matching on the column-tuple instead.
+		childDDL := `CREATE TABLE schema_fk_child (
+			id INTEGER PRIMARY KEY,
+			parent_id INTEGER,
+			CONSTRAINT fk_schema_fk_child_parent
+				FOREIGN KEY (parent_id) REFERENCES schema_fk_parent(id)
+				ON DELETE CASCADE
+		)`
+		if _, err := baseClient.Raw().ExecContext(ctx, childDDL); err != nil {
+			t.Fatalf("seed schema_fk_child failed on %s: %v", dialect, err)
+		}
+
+		schema, err := baseClient.IntrospectSchema(ctx)
+		if err != nil {
+			t.Fatalf("IntrospectSchema: %v", err)
+		}
+		var child *quark.Table
+		for i := range schema.Tables {
+			if schema.Tables[i].Name == "schema_fk_child" {
+				child = &schema.Tables[i]
+				break
+			}
+		}
+		if child == nil {
+			t.Fatalf("schema_fk_child missing from introspection result")
+		}
+		if len(child.ForeignKeys) != 1 {
+			t.Fatalf("expected 1 FK on schema_fk_child, got %d: %+v",
+				len(child.ForeignKeys), child.ForeignKeys)
+		}
+		fk := child.ForeignKeys[0]
+		// SQLite returns "" for inline-FK names; everything else
+		// echoes the CONSTRAINT name. Both are correct per contract.
+		if dialect != "sqlite" && fk.Name != "fk_schema_fk_child_parent" {
+			t.Errorf("FK name: want fk_schema_fk_child_parent, got %q", fk.Name)
+		}
+		if len(fk.Columns) != 1 || fk.Columns[0] != "parent_id" {
+			t.Errorf("FK columns: want [parent_id], got %v", fk.Columns)
+		}
+		if fk.RefTable != "schema_fk_parent" {
+			t.Errorf("FK ref_table: want schema_fk_parent, got %q", fk.RefTable)
+		}
+		if len(fk.RefColumns) != 1 || fk.RefColumns[0] != "id" {
+			t.Errorf("FK ref_columns: want [id], got %v", fk.RefColumns)
+		}
+		if fk.OnDelete != "CASCADE" {
+			t.Errorf("FK on_delete: want CASCADE, got %q", fk.OnDelete)
+		}
+		// We didn't specify ON UPDATE — should be the SQL-standard
+		// default. MariaDB stores this default as RESTRICT in
+		// `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS`, while MySQL,
+		// PG, MSSQL, and SQLite store it as NO ACTION. In SQL
+		// semantics RESTRICT and NO ACTION are equivalent in
+		// immediate-check mode (which is the only mode these engines
+		// support), but the catalog labelling diverges. We accept
+		// either here rather than normalising on the introspector
+		// side — F3-3 will treat them as equivalent for the diff.
+		if fk.OnUpdate != "NO ACTION" && fk.OnUpdate != "RESTRICT" {
+			t.Errorf("FK on_update: want NO ACTION or RESTRICT (MariaDB stores RESTRICT for unspecified ON UPDATE), got %q", fk.OnUpdate)
+		}
+	})
+
 	t.Run("FiltersInternalTables", func(t *testing.T) {
 		// `quark_*` tables (used internally for migration state /
 		// future use) must not surface in the user-facing schema view.
