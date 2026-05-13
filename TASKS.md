@@ -147,7 +147,18 @@ Pendientes para cerrar F3-2 entero:
   en paréntesis (`(0)`, `(getdate())`), unwrap es responsabilidad
   del F3-3.
 - **F3-2-oracle**: `USER_TABLES`, `USER_TAB_COLUMNS`, `USER_CONS_COLUMNS`. Deferred — Oracle no está en CI hasta que el `gvenzl/oracle-free` image se debuguee.
-- **F3-2-indexes**: añadir `Table.Indexes` + introspection cross-dialect.
+- ~~**F3-2-indexes**~~. **Cerrado** — `Table.Indexes`
+  poblado en SQLite / PG / MySQL / MariaDB / MSSQL con
+  `Index{Name, Columns, Unique}`. PK-backing indexes filtrados
+  per-dialect (PK es constraint, no index, en el modelo de diff).
+  Catálogos: SQLite `PRAGMA index_list` + `PRAGMA index_info`;
+  PG `pg_index` con `unnest(indkey) WITH ORDINALITY` para column
+  order estable; MySQL/MariaDB `INFORMATION_SCHEMA.STATISTICS`
+  agrupado por `INDEX_NAME` con `SEQ_IN_INDEX`; MSSQL
+  `sys.indexes` + `sys.index_columns` (`is_primary_key=0`,
+  `type>0`, `is_included_column=0`). Expression indexes
+  surface el slot como `""` para que F3-3 decida si los
+  trata como opacos.
 - **F3-2-fks**: añadir `Table.ForeignKeys` + introspection.
 - **F3-2-checks**: añadir `Table.Checks` + introspection.
 

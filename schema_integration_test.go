@@ -6,6 +6,7 @@ package quark_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -96,6 +97,71 @@ func testSchemaIntrospection(ctx context.Context, t *testing.T, baseClient *quar
 			t.Errorf("description column missing")
 		} else if !desc.Nullable {
 			t.Errorf("description column should be nullable, got Nullable=false")
+		}
+	})
+
+	t.Run("ListsCreatedIndex", func(t *testing.T) {
+		// F3-2-indexes contract: a UNIQUE INDEX created via
+		// CreateIndex must surface in Table.Indexes with the right
+		// shape (name, columns, unique flag).
+		//
+		// We use CreateIndex rather than raw DDL because:
+		//   - It's the public Quark API the diff layer will compare
+		//     against, so the introspector and the migrator have to
+		//     agree on the *same* surface.
+		//   - It handles per-dialect quirks (MySQL no `IF NOT EXISTS`,
+		//     MSSQL `IF NOT EXISTS (SELECT … sys.indexes …)`) so the
+		//     test stays dialect-neutral.
+		idxName := "idx_schema_fixtures_name"
+		if err := baseClient.CreateIndex(ctx, "schema_fixtures", idxName,
+			[]string{"name"}, true); err != nil {
+			t.Fatalf("CreateIndex: %v", err)
+		}
+		// The parent test already `defer dropTable(... schema_fixtures)`
+		// which cascades the index in most engines, but we also
+		// best-effort drop the index by name on subtest exit so a
+		// re-run in the same process (rare locally; happens with
+		// `-run` flag matching) doesn't trip a "already exists" path
+		// the CreateIndex helper has to ignore.
+		defer func() {
+			_, _ = baseClient.Raw().ExecContext(ctx,
+				fmt.Sprintf("DROP INDEX %s", idxName))
+		}()
+
+		schema, err := baseClient.IntrospectSchema(ctx)
+		if err != nil {
+			t.Fatalf("IntrospectSchema: %v", err)
+		}
+		var fixture *quark.Table
+		for i := range schema.Tables {
+			if schema.Tables[i].Name == "schema_fixtures" {
+				fixture = &schema.Tables[i]
+				break
+			}
+		}
+		if fixture == nil {
+			t.Fatalf("schema_fixtures missing from introspection result")
+		}
+
+		var found *quark.Index
+		for i := range fixture.Indexes {
+			if fixture.Indexes[i].Name == idxName {
+				found = &fixture.Indexes[i]
+				break
+			}
+		}
+		if found == nil {
+			names := make([]string, 0, len(fixture.Indexes))
+			for _, idx := range fixture.Indexes {
+				names = append(names, idx.Name)
+			}
+			t.Fatalf("index %q missing from introspection result. Saw: %v", idxName, names)
+		}
+		if !found.Unique {
+			t.Errorf("index %q should be UNIQUE, got Unique=false", idxName)
+		}
+		if len(found.Columns) != 1 || found.Columns[0] != "name" {
+			t.Errorf("index %q columns: want [name], got %v", idxName, found.Columns)
 		}
 	})
 

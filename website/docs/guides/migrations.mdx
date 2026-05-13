@@ -369,10 +369,19 @@ Dialect coverage (F3-2 progress):
 | SQL Server | ✅ supported — `sys.tables` / `sys.columns` / `sys.types` + `sys.default_constraints` LEFT JOIN; type reassembly from `max_length` / `precision` / `scale` with nvarchar byte→char halving and `MAX` for `max_length = -1` |
 | Oracle | ⚠️ returns `ErrUnsupportedFeature` — F3-2-oracle deferred (no CI) |
 
-Schema surface currently covers **tables and columns only**. Indexes,
-foreign keys, and check constraints land in subsequent F3-2-*
-follow-ups once the column-only path is verified across the 4 CI
-engines. Code that consumes `Schema` should treat unpopulated
+Schema surface currently covers **tables, columns, and non-primary-key
+indexes** (`Index{Name, Columns, Unique}`). Each dialect uses its
+native index catalog: SQLite `PRAGMA index_list` / `PRAGMA index_info`
+(origin `pk` filtered); PostgreSQL `pg_index` joined with
+`pg_attribute` via `unnest(indkey) WITH ORDINALITY` for stable
+column order; MySQL/MariaDB `INFORMATION_SCHEMA.STATISTICS`
+(`INDEX_NAME != 'PRIMARY'`); MSSQL `sys.indexes` / `sys.index_columns`
+(`is_primary_key = 0`, `is_included_column = 0`). Expression /
+functional indexes surface their expression slot as `""` — the diff
+layer (F3-3) decides whether to treat them as opaque.
+
+Foreign keys and check constraints land in subsequent F3-2-*
+follow-ups. Code that consumes `Schema` should treat unpopulated
 constraint slices as "not yet introspected", not "no constraints".
 
 Internal tables (`quark_*` for migration state, plus `sqlite_*` on

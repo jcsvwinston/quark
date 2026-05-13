@@ -37,7 +37,11 @@ func (d *SQLiteDialect) IntrospectSchema(ctx context.Context, exec Executor) (Sc
 		if err != nil {
 			return Schema{}, fmt.Errorf("sqlite introspect: list columns for %q: %w", name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols})
+		idx, err := sqliteListIndexes(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("sqlite introspect: list indexes for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -119,6 +123,111 @@ func sqliteListColumns(ctx context.Context, exec Executor, table string) ([]Colu
 	return out, rows.Err()
 }
 
+// sqliteListIndexes uses PRAGMA index_list / index_info for the index
+// surface. PRAGMA index_list returns one row per index with an `origin`
+// column we filter on:
+//
+//	c  → user-created via CREATE INDEX        (surfaced)
+//	u  → implicit, from a UNIQUE constraint    (surfaced; the diff layer
+//	     decides whether it round-trips as a CREATE INDEX or as a column
+//	     UNIQUE)
+//	pk → implicit, backing the PRIMARY KEY     (NOT surfaced — PK is a
+//	     constraint in the diff model, not an index)
+//
+// PRAGMA index_info(<name>) then returns the columns in `seqno` order,
+// which is the column order in the index — significant for B-trees.
+//
+// Identifier note: SQLite PRAGMA syntax doesn't accept parameterised
+// arguments — the table and index name are spliced into the SQL surface.
+// We validate via SQLGuard's `ValidateIdentifier` before each splice,
+// which is a strict ASCII rule (`^[a-zA-Z_][a-zA-Z0-9_]*$`, len ≤ 64).
+// Tables/indexes whose names came in via Quark APIs always pass that
+// rule; tables/indexes created externally with hyphens, spaces, or
+// non-ASCII characters will surface as an error from this function
+// rather than being silently skipped. That's intentional: a migrations
+// tool that hides indexes it can't read is a foot-gun (the diff would
+// emit DROP INDEX for missing entries it never saw). If you hit this
+// in production, rename the affected index to ASCII-only or open an
+// issue requesting per-dialect quoting that bypasses the guard.
+func sqliteListIndexes(ctx context.Context, exec Executor, table string) ([]Index, error) {
+	if err := NewSQLGuard().ValidateIdentifier(table); err != nil {
+		return nil, fmt.Errorf("sqlite introspect: bad table name %q: %w", table, err)
+	}
+	listQ := fmt.Sprintf(`PRAGMA index_list("%s")`, table)
+	rows, err := exec.QueryContext(ctx, listQ)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type meta struct {
+		name   string
+		unique bool
+	}
+	var pending []meta
+	for rows.Next() {
+		var (
+			seq     int
+			name    string
+			uniq    int
+			origin  string
+			partial int
+		)
+		if err := rows.Scan(&seq, &name, &uniq, &origin, &partial); err != nil {
+			return nil, err
+		}
+		if origin == "pk" {
+			continue
+		}
+		pending = append(pending, meta{name: name, unique: uniq == 1})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	out := make([]Index, 0, len(pending))
+	for _, m := range pending {
+		if err := NewSQLGuard().ValidateIdentifier(m.name); err != nil {
+			return nil, fmt.Errorf("sqlite introspect: bad index name %q: %w", m.name, err)
+		}
+		infoQ := fmt.Sprintf(`PRAGMA index_info("%s")`, m.name)
+		infoRows, err := exec.QueryContext(ctx, infoQ)
+		if err != nil {
+			return nil, err
+		}
+		var cols []string
+		for infoRows.Next() {
+			var (
+				seqno   int
+				cid     int
+				colname sql.NullString
+			)
+			if err := infoRows.Scan(&seqno, &cid, &colname); err != nil {
+				infoRows.Close()
+				return nil, err
+			}
+			// `cid = -1` and `colname IS NULL` indicate an expression
+			// index (CREATE INDEX … ON t(lower(x))). We surface the
+			// raw "" column name so the diff layer can decide whether
+			// to treat it as opaque; expression indexes are out of
+			// scope for the F3-3 column-equality diff.
+			if colname.Valid {
+				cols = append(cols, colname.String)
+			} else {
+				cols = append(cols, "")
+			}
+		}
+		if err := infoRows.Err(); err != nil {
+			infoRows.Close()
+			return nil, err
+		}
+		infoRows.Close()
+		out = append(out, Index{Name: m.name, Columns: cols, Unique: m.unique})
+	}
+	return out, nil
+}
+
 // --- MySQL / MariaDB ---------------------------------------------------------
 
 // IntrospectSchema reads the MySQL/MariaDB schema using
@@ -160,7 +269,11 @@ func mysqlLikeIntrospect(ctx context.Context, exec Executor, dialectName string)
 		if err != nil {
 			return Schema{}, fmt.Errorf("%s introspect: list columns for %q: %w", dialectName, name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols})
+		idx, err := mysqlListIndexes(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("%s introspect: list indexes for %q: %w", dialectName, name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -227,6 +340,72 @@ func mysqlListColumns(ctx context.Context, exec Executor, table string) ([]Colum
 	return out, rows.Err()
 }
 
+// mysqlListIndexes reads `INFORMATION_SCHEMA.STATISTICS`, the
+// documented catalog for index metadata in MySQL/MariaDB. The
+// catalog returns one row per (index, column) — we group those rows
+// in Go using `SEQ_IN_INDEX` for column order. PRIMARY KEY backing
+// indexes are filtered (the PK is a constraint, not an index in our
+// diff model). `NON_UNIQUE = 0` is the unique flag.
+//
+// MariaDB shares this catalog with MySQL, so the same query works
+// for both — no dialect branching needed.
+func mysqlListIndexes(ctx context.Context, exec Executor, table string) ([]Index, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME, SEQ_IN_INDEX
+		  FROM INFORMATION_SCHEMA.STATISTICS
+		 WHERE TABLE_SCHEMA = DATABASE()
+		   AND TABLE_NAME = ?
+		   AND INDEX_NAME != 'PRIMARY'
+		 ORDER BY INDEX_NAME, SEQ_IN_INDEX`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Group rows by index name preserving the first-seen order.
+	type accum struct {
+		unique bool
+		cols   []string
+	}
+	byName := map[string]*accum{}
+	var order []string
+	for rows.Next() {
+		var (
+			indexName string
+			nonUnique int
+			colName   sql.NullString
+			seqInIdx  int
+		)
+		if err := rows.Scan(&indexName, &nonUnique, &colName, &seqInIdx); err != nil {
+			return nil, err
+		}
+		a, ok := byName[indexName]
+		if !ok {
+			a = &accum{unique: nonUnique == 0}
+			byName[indexName] = a
+			order = append(order, indexName)
+		}
+		// COLUMN_NAME is NULL for functional/expression indexes
+		// (MySQL 8.0+: `CREATE INDEX … ON t((lower(x)))`). Surface ""
+		// so the diff layer can spot the expression-index case rather
+		// than silently dropping the column slot.
+		if colName.Valid {
+			a.cols = append(a.cols, colName.String)
+		} else {
+			a.cols = append(a.cols, "")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Index, 0, len(order))
+	for _, name := range order {
+		a := byName[name]
+		out = append(out, Index{Name: name, Columns: a.cols, Unique: a.unique})
+	}
+	return out, nil
+}
+
 // --- SQL Server --------------------------------------------------------------
 
 // IntrospectSchema reads the MSSQL schema via `sys.tables`,
@@ -261,7 +440,11 @@ func (d *MSSQLDialect) IntrospectSchema(ctx context.Context, exec Executor) (Sch
 		if err != nil {
 			return Schema{}, fmt.Errorf("mssql introspect: list columns for %q: %w", name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols})
+		idx, err := mssqlListIndexes(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("mssql introspect: list indexes for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -342,6 +525,80 @@ func mssqlListColumns(ctx context.Context, exec Executor, table string) ([]Colum
 	return out, rows.Err()
 }
 
+// mssqlListIndexes reads `sys.indexes` joined with `sys.index_columns`
+// and `sys.columns` to get the (index, column) tuples. Three filters
+// apply at the catalog level:
+//
+//   - `is_primary_key = 0` — PK is a constraint, not an index here.
+//   - `type > 0` — `type = 0` is HEAP (no real index storage), `1` is
+//     CLUSTERED, `2` is NONCLUSTERED. We want 1 and 2 (and 5/6 for
+//     XML / SPATIAL aren't going to round-trip anyway).
+//   - `is_unique_constraint = 0` is NOT applied — a UNIQUE constraint
+//     creates a backing index that we DO want to surface, mirroring
+//     what other dialects do.
+//
+// `key_ordinal` is the column position in the index key (1-based).
+// We group rows by index name in Go preserving the catalog order.
+func mssqlListIndexes(ctx context.Context, exec Executor, table string) ([]Index, error) {
+	d := &MSSQLDialect{}
+	q := fmt.Sprintf(`
+		SELECT i.name AS index_name,
+		       i.is_unique,
+		       c.name AS column_name,
+		       ic.key_ordinal
+		  FROM sys.indexes i
+		  JOIN sys.index_columns ic
+		    ON i.object_id = ic.object_id
+		   AND i.index_id  = ic.index_id
+		  JOIN sys.columns c
+		    ON ic.object_id = c.object_id
+		   AND ic.column_id = c.column_id
+		 WHERE i.object_id = OBJECT_ID(%s)
+		   AND i.is_primary_key = 0
+		   AND i.type > 0
+		   AND ic.is_included_column = 0
+		 ORDER BY i.name, ic.key_ordinal`, d.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type accum struct {
+		unique bool
+		cols   []string
+	}
+	byName := map[string]*accum{}
+	var order []string
+	for rows.Next() {
+		var (
+			indexName  string
+			isUnique   bool
+			columnName string
+			keyOrdinal uint8
+		)
+		if err := rows.Scan(&indexName, &isUnique, &columnName, &keyOrdinal); err != nil {
+			return nil, err
+		}
+		a, ok := byName[indexName]
+		if !ok {
+			a = &accum{unique: isUnique}
+			byName[indexName] = a
+			order = append(order, indexName)
+		}
+		a.cols = append(a.cols, columnName)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Index, 0, len(order))
+	for _, name := range order {
+		a := byName[name]
+		out = append(out, Index{Name: name, Columns: a.cols, Unique: a.unique})
+	}
+	return out, nil
+}
+
 // mssqlReassembleType glues parameters onto MSSQL's bare type name from
 // the catalog: `varchar` + `max_length=255` → `varchar(255)`;
 // `decimal` + `precision=10,scale=2` → `decimal(10,2)`; `nvarchar` +
@@ -401,7 +658,11 @@ func (d *PostgresDialect) IntrospectSchema(ctx context.Context, exec Executor) (
 		if err != nil {
 			return Schema{}, fmt.Errorf("pg introspect: list columns for %q: %w", name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols})
+		idx, err := pgListIndexes(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("pg introspect: list indexes for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -489,4 +750,90 @@ func pgListColumns(ctx context.Context, exec Executor, table string) ([]Column, 
 		out = append(out, col)
 	}
 	return out, rows.Err()
+}
+
+// pgListIndexes reads index metadata via `pg_index` joined with
+// `pg_class` (for the index name) and `pg_attribute` (for the column
+// name). `unnest(indkey) WITH ORDINALITY` lets us preserve column
+// order — `indkey` is a `smallint[]` array of attribute numbers in
+// key order, so the ordinality column is the key position.
+//
+// PG caveats:
+//   - `indisprimary` filters PK-backing indexes — PK is a constraint,
+//     not an index in our diff model.
+//   - `indisunique` is the unique flag (covers both UNIQUE INDEX and
+//     UNIQUE-constraint-backing indexes, which is what we want — the
+//     diff layer treats them uniformly).
+//   - `current_schema()` scopes to the public-ish schema in the same
+//     way `pgListTables` does.
+//   - Expression indexes have `attnum = 0` for the expression slot;
+//     the LEFT JOIN to pg_attribute returns NULL for those, which we
+//     surface as `""` to match the SQLite/MySQL convention.
+func pgListIndexes(ctx context.Context, exec Executor, table string) ([]Index, error) {
+	// Placeholder via Dialect rather than hardcoded `$1`. The query
+	// body uses pg_catalog (PG-specific), but going through
+	// Placeholder() keeps the call site consistent with mssql's
+	// catalog query and prevents the "copy-paste $1" anti-pattern
+	// from spreading. (pgListColumns above still hardcodes $1 —
+	// that's pre-existing deuda; this PR refuses to add a new
+	// instance.)
+	d := &PostgresDialect{}
+	q := fmt.Sprintf(`
+		SELECT i.relname        AS index_name,
+		       ix.indisunique   AS is_unique,
+		       a.attname        AS column_name,
+		       k.ord            AS column_position
+		  FROM pg_class t
+		  JOIN pg_namespace n ON n.oid = t.relnamespace
+		  JOIN pg_index    ix ON ix.indrelid = t.oid
+		  JOIN pg_class    i  ON i.oid = ix.indexrelid
+		  JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+		  LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+		 WHERE t.relname = %s
+		   AND n.nspname = current_schema()
+		   AND NOT ix.indisprimary
+		 ORDER BY i.relname, k.ord`, d.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type accum struct {
+		unique bool
+		cols   []string
+	}
+	byName := map[string]*accum{}
+	var order []string
+	for rows.Next() {
+		var (
+			indexName string
+			isUnique  bool
+			colName   sql.NullString
+			position  int
+		)
+		if err := rows.Scan(&indexName, &isUnique, &colName, &position); err != nil {
+			return nil, err
+		}
+		a, ok := byName[indexName]
+		if !ok {
+			a = &accum{unique: isUnique}
+			byName[indexName] = a
+			order = append(order, indexName)
+		}
+		if colName.Valid {
+			a.cols = append(a.cols, colName.String)
+		} else {
+			a.cols = append(a.cols, "")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Index, 0, len(order))
+	for _, name := range order {
+		a := byName[name]
+		out = append(out, Index{Name: name, Columns: a.cols, Unique: a.unique})
+	}
+	return out, nil
 }
