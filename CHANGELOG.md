@@ -17,6 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Client.AcquireMigrationLock(ctx, name, timeout)` — distributed
+  migration lock (F3-1)**: cluster-wide advisory lock for migration
+  operations. First caller wins; subsequent callers block up to
+  `timeout` or receive `ErrLockTimeout`. The lock is held by a
+  dedicated connection for its lifetime; `Release` returns it to the
+  pool. New optional `MigrationLocker` interface on Dialect — kept
+  optional so custom dialects don't break.
+  Per-dialect implementation: PG uses session-level
+  `pg_advisory_lock(hashtext)` + `SET lock_timeout` (SQLSTATE
+  `55P03` → `ErrLockTimeout`); MySQL/MariaDB use `GET_LOCK` +
+  `RELEASE_LOCK` (return 0 → `ErrLockTimeout`); MSSQL uses
+  `sp_getapplock @LockOwner='Session'` (status -1 →
+  `ErrLockTimeout`). SQLite and Oracle return
+  `ErrUnsupportedFeature` — SQLite has no distributed primitive,
+  Oracle's `DBMS_LOCK` needs PL/SQL plumbing tracked as F3-1
+  follow-up. First F3 deliverable closed.
+
 - **`Array[T]` generic** — typed wrapper for SQL columns holding a list of `T`.
   Round-trips through JSON regardless of dialect (same wire format as
   `JSON[T]`; migrate maps to the per-dialect JSON column type). Helpers
