@@ -526,6 +526,14 @@ func mysqlListIndexes(ctx context.Context, exec Executor, table string) ([]Index
 // REFERENTIAL_CONSTRAINTS returns UPDATE_RULE / DELETE_RULE as
 // verbose strings (`CASCADE`, `SET NULL`, `NO ACTION`, `RESTRICT`,
 // `SET DEFAULT`) — no normalisation needed.
+//
+// Asymmetry to know about: when a FK is declared without an explicit
+// ON DELETE/UPDATE clause, MariaDB stores the SQL-standard default
+// as `RESTRICT` while MySQL stores it as `NO ACTION`. Both are
+// semantically equivalent in immediate-check mode (which is the only
+// mode either engine supports), but the catalog labelling diverges.
+// We pass either label through verbatim rather than collapsing them
+// — the diff layer (F3-3) treats them as equivalent.
 func mysqlListForeignKeys(ctx context.Context, exec Executor, table string) ([]ForeignKey, error) {
 	rows, err := exec.QueryContext(ctx, `
 		SELECT kcu.CONSTRAINT_NAME,

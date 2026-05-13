@@ -63,10 +63,20 @@ type Index struct {
 // form (`"CASCADE"`, `"SET NULL"`, `"SET DEFAULT"`, `"RESTRICT"`,
 // `"NO ACTION"`) regardless of how the underlying catalog encodes
 // them (PG single-char `confdeltype`, MSSQL `delete_referential_action_desc`
-// with underscores, etc.). All four implemented dialects emit
-// `"NO ACTION"` explicitly for the SQL-standard default — the empty
-// string never appears here in practice. A future Oracle introspector
-// (F3-2-oracle) is expected to follow the same convention.
+// with underscores, etc.). The empty string never appears here in
+// practice — every catalog returns a verbose label.
+//
+// Catalog asymmetry to know about: when a foreign key is declared
+// without an explicit ON DELETE/ON UPDATE clause, **MariaDB** stores
+// the SQL-standard default as `"RESTRICT"` in
+// `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS`, while **MySQL**,
+// **PostgreSQL**, **MSSQL**, and **SQLite** store it as `"NO ACTION"`.
+// In SQL semantics RESTRICT and NO ACTION are equivalent in
+// immediate-check mode (the only mode these engines support); the
+// difference is purely how each catalog labels the default. The
+// introspector reports what the catalog says rather than normalising
+// to a single canonical form — the diff layer (F3-3) treats the two
+// as equivalent on the MySQL/MariaDB side.
 //
 // Name comes from the catalog. SQLite returns `""` for inline FKs
 // declared without an explicit `CONSTRAINT <name>` clause; the diff
