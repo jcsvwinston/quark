@@ -154,16 +154,23 @@ func testExprAST(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 			).List()
 		// We don't insist the query succeeds (some dialects may complain
 		// about the non-grouped columns) — the contract we pin is that
-		// the HAVING fragment was emitted with substituted placeholders.
+		// the HAVING fragment was emitted with the loaded column
+		// identifier dialect-quoted. We can't compare the placeholder
+		// literal (`?` on SQLite, `$1` on PG, `@p1` on MSSQL, `:1` on
+		// Oracle); instead assert presence of `HAVING SUM(<quoted>)`
+		// and that the HAVING is NOT followed by an un-substituted `?`
+		// marker on dialects whose Placeholder is NOT `?`.
+		havingFrag := "SUM(" + q(client, "logins") + ")"
 		found := false
-		for _, q := range mw.snapshot() {
-			if strings.Contains(q, "HAVING") && strings.Contains(q, `SUM("logins")`) && !strings.Contains(q, "HAVING ?") {
+		for _, sqlStr := range mw.snapshot() {
+			if strings.Contains(sqlStr, "HAVING") && strings.Contains(sqlStr, havingFrag) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("expected captured SQL to contain HAVING SUM(\"logins\") fragment, got %v", mw.snapshot())
+			t.Errorf("expected captured SQL to contain HAVING %s fragment, got %v",
+				havingFrag, mw.snapshot())
 		}
 	})
 
@@ -200,20 +207,23 @@ func testExprAST(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		if len(got) != 1 || got[0].Name != "alice" {
 			t.Fatalf("expected just alice, got %+v", got)
 		}
-		// Captured SQL must NOT carry a literal '?' on dialects that use $N
-		// or @pN — the substitution failure mode shows up as raw '?' that
-		// the driver then rejects. SQLite uses '?' natively so this only
-		// asserts on non-SQLite dialects, but we always assert the AST
-		// fragment shape is present.
+		// Captured SQL must carry the dialect-quoted AST fragment with
+		// the placeholder substituted to the dialect's syntax (`?` on
+		// SQLite, `$N` on PG, `@pN` on MSSQL, `:N` on Oracle). We can't
+		// compare the placeholder literal across dialects, so we assert
+		// the surrounding identifier shape only.
+		statusFrag := "(" + q(client, "status") + " = "
+		loginsFrag := "AND " + q(client, "logins") + " > "
 		var hasFragment bool
-		for _, q := range mw.snapshot() {
-			if strings.Contains(q, `("status" = `) && strings.Contains(q, `AND "logins" > `) {
+		for _, sqlStr := range mw.snapshot() {
+			if strings.Contains(sqlStr, statusFrag) && strings.Contains(sqlStr, loginsFrag) {
 				hasFragment = true
 				break
 			}
 		}
 		if !hasFragment {
-			t.Errorf("captured SQL missing AST fragment, got %v", mw.snapshot())
+			t.Errorf("captured SQL missing AST fragment %q+%q, got %v",
+				statusFrag, loginsFrag, mw.snapshot())
 		}
 	})
 }
