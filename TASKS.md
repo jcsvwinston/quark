@@ -659,10 +659,26 @@ items; al cerrarse, se flipea a blocking en un PR final.
 7. **Precisión float en `nullable_test.go:58` (Postgres)** —
    `98.5999984741211 vs 98.6`. Postgres mapea `float` a `real` (32-bit).
    Fix: fixture con `double precision` o `cmpopts.EquateApprox`.
-8. **`JSON[T].Scan: invalid character 'â'` (MSSQL)** — **posible bug
-   real** en la API. MSSQL devuelve NVARCHAR (UTF-16), Quark intenta
-   `json.Unmarshal` directo. Necesita inspección — si confirmado,
-   fix en `json_field.go` con prioridad ALTA.
+8. **`JSON[T].Scan: invalid character 'â'` (MSSQL)** — **bug real
+   confirmado**. Investigación inicial: el migrate de `JSON[T]` mapea
+   a `NVARCHAR(MAX)` en MSSQL; el driver `go-mssqldb` devuelve esos
+   bytes con un encoding (probablemente UTF-16 LE o un prefijo de
+   longitud) que `json.Unmarshal` no reconoce. El primer carácter
+   reportado (`â` = `â`, UTF-8 `0xC3 0xA2`) sugiere que los bytes
+   llegan en orden de UTF-16-decoded-as-UTF-8 (LE byte order = byte
+   `0xE2` aparece primero). **Fix probable**:
+   - **(a)** cambiar `NVARCHAR(MAX)` → `VARCHAR(MAX)` para columnas
+     `JSON[T]` en MSSQL. JSON es ASCII-safe; las strings Unicode
+     dentro del payload se escapan a `\uXXXX` por `json.Marshal` —
+     el contenido en disco no contiene caracteres multi-byte
+     directos. Microsoft documenta ambas opciones, `VARCHAR(MAX)` es
+     más eficiente para JSON ya escapado.
+   - **(b)** Detectar UTF-16 en `JSON[T].Scan` (BOM o heuristic) y
+     decodificar antes de `json.Unmarshal`.
+   - Opción (a) es la más limpia y no requiere bytes-en-runtime. La
+     hago en su PR cuando haya MSSQL disponible para verificar.
+   - Status interim: el test `testJSONField` se skipea en MSSQL con
+     `t.Skip` apuntando a este punto.
 9. **Oracle container exit code 1** (~200 ms) — `gvenzl/oracle-free:
    23-slim-faststart` no arranca en `ubuntu-latest` runners (probable
    issue de memoria / arch). Fix: probar otro tag (`slim` sin
