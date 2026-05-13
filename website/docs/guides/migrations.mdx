@@ -394,9 +394,25 @@ indexes, and foreign keys**:
   (`CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`, `NO ACTION`)
   regardless of how the catalog encodes them.
 
-Check constraints land in F3-2-checks. Code that consumes `Schema`
-should treat unpopulated constraint slices as "not yet introspected",
-not "no constraints".
+**CHECK constraints** (`Check{Name, Expression}`) — PostgreSQL
+`pg_constraint` (contype='c') with `pg_get_constraintdef`;
+MySQL/MariaDB `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` joined with
+`TABLE_CONSTRAINTS` (MySQL 8.0.16+, MariaDB 10.2.1+); MSSQL
+`sys.check_constraints`. The expression text is passed through raw
+per dialect — each engine has its own canonical form (`((age > 0))`
+on PG, `` (`age` > 0) `` on MariaDB, `([age]>(0))` on MSSQL). The
+diff layer (F3-3) handles cross-dialect expression equivalence at
+the AST level, not the introspector.
+
+**SQLite intentionally deferred** for CHECK introspection: SQLite
+has no catalog for CHECK constraints, the only path is parsing
+`sqlite_master.sql` DDL — brittle and out of scope for a
+catalog-reader layer. On SQLite, `Schema.Tables[i].Checks` is `nil`
+(intentionally not surfaced, NOT "no CHECK constraints").
+
+Code that consumes `Schema` should treat unpopulated slices as
+"not yet introspected" (or, for SQLite Checks, "intentionally not
+surfaced"), not "no constraints".
 
 Internal tables (`quark_*` for migration state, plus `sqlite_*` on
 SQLite) are filtered out — the introspection result is the user-facing

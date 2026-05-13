@@ -40,6 +40,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **CHECK constraint introspection on the 4 CI dialects (F3-2-checks)**:
+  `Table.Checks` is now populated with `Check{Name, Expression}`.
+  Per-dialect catalogs: **PostgreSQL** `pg_constraint` (contype='c')
+  with `pg_get_constraintdef(oid, true)` for the canonical expression
+  text (the leading `CHECK ` keyword is stripped so `Expression`
+  carries the predicate only);
+  **MySQL / MariaDB** `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` joined
+  with `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` (MySQL 8.0.16+,
+  MariaDB 10.2.1+). Older versions don't have the
+  `CHECK_CONSTRAINTS` catalog at all — the query would return
+  `Error 1146: Table … doesn't exist`. `mysqlListChecks` detects
+  that specific error and degrades to an empty result, keeping
+  `IntrospectSchema` usable on older engines (which never
+  enforced CHECK anyway, so "empty" is semantically correct);
+  **MSSQL** `sys.check_constraints` filtered by parent table
+  `OBJECT_ID`. The expression is passed through raw per dialect
+  (each engine has its own canonical form — `((age > 0))` on PG,
+  `` (`age` > 0) `` on MariaDB, `([age]>(0))` on MSSQL); F3-3 handles
+  expression equivalence at the AST level.
+  **SQLite intentionally deferred**: SQLite has no catalog for CHECK
+  constraints, the only path is parsing `sqlite_master.sql` DDL —
+  brittle and out of scope for the catalog-reader layer.
+  `Schema.Tables[i].Checks` is `nil` on SQLite (intentionally not
+  populated, NOT "no CHECK constraints"); a future
+  `F3-2-checks-sqlite` follow-up could add DDL parsing if user
+  demand justifies it.
+
 - **Foreign-key introspection across the 4 CI dialects + SQLite
   (F3-2-fks)**: `Table.ForeignKeys` is now populated with
   `ForeignKey{Name, Columns, RefTable, RefColumns, OnDelete, OnUpdate}`.

@@ -27,12 +27,7 @@ type Table struct {
 	Columns     []Column
 	Indexes     []Index
 	ForeignKeys []ForeignKey
-
-	// Checks is intentionally left out of the F3-2 minimum surface.
-	// It lands in F3-2-checks once the column / index / FK paths are
-	// proven across the engines. Tests and downstream code that read
-	// this struct should treat zero-values as "not yet introspected"
-	// rather than "no constraints".
+	Checks      []Check
 }
 
 // Index is one secondary (non-primary-key) index on a table. The PK
@@ -91,6 +86,31 @@ type ForeignKey struct {
 	OnUpdate   string
 }
 
+// Check is one CHECK constraint declared on a table. Expression is the
+// raw catalog text — dialect-specific phrasing, parenthesisation, and
+// whitespace. The introspector deliberately does NOT normalise the
+// expression because expression-equivalence across dialects is an
+// AST-level problem (`(x > 0)` vs `x > 0`, `'a' IN ('a','b')` vs
+// `'a' = ANY (ARRAY['a','b'])`, etc.) that belongs to F3-3's diff
+// engine, not to the catalog reader.
+//
+// Name comes from the catalog. Inline anonymous checks (`age INTEGER
+// CHECK (age > 0)` without an explicit `CONSTRAINT <name>`) get
+// dialect-generated names (`age_check`, `CK__table__age__hash`, etc.);
+// the diff layer matches by name first and falls back to expression
+// equivalence for anonymous ones.
+//
+// Coverage: PostgreSQL, MySQL, MariaDB, and MSSQL implement the
+// introspector. **SQLite** returns `Checks=nil` because SQLite has no
+// catalog for CHECK constraints — the only path is parsing
+// `sqlite_master.sql` DDL, which is brittle and intentionally out of
+// scope for the catalog-reader layer. A future F3-2-checks-sqlite
+// follow-up could add DDL parsing if user demand justifies it.
+type Check struct {
+	Name       string
+	Expression string
+}
+
 // Column is one column in a table.
 //
 // `Type` is the raw dialect-native type string as returned by the
@@ -133,10 +153,13 @@ type SchemaIntrospector interface {
 // Oracle returns `ErrUnsupportedFeature` until F3-2-oracle lands
 // (deferred while the container image situation is resolved).
 //
-// Surface: tables, columns, non-PK indexes, and foreign keys. Check
-// constraints arrive in F3-2-checks. Code that reads [Schema] should
-// treat the unpopulated slices as "not yet introspected", not "no
-// constraints exist".
+// Surface: tables, columns, non-PK indexes, foreign keys, and CHECK
+// constraints. SQLite returns `Checks=nil` (the only catalog read it
+// doesn't implement; see the [Check] godoc for the rationale).
+//
+// Code that reads [Schema] should treat the unpopulated slices as
+// "not yet introspected" (or, for SQLite Checks, "intentionally not
+// surfaced"), not "no constraints exist".
 func (c *Client) IntrospectSchema(ctx context.Context) (Schema, error) {
 	introspector, ok := c.dialect.(SchemaIntrospector)
 	if !ok {
