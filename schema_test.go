@@ -8,16 +8,16 @@ import (
 )
 
 // TestSchema_DialectInterfaceConformance pins which dialects implement
-// SchemaIntrospector in this PR. SQLite and PG opt in; MySQL,
-// MariaDB, MSSQL, and Oracle do not yet — they return
-// ErrUnsupportedFeature from Client.IntrospectSchema and add the
-// interface in their respective follow-up F3-2-* PRs.
+// SchemaIntrospector. SQLite, PG, MySQL, MariaDB, and MSSQL all opt
+// in (post-F3-2-core / F3-2-mysql / F3-2-mssql). Only Oracle does
+// not yet — it returns ErrUnsupportedFeature from
+// Client.IntrospectSchema until F3-2-oracle lands.
 //
-// The test is the lever that makes those follow-ups visible: when a
-// later PR implements MySQL's introspector, this test starts
-// failing with "MySQLDialect must NOT implement SchemaIntrospector",
-// reminding the author to flip the expectation. Without this anchor
-// the silent addition of the interface would be invisible to review.
+// The test is the lever that locks the expectation: if a future PR
+// accidentally regresses a dialect's introspector (e.g. removes the
+// method during a refactor), this test fires with "<dialect> must
+// implement SchemaIntrospector", reminding the author. When
+// F3-2-oracle lands, flip Oracle's expectation to `true`.
 func TestSchema_DialectInterfaceConformance(t *testing.T) {
 	cases := []struct {
 		dialect any

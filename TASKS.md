@@ -172,7 +172,24 @@ Pendientes para cerrar F3-2 entero:
   underscored normalizado a verbose. `OnDelete`/`OnUpdate` se
   emiten siempre en forma SQL-standard verbose (`CASCADE`,
   `SET NULL`, `SET DEFAULT`, `RESTRICT`, `NO ACTION`).
-- **F3-2-checks**: añadir `Table.Checks` + introspection.
+- ~~**F3-2-checks**~~. **Cerrado** — `Table.Checks` poblado
+  en PG / MySQL / MariaDB / MSSQL con `Check{Name, Expression}`.
+  Catálogos: PG `pg_constraint` (contype='c') con
+  `pg_get_constraintdef(oid, true)` (se quita el `CHECK ` leading);
+  MySQL/MariaDB `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` joined con
+  `TABLE_CONSTRAINTS` (MySQL 8.0.16+, MariaDB 10.2.1+ — versiones
+  anteriores no tienen el catálogo, `mysqlListChecks` detecta el
+  `Error 1146` y degrada a empty result para no romper la
+  introspección entera); MSSQL
+  `sys.check_constraints` filtrado por parent `OBJECT_ID`.
+  Expression se pasa raw — cada motor tiene su canonical form
+  (`((age > 0))` PG, `` (`age` > 0) `` MariaDB, `([age]>(0))`
+  MSSQL); F3-3 maneja AST-level equivalence cross-dialect.
+  **SQLite intencionalmente diferido**: SQLite no tiene catálogo
+  para CHECK; única vía es parsear `sqlite_master.sql`, brittle
+  y fuera de alcance del catalog-reader layer.
+  `Schema.Tables[i].Checks=nil` en SQLite (intencional, NO "sin
+  checks"). Follow-up posible: F3-2-checks-sqlite si hay demanda.
 
 Indexes/FKs/Checks llegan **después** de cerrar los 4 motores CI con
 la superficie column-only — la matriz blocking exige verde en

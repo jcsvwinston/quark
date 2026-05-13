@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // --- SQLite ------------------------------------------------------------------
@@ -45,6 +46,12 @@ func (d *SQLiteDialect) IntrospectSchema(ctx context.Context, exec Executor) (Sc
 		if err != nil {
 			return Schema{}, fmt.Errorf("sqlite introspect: list foreign keys for %q: %w", name, err)
 		}
+		// Checks intentionally not populated on SQLite — SQLite has
+		// no catalog for CHECK constraints, only the raw CREATE
+		// TABLE DDL in `sqlite_master.sql`. Parsing that DDL is
+		// brittle and out of scope for the catalog-reader layer.
+		// See the [Check] type godoc for the full rationale and
+		// the F3-2-checks-sqlite follow-up note in TASKS.md.
 		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks})
 	}
 	return Schema{Tables: tables}, nil
@@ -380,7 +387,11 @@ func mysqlLikeIntrospect(ctx context.Context, exec Executor, dialectName string)
 		if err != nil {
 			return Schema{}, fmt.Errorf("%s introspect: list foreign keys for %q: %w", dialectName, name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks})
+		checks, err := mysqlListChecks(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("%s introspect: list checks for %q: %w", dialectName, name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks, Checks: checks})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -605,6 +616,60 @@ func mysqlListForeignKeys(ctx context.Context, exec Executor, table string) ([]F
 	return out, nil
 }
 
+// mysqlListChecks reads CHECK constraints via
+// `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` joined with
+// `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`. MySQL 8.0.16+ and
+// MariaDB 10.2.1+ expose this catalog. **Older versions** (MySQL
+// 5.7 / 8.0.0–8.0.15, MariaDB <10.2.1) have **no
+// `CHECK_CONSTRAINTS` table** — the query fails with
+// `Error 1146: Table … doesn't exist`. To keep `IntrospectSchema`
+// usable on those engines we detect that error and degrade to an
+// empty result rather than aborting the whole scan. CHECK
+// constraints weren't enforced before those versions either, so
+// "empty" is the correct semantic answer.
+//
+// CHECK_CLAUSE comes back as the catalog's canonical form, which
+// differs between engines: MariaDB preserves whitespace and quoting
+// close to the user-written predicate, MySQL 8.x re-emits a
+// canonical form. Two dialects with the same logical constraint may
+// have different `Expression` strings; F3-3 handles equivalence at
+// the AST level.
+func mysqlListChecks(ctx context.Context, exec Executor, table string) ([]Check, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
+		  FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+		  JOIN INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc
+		    ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
+		   AND tc.CONSTRAINT_NAME   = cc.CONSTRAINT_NAME
+		 WHERE tc.TABLE_SCHEMA     = DATABASE()
+		   AND tc.TABLE_NAME       = ?
+		   AND tc.CONSTRAINT_TYPE  = 'CHECK'
+		 ORDER BY tc.CONSTRAINT_NAME`, table)
+	if err != nil {
+		// Detect-and-degrade for MySQL <8.0.16 / MariaDB <10.2.1:
+		// the catalog table doesn't exist, the driver returns
+		// `Error 1146 (42S02): Table … doesn't exist`. Match on
+		// the error code (`1146`) AND the message text (`doesn't
+		// exist`) so a transient connection error reporting an
+		// unrelated table doesn't get silently swallowed.
+		msg := err.Error()
+		if strings.Contains(msg, "1146") && strings.Contains(msg, "doesn't exist") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Check
+	for rows.Next() {
+		var name, expr string
+		if err := rows.Scan(&name, &expr); err != nil {
+			return nil, err
+		}
+		out = append(out, Check{Name: name, Expression: expr})
+	}
+	return out, rows.Err()
+}
+
 // --- SQL Server --------------------------------------------------------------
 
 // IntrospectSchema reads the MSSQL schema via `sys.tables`,
@@ -647,7 +712,11 @@ func (d *MSSQLDialect) IntrospectSchema(ctx context.Context, exec Executor) (Sch
 		if err != nil {
 			return Schema{}, fmt.Errorf("mssql introspect: list foreign keys for %q: %w", name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks})
+		checks, err := mssqlListChecks(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("mssql introspect: list checks for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks, Checks: checks})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -893,6 +962,34 @@ func mssqlListForeignKeys(ctx context.Context, exec Executor, table string) ([]F
 	return out, nil
 }
 
+// mssqlListChecks reads `sys.check_constraints` filtered by parent
+// table OBJECT_ID. `definition` is the constraint expression as the
+// engine stored it — typically wrapped in parens (`([age]>(0))`).
+// We pass the definition through raw; the diff layer is responsible
+// for any normalisation needed to compare against the Go-side DDL.
+func mssqlListChecks(ctx context.Context, exec Executor, table string) ([]Check, error) {
+	d := &MSSQLDialect{}
+	q := fmt.Sprintf(`
+		SELECT cc.name, cc.definition
+		  FROM sys.check_constraints cc
+		 WHERE cc.parent_object_id = OBJECT_ID(%s)
+		 ORDER BY cc.name`, d.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Check
+	for rows.Next() {
+		var name, def string
+		if err := rows.Scan(&name, &def); err != nil {
+			return nil, err
+		}
+		out = append(out, Check{Name: name, Expression: def})
+	}
+	return out, rows.Err()
+}
+
 // mssqlFKAction normalises MSSQL's `*_referential_action_desc`
 // strings (`NO_ACTION`, `SET_NULL`, `SET_DEFAULT`, `CASCADE`) to the
 // SQL-standard verbose form used in `ForeignKey.OnDelete` /
@@ -981,7 +1078,11 @@ func (d *PostgresDialect) IntrospectSchema(ctx context.Context, exec Executor) (
 		if err != nil {
 			return Schema{}, fmt.Errorf("pg introspect: list foreign keys for %q: %w", name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks})
+		checks, err := pgListChecks(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("pg introspect: list checks for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks, Checks: checks})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -1280,4 +1381,52 @@ func pgFKAction(c string) string {
 		// forward-compatible if PG adds a code.
 		return c
 	}
+}
+
+// pgListChecks reads CHECK constraints via `pg_constraint`
+// (contype='c'). The canonical text comes from
+// `pg_get_constraintdef(c.oid, true)` which returns
+// `"CHECK ((age > 0))"`; we strip the leading `CHECK ` keyword and
+// surface just the predicate expression so the diff layer can compare
+// expressions symmetrically with what the user wrote in DDL.
+//
+// PG also surfaces NOT NULL as a CHECK constraint on `domain` types
+// but NOT on table columns — those don't show up under contype='c'
+// for a regular table. We don't filter on `connoinherit` or
+// `convalidated` — invalid (NOT VALID) constraints are still part
+// of the schema and F3-3 needs to see them.
+func pgListChecks(ctx context.Context, exec Executor, table string) ([]Check, error) {
+	d := &PostgresDialect{}
+	q := fmt.Sprintf(`
+		SELECT c.conname,
+		       pg_get_constraintdef(c.oid, true) AS def
+		  FROM pg_constraint c
+		  JOIN pg_class      t ON t.oid = c.conrelid
+		  JOIN pg_namespace  n ON n.oid = t.relnamespace
+		 WHERE c.contype = 'c'
+		   AND n.nspname = current_schema()
+		   AND t.relname = %s
+		 ORDER BY c.conname`, d.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Check
+	for rows.Next() {
+		var name, def string
+		if err := rows.Scan(&name, &def); err != nil {
+			return nil, err
+		}
+		// pg_get_constraintdef returns `CHECK ((expr))` — strip the
+		// leading `CHECK ` so Expression carries just the predicate.
+		// We keep the inner parens since PG always emits at least one
+		// (and the diff layer will normalise paren depth, not us).
+		expr := def
+		if after, ok := strings.CutPrefix(expr, "CHECK "); ok {
+			expr = after
+		}
+		out = append(out, Check{Name: name, Expression: expr})
+	}
+	return out, rows.Err()
 }

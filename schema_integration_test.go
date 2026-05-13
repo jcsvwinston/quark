@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -29,9 +30,12 @@ type schemaFixture struct {
 }
 
 // testSchemaIntrospection runs the F3-2 contract against any dialect
-// the SharedSuite covers. On dialects that don't implement the
-// introspector yet (MySQL, MariaDB, MSSQL, Oracle), the test asserts
-// `ErrUnsupportedFeature` so the follow-up PR knows what to remove.
+// the SharedSuite covers. SQLite, PostgreSQL, MySQL, MariaDB, and
+// MSSQL all implement the introspector at the column / index / FK
+// level (and at the CHECK level for the 4 non-SQLite engines —
+// SQLite intentionally returns Checks=nil; see schema.Check godoc).
+// Only Oracle still asserts `ErrUnsupportedFeature` until
+// F3-2-oracle lands.
 func testSchemaIntrospection(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	t.Helper()
 
@@ -253,6 +257,71 @@ func testSchemaIntrospection(ctx context.Context, t *testing.T, baseClient *quar
 		// side — F3-3 will treat them as equivalent for the diff.
 		if fk.OnUpdate != "NO ACTION" && fk.OnUpdate != "RESTRICT" {
 			t.Errorf("FK on_update: want NO ACTION or RESTRICT (MariaDB stores RESTRICT for unspecified ON UPDATE), got %q", fk.OnUpdate)
+		}
+	})
+
+	t.Run("ListsCreatedCheck", func(t *testing.T) {
+		// F3-2-checks contract: a CHECK constraint declared inline
+		// in DDL must surface in Table.Checks with the right shape
+		// (name + expression).
+		//
+		// SQLite is intentionally skipped: SQLite has no
+		// information_schema-style catalog for CHECK constraints
+		// (the only path is parsing sqlite_master.sql, which is
+		// brittle and out of scope for the catalog-reader layer).
+		// We assert Checks=nil on SQLite to lock the contract.
+		dropTable(baseClient, "schema_check_fixture")
+		defer dropTable(baseClient, "schema_check_fixture")
+
+		ddl := `CREATE TABLE schema_check_fixture (
+			id INTEGER PRIMARY KEY,
+			age INTEGER,
+			CONSTRAINT chk_schema_check_fixture_age CHECK (age > 0)
+		)`
+		if _, err := baseClient.Raw().ExecContext(ctx, ddl); err != nil {
+			t.Fatalf("seed schema_check_fixture failed on %s: %v", dialect, err)
+		}
+
+		schema, err := baseClient.IntrospectSchema(ctx)
+		if err != nil {
+			t.Fatalf("IntrospectSchema: %v", err)
+		}
+		var fixture *quark.Table
+		for i := range schema.Tables {
+			if schema.Tables[i].Name == "schema_check_fixture" {
+				fixture = &schema.Tables[i]
+				break
+			}
+		}
+		if fixture == nil {
+			t.Fatalf("schema_check_fixture missing from introspection result")
+		}
+
+		if dialect == "sqlite" {
+			// Contract: SQLite returns Checks=nil (intentionally —
+			// see Check godoc). If a future PR adds SQLite DDL
+			// parsing, this branch becomes a real assertion.
+			if len(fixture.Checks) != 0 {
+				t.Errorf("SQLite should return Checks=nil for now, got %+v", fixture.Checks)
+			}
+			return
+		}
+
+		// PG / MySQL / MariaDB / MSSQL: expect exactly one check by
+		// name; expression contents vary by dialect (`((age > 0))`
+		// on PG, `(\`age\` > 0)` on MariaDB, `([age]>(0))` on MSSQL),
+		// so we only assert "name matches" + "Expression contains
+		// the column reference age".
+		if len(fixture.Checks) != 1 {
+			t.Fatalf("expected 1 CHECK on schema_check_fixture, got %d: %+v",
+				len(fixture.Checks), fixture.Checks)
+		}
+		chk := fixture.Checks[0]
+		if chk.Name != "chk_schema_check_fixture_age" {
+			t.Errorf("CHECK name: want chk_schema_check_fixture_age, got %q", chk.Name)
+		}
+		if !strings.Contains(strings.ToLower(chk.Expression), "age") {
+			t.Errorf("CHECK expression should reference 'age' column, got %q", chk.Expression)
 		}
 	})
 
