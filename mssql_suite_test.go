@@ -14,9 +14,9 @@ import (
 )
 
 func TestSuiteMSSQL(t *testing.T) {
-	dsn := os.Getenv("QUARK_TEST_MSSQL_DSN")
+	dsn := resolveMSSQLDSN(t)
 	if dsn == "" {
-		t.Skip("QUARK_TEST_MSSQL_DSN not set")
+		t.Skip("QUARK_TEST_MSSQL_DSN not set (rebuild with -tags=integration to spin up a container)")
 	}
 
 	// Create database if not exists

@@ -12,9 +12,9 @@ import (
 )
 
 func TestSuiteOracle(t *testing.T) {
-	dsn := os.Getenv("QUARK_TEST_ORACLE_DSN")
+	dsn := resolveOracleDSN(t)
 	if dsn == "" {
-		t.Skip("QUARK_TEST_ORACLE_DSN not set")
+		t.Skip("QUARK_TEST_ORACLE_DSN not set (rebuild with -tags=integration to spin up a container)")
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
