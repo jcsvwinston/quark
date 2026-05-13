@@ -40,6 +40,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **Cross-dialect type-string normalisation (F3-3-types)**: the
+  diff's `columnsEqual` now normalises type strings before comparing,
+  so the migrator's canonical UPPERCASE (`BIGINT`, `VARCHAR(255)`)
+  compares equal to the catalog's lowercase (`bigint`,
+  `varchar(255)` / `character varying(255)`). Three normalisation
+  steps: case-fold + trim; PG alias `character varying` → `varchar`
+  (PG's information_schema returns the SQL-standard form while the
+  migrator emits the engine alias); MySQL display-width strip
+  (`int(11)` → `int`) for old MySQL 5.7 / mixed-version clusters.
+
+  Headline contract: **`PlanMigration` round-trip is now empty on
+  all 5 motors** after `Migrate(model)` — previously only SQLite
+  passed because of the type-string drift. The integration test
+  `PlanMigration_RoundTripScopedToFixture` now runs on PG / MySQL /
+  MariaDB / MSSQL / SQLite via SharedSuite (scoped to its own
+  fixture because the SharedSuite leaves unrelated tables behind
+  that the diff legitimately wants to drop). The CLI plan command (F3-5)
+  can now be built on this; without the normaliser, the CLI would
+  emit noisy plans on production engines.
+
+  Not yet normalised (documented as TODO): PG `int8`/`int4`/`int2`
+  ↔ `bigint`/`integer`/`smallint` — `information_schema` returns
+  the SQL-standard names so this never arises from introspection,
+  but users hand-constructing desired Schemas may see drift.
+
 - **`Client.ApplyPlan(ctx, plan)` — Plan executor (F3-3-execute)**:
   walks the operations in a [Plan] in order and dispatches each to
   the appropriate per-dialect DDL. Closes the F3-3 trio: with

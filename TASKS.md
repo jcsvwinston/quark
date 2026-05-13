@@ -236,10 +236,11 @@ Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
   spurious `nullable true→false` alter en cada PK.
 
   Gaps conocidos documentados en godoc + migrations.mdx:
-  - **Type string drift cross-dialect**: migrador emite `BIGINT`,
-    catálogos devuelven `bigint`/`int`/`bigint`. Round-trip clean
-    en SQLite; ruido en PG/MySQL/MSSQL hasta que aterrice el
-    type-normalisation follow-up.
+  - ~~**Type string drift cross-dialect**~~: **Cerrado por
+    F3-3-types** — normaliser en `columnsEqual` (case-fold,
+    PG character varying alias, MySQL display-width strip) hace
+    el round-trip clean en los 5 motores. `PlanMigration_RoundTripIsEmpty`
+    ahora corre en SharedSuite.
   - **Indexes/FKs/Checks no declarados en modelos**: `PlanMigration`
     copia el surface non-column del current al desired antes de
     diffear para evitar drops espurios. F3-3-plan-indexes
