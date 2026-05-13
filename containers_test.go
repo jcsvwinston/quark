@@ -189,25 +189,29 @@ func setupMSSQLContainer(t *testing.T) string {
 // dedicated testcontainers module exists for Oracle, so this uses the
 // generic container runner with the gvenzl image.
 //
-// First-boot is slow (~90 s) because Oracle initialises the SYS schema
-// from scratch. CI matrix should budget at least 4 minutes for the
-// Oracle job.
+// The `:23-slim` tag is the slow-but-reliable variant. The `-faststart`
+// flavour we tried first exited with code 1 inside ~200ms on
+// ubuntu-latest runners (probable memory or arch quirk inside the
+// faststart restore path; gvenzl/oracle-free issue tracker has similar
+// reports). Plain `:23-slim` does the full DB init from scratch — slow
+// (~3 min on a cold runner) but boots cleanly. CI matrix budgets 30 min
+// for the Oracle job for this reason.
 func setupOracleContainer(t *testing.T) string {
 	t.Helper()
 	ctx, cancel := containerCtx()
 	defer cancel()
 
 	req := testcontainers.ContainerRequest{
-		Image:        "gvenzl/oracle-free:23-slim-faststart",
+		Image:        "gvenzl/oracle-free:23-slim",
 		ExposedPorts: []string{"1521/tcp"},
 		Env: map[string]string{
+			"ORACLE_RANDOM_PASSWORD": "no",
 			"ORACLE_PASSWORD":        "quark",
 			"APP_USER":               "quark",
 			"APP_USER_PASSWORD":      "quark",
-			"ORACLE_RANDOM_PASSWORD": "no",
 		},
 		WaitingFor: wait.ForLog("DATABASE IS READY TO USE!").
-			WithStartupTimeout(4 * time.Minute),
+			WithStartupTimeout(8 * time.Minute),
 	}
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
