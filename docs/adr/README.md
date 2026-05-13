@@ -15,6 +15,7 @@
 | [0006](0006-no-graphql-admin-auto.md) | Sin GraphQL ni admin auto-generado | Accepted | — |
 | [0007](0007-multi-tenancy-tres-estrategias.md) | Multi-tenancy: tres estrategias coexisten | Accepted | Fase 5 |
 | [0008](0008-docs-en-mismo-pr-que-api.md) | Documentación se modifica en el mismo PR que la API | Accepted | — |
+| [0009](0009-migrations-introspection-diff-not-versioned-files.md) | Migrations: introspection-based diff, not (only) versioned files | Accepted | Fase 3 |
 
 ## Cómo añadir un ADR nuevo
 
