@@ -194,6 +194,126 @@ func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		}
 	})
 
+	t.Run("ApplyPlan_ResumesAfterMidPlanFailure", func(t *testing.T) {
+		// F3-4-resumable contract: on engines without transactional
+		// DDL (MySQL / MariaDB / Oracle), a mid-plan failure leaves
+		// the schema partially applied — that's unavoidable. What
+		// F3-4-resumable adds is that re-invoking ApplyPlan with
+		// the SAME plan picks up from the first un-applied op
+		// instead of re-applying ops that already landed.
+		//
+		// On transactional engines (PG / MSSQL / SQLite) the
+		// resumable path isn't used — rollback handles failure.
+		// So this test only runs the assertion on non-tx engines;
+		// transactional engines get an early return with a note
+		// so the test still passes there (it's a no-op for them).
+		if dialect == "postgres" || dialect == "mssql" || dialect == "sqlite" {
+			// CLAUDE.md rule 7 — no t.Skip for per-engine gating.
+			// Use early return so the subtest doesn't show up as
+			// SKIP in CI (which can be silently ignored); it just
+			// doesn't exercise the assertion path for engines where
+			// the contract doesn't apply.
+			return
+		}
+
+		dropTable(baseClient, "resume_probe_a")
+		dropTable(baseClient, "resume_probe_b")
+		defer dropTable(baseClient, "resume_probe_a")
+		defer dropTable(baseClient, "resume_probe_b")
+		// Also clean the state table after the test so subsequent
+		// runs see a fresh slate. Use raw DDL because the state
+		// table is internal and not exposed via the Client API.
+		defer func() {
+			_, _ = baseClient.Raw().ExecContext(ctx,
+				"DELETE FROM quark_migration_state")
+		}()
+
+		// 3-op plan where op 1 will fail (DROP non-existent),
+		// surrounded by ops 0 and 2 which would succeed in
+		// isolation. The plan hash will identify this exact
+		// sequence; after the failure, we patch the missing
+		// table and re-invoke. The contract: only op 2 runs on
+		// the second invocation (op 0 was already applied).
+		plan := quark.Plan{Ops: []quark.Operation{
+			quark.OpCreateTable{Table: quark.Table{
+				Name:    "resume_probe_a",
+				Columns: []quark.Column{{Name: "id", Type: "INTEGER", Nullable: false}},
+			}},
+			quark.OpDropTable{Table: "resume_doesnt_exist_xyz"},
+			quark.OpCreateTable{Table: quark.Table{
+				Name:    "resume_probe_b",
+				Columns: []quark.Column{{Name: "id", Type: "INTEGER", Nullable: false}},
+			}},
+		}}
+
+		// First invocation: ops 0 and 1 hit the engine; op 1
+		// fails; op 2 never runs. State table records op 0.
+		err := baseClient.ApplyPlan(ctx, plan)
+		if err == nil {
+			t.Fatalf("plan with guaranteed-fail op should error on first run, got nil")
+		}
+
+		// Verify op 0 landed (resume_probe_a exists) and op 2
+		// did NOT (resume_probe_b doesn't exist yet).
+		schema, ierr := baseClient.IntrospectSchema(ctx)
+		if ierr != nil {
+			t.Fatalf("introspect: %v", ierr)
+		}
+		var sawA, sawB bool
+		for _, tbl := range schema.Tables {
+			if tbl.Name == "resume_probe_a" {
+				sawA = true
+			}
+			if tbl.Name == "resume_probe_b" {
+				sawB = true
+			}
+		}
+		if !sawA {
+			t.Fatalf("after first run, resume_probe_a should exist (op 0 implicitly committed)")
+		}
+		if sawB {
+			t.Fatalf("after first run, resume_probe_b should NOT exist (op 2 never reached)")
+		}
+
+		// "Fix" the failing op by creating the missing table
+		// that op 1 wants to drop. Now op 1 will succeed on
+		// re-run.
+		if _, err := baseClient.Raw().ExecContext(ctx,
+			`CREATE TABLE resume_doesnt_exist_xyz (id INTEGER PRIMARY KEY)`); err != nil {
+			t.Fatalf("patch: %v", err)
+		}
+		defer func() {
+			_, _ = baseClient.Raw().ExecContext(ctx, "DROP TABLE resume_doesnt_exist_xyz")
+		}()
+
+		// Second invocation: the resumable path reads the state
+		// table, sees that op 0 was applied, and starts from
+		// op 1. Ops 1 and 2 both succeed.
+		if err := baseClient.ApplyPlan(ctx, plan); err != nil {
+			t.Fatalf("second ApplyPlan (resume): %v", err)
+		}
+		// Now resume_probe_b should exist.
+		schema, ierr = baseClient.IntrospectSchema(ctx)
+		if ierr != nil {
+			t.Fatalf("introspect after resume: %v", ierr)
+		}
+		sawA, sawB = false, false
+		for _, tbl := range schema.Tables {
+			if tbl.Name == "resume_probe_a" {
+				sawA = true
+			}
+			if tbl.Name == "resume_probe_b" {
+				sawB = true
+			}
+		}
+		if !sawA {
+			t.Errorf("after resume, resume_probe_a should still exist")
+		}
+		if !sawB {
+			t.Errorf("after resume, resume_probe_b should exist (op 2 ran on second invocation)")
+		}
+	})
+
 	t.Run("ApplyPlan_AddColumnRoundTrip", func(t *testing.T) {
 		// F3-3-execute contract on real engines: build a one-op
 		// plan that adds a column, apply it, then re-introspect

@@ -25,13 +25,42 @@ import (
 //
 //   - **MySQL, MariaDB, Oracle** — DDL implicitly commits the
 //     current transaction on every statement, so wrapping is
-//     pointless: a failure mid-plan still leaves the schema
-//     partially applied, and the executor follows the old
-//     no-transaction path (return the error with op index, let
-//     the caller resume manually). The eventual F3-4-resumable
-//     follow-up adds a `quark_migration_state` checkpoint table
-//     for these engines so a manual resume can pick up where the
-//     plan left off.
+//     pointless. Instead, ApplyPlan uses a **resumable** path
+//     backed by a `quark_migration_state` checkpoint table
+//     (F3-4-resumable). Each successfully applied op is recorded
+//     by `(plan_hash, op_index)`; a re-invocation against the
+//     same plan (identified by `Plan.Hash()`) skips ops that
+//     were already recorded. A mid-plan failure can therefore be
+//     fixed (the underlying constraint addressed, the connection
+//     restored, etc.) and resumed simply by calling ApplyPlan
+//     again with the same plan — no re-applying earlier
+//     successful ops, no manual state management.
+//
+//     Drift detection: if the plan changed between runs (different
+//     ops, different table names, anything that flips the hash),
+//     the state from the prior run doesn't apply and the new
+//     plan starts fresh from op 0. This is the safety boundary
+//     that prevents "resume from op 3" against a plan whose op 3
+//     means something different.
+//
+//     **Concurrency**: on non-transactional engines, two processes
+//     calling ApplyPlan against the same plan simultaneously race
+//     on the state table — both read `resumeFrom = -1`, both try
+//     to apply op 0, one (or both) of them hit DDL errors (table
+//     already exists) and a `duplicate-PK` on the state insert.
+//     `Client.AcquireMigrationLock` (F3-1) is the right primitive
+//     to serialise — wrap your ApplyPlan call:
+//
+//     lock, err := client.AcquireMigrationLock(ctx, "schema", 30*time.Second)
+//     if err != nil { return err }
+//     defer lock.Release(ctx)
+//     err = client.ApplyPlan(ctx, plan)
+//
+//     The reason this isn't done automatically inside ApplyPlan:
+//     not every dialect implements `MigrationLocker` yet (Oracle
+//     is pending) and the lock name / timeout are workflow choices
+//     that belong to the caller. Future: a `Client.MigrateAtomic`
+//     wrapper that bundles lock + plan + apply, target for F3-5.
 //
 // The returned error carries the index of the op that failed and
 // the op's String() rendering for debuggability, regardless of
@@ -134,11 +163,54 @@ func (c *Client) applyPlanTx(ctx context.Context, plan Plan) error {
 
 // applyPlanNoTx runs the ops without a transaction wrapper. Used on
 // engines where DDL implicitly commits (MySQL / MariaDB / Oracle).
-// A mid-plan failure here leaves the schema partially applied.
+//
+// **Resumable** (F3-4-resumable): a checkpoint table
+// `quark_migration_state` records each successfully applied op
+// keyed by `(plan_hash, op_index)`. On the next invocation against
+// the SAME plan (same Plan.Hash()), the apply path skips ops that
+// were already recorded — so a mid-plan failure can be fixed
+// (manually, or by running ApplyPlan with the same plan after the
+// underlying problem is resolved) and resumed without re-applying
+// the earlier successful ops.
+//
+// Drift detection: the plan_hash key means two plans that differ
+// in any way (different ops, different table names, different
+// column types) won't share state. A user who modifies their
+// models between runs starts fresh — there's no false "resume
+// from op 3" against a plan whose op 3 means something different
+// from the original.
+//
+// Empty plans skip the state table entirely (no ops to record,
+// no resume to perform) so the noop case stays cheap.
 func (c *Client) applyPlanNoTx(ctx context.Context, plan Plan) error {
+	if len(plan.Ops) == 0 {
+		return nil
+	}
+	if err := c.ensureMigrationStateTable(ctx, c.db); err != nil {
+		return fmt.Errorf("ApplyPlan: %w", err)
+	}
+	planHash := plan.Hash()
+	resumeFrom, err := c.lastAppliedOpIndex(ctx, c.db, planHash)
+	if err != nil {
+		return fmt.Errorf("ApplyPlan: %w", err)
+	}
+	// resumeFrom is the highest op_index already applied, or -1
+	// if none. The first op to (re-)apply is resumeFrom + 1.
 	for i, op := range plan.Ops {
+		if i <= resumeFrom {
+			continue
+		}
 		if err := c.applyOne(ctx, c.db, op); err != nil {
 			return fmt.Errorf("ApplyPlan: op %d (%s): %w", i, op.String(), err)
+		}
+		if err := c.recordOpApplied(ctx, c.db, planHash, i, op.String()); err != nil {
+			// Rare: the op itself succeeded but recording the
+			// state failed. Surface this so the caller knows the
+			// schema is one step ahead of the checkpoint — they
+			// can either run again (the duplicate-PK on retry
+			// would reveal the recording failure as a separate
+			// signal) or manually update the state table.
+			return fmt.Errorf("ApplyPlan: op %d (%s) succeeded but state recording failed: %w", i, op.String(), err)
 		}
 	}
 	return nil
