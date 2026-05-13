@@ -75,8 +75,9 @@ jobs:
             run: TestSuiteMSSQL
           - engine: oracle
             run: TestSuiteOracle
-            # Oracle initialises ~90s on cold boot; bump the timeout.
-            timeout: 30
+            # Oracle initialises ~3 min on cold boot from gvenzl/oracle-free:23-slim
+            # (the -faststart variant crashed on ubuntu-latest, see F0-8 followup F).
+            timeout: 35
     steps:
       - uses: actions/checkout@v4
 
