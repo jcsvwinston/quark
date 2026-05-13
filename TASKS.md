@@ -39,6 +39,137 @@ leverage según el estado del repo.
 
 ---
 
+## Fase 3 — Migraciones serias y schema-as-code (apertura formal)
+
+> Spec narrativo: `docs/ANALISIS_MADUREZ.md` §4 Fase 3. Decisión
+> arquitectónica: [`docs/adr/0009-migrations-introspection-diff-not-versioned-files.md`](docs/adr/0009-migrations-introspection-diff-not-versioned-files.md).
+> Objetivo de fase: emparejar Quark con Alembic / EF Migrations / Atlas.
+> Salida: v0.6.0 con migraciones que un equipo serio aceptaría.
+
+Estrategia decidida (ADR-0009): **code-first + diff bidireccional**.
+El modelo Go es la fuente de verdad; un `quark schema diff` introspecciona
+el DB en vivo, lo compara, y emite la migración candidata Up + Down.
+
+Descomposición en 7 items entregables independientemente:
+
+### F3-1 · Lock distribuido de migración
+
+- **Objetivo**: mutex de migración a nivel de cluster — el primer proceso
+  que arranca lo adquiere; los demás esperan con timeout. Previene que
+  dos pods migren simultáneamente (incidente común en deploys multi-pod).
+- **Acción**:
+  1. `Dialect.AcquireMigrationLock(ctx, exec, name string, timeout time.Duration) (MigrationLock, error)`
+     + `MigrationLock.Release(ctx)` interface.
+  2. Implementaciones por dialect:
+     - PG: `SELECT pg_advisory_xact_lock(hashtext($1))` — auto-released en commit.
+     - MySQL/MariaDB: `GET_LOCK($1, $2)` + `RELEASE_LOCK($1)` en defer.
+     - MSSQL: `sp_getapplock @LockMode=Exclusive` + `sp_releaseapplock`.
+     - Oracle: `DBMS_LOCK.ALLOCATE_UNIQUE` + `DBMS_LOCK.REQUEST` + `DBMS_LOCK.RELEASE`.
+     - SQLite: `ErrUnsupportedFeature` (no hay semántica distribuida; usar
+       `BEGIN IMMEDIATE` que es la semántica de single-writer del proceso).
+  3. Wrapper opt-in: `client.WithMigrationLock(name, timeout)` que devuelve
+     un `*Client` que adquiere el lock antes de cada `Migrate(ctx, …)`.
+- **Done**: test cross-engine que arranca dos goroutines compitiendo por
+  el mismo lock; sólo una progresa, la otra recibe `ErrLockTimeout`.
+
+### F3-2 · Schema introspection (per-dialect)
+
+- **Objetivo**: devolver una representación neutral del schema actual del
+  DB. Equivalente a `pg_dump --schema-only` pero estructurado en Go.
+- **Acción**:
+  1. Nuevos tipos en `migrate/schema.go`: `Schema{Tables []Table}`,
+     `Table{Name, Columns, Indexes, ForeignKeys, Checks}`, `Column{Name, Type, Nullable, Default}`, etc.
+  2. `Dialect.IntrospectSchema(ctx, exec) (Schema, error)` por motor:
+     - PG: `pg_catalog` queries.
+     - MySQL/MariaDB: `INFORMATION_SCHEMA.{TABLES, COLUMNS, KEY_COLUMN_USAGE, …}`.
+     - MSSQL: `sys.tables`, `sys.columns`, `sys.foreign_keys`, etc.
+     - Oracle: `USER_TABLES`, `USER_TAB_COLUMNS`, `USER_CONS_COLUMNS`.
+     - SQLite: `sqlite_master` + `PRAGMA table_info` / `PRAGMA index_list` / `PRAGMA foreign_key_list`.
+  3. Schema normalizado: el comparador (F3-3) opera sobre la representación
+     neutral, no sobre los catalogs raw.
+- **Done**: test cross-engine que crea una tabla de fixture, ejecuta
+  `IntrospectSchema`, y verifica que la representación incluye columnas,
+  índices, FK con los campos esperados.
+
+### F3-3 · Schema diff core
+
+- **Objetivo**: comparador que toma el schema Go (derivado de los modelos)
+  y el schema DB (devuelto por F3-2) y emite operaciones bidireccionales
+  con `RiskLevel` (`safe` / `lossy` / `breaking`).
+- **Acción**:
+  1. `migrate.Diff(go, db Schema) []Operation`.
+  2. `Operation` interface: `AddColumn`, `DropColumn`, `AlterColumnType`,
+     `AddIndex`, `DropIndex`, `AddForeignKey`, etc. Cada uno con su
+     `RiskLevel()`, `UpSQL(dialect)` y `DownSQL(dialect)`.
+  3. Heurísticas para casos ambiguos:
+     - Rename column = drop + add con la misma posición y tipo similar.
+       Opt-in via comment-style hint en el modelo (`db:"new,old_name=old"`).
+     - Drop column = `lossy` warning explícito.
+- **Done**: tests unit-level con pares (go, db) inputs sintetizados y
+  output esperado.
+
+### F3-4 · Migración transaccional + resumable
+
+- **Objetivo**: cada migración aborta limpio si una operación falla.
+- **Acción**:
+  1. Wrapper `Migration.Run(ctx, ops []Operation)` que abre tx, aplica
+     cada op, commit al final. Savepoints intermedios para que un fallo
+     no pierda el progreso.
+  2. MySQL/MariaDB no son transaccionales para DDL → state checkpoint
+     en `quark_migration_state(op_index, status, resume_token)`. La
+     siguiente invocación retoma desde el último checkpoint exitoso.
+- **Done**: test que mata el proceso a mitad de una migración de 10
+  ops; siguiente run completa los 10 sin re-aplicar los primeros.
+
+### F3-5 · Dry-run plan
+
+- **Objetivo**: `quark schema diff --plan` que muestra DDL up/down + warnings
+  de RiskLevel sin ejecutar nada. Estilo `terraform plan`.
+- **Acción**:
+  1. CLI command en `cmd/quark/commands/diff.go`: introspecciona el DB,
+     comparara con los modelos registrados (via `--models-pkg ./...`
+     o por convención), emite el plan.
+  2. Salida coloreada (azul=safe, amarillo=lossy, rojo=breaking) en TTY;
+     fallback a texto plano en pipes.
+- **Done**: ejemplo en `examples/blog-api/` (o crear `examples/migrations/`)
+  que muestra el output esperado.
+
+### F3-6 · Backfill orquestado
+
+- **Objetivo**: data migrations que no caben en una sola transacción.
+  Resume token persistido para reanudar tras fallo.
+- **Acción**:
+  1. `Migration.Backfill(fn func(*Tx, []ID) error, batchSize int)`.
+  2. La estructura del backfill (iterar por PK, almacenar último ID
+     procesado) la maneja el helper; el caller sólo escribe la
+     función-por-batch.
+  3. Resume token en `quark_migration_state` (mismo schema de F3-4).
+- **Done**: test cross-engine con tabla de 10k rows + backfill que
+  duplica un campo; verificar que el helper recorre todos los batches.
+
+### F3-7 · Per-client model registry
+
+- **Objetivo**: sustituir el registro global de modelos (`getModelMeta`
+  package-level) por un registro por `*Client`. Permite tests
+  independientes y multi-tenant strict.
+- **Acción**:
+  1. `Client.RegisterModel[T]()` que añade meta al registry del Client.
+  2. `client.Migrate(ctx, &Model{})` registra implícitamente.
+  3. `quark.For[T](ctx, client)` busca primero en el registro del Client,
+     fallback al global durante la transición.
+  4. Tras un release con el cambio, deprecar el global y borrarlo en el
+     siguiente.
+- **Done**: tests existentes pasan sin cambios; nuevo test que demuestra
+  que dos Clients pueden registrar modelos con el mismo nombre Go sin
+  conflicto.
+
+### Cierre de Phase 3
+
+Cuando F3-1..F3-7 estén ✅, taggear **v0.6.0** via `/release v0.6.0`.
+Mientras Phase 3 esté en progreso (cualquier F3-N abierto), v0.6 no se taggea.
+
+---
+
 ## Fase 2 — Query builder componible y locking
 
 ### ~~F2-locking · Pessimistic locking~~

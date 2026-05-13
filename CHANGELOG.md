@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Phase 3 formally opened** ([ADR-0009](docs/adr/0009-migrations-introspection-diff-not-versioned-files.md))
+  with the decomposition into F3-1..F3-7 in `TASKS.md`. Strategy:
+  code-first + diff bidireccional (introspection-based diff against
+  the live DB, not only versioned files). Phase 3 closes when the
+  seven items land; that release becomes v0.6.0.
+
 ### Added
 
 - **`Array[T]` generic** — typed wrapper for SQL columns holding a list of `T`.
