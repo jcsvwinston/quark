@@ -478,9 +478,167 @@ func sortedKeys[V any](m map[string]V) []string {
 
 func columnsEqual(a, b Column) bool {
 	return a.Name == b.Name &&
-		a.Type == b.Type &&
+		normalizeType(a.Type) == normalizeType(b.Type) &&
 		a.Nullable == b.Nullable &&
-		stringPtrEqual(a.Default, b.Default)
+		defaultsEqual(a.Default, b.Default)
+}
+
+// defaultsEqual returns true when two Column.Default values are
+// logically equivalent, with cross-dialect awareness for engine-
+// generated defaults that don't have a Go-side counterpart.
+//
+// Handled equivalences:
+//
+//   - nil == nil → equal (no default on either side).
+//   - identical non-nil strings → equal.
+//   - one side nil, other side a PG SERIAL-generated `nextval(...)`
+//     expression → equal. PG creates a sequence + sets the default
+//     to `nextval('table_col_seq'::regclass)` for SERIAL / IDENTITY
+//     columns; the Go-side desired Schema has Default=nil because
+//     models never declare nextval. Treating these as equal closes
+//     the spurious-alter loop that would otherwise fire on every
+//     PlanMigration round-trip for any PG model with an int PK.
+//
+// Why this isn't done in the introspector (set Default=nil when
+// it sees nextval): the catalog reader is meant to faithfully
+// report what's in the database; the diff layer is where dialect
+// awareness lives (per the F3-3 godoc — same pattern as the
+// MariaDB RESTRICT ≡ MySQL NO ACTION decision).
+func defaultsEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil {
+		return isAutoincrementDefault(*b)
+	}
+	if b == nil {
+		return isAutoincrementDefault(*a)
+	}
+	return *a == *b
+}
+
+// isAutoincrementDefault reports whether a Column.Default string is
+// an engine-generated autoincrement marker rather than a logical
+// user-specified default. Currently matches PG's
+// `nextval(...)` expressions, which is the only engine that exposes
+// autoincrement plumbing via the DEFAULT clause (MySQL uses the
+// EXTRA field; MSSQL uses IDENTITY as a separate property; SQLite
+// uses INTEGER PRIMARY KEY AUTOINCREMENT — none of those produce a
+// COLUMN_DEFAULT row in the catalog).
+func isAutoincrementDefault(s string) bool {
+	low := strings.ToLower(strings.TrimSpace(s))
+	return strings.HasPrefix(low, "nextval(")
+}
+
+// normalizeType produces a comparable canonical form for a SQL type
+// string. Two type strings are treated as equal by [columnsEqual]
+// when their normalised forms match — which lets the migrator's
+// uppercase canonical (`BIGINT`, `VARCHAR(255)`) compare equal to
+// the catalog's lowercase (`bigint`, `varchar(255)`) without
+// generating spurious OpAlterColumn ops on every round-trip.
+//
+// Normalisation steps, in order:
+//
+//  1. Trim outer whitespace.
+//  2. Lowercase. (Migrator emits canonical UPPER; catalogs all
+//     return lowercase except SQLite which echoes the DDL verbatim.)
+//  3. PG alias: `character varying` → `varchar`. PG's
+//     information_schema returns `character varying(N)` for what
+//     the migrator emits as `VARCHAR(N)` — they're aliases in PG's
+//     grammar; we collapse to `varchar` since that's what every
+//     other engine uses.
+//  4. PG alias: `character(` → `char(`. Same rationale.
+//  5. MySQL display widths: `int(11)` → `int`, `bigint(20)` →
+//     `bigint`, etc. Older MySQL versions (5.7) emit display widths
+//     in `INFORMATION_SCHEMA.COLUMNS.COLUMN_TYPE`; MySQL 8.0+
+//     dropped them but a mixed-version cluster could still surface
+//     them. Stripping is safe — the width was always cosmetic for
+//     integer types.
+//
+// Deliberately NOT normalised in this pass:
+//
+//   - PG `int8`/`int4`/`int2` ↔ `bigint`/`integer`/`smallint`. PG's
+//     `information_schema.columns.data_type` returns the SQL-standard
+//     names (`bigint` etc.), not the binary aliases, so this case
+//     never arises from the introspector. If a user constructs a
+//     desired Schema with `int8` manually they'll see drift; that's
+//     a tag-driven path and out of scope here.
+//   - Whitespace within multi-word types (already handled by
+//     `character varying` → `varchar` collapsing the only such
+//     case in practice).
+//   - MSSQL aliases. `bigint`/`int`/`smallint` are already the
+//     canonical names in both directions; no aliasing needed.
+//
+// Pure function — no state, no IO, safe to call from anywhere.
+func normalizeType(t string) string {
+	s := strings.ToLower(strings.TrimSpace(t))
+	s = strings.ReplaceAll(s, "character varying", "varchar")
+	s = strings.ReplaceAll(s, "character(", "char(")
+	s = stripMySQLDisplayWidth(s)
+	// `int` ≡ `integer` — SQL standard `INTEGER` vs engine-
+	// vernacular `INT`. The migrator emits `INTEGER` for int kinds
+	// (see internal/migrate/migrate.go); MySQL/MariaDB/MSSQL
+	// catalogs return `int` / `int(11)` (the latter already
+	// stripped above); PG catalog returns `integer`. Collapse to
+	// the shorter form. Anchored to the whole string so we don't
+	// substring-mangle types like `pointinteger` (which doesn't
+	// exist but the discipline is cheap).
+	if s == "integer" {
+		s = "int"
+	}
+	return s
+}
+
+// stripMySQLDisplayWidth removes the `(N)` display width from
+// integer-family types. Only applies to the family that historically
+// carried display widths in MySQL: `int`, `bigint`, `smallint`,
+// `tinyint`, `mediumint`. Decimal/varchar widths are NOT touched —
+// those carry actual precision/length information.
+//
+// Matches as a word — `int(11)` becomes `int` but `point(2,2)` is
+// left alone (the prefix doesn't end a word). The implementation
+// uses a manual scan rather than regexp to keep the function
+// allocation-free for the common case.
+func stripMySQLDisplayWidth(s string) string {
+	kws := []string{"bigint", "mediumint", "smallint", "tinyint", "int"}
+	for _, kw := range kws {
+		idx := strings.Index(s, kw+"(")
+		if idx < 0 {
+			continue
+		}
+		// Require the keyword to start at position 0 or after a
+		// non-letter character — so `point(2,2)` (substring `int(`
+		// at index 1) doesn't false-match.
+		if idx > 0 {
+			prev := s[idx-1]
+			if (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || prev == '_' {
+				continue
+			}
+		}
+		// Find the matching `)` after the keyword. Variable named
+		// `closeIdx` rather than `close` to avoid shadowing the
+		// `close` builtin (which staticcheck would flag).
+		closeIdx := strings.Index(s[idx:], ")")
+		if closeIdx < 0 {
+			continue
+		}
+		// Body between `(` and `)` must be all digits for this to
+		// be a display width (not e.g. `int(unsigned)` which doesn't
+		// exist in real MySQL but we should be paranoid).
+		body := s[idx+len(kw)+1 : idx+closeIdx]
+		allDigits := body != ""
+		for i := 0; i < len(body); i++ {
+			if body[i] < '0' || body[i] > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if !allDigits {
+			continue
+		}
+		s = s[:idx+len(kw)] + s[idx+closeIdx+1:]
+	}
+	return s
 }
 
 func indexesEqual(a, b Index) bool {

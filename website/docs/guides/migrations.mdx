@@ -529,12 +529,13 @@ on a stable schema is empty even if indexes / FKs / checks exist
 in the DB but not in the models. F3-3-plan-indexes will lift this
 limitation by letting struct tags drive indexes.
 
-**Known type-string drift**: the migrator's `SQLTypeWithOpts` emits
-canonical forms (`BIGINT`, `VARCHAR(255)`) while the catalog readers
-return whatever the engine stores (PG `bigint`, MySQL `int`, MSSQL
-`varchar`). On SQLite the round-trip is clean; on PG/MySQL/MSSQL
-expect spurious `OpAlterColumn` ops until the type-normalisation
-follow-up lands. Use SQLite for round-trip-clean test suites today.
+Type-string normalisation (F3-3-types): the diff's column comparison
+applies a case-fold + trim, a PG `character varying` → `varchar`
+alias, and a MySQL display-width strip (`int(11)` → `int`) so the
+migrator's canonical UPPERCASE compares equal to the catalog's
+lowercase. **Round-trip is clean on all 5 supported dialects** —
+`PlanMigration(model)` after `Migrate(model)` returns an empty
+Plan on PG, MySQL, MariaDB, MSSQL, and SQLite.
 
 ## Recommended Production Flow
 

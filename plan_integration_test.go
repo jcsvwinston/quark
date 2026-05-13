@@ -5,6 +5,7 @@ package quark_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -20,6 +21,29 @@ import (
 type planFixture struct {
 	ID   int64  `db:"id" pk:"true"`
 	Name string `db:"name" quark:"not_null"`
+}
+
+// opTouchesTable reports whether an Operation's String() format
+// references the given table name. Used by the round-trip test
+// to scope assertions to a specific fixture rather than the whole
+// (shared, polluted) database.
+//
+// We tokenize Op.String() on whitespace + `.` + `(` + `,` and check
+// for an exact-token match against `table`. A naive
+// `strings.Contains` would false-positive on `plan_fixtures` vs
+// `plan_fixtures_archive` or similar substring relationships —
+// uncommon today but the kind of latent fragility a token check
+// eliminates outright.
+func opTouchesTable(op quark.Operation, table string) bool {
+	sep := func(r rune) bool {
+		return r == ' ' || r == '.' || r == '(' || r == ',' || r == ')'
+	}
+	for _, tok := range strings.FieldsFunc(op.String(), sep) {
+		if tok == table {
+			return true
+		}
+	}
+	return false
 }
 
 // testPlanMigration runs the dialect-agnostic F3-3-plan contracts
@@ -65,6 +89,44 @@ func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		}
 		if !sawCreate {
 			t.Fatalf("plan should include OpCreateTable{plan_fixtures}, got:\n%s", plan.String())
+		}
+	})
+
+	t.Run("PlanMigration_RoundTripScopedToFixture", func(t *testing.T) {
+		// F3-3-plan's headline contract — now reachable on all 5
+		// motors thanks to F3-3-types (cross-dialect type-string
+		// normalisation): after Migrate(model), PlanMigration(model)
+		// emits **no ops that touch the fixture's table**.
+		//
+		// We scope the assertion to operations referencing
+		// `plan_fixtures` because the SharedSuite reuses one DB
+		// connection across tests, so other tests' tables (which
+		// PlanMigration legitimately wants to drop given our
+		// single-model input) would otherwise flood the result.
+		// The contract we want to pin is "the fixture round-trips
+		// clean", not "the entire DB matches the fixture".
+		//
+		// Before F3-3-types this only worked on SQLite because the
+		// migrator emits `BIGINT` / `VARCHAR(255)` while PG returns
+		// `bigint` / `character varying(255)` and MySQL returns
+		// `bigint(20)` / `varchar(255)`. The normaliser in
+		// columnsEqual now collapses all those to the same canonical
+		// form. If this test fails on a motor, the normaliser is
+		// missing a case for that engine's catalog output.
+		dropTable(baseClient, "plan_fixtures")
+		defer dropTable(baseClient, "plan_fixtures")
+
+		if err := baseClient.Migrate(ctx, &planFixture{}); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+		plan, err := baseClient.PlanMigration(ctx, &planFixture{})
+		if err != nil {
+			t.Fatalf("PlanMigration after Migrate: %v", err)
+		}
+		for _, op := range plan.Ops {
+			if opTouchesTable(op, "plan_fixtures") {
+				t.Errorf("plan after Migrate should NOT touch plan_fixtures, got: %s", op.String())
+			}
 		}
 	})
 

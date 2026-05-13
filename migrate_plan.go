@@ -67,17 +67,19 @@ func (p Plan) String() string {
 //  3. Call [Diff] to produce the ordered op list.
 //  4. Wrap the ops in a [Plan].
 //
-// Surface caveats — known asymmetries between desired and current
-// that may produce noisy plans today:
+// Surface caveats — known asymmetries between desired and current:
 //
 //   - **Type strings**: the desired Schema uses the migrator's
 //     `SQLTypeWithOpts` output (`BIGINT`, `VARCHAR(255)`) while the
 //     introspector returns whatever the catalog stores (lowercase,
-//     parameter-bearing, or canonical form per dialect). Spurious
-//     OpAlterColumn ops will appear for round-tripped tables where
-//     the strings differ. Normalising types across the two sides is
-//     planned as a follow-up; users running F3-3-plan today should
-//     review the alter ops manually.
+//     parameter-bearing, or canonical form per dialect). The diff's
+//     [normalizeType] helper collapses these to a comparable form
+//     (case-fold, PG `character varying` ↔ `varchar` alias, MySQL
+//     display-width strip), so a clean round-trip works on all 5
+//     supported dialects since F3-3-types. Edge cases not yet
+//     normalised: PG `int8`/`int4`/`int2` aliases (don't arise from
+//     introspection; only relevant if the desired Schema is
+//     hand-constructed with those names).
 //   - **Indexes / FKs / CHECK** declared on the model: struct tags
 //     don't yet carry index or FK metadata (CreateIndex /
 //     AddForeignKey are explicit calls). PlanMigration's `desired`
