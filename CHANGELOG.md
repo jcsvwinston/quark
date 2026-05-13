@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ubuntu-latest` runner so no extra setup. Closes the v0.x honor-system
   state of the "6 motores verdes antes de mergear" hard rule.
 
+  The matrix lands as **advisory** (`continue-on-error: true`) because
+  the first cross-engine run surfaced 9 latent test-side bugs that
+  were hidden under SQLite-only CI. The API itself is clean — the SQL
+  emitted by Quark is valid on all 5 engines; the failures are in
+  test assertions that hardcoded SQLite quoting / placeholders. The
+  bugs are catalogued in `TASKS.md` § "F0-8-followup" and will be
+  closed in focused PRs; once cleared, the matrix flips to blocking.
+
 ## [0.4.0] - 2026-05-10
 
 Phase 2 release: composable query builder. Introduces a typed expression
