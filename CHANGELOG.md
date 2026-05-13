@@ -40,6 +40,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **Foreign-key introspection across the 4 CI dialects + SQLite
+  (F3-2-fks)**: `Table.ForeignKeys` is now populated with
+  `ForeignKey{Name, Columns, RefTable, RefColumns, OnDelete, OnUpdate}`.
+  Per-dialect catalogs: **SQLite** `PRAGMA foreign_key_list`
+  (groups rows by synthetic `id`; constraint Name comes back `""`
+  since the PRAGMA doesn't preserve names — the diff layer matches
+  on column-tuple instead);
+  **PostgreSQL** `pg_constraint` (contype='f') with
+  `unnest(conkey/confkey) WITH ORDINALITY` for stable composite-FK
+  column matching; `confdeltype`/`confupdtype` single-char codes
+  translated to verbose form;
+  **MySQL / MariaDB** `INFORMATION_SCHEMA.KEY_COLUMN_USAGE`
+  joined with `REFERENTIAL_CONSTRAINTS` (UPDATE_RULE / DELETE_RULE
+  passthrough);
+  **MSSQL** `sys.foreign_keys` joined with `sys.foreign_key_columns`
+  / `sys.tables` / `sys.columns` ×2; underscored
+  `*_referential_action_desc` strings (`NO_ACTION`, `SET_NULL`,
+  `SET_DEFAULT`) normalised to SQL-standard spaces.
+  All dialects emit `OnDelete`/`OnUpdate` as the SQL-standard
+  verbose form (`CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`,
+  `NO ACTION`).
+
 - **Index introspection across the 4 CI dialects + SQLite
   (F3-2-indexes)**: `Table.Indexes` is now populated with
   non-primary-key indexes (`Index{Name, Columns, Unique}`).

@@ -41,7 +41,11 @@ func (d *SQLiteDialect) IntrospectSchema(ctx context.Context, exec Executor) (Sc
 		if err != nil {
 			return Schema{}, fmt.Errorf("sqlite introspect: list indexes for %q: %w", name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx})
+		fks, err := sqliteListForeignKeys(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("sqlite introspect: list foreign keys for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -228,6 +232,105 @@ func sqliteListIndexes(ctx context.Context, exec Executor, table string) ([]Inde
 	return out, nil
 }
 
+// sqliteListForeignKeys uses `PRAGMA foreign_key_list(<table>)`. The
+// PRAGMA does NOT preserve constraint names from the CREATE TABLE DDL
+// — it returns a synthetic `id` per FK constraint. We surface
+// `Name = ""` so the diff layer's symmetric-matching path (which
+// keys on column-tuple + ref_table rather than name) is exercised
+// rather than relying on a spurious synthetic name.
+//
+// Rows are grouped by `id` (FK constraint identifier) preserving
+// seq order. PRAGMA columns are:
+//
+//	id INTEGER, seq INTEGER, table TEXT, from TEXT, to TEXT,
+//	on_update TEXT, on_delete TEXT, match TEXT
+//
+// `match` is one of NONE/PARTIAL/FULL — SQL-standard but rarely used
+// (SQLite only enforces NONE). Not surfaced; F3-2 doesn't diff on
+// MATCH semantics.
+func sqliteListForeignKeys(ctx context.Context, exec Executor, table string) ([]ForeignKey, error) {
+	if err := NewSQLGuard().ValidateIdentifier(table); err != nil {
+		return nil, fmt.Errorf("sqlite introspect: bad table name %q: %w", table, err)
+	}
+	q := fmt.Sprintf(`PRAGMA foreign_key_list("%s")`, table)
+	rows, err := exec.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type accum struct {
+		refTable string
+		cols     []string
+		refCols  []string
+		onUpdate string
+		onDelete string
+	}
+	byID := map[int]*accum{}
+	var order []int
+	for rows.Next() {
+		var (
+			id       int
+			seq      int
+			refTab   string
+			fromCol  sql.NullString
+			toCol    sql.NullString
+			onUpdate string
+			onDelete string
+			matchVal string
+		)
+		if err := rows.Scan(&id, &seq, &refTab, &fromCol, &toCol, &onUpdate, &onDelete, &matchVal); err != nil {
+			return nil, err
+		}
+		a, ok := byID[id]
+		if !ok {
+			a = &accum{refTable: refTab, onUpdate: sqliteFKAction(onUpdate), onDelete: sqliteFKAction(onDelete)}
+			byID[id] = a
+			order = append(order, id)
+		}
+		if fromCol.Valid {
+			a.cols = append(a.cols, fromCol.String)
+		} else {
+			a.cols = append(a.cols, "")
+		}
+		if toCol.Valid {
+			a.refCols = append(a.refCols, toCol.String)
+		} else {
+			a.refCols = append(a.refCols, "")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]ForeignKey, 0, len(order))
+	for _, id := range order {
+		a := byID[id]
+		out = append(out, ForeignKey{
+			Name:       "",
+			Columns:    a.cols,
+			RefTable:   a.refTable,
+			RefColumns: a.refCols,
+			OnDelete:   a.onDelete,
+			OnUpdate:   a.onUpdate,
+		})
+	}
+	return out, nil
+}
+
+// sqliteFKAction normalises SQLite's PRAGMA action strings to the
+// SQL-standard verbose form. SQLite returns `NO ACTION`, `RESTRICT`,
+// `SET NULL`, `SET DEFAULT`, `CASCADE` — already verbose — so this
+// is mostly a passthrough. SQLite never returns the empty string
+// (NO ACTION is its default for unspecified clauses).
+func sqliteFKAction(s string) string {
+	// PRAGMA returns "NONE" for no-action FK actions in some SQLite
+	// versions; map that to NO ACTION for cross-dialect consistency.
+	if s == "NONE" {
+		return "NO ACTION"
+	}
+	return s
+}
+
 // --- MySQL / MariaDB ---------------------------------------------------------
 
 // IntrospectSchema reads the MySQL/MariaDB schema using
@@ -273,7 +376,11 @@ func mysqlLikeIntrospect(ctx context.Context, exec Executor, dialectName string)
 		if err != nil {
 			return Schema{}, fmt.Errorf("%s introspect: list indexes for %q: %w", dialectName, name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx})
+		fks, err := mysqlListForeignKeys(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("%s introspect: list foreign keys for %q: %w", dialectName, name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -406,6 +513,90 @@ func mysqlListIndexes(ctx context.Context, exec Executor, table string) ([]Index
 	return out, nil
 }
 
+// mysqlListForeignKeys reads `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` joined
+// with `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS`. The catalog
+// returns one row per (constraint, column); we group by
+// CONSTRAINT_NAME in Go, ordered by ORDINAL_POSITION for stable
+// column matching across composite FKs.
+//
+// MySQL/MariaDB share this catalog so a single implementation covers
+// both. The dialect-shared `mysqlLikeIntrospect` already delegates
+// here.
+//
+// REFERENTIAL_CONSTRAINTS returns UPDATE_RULE / DELETE_RULE as
+// verbose strings (`CASCADE`, `SET NULL`, `NO ACTION`, `RESTRICT`,
+// `SET DEFAULT`) — no normalisation needed.
+func mysqlListForeignKeys(ctx context.Context, exec Executor, table string) ([]ForeignKey, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT kcu.CONSTRAINT_NAME,
+		       kcu.COLUMN_NAME,
+		       kcu.REFERENCED_TABLE_NAME,
+		       kcu.REFERENCED_COLUMN_NAME,
+		       rc.UPDATE_RULE,
+		       rc.DELETE_RULE,
+		       kcu.ORDINAL_POSITION
+		  FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+		  JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+		    ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
+		   AND kcu.CONSTRAINT_NAME   = rc.CONSTRAINT_NAME
+		 WHERE kcu.TABLE_SCHEMA      = DATABASE()
+		   AND kcu.TABLE_NAME        = ?
+		   AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
+		 ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type accum struct {
+		refTable string
+		cols     []string
+		refCols  []string
+		onUpdate string
+		onDelete string
+	}
+	byName := map[string]*accum{}
+	var order []string
+	for rows.Next() {
+		var (
+			constraintName string
+			columnName     string
+			refTable       string
+			refColumn      string
+			updateRule     string
+			deleteRule     string
+			pos            int
+		)
+		if err := rows.Scan(&constraintName, &columnName, &refTable, &refColumn, &updateRule, &deleteRule, &pos); err != nil {
+			return nil, err
+		}
+		a, ok := byName[constraintName]
+		if !ok {
+			a = &accum{refTable: refTable, onUpdate: updateRule, onDelete: deleteRule}
+			byName[constraintName] = a
+			order = append(order, constraintName)
+		}
+		a.cols = append(a.cols, columnName)
+		a.refCols = append(a.refCols, refColumn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]ForeignKey, 0, len(order))
+	for _, name := range order {
+		a := byName[name]
+		out = append(out, ForeignKey{
+			Name:       name,
+			Columns:    a.cols,
+			RefTable:   a.refTable,
+			RefColumns: a.refCols,
+			OnDelete:   a.onDelete,
+			OnUpdate:   a.onUpdate,
+		})
+	}
+	return out, nil
+}
+
 // --- SQL Server --------------------------------------------------------------
 
 // IntrospectSchema reads the MSSQL schema via `sys.tables`,
@@ -444,7 +635,11 @@ func (d *MSSQLDialect) IntrospectSchema(ctx context.Context, exec Executor) (Sch
 		if err != nil {
 			return Schema{}, fmt.Errorf("mssql introspect: list indexes for %q: %w", name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx})
+		fks, err := mssqlListForeignKeys(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("mssql introspect: list foreign keys for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -599,6 +794,118 @@ func mssqlListIndexes(ctx context.Context, exec Executor, table string) ([]Index
 	return out, nil
 }
 
+// mssqlListForeignKeys reads `sys.foreign_keys` joined with
+// `sys.foreign_key_columns`, `sys.tables` (referenced table name),
+// and `sys.columns` (twice — once for the parent/local column, once
+// for the referenced column).
+//
+// MSSQL exposes the FK actions as descriptive verbose strings in
+// `delete_referential_action_desc` / `update_referential_action_desc`,
+// but with underscores (`NO_ACTION`, `SET_NULL`, `SET_DEFAULT`) —
+// the helper [mssqlFKAction] strips them to the SQL-standard form.
+func mssqlListForeignKeys(ctx context.Context, exec Executor, table string) ([]ForeignKey, error) {
+	d := &MSSQLDialect{}
+	q := fmt.Sprintf(`
+		SELECT fk.name AS fk_name,
+		       pc.name AS column_name,
+		       rt.name AS ref_table,
+		       rc.name AS ref_column,
+		       fk.delete_referential_action_desc AS on_delete,
+		       fk.update_referential_action_desc AS on_update,
+		       fkc.constraint_column_id
+		  FROM sys.foreign_keys fk
+		  JOIN sys.foreign_key_columns fkc
+		    ON fk.object_id = fkc.constraint_object_id
+		  JOIN sys.tables rt
+		    ON rt.object_id = fkc.referenced_object_id
+		  JOIN sys.columns pc
+		    ON pc.object_id = fkc.parent_object_id
+		   AND pc.column_id = fkc.parent_column_id
+		  JOIN sys.columns rc
+		    ON rc.object_id = fkc.referenced_object_id
+		   AND rc.column_id = fkc.referenced_column_id
+		 WHERE fk.parent_object_id = OBJECT_ID(%s)
+		 ORDER BY fk.name, fkc.constraint_column_id`, d.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type accum struct {
+		refTable string
+		cols     []string
+		refCols  []string
+		onDelete string
+		onUpdate string
+	}
+	byName := map[string]*accum{}
+	var order []string
+	for rows.Next() {
+		var (
+			fkName       string
+			columnName   string
+			refTable     string
+			refColumn    string
+			onDelete     string
+			onUpdate     string
+			constraintID int
+		)
+		if err := rows.Scan(&fkName, &columnName, &refTable, &refColumn, &onDelete, &onUpdate, &constraintID); err != nil {
+			return nil, err
+		}
+		a, ok := byName[fkName]
+		if !ok {
+			a = &accum{
+				refTable: refTable,
+				onDelete: mssqlFKAction(onDelete),
+				onUpdate: mssqlFKAction(onUpdate),
+			}
+			byName[fkName] = a
+			order = append(order, fkName)
+		}
+		a.cols = append(a.cols, columnName)
+		a.refCols = append(a.refCols, refColumn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]ForeignKey, 0, len(order))
+	for _, name := range order {
+		a := byName[name]
+		out = append(out, ForeignKey{
+			Name:       name,
+			Columns:    a.cols,
+			RefTable:   a.refTable,
+			RefColumns: a.refCols,
+			OnDelete:   a.onDelete,
+			OnUpdate:   a.onUpdate,
+		})
+	}
+	return out, nil
+}
+
+// mssqlFKAction normalises MSSQL's `*_referential_action_desc`
+// strings (`NO_ACTION`, `SET_NULL`, `SET_DEFAULT`, `CASCADE`) to the
+// SQL-standard verbose form used in `ForeignKey.OnDelete` /
+// `OnUpdate` — i.e. underscores → spaces.
+func mssqlFKAction(s string) string {
+	switch s {
+	case "NO_ACTION":
+		return "NO ACTION"
+	case "SET_NULL":
+		return "SET NULL"
+	case "SET_DEFAULT":
+		return "SET DEFAULT"
+	default:
+		// CASCADE comes through as-is. NOTE: MSSQL does NOT support
+		// RESTRICT as a referential action — T-SQL has no such code
+		// in `*_referential_action_desc`. Don't add a "RESTRICT" case
+		// here on autopilot from PG/MySQL/SQLite habit.
+		return s
+	}
+}
+
 // mssqlReassembleType glues parameters onto MSSQL's bare type name from
 // the catalog: `varchar` + `max_length=255` → `varchar(255)`;
 // `decimal` + `precision=10,scale=2` → `decimal(10,2)`; `nvarchar` +
@@ -662,7 +969,11 @@ func (d *PostgresDialect) IntrospectSchema(ctx context.Context, exec Executor) (
 		if err != nil {
 			return Schema{}, fmt.Errorf("pg introspect: list indexes for %q: %w", name, err)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx})
+		fks, err := pgListForeignKeys(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("pg introspect: list foreign keys for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks})
 	}
 	return Schema{Tables: tables}, nil
 }
@@ -836,4 +1147,129 @@ func pgListIndexes(ctx context.Context, exec Executor, table string) ([]Index, e
 		out = append(out, Index{Name: name, Columns: a.cols, Unique: a.unique})
 	}
 	return out, nil
+}
+
+// pgListForeignKeys reads `pg_constraint` (contype='f') directly,
+// joining `pg_attribute` twice (once for the parent/local columns
+// via `conkey`, once for the referenced columns via `confkey`).
+//
+// `pg_constraint.confdeltype` / `confupdtype` are single-character
+// codes documented in the PG catalog reference:
+//
+//	a = NO ACTION  (SQL default)
+//	r = RESTRICT
+//	c = CASCADE
+//	n = SET NULL
+//	d = SET DEFAULT
+//
+// [pgFKAction] translates them to the SQL-standard verbose form.
+//
+// The `unnest` + `WITH ORDINALITY` pattern preserves column order
+// across composite FKs — `conkey[i]` matches `confkey[i]` by
+// position, and we group by FK name in Go.
+func pgListForeignKeys(ctx context.Context, exec Executor, table string) ([]ForeignKey, error) {
+	d := &PostgresDialect{}
+	// Column order in the SELECT mirrors mssqlListForeignKeys and
+	// mysqlListForeignKeys — local column first, ref column second —
+	// so the Scan call in this file reads symmetrically across the
+	// three dialect implementations. Don't reorder without auditing
+	// the Scan below.
+	q := fmt.Sprintf(`
+		SELECT c.conname AS fk_name,
+		       a.attname  AS column_name,
+		       ra.attname AS ref_column,
+		       c.confdeltype,
+		       c.confupdtype,
+		       rt.relname AS ref_table,
+		       k.ord
+		  FROM pg_constraint c
+		  JOIN pg_class      pt ON pt.oid = c.conrelid
+		  JOIN pg_namespace  pn ON pn.oid = pt.relnamespace
+		  JOIN pg_class      rt ON rt.oid = c.confrelid
+		  JOIN LATERAL unnest(c.conkey)  WITH ORDINALITY AS k(attnum, ord) ON true
+		  JOIN LATERAL unnest(c.confkey) WITH ORDINALITY AS rk(attnum, ord) ON rk.ord = k.ord
+		  JOIN pg_attribute a  ON a.attrelid  = c.conrelid  AND a.attnum  = k.attnum
+		  JOIN pg_attribute ra ON ra.attrelid = c.confrelid AND ra.attnum = rk.attnum
+		 WHERE c.contype = 'f'
+		   AND pn.nspname = current_schema()
+		   AND pt.relname = %s
+		 ORDER BY c.conname, k.ord`, d.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type accum struct {
+		refTable string
+		cols     []string
+		refCols  []string
+		onDelete string
+		onUpdate string
+	}
+	byName := map[string]*accum{}
+	var order []string
+	for rows.Next() {
+		var (
+			fkName      string
+			columnName  string
+			refColumn   string
+			confdeltype string
+			confupdtype string
+			refTable    string
+			position    int
+		)
+		if err := rows.Scan(&fkName, &columnName, &refColumn, &confdeltype, &confupdtype, &refTable, &position); err != nil {
+			return nil, err
+		}
+		a, ok := byName[fkName]
+		if !ok {
+			a = &accum{
+				refTable: refTable,
+				onDelete: pgFKAction(confdeltype),
+				onUpdate: pgFKAction(confupdtype),
+			}
+			byName[fkName] = a
+			order = append(order, fkName)
+		}
+		a.cols = append(a.cols, columnName)
+		a.refCols = append(a.refCols, refColumn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]ForeignKey, 0, len(order))
+	for _, name := range order {
+		a := byName[name]
+		out = append(out, ForeignKey{
+			Name:       name,
+			Columns:    a.cols,
+			RefTable:   a.refTable,
+			RefColumns: a.refCols,
+			OnDelete:   a.onDelete,
+			OnUpdate:   a.onUpdate,
+		})
+	}
+	return out, nil
+}
+
+// pgFKAction maps PG's `pg_constraint.confdeltype` / `confupdtype`
+// single-character codes to the SQL-standard verbose form.
+func pgFKAction(c string) string {
+	switch c {
+	case "a":
+		return "NO ACTION"
+	case "r":
+		return "RESTRICT"
+	case "c":
+		return "CASCADE"
+	case "n":
+		return "SET NULL"
+	case "d":
+		return "SET DEFAULT"
+	default:
+		// Unknown codes pass through — keeps the introspector
+		// forward-compatible if PG adds a code.
+		return c
+	}
 }

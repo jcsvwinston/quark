@@ -23,18 +23,16 @@ type Schema struct {
 // stores both the raw dialect-native type strings (`Type`) and (in a
 // later phase) a normalised form for cross-dialect comparison.
 type Table struct {
-	Name    string
-	Columns []Column
-	Indexes []Index
+	Name        string
+	Columns     []Column
+	Indexes     []Index
+	ForeignKeys []ForeignKey
 
-	// ForeignKeys / Checks are intentionally left out of the F3-2
-	// minimum surface. They land in follow-up PRs once the
-	// column-and-index diff is proven against the live engines:
-	//   - F3-2-fks      → reads foreign key constraints
-	//   - F3-2-checks   → reads CHECK constraints
-	// The Schema struct will grow these fields in those PRs; tests and
-	// downstream code that read this struct should treat zero-values
-	// as "not yet introspected" rather than "no constraints".
+	// Checks is intentionally left out of the F3-2 minimum surface.
+	// It lands in F3-2-checks once the column / index / FK paths are
+	// proven across the engines. Tests and downstream code that read
+	// this struct should treat zero-values as "not yet introspected"
+	// rather than "no constraints".
 }
 
 // Index is one secondary (non-primary-key) index on a table. The PK
@@ -50,6 +48,37 @@ type Index struct {
 	Name    string
 	Columns []string
 	Unique  bool
+}
+
+// ForeignKey is one FOREIGN KEY constraint declared on a table. It
+// captures the surface that [Client.AddForeignKey] takes as input so
+// the diff comparator (F3-3) can match introspected FKs against
+// Go-side declarations symmetrically.
+//
+// Columns and RefColumns are positionally matched — `Columns[i]`
+// references `RefColumns[i]` (FK constraints can span multiple
+// columns, e.g. composite FKs).
+//
+// OnDelete / OnUpdate are normalised to the SQL-standard verbose
+// form (`"CASCADE"`, `"SET NULL"`, `"SET DEFAULT"`, `"RESTRICT"`,
+// `"NO ACTION"`) regardless of how the underlying catalog encodes
+// them (PG single-char `confdeltype`, MSSQL `delete_referential_action_desc`
+// with underscores, etc.). All four implemented dialects emit
+// `"NO ACTION"` explicitly for the SQL-standard default — the empty
+// string never appears here in practice. A future Oracle introspector
+// (F3-2-oracle) is expected to follow the same convention.
+//
+// Name comes from the catalog. SQLite returns `""` for inline FKs
+// declared without an explicit `CONSTRAINT <name>` clause; the diff
+// layer handles unnamed FKs by matching on (columns, ref_table,
+// ref_columns) tuples.
+type ForeignKey struct {
+	Name       string
+	Columns    []string
+	RefTable   string
+	RefColumns []string
+	OnDelete   string
+	OnUpdate   string
 }
 
 // Column is one column in a table.
@@ -94,10 +123,10 @@ type SchemaIntrospector interface {
 // Oracle returns `ErrUnsupportedFeature` until F3-2-oracle lands
 // (deferred while the container image situation is resolved).
 //
-// Surface: tables, columns, and indexes (non-PK). Foreign keys and
-// check constraints arrive in follow-up PRs (F3-2-fks, F3-2-checks).
-// Code that reads [Schema] should treat the unpopulated slices as
-// "not yet introspected", not "no constraints exist".
+// Surface: tables, columns, non-PK indexes, and foreign keys. Check
+// constraints arrive in F3-2-checks. Code that reads [Schema] should
+// treat the unpopulated slices as "not yet introspected", not "no
+// constraints exist".
 func (c *Client) IntrospectSchema(ctx context.Context) (Schema, error) {
 	introspector, ok := c.dialect.(SchemaIntrospector)
 	if !ok {
