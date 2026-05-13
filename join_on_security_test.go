@@ -41,10 +41,15 @@ func testJoinOnSecurity(ctx context.Context, t *testing.T, baseClient *quark.Cli
 		// execute without error. The typed builder form `.On(left, op, right)`
 		// is the v0.4 idiomatic shape — it composes the ON clause from
 		// validated parts and forwards through the same ValidateJoinOn path.
+		//
+		// `Count()` instead of `List()` so MSSQL doesn't reject the implicit
+		// `SELECT *` over a multi-table join with overlapping `id` columns
+		// ("Ambiguous column name 'id'"). The contract being pinned is
+		// "ON clause is accepted and the JOIN executes" — Count exercises
+		// both as well as List does, without the projection ambiguity.
 		_, err := quark.For[JoinOrder](ctx, baseClient).
 			Join("join_users").On("join_users.id", "=", "join_orders.user_id").
-			Limit(10).
-			List()
+			Count()
 		if err != nil {
 			t.Errorf("expected valid ON clause to execute, got: %v", err)
 		}
@@ -53,11 +58,11 @@ func testJoinOnSecurity(ctx context.Context, t *testing.T, baseClient *quark.Cli
 	t.Run("ValidMultiConditionJoinExecutes", func(t *testing.T) {
 		// Multi-condition ON clauses fall back to OnRaw, which still
 		// validates through guard.ValidateJoinOn (AND-chained binary
-		// identifier comparisons are accepted).
+		// identifier comparisons are accepted). Count() for the same
+		// reason as ValidJoinExecutes.
 		_, err := quark.For[JoinOrder](ctx, baseClient).
 			LeftJoin("join_users").OnRaw("join_users.id = join_orders.user_id AND join_users.id = join_orders.user_id").
-			Limit(10).
-			List()
+			Count()
 		if err != nil {
 			t.Errorf("expected valid AND-joined ON clause to execute, got: %v", err)
 		}
