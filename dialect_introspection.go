@@ -227,6 +227,152 @@ func mysqlListColumns(ctx context.Context, exec Executor, table string) ([]Colum
 	return out, rows.Err()
 }
 
+// --- SQL Server --------------------------------------------------------------
+
+// IntrospectSchema reads the MSSQL schema via `sys.tables`,
+// `sys.columns`, `sys.types`, and `sys.default_constraints`. MSSQL
+// stores defaults in a separate catalog joined on parent object_id
+// + column_id, so default-extraction needs a LEFT JOIN; everything
+// else is a straight catalog read.
+//
+// MSSQL caveats handled here:
+//   - System-shipped tables are filtered via `is_ms_shipped = 0` plus
+//     `name NOT LIKE 'quark[_]%' ESCAPE`-style char class (the `[_]`
+//     bracket prevents `_` from being interpreted as the wildcard).
+//   - Type reassembly: `sys.types` returns the bare type name
+//     (`varchar`, `decimal`); we glue `(N)` / `(P,S)` / `(MAX)`
+//     onto it from the adjacent columns. `max_length = -1` is the
+//     MSSQL convention for VARCHAR(MAX) / NVARCHAR(MAX). For
+//     nvarchar, `max_length` is bytes (chars * 2), so we divide by
+//     2 when emitting the displayed type — matches what a user would
+//     write in DDL.
+//   - Default values: MSSQL wraps them in parens (`(0)`,
+//     `(getdate())`, `('draft')`). We pass that through raw — the
+//     diff layer (F3-3) is responsible for unwrapping if it needs
+//     to compare against the Go-side DDL.
+func (d *MSSQLDialect) IntrospectSchema(ctx context.Context, exec Executor) (Schema, error) {
+	tableNames, err := mssqlListTables(ctx, exec)
+	if err != nil {
+		return Schema{}, fmt.Errorf("mssql introspect: list tables: %w", err)
+	}
+	tables := make([]Table, 0, len(tableNames))
+	for _, name := range tableNames {
+		cols, err := mssqlListColumns(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("mssql introspect: list columns for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: name, Columns: cols})
+	}
+	return Schema{Tables: tables}, nil
+}
+
+func mssqlListTables(ctx context.Context, exec Executor) ([]string, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT t.name
+		  FROM sys.tables t
+		 WHERE t.is_ms_shipped = 0
+		   AND t.name NOT LIKE 'quark[_]%'
+		 ORDER BY t.name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+func mssqlListColumns(ctx context.Context, exec Executor, table string) ([]Column, error) {
+	// Placeholder via Dialect rather than hardcoded `@p1`. The query
+	// body is MSSQL-specific (sys.* catalog), but using the dialect's
+	// Placeholder() keeps the call site honest — a future driver change
+	// would only need to touch the dialect, not every catalog query.
+	d := &MSSQLDialect{}
+	q := fmt.Sprintf(`
+		SELECT c.name,
+		       ty.name AS type_name,
+		       c.max_length,
+		       c.precision,
+		       c.scale,
+		       c.is_nullable,
+		       dc.definition AS default_value
+		  FROM sys.columns c
+		  JOIN sys.types ty ON c.user_type_id = ty.user_type_id
+		  LEFT JOIN sys.default_constraints dc
+		    ON dc.parent_object_id = c.object_id
+		   AND dc.parent_column_id = c.column_id
+		 WHERE c.object_id = OBJECT_ID(%s)
+		 ORDER BY c.column_id`, d.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Column
+	for rows.Next() {
+		var (
+			name       string
+			typeName   string
+			maxLength  int16
+			precision  uint8
+			scale      uint8
+			isNullable bool
+			dflt       sql.NullString
+		)
+		if err := rows.Scan(&name, &typeName, &maxLength, &precision, &scale, &isNullable, &dflt); err != nil {
+			return nil, err
+		}
+		col := Column{
+			Name:     name,
+			Type:     mssqlReassembleType(typeName, maxLength, precision, scale),
+			Nullable: isNullable,
+		}
+		if dflt.Valid {
+			s := dflt.String
+			col.Default = &s
+		}
+		out = append(out, col)
+	}
+	return out, rows.Err()
+}
+
+// mssqlReassembleType glues parameters onto MSSQL's bare type name from
+// the catalog: `varchar` + `max_length=255` → `varchar(255)`;
+// `decimal` + `precision=10,scale=2` → `decimal(10,2)`; `nvarchar` +
+// `max_length=-1` → `nvarchar(MAX)`. For `nvarchar`/`nchar` the
+// catalog's max_length is bytes (chars × 2) so we halve it when
+// emitting the displayed length. `ntext` is intentionally NOT in the
+// switch — it has no length parameter (always MAX-sized), so the
+// default branch returning the bare name is correct.
+func mssqlReassembleType(typeName string, maxLength int16, precision, scale uint8) string {
+	switch typeName {
+	case "varchar", "char", "varbinary", "binary":
+		if maxLength == -1 {
+			return fmt.Sprintf("%s(MAX)", typeName)
+		}
+		if maxLength > 0 {
+			return fmt.Sprintf("%s(%d)", typeName, maxLength)
+		}
+	case "nvarchar", "nchar":
+		if maxLength == -1 {
+			return fmt.Sprintf("%s(MAX)", typeName)
+		}
+		if maxLength > 0 {
+			// nvarchar/nchar store 2 bytes per char.
+			return fmt.Sprintf("%s(%d)", typeName, maxLength/2)
+		}
+	case "decimal", "numeric":
+		return fmt.Sprintf("%s(%d,%d)", typeName, precision, scale)
+	}
+	return typeName
+}
+
 // --- PostgreSQL --------------------------------------------------------------
 
 // IntrospectSchema reads the PG schema by querying `information_schema`

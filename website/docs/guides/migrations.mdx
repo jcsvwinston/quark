@@ -366,7 +366,7 @@ Dialect coverage (F3-2 progress):
 | SQLite | ✅ supported — `sqlite_master` + `PRAGMA table_info` |
 | MySQL | ✅ supported — `INFORMATION_SCHEMA.{TABLES,COLUMNS}` scoped to `DATABASE()`, `COLUMN_TYPE` verbatim |
 | MariaDB | ✅ supported — shares the MySQL implementation |
-| SQL Server | ⚠️ returns `ErrUnsupportedFeature` — F3-2-mssql follow-up |
+| SQL Server | ✅ supported — `sys.tables` / `sys.columns` / `sys.types` + `sys.default_constraints` LEFT JOIN; type reassembly from `max_length` / `precision` / `scale` with nvarchar byte→char halving and `MAX` for `max_length = -1` |
 | Oracle | ⚠️ returns `ErrUnsupportedFeature` — F3-2-oracle deferred (no CI) |
 
 Schema surface currently covers **tables and columns only**. Indexes,

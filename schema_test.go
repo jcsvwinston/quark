@@ -28,7 +28,7 @@ func TestSchema_DialectInterfaceConformance(t *testing.T) {
 		{&PostgresDialect{}, true, "Postgres must implement SchemaIntrospector (F3-2 core)"},
 		{&MySQLDialect{}, true, "MySQL must implement SchemaIntrospector (F3-2-mysql)"},
 		{&MariaDBDialect{}, true, "MariaDB must implement SchemaIntrospector (F3-2-mysql — shares impl with MySQL)"},
-		{&MSSQLDialect{}, false, "MSSQL introspector is in F3-2-mssql (follow-up)"},
+		{&MSSQLDialect{}, true, "MSSQL must implement SchemaIntrospector (F3-2-mssql)"},
 		{&OracleDialect{}, false, "Oracle introspector is deferred (no CI coverage; needs local DBMS access)"},
 	}
 	for _, tc := range cases {

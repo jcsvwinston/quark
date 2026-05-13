@@ -40,7 +40,7 @@ func testSchemaIntrospection(ctx context.Context, t *testing.T, baseClient *quar
 	// ErrUnsupportedFeature. When their follow-up PR lands, this
 	// branch goes away and the dialect joins the main path below.
 	switch dialect {
-	case "sqlserver", "mssql", "oracle":
+	case "oracle":
 		_, err := baseClient.IntrospectSchema(ctx)
 		if !errors.Is(err, quark.ErrUnsupportedFeature) {
 			t.Errorf("dialect %s should return ErrUnsupportedFeature until F3-2-%s lands, got %v",
@@ -49,7 +49,7 @@ func testSchemaIntrospection(ctx context.Context, t *testing.T, baseClient *quar
 		return
 	}
 
-	// Supported path: SQLite + PostgreSQL + MySQL + MariaDB.
+	// Supported path: SQLite + PostgreSQL + MySQL + MariaDB + MSSQL.
 	dropTable(baseClient, "schema_fixtures")
 	if err := baseClient.Migrate(ctx, &schemaFixture{}); err != nil {
 		t.Fatalf("migrate: %v", err)

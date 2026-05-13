@@ -136,7 +136,16 @@ Pendientes para cerrar F3-2 entero:
   `COLUMN_TYPE` para tipo verbose (`varchar(255)`, `int(11) unsigned`).
   Ambos motores comparten un único impl
   `mysqlLikeIntrospect`; los dos Dialect types delegan a él.
-- **F3-2-mssql**: `sys.tables`, `sys.columns`, `sys.foreign_keys`.
+- ~~**F3-2-mssql**~~. **Cerrado** — `sys.tables` /
+  `sys.columns` / `sys.types` con LEFT JOIN a
+  `sys.default_constraints`. Type reassembly de `max_length`/
+  `precision`/`scale` con dos detalles MSSQL-específicos: el
+  `max_length = -1` se traduce a `(MAX)` (NVARCHAR(MAX) /
+  VARBINARY(MAX)), y para nvarchar/nchar el `max_length` es bytes
+  (chars × 2) → emit `length/2` para coincidir con la DDL
+  user-facing. Defaults se pasan raw — MSSQL los devuelve envueltos
+  en paréntesis (`(0)`, `(getdate())`), unwrap es responsabilidad
+  del F3-3.
 - **F3-2-oracle**: `USER_TABLES`, `USER_TAB_COLUMNS`, `USER_CONS_COLUMNS`. Deferred — Oracle no está en CI hasta que el `gvenzl/oracle-free` image se debuguee.
 - **F3-2-indexes**: añadir `Table.Indexes` + introspection cross-dialect.
 - **F3-2-fks**: añadir `Table.ForeignKeys` + introspection.
