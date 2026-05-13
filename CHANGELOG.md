@@ -36,9 +36,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   byte-to-char halving; `MAX` for `max_length = -1`).
   Oracle still returns `ErrUnsupportedFeature` until F3-2-oracle
   (deferred — no CI coverage until the `gvenzl/oracle-free`
-  image issue resolves). Indexes, foreign keys, and check
-  constraints are deferred to F3-2-{indexes, fks, checks} —
-  `Table` ships with column-only metadata for now.
+  image issue resolves). Foreign keys and check constraints are
+  deferred to F3-2-{fks, checks} — `Table` ships with column +
+  index metadata for now.
+
+- **Index introspection across the 4 CI dialects + SQLite
+  (F3-2-indexes)**: `Table.Indexes` is now populated with
+  non-primary-key indexes (`Index{Name, Columns, Unique}`).
+  Per-dialect catalogs: **SQLite** `PRAGMA index_list` /
+  `PRAGMA index_info` (origin=`pk` filtered);
+  **PostgreSQL** `pg_index` / `pg_class` / `pg_attribute` with
+  `unnest(indkey) WITH ORDINALITY` for stable column order
+  (filter `NOT indisprimary`);
+  **MySQL / MariaDB** `INFORMATION_SCHEMA.STATISTICS` grouped
+  by `INDEX_NAME` ordered by `SEQ_IN_INDEX` (filter `INDEX_NAME
+  != 'PRIMARY'`);
+  **MSSQL** `sys.indexes` / `sys.index_columns` / `sys.columns`
+  with `is_primary_key = 0 AND type > 0` and
+  `is_included_column = 0` to exclude INCLUDE columns.
+  Expression / functional indexes surface their expression
+  slot as `""` — the diff layer (F3-3) decides whether to
+  treat them as opaque.
 
 - **`Client.AcquireMigrationLock(ctx, name, timeout)` — distributed
   migration lock (F3-1)**: cluster-wide advisory lock for migration

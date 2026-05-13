@@ -25,16 +25,31 @@ type Schema struct {
 type Table struct {
 	Name    string
 	Columns []Column
+	Indexes []Index
 
-	// Indexes / ForeignKeys / Checks are intentionally left out of the
-	// minimum F3-2 surface. They land in follow-up PRs once the
-	// column-level diff is proven against the live engines:
-	//   - F3-2-indexes  → reads idx metadata per dialect
+	// ForeignKeys / Checks are intentionally left out of the F3-2
+	// minimum surface. They land in follow-up PRs once the
+	// column-and-index diff is proven against the live engines:
 	//   - F3-2-fks      → reads foreign key constraints
 	//   - F3-2-checks   → reads CHECK constraints
 	// The Schema struct will grow these fields in those PRs; tests and
 	// downstream code that read this struct should treat zero-values
 	// as "not yet introspected" rather than "no constraints".
+}
+
+// Index is one secondary (non-primary-key) index on a table. The PK
+// is a constraint rather than an index in the diff model and lives on
+// the Column (via Default / future PrimaryKey field), not here. The
+// introspector deliberately filters PK-backing indexes per dialect so
+// `Table.Indexes` only carries what F3-3 diffs need to add/drop.
+//
+// Columns is the ordered list of column names as the index defines
+// them (the order is significant for B-tree indexes — a (a,b) index
+// is not the same as (b,a)).
+type Index struct {
+	Name    string
+	Columns []string
+	Unique  bool
 }
 
 // Column is one column in a table.
@@ -75,14 +90,14 @@ type SchemaIntrospector interface {
 // produced here plus the Schema derived from the Go models and emits
 // the operations needed to bring them into alignment.
 //
-// Supported dialects (this PR): PostgreSQL, SQLite. Other dialects
-// (MySQL, MariaDB, MSSQL, Oracle) return `ErrUnsupportedFeature`
-// until their follow-up F3-2-* PRs land.
+// Supported dialects: PostgreSQL, SQLite, MySQL, MariaDB, MSSQL.
+// Oracle returns `ErrUnsupportedFeature` until F3-2-oracle lands
+// (deferred while the container image situation is resolved).
 //
-// The minimum surface for F3-2 is tables + columns; indexes, foreign
-// keys, and check constraints arrive in follow-up PRs. Code that
-// reads [Schema] should treat the unpopulated slices as "not yet
-// introspected", not "no constraints exist".
+// Surface: tables, columns, and indexes (non-PK). Foreign keys and
+// check constraints arrive in follow-up PRs (F3-2-fks, F3-2-checks).
+// Code that reads [Schema] should treat the unpopulated slices as
+// "not yet introspected", not "no constraints exist".
 func (c *Client) IntrospectSchema(ctx context.Context) (Schema, error) {
 	introspector, ok := c.dialect.(SchemaIntrospector)
 	if !ok {
