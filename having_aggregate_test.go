@@ -94,7 +94,13 @@ func testHavingAggregate(ctx context.Context, t *testing.T, baseClient *quark.Cl
 
 	t.Run("CountStarGreaterThan", func(t *testing.T) {
 		mw.reset()
+		// Explicit Select("status") is required for portable SQL:
+		// PostgreSQL, MySQL with `sql_mode=only_full_group_by`, and MSSQL
+		// reject `SELECT *` over a GROUP BY when non-grouped columns
+		// aren't in an aggregate. SQLite is permissive about this, but
+		// the test must work across the integration matrix.
 		_, err := quark.For[HAOrder](ctx, client).
+			Select("status").
 			GroupBy("status").
 			HavingAggregate("COUNT", "*", ">", 1).
 			Limit(10).
@@ -113,7 +119,10 @@ func testHavingAggregate(ctx context.Context, t *testing.T, baseClient *quark.Cl
 
 	t.Run("SumGreaterEqual", func(t *testing.T) {
 		mw.reset()
+		// Same reason as CountStarGreaterThan: explicit projection so
+		// `only_full_group_by`-strict engines accept the query.
 		_, err := quark.For[HAOrder](ctx, client).
+			Select("status").
 			GroupBy("status").
 			HavingAggregate("SUM", "amount", ">=", 60).
 			Limit(10).
