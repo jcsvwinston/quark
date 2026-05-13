@@ -22,16 +22,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dialect-neutral `Schema{Tables[]Table{Name, Columns[]Column}}`.
   Foundation for the F3-3 diff comparator. New optional
   `SchemaIntrospector` interface on Dialect (same opt-in pattern as
-  `MigrationLocker`). Implementations land in this PR for
+  `MigrationLocker`). Implementations land for
   **SQLite** (`sqlite_master` + `PRAGMA table_info`),
   **PostgreSQL** (`information_schema.tables` /
   `information_schema.columns` with `current_schema()` scoping +
-  type-parameter reassembly for `varchar(N)` / `numeric(P,S)`), and
+  type-parameter reassembly for `varchar(N)` / `numeric(P,S)`),
   **MySQL / MariaDB** (`INFORMATION_SCHEMA.{TABLES,COLUMNS}` scoped
   to `DATABASE()`, using `COLUMN_TYPE` for the full parameterised
-  type string). MSSQL and Oracle return `ErrUnsupportedFeature`
-  until their F3-2-* follow-up PRs land. Indexes, foreign keys, and
-  check constraints are deferred to F3-2-{indexes, fks, checks} —
+  type string), and
+  **MSSQL** (`sys.tables` / `sys.columns` / `sys.types` /
+  `sys.default_constraints` with type reassembly from
+  `max_length`, `precision`, `scale`; nvarchar/nchar
+  byte-to-char halving; `MAX` for `max_length = -1`).
+  Oracle still returns `ErrUnsupportedFeature` until F3-2-oracle
+  (deferred — no CI coverage until the `gvenzl/oracle-free`
+  image issue resolves). Indexes, foreign keys, and check
+  constraints are deferred to F3-2-{indexes, fks, checks} —
   `Table` ships with column-only metadata for now.
 
 - **`Client.AcquireMigrationLock(ctx, name, timeout)` — distributed
