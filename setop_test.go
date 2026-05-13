@@ -137,6 +137,17 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	})
 
 	t.Run("IntersectFiltersCommonRows", func(t *testing.T) {
+		// INTERSECT isn't supported by MySQL/MariaDB; the API returns
+		// ErrUnsupportedFeature there (see setop.go:setOpKeyword). The
+		// happy-path semantic test only applies to engines that accept
+		// the operator — skip on the ones that reject it. Engines that
+		// do support it (PostgreSQL, MSSQL, Oracle, SQLite) verify the
+		// row-set arithmetic below.
+		switch baseClient.Dialect().Name() {
+		case "mysql", "mariadb":
+			t.Skip("INTERSECT not supported on MySQL/MariaDB — covered by the rejection contract")
+		}
+
 		// Two operands selecting overlapping email subsets. INTERSECT
 		// returns the rows present in BOTH, deduplicated.
 		//   LHS: alice, bob, carol
@@ -164,6 +175,16 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	})
 
 	t.Run("ExceptFiltersUnique", func(t *testing.T) {
+		// Same as IntersectFiltersCommonRows: MySQL/MariaDB don't
+		// support EXCEPT, the dialect surfaces ErrUnsupportedFeature
+		// in those cases — happy-path semantic test only applies to
+		// the engines that accept the operator. Oracle spells it MINUS
+		// (handled in setOpKeyword) but the Go-level API stays Except.
+		switch baseClient.Dialect().Name() {
+		case "mysql", "mariadb":
+			t.Skip("EXCEPT not supported on MySQL/MariaDB — covered by the rejection contract")
+		}
+
 		// EXCEPT: rows in LHS not in RHS, deduplicated.
 		//   LHS: alice, bob, carol
 		//   RHS: bob, dave
@@ -243,6 +264,32 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		}
 		if !errors.Is(err, quark.ErrUnsupportedFeature) {
 			t.Errorf("expected ErrUnsupportedFeature, got %v", err)
+		}
+	})
+
+	t.Run("IntersectExceptRejectedOnMySQL", func(t *testing.T) {
+		// Mirror image of the happy-path subtests above: on MySQL and
+		// MariaDB, the dialect should reject Intersect / Except with
+		// ErrUnsupportedFeature. The other engines accept the operator
+		// — skip there because there's nothing to assert.
+		switch baseClient.Dialect().Name() {
+		case "mysql", "mariadb":
+			// expected to error
+		default:
+			t.Skip("dialect supports INTERSECT/EXCEPT — this rejection contract only applies to MySQL/MariaDB")
+		}
+
+		lhs := quark.For[setUserA](ctx, baseClient).Select("email")
+		rhs := quark.For[setUserA](ctx, baseClient).Select("email")
+
+		_, err := lhs.Intersect(rhs).List()
+		if err == nil || !errors.Is(err, quark.ErrUnsupportedFeature) {
+			t.Errorf("Intersect on MySQL/MariaDB should return ErrUnsupportedFeature, got %v", err)
+		}
+
+		_, err = lhs.Except(rhs).List()
+		if err == nil || !errors.Is(err, quark.ErrUnsupportedFeature) {
+			t.Errorf("Except on MySQL/MariaDB should return ErrUnsupportedFeature, got %v", err)
 		}
 	})
 }
