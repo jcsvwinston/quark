@@ -40,6 +40,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **Resumable `ApplyPlan` on non-transactional engines (F3-4-resumable)**:
+  closes F3-4 entirely. On MySQL, MariaDB, and Oracle (where DDL
+  implicitly commits and the F3-4-tx wrapper has no effect),
+  `ApplyPlan` now records each successfully applied op in a
+  `quark_migration_state` table keyed by `(plan_hash, op_index)`.
+  A re-invocation against the same plan (same `Plan.Hash()`) skips
+  ops that were already recorded.
+
+  Workflow on a non-tx engine when something goes wrong mid-plan:
+
+  1. `ApplyPlan` runs ops 0..N, op N+1 fails. Ops 0..N are
+     implicitly committed; state table records each.
+  2. User addresses the underlying problem (missing referenced
+     table, unique constraint conflict, etc.).
+  3. User calls `ApplyPlan` again with the same plan. Resume path
+     reads the state, sees ops 0..N applied, starts from op N+1.
+     No re-applying earlier ops — no duplicate-key, no idempotency
+     guesswork.
+
+  Drift detection: the `plan_hash` (SHA-256 of the concatenated
+  `op.String()` outputs) means two plans differing in any way
+  produce independent state. A user who edits their models between
+  runs starts a fresh sequence — no false "resume from op 3"
+  against a plan whose op 3 means something different.
+
+  New `Plan.Hash() string` method exposes the hash for users who
+  want to inspect it (e.g. log the plan ID in CI gates).
+
+  Transactional engines (PG / MSSQL / SQLite) skip the resumable
+  path entirely — rollback handles failure cleanly, no state
+  table needed. The `quark_migration_state` table is filtered out
+  of `IntrospectSchema` by the existing `quark_*` exclusion, so it
+  doesn't surface in user plans.
+
 - **Transactional `ApplyPlan` (F3-4-tx)**: on engines with
   transactional DDL — **PostgreSQL, MSSQL, SQLite** — `Client.ApplyPlan`
   now wraps the op loop in `BEGIN ... COMMIT`. A mid-plan failure

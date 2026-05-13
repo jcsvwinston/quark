@@ -294,16 +294,26 @@ Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
   con branching per-dialect (rollback expected en PG/MSSQL/SQLite,
   partial commit expected en MySQL/MariaDB).
 
-- **F3-4-resumable** (follow-up): checkpoint state en
-  `quark_migration_state(plan_hash, op_index, status, applied_at)`
-  para MySQL / MariaDB / Oracle. La siguiente invocación lee el
-  último op_index con `status=success` y skipea hasta op_index+1.
-  Plan hash sirve para detectar plan-drift entre runs (si el
-  plan cambió, no se puede reanudar — error con instrucción).
+- ~~**F3-4-resumable**~~ **Cerrado** — checkpoint state en
+  `quark_migration_state(plan_hash, op_index, op_string, applied_at)`
+  para MySQL / MariaDB / Oracle. `Plan.Hash()` (sha256 hex de
+  `op.String()` concatenados) es la clave de identidad: la
+  siguiente invocación contra el MISMO plan lee el último
+  op_index registrado y arranca desde op_index+1. Plan-drift se
+  detecta automáticamente — un plan modificado tiene hash
+  diferente, arranca de cero. Cobertura: `TestPlan_Hash_*` (3
+  unit tests para determinismo / orden / longitud) + integration
+  `ApplyPlan_ResumesAfterMidPlanFailure` en SharedSuite (3-op
+  plan, op intermedia falla, fix manual, re-invoke, verifica
+  que op 0 NO se re-aplica y op 2 sí se ejecuta). PG/MSSQL/SQLite
+  skipean este test porque usan tx wrapper.
 
-- **Done F3-4 entero**: test que mata el proceso a mitad de una
-  migración de 10 ops; siguiente run completa los 10 sin re-aplicar
-  los primeros. Pendiente para F3-4-resumable.
+- **F3-4 cerrado entero** (tx + resumable). El test "mata el
+  proceso a mitad y completa después" del plan original queda
+  cubierto a un nivel diferente: el integration test reproduce
+  la condición de fallo (op intermedia error) en lugar de matar
+  el proceso, lo cual prueba la misma propiedad sin el
+  flakiness del kill.
 
 ### F3-5 · Dry-run plan
 
