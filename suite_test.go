@@ -113,6 +113,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testArray(ctx, t, client)
 	})
 
+	t.Run("MigrationLock", func(t *testing.T) {
+		testMigrationLock(ctx, t, client)
+	})
+
 	t.Run("PessimisticLocking", func(t *testing.T) {
 		testPessimisticLocking(ctx, t, client)
 	})

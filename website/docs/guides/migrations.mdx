@@ -290,6 +290,52 @@ err = migrator.Down(ctx, 1)
 Pass `steps > 0` to limit how many migrations are applied or reverted. Pass `0`
 to apply or revert every eligible migration.
 
+## Distributed Migration Lock
+
+When multiple processes (CI runs, sidecars, deployment pods) can boot
+against the same database, they may race to run the same migration.
+`Client.AcquireMigrationLock(ctx, name, timeout)` returns a cluster-wide
+advisory lock — the first caller wins; the rest wait up to `timeout`
+or receive `ErrLockTimeout`. The lock is held by a dedicated
+connection for its lifetime; releasing it returns the connection to
+the pool.
+
+```go
+lock, err := client.AcquireMigrationLock(ctx, "schema-migrations", 30*time.Second)
+if err != nil {
+    return err
+}
+defer lock.Release(ctx)
+
+if err := client.Migrate(ctx, &User{}, &Order{}); err != nil {
+    return err
+}
+```
+
+Per-dialect implementation:
+
+| Dialect | Primitive |
+| --- | --- |
+| PostgreSQL | `pg_advisory_lock(hashtext(name))` + `pg_advisory_unlock`. Timeout via `SET lock_timeout`. SQLSTATE `55P03` mapped to `ErrLockTimeout`. |
+| MySQL / MariaDB | `GET_LOCK(name, timeout_seconds)` + `RELEASE_LOCK`. Return value 0 mapped to `ErrLockTimeout`. |
+| SQL Server | `sp_getapplock @LockMode='Exclusive', @LockOwner='Session'` + `sp_releaseapplock`. Status code `-1` mapped to `ErrLockTimeout`. |
+| SQLite | Not supported — single-writer model; use `BEGIN IMMEDIATE` inside the process. Returns `ErrUnsupportedFeature`. |
+| Oracle | Not yet supported — `DBMS_LOCK.REQUEST` needs PL/SQL plumbing; tracked as F3-1 follow-up. Returns `ErrUnsupportedFeature`. |
+
+Implementation notes:
+
+- The lock is **opt-in**: `client.Migrate(ctx, …)` does NOT call
+  `AcquireMigrationLock` automatically. Wrap your migration code
+  explicitly when you need cross-process exclusion.
+- The MySQL/MariaDB resolution is **whole seconds**. A sub-second
+  `timeout` rounds up to 1 s — the next-best approximation given the
+  protocol granularity.
+- The PostgreSQL implementation uses **session-level** advisory locks
+  (`pg_advisory_lock`, not `pg_advisory_xact_lock`), so the lock
+  doesn't tie the lifetime to a single long-running transaction. You
+  can run any number of statements under the lock — including
+  transactions — without conflict.
+
 ## Recommended Production Flow
 
 1. Use `Migrate` freely in tests and local prototypes.
@@ -299,3 +345,5 @@ to apply or revert every eligible migration.
 5. Keep `SafeMigrations` enabled for app clients.
 6. Use a separate migration client with `AllowRawQueries: true`.
 7. Make destructive changes explicit and reversible, with a tested `Down`.
+8. Wrap multi-process migrations in `AcquireMigrationLock` so deploys
+   don't race against themselves.

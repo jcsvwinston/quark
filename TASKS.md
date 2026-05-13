@@ -52,25 +52,56 @@ el DB en vivo, lo compara, y emite la migración candidata Up + Down.
 
 Descomposición en 7 items entregables independientemente:
 
-### F3-1 · Lock distribuido de migración
+### ~~F3-1 · Lock distribuido de migración~~
 
-- **Objetivo**: mutex de migración a nivel de cluster — el primer proceso
-  que arranca lo adquiere; los demás esperan con timeout. Previene que
-  dos pods migren simultáneamente (incidente común en deploys multi-pod).
-- **Acción**:
-  1. `Dialect.AcquireMigrationLock(ctx, exec, name string, timeout time.Duration) (MigrationLock, error)`
-     + `MigrationLock.Release(ctx)` interface.
-  2. Implementaciones por dialect:
-     - PG: `SELECT pg_advisory_xact_lock(hashtext($1))` — auto-released en commit.
-     - MySQL/MariaDB: `GET_LOCK($1, $2)` + `RELEASE_LOCK($1)` en defer.
-     - MSSQL: `sp_getapplock @LockMode=Exclusive` + `sp_releaseapplock`.
-     - Oracle: `DBMS_LOCK.ALLOCATE_UNIQUE` + `DBMS_LOCK.REQUEST` + `DBMS_LOCK.RELEASE`.
-     - SQLite: `ErrUnsupportedFeature` (no hay semántica distribuida; usar
-       `BEGIN IMMEDIATE` que es la semántica de single-writer del proceso).
-  3. Wrapper opt-in: `client.WithMigrationLock(name, timeout)` que devuelve
-     un `*Client` que adquiere el lock antes de cada `Migrate(ctx, …)`.
-- **Done**: test cross-engine que arranca dos goroutines compitiendo por
-  el mismo lock; sólo una progresa, la otra recibe `ErrLockTimeout`.
+**Cerrado** — `migration_lock.go` introduce `MigrationLock` (interface
+con `Release(ctx)`) y `MigrationLocker` (interface opcional que un
+Dialect implementa para soportar el lock). El método público
+`Client.AcquireMigrationLock(ctx, name, timeout)` hace type-assertion
+contra `MigrationLocker`; si el dialect no lo implementa, devuelve
+`ErrUnsupportedFeature` envuelto con un mensaje descriptivo.
+`ErrLockTimeout` es el sentinel para timeouts (distinguible de
+`ErrUnsupportedFeature` por `errors.Is`).
+
+Implementaciones por dialect (`dialect_migration_lock.go`):
+- **PG**: session-level `pg_advisory_lock(hashtext(name))` sobre
+  conexión dedicada, con `SET lock_timeout` previo. SQLSTATE
+  `55P03` (`lock_not_available`) → `ErrLockTimeout`. Se eligió
+  session-level (no `pg_advisory_xact_lock`) para no atar el lock
+  a una transacción larga — el caller puede correr múltiples
+  statements bajo el lock.
+- **MySQL/MariaDB**: `GET_LOCK(name, timeout_seconds)` con
+  `RELEASE_LOCK(name)` en `Release`. Return 0 → `ErrLockTimeout`,
+  NULL → error descriptivo. Resolución de timeout es segundos
+  enteros (sub-second se redondea hacia arriba a 1s).
+- **MSSQL**: `sp_getapplock @LockMode='Exclusive', @LockOwner='Session'`
+  + `sp_releaseapplock`. Status `-1` → `ErrLockTimeout`; otros
+  códigos negativos → error con el código.
+- **SQLite**: no implementa `MigrationLocker` (intencional). Sin
+  primitiva distribuida; usar `BEGIN IMMEDIATE` para mutex
+  intra-proceso. `Client.AcquireMigrationLock` devuelve
+  `ErrUnsupportedFeature`.
+- **Oracle**: tampoco implementa `MigrationLocker` aún. `DBMS_LOCK`
+  necesita PL/SQL blocks y handles per-lock vía `ALLOCATE_UNIQUE`;
+  diferido a follow-up PR. Comportamiento idéntico al de SQLite
+  por el momento.
+
+Decisión clave: `MigrationLocker` es **interface opcional**, no
+método requerido en `Dialect`. Custom dialects existentes downstream
+no rompen su build.
+
+Cobertura: `migration_lock_test.go` (5 unit tests: type assertions
+sobre supported/unsupported dialects + PG SQL shape + MySQL/MSSQL
+timeout mapping). `testMigrationLock` en SharedSuite (3 subtests
+para los 4 motores que lo soportan: AcquireRelease,
+ConcurrentAcquireSerialises con mutex-exclusión verificada por
+contador atómico, TimeoutWhenAlreadyHeld). SQLite ejecuta un
+subtest dedicado `UnsupportedOnSQLite` que verifica
+`ErrUnsupportedFeature`.
+
+Doc: `website/docs/guides/migrations.mdx` § Distributed Migration
+Lock con la tabla per-dialect y notas sobre opt-in / sub-second
+timeout / session-level advisory; CHANGELOG `### Added`.
 
 ### F3-2 · Schema introspection (per-dialect)
 
