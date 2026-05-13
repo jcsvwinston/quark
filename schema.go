@@ -96,9 +96,17 @@ type ForeignKey struct {
 //
 // Name comes from the catalog. Inline anonymous checks (`age INTEGER
 // CHECK (age > 0)` without an explicit `CONSTRAINT <name>`) get
-// dialect-generated names (`age_check`, `CK__table__age__hash`, etc.);
-// the diff layer matches by name first and falls back to expression
-// equivalence for anonymous ones.
+// dialect-generated names (`age_check`, `CK__table__age__hash`,
+// etc.). F3-3-core's `Diff` matches checks **by name only** — there
+// is no fallback to expression equivalence for anonymous ones,
+// because expression equivalence is AST-level work that's out of
+// scope for the diff layer (each dialect emits its own canonical
+// form; comparing them is its own problem). If your checks must
+// round-trip cleanly cross-dialect, give them explicit
+// `CONSTRAINT <name>` clauses in DDL.
+// TODO(F3-3-checks-anon): consider an opt-in pass that matches
+// anonymous checks by normalised expression once the AST equivalence
+// work lands.
 //
 // Coverage: PostgreSQL, MySQL, MariaDB, and MSSQL implement the
 // introspector. **SQLite** returns `Checks=nil` because SQLite has no

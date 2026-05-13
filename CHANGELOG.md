@@ -40,6 +40,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **Pure-Go schema diff algorithm (F3-3-core)**: `Diff(desired,
+  current Schema) []Operation` returns the ordered list of changes
+  needed to bring `current` into alignment with `desired`. Operations
+  are dialect-neutral sealed types (`OpCreateTable`, `OpDropTable`,
+  `OpAddColumn`, `OpDropColumn`, `OpAlterColumn`, `OpCreateIndex`,
+  `OpDropIndex`, `OpAddForeignKey`, `OpDropForeignKey`,
+  `OpAddCheck`, `OpDropCheck`) — each carries the neutral shape
+  needed to render DDL via the per-dialect helpers in F3-3-execute
+  (follow-up PR). The diff is **pure and deterministic** (same
+  input → same output, stable sort) and **conservatively-typed**
+  (matches columns / indexes / checks by name; matches FKs by name
+  or by composite `(columns, ref_table, ref_columns)` key when the
+  catalog returned an empty name — the SQLite inline-FK case).
+
+  Cross-dialect awareness baked into the equality functions:
+  the MariaDB `RESTRICT` vs MySQL `NO ACTION` FK-action divergence
+  (documented in `ForeignKey` godoc) is treated as semantically
+  equivalent so no spurious DROP+ADD ops appear on every plan.
+  SQLite's `Checks=nil` contract is respected: when either side
+  has `Checks=nil` for a table, the check comparison is skipped
+  rather than treating `nil` as "no checks" (which would emit
+  DropCheck for every check on the other side).
+
+  Op ordering follows dependency rules: CREATE TABLE first; per
+  shared table, ADD COLUMN → ALTER COLUMN → DROP CHECK → DROP FK
+  → DROP INDEX → DROP COLUMN → CREATE INDEX → ADD FK → ADD CHECK;
+  DROP TABLE last. The full algorithm is documented on the [Diff]
+  godoc. Index shape changes (columns or unique flag) are modelled
+  as DROP+CREATE since no engine supports altering an index in
+  place.
+
+  Follow-up F3-3-plan PR will add `Client.PlanMigration(ctx, models...)`
+  to drive this from Go-side model types.
+
 - **CHECK constraint introspection on the 4 CI dialects (F3-2-checks)**:
   `Table.Checks` is now populated with `Check{Name, Expression}`.
   Per-dialect catalogs: **PostgreSQL** `pg_constraint` (contype='c')
