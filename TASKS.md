@@ -246,10 +246,27 @@ Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
     levantará esta limitación cuando struct tags soporten
     declarar indexes.
 
-- **F3-3-execute** (follow-up): aplicar el plan via per-dialect
-  helpers (CreateTable / AddColumn / AlterColumn / CreateIndex /
-  AddForeignKey + raw DDL para CHECK). Riesgo / dry-run / fallback
-  son parte de F3-4 + F3-5, no de execute.
+- ~~**F3-3-execute**~~ **Cerrado** — `Client.ApplyPlan(ctx, plan)`
+  en `migrate_execute.go`. Dispatch per op type via type switch:
+  CreateTable rebuilds DDL desde el neutral `Table` struct;
+  Drop/Add/AlterColumn usan `Dialect.AlterTable*`; CreateIndex /
+  AddForeignKey reusan helpers F2-era; DropIndex / DropForeignKey /
+  AddCheck / DropCheck inline per-dialect.
+
+  Gaps documentados:
+  - **OpAlterColumn**: solo type changes hoy. Nullable / Default
+    deltas son no-ops (TODO F3-3-execute-alter).
+  - **SQLite + DropForeignKey / DropCheck**: `ErrUnsupportedFeature`
+    porque SQLite no soporta `ALTER TABLE DROP CONSTRAINT`. Workaround
+    es 12-step rebuild — follow-up F3-3-execute-sqlite-rebuild.
+
+  No transaccional — F3-4 (resumable) añade el wrapper BEGIN/COMMIT.
+  Error wrap incluye op index + op.String() para debug.
+
+  Tests: 6 unit-style en `migrate_execute_test.go` (empty noop,
+  round-trip, add/drop column, SQLite limitations, error wrapping).
+  Integration test `ApplyPlan_AddColumnRoundTrip` añadido a SharedSuite,
+  corre en 4 motores + SQLite.
 
 - **Heurísticas pendientes** para casos ambiguos (no F3-3-core):
   - Rename column = drop + add. Opt-in via tag hint

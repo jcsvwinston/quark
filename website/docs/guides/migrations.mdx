@@ -488,10 +488,39 @@ fmt.Println("pending changes:")
 fmt.Println(plan.String())
 ```
 
-The Plan is **inert** — it doesn't apply itself (`Plan.Apply` lands
-with F3-3-execute). The CLI plan command (F3-5) will be the typical
-consumer; in user code you can use `IsEmpty()` as a "did anything
-drift?" probe in health checks or CI gates.
+The Plan is **inert** — it doesn't apply itself. Use
+`Client.ApplyPlan(ctx, plan)` to execute the operations against the
+database when you're ready:
+
+```go
+plan, _ := client.PlanMigration(ctx, &User{}, &Order{})
+if !plan.IsEmpty() {
+    if err := client.ApplyPlan(ctx, plan); err != nil {
+        return err
+    }
+}
+```
+
+ApplyPlan walks the ops in order and dispatches each to the
+per-dialect DDL. **Not transactional** in F3-3-execute — a mid-plan
+failure leaves the schema partially applied. The returned error
+carries the op index and the op's String() so you can identify
+where things broke. F3-4 will wrap ApplyPlan in BEGIN / COMMIT
+(for engines that support transactional DDL — PG, MSSQL, SQLite)
+plus checkpoint state for MySQL/MariaDB.
+
+**Known limitations**:
+- **OpAlterColumn** today only emits DDL for the Type change;
+  Nullable / Default deltas are silently skipped (TODO
+  F3-3-execute-alter).
+- **OpDropForeignKey** and **OpDropCheck** on SQLite return
+  `ErrUnsupportedFeature` — SQLite has no `ALTER TABLE DROP
+  CONSTRAINT`, the workaround is the 12-step table-rebuild
+  procedure (separate follow-up).
+
+The CLI plan command (F3-5) will be the typical consumer; in user
+code you can use `IsEmpty()` as a "did anything drift?" probe in
+health checks or CI gates, and `ApplyPlan` to close the loop.
 
 `PlanMigration` carries indexes / FKs / checks from the current
 schema over to the desired one before diffing, because struct tags
