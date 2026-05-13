@@ -103,17 +103,39 @@ func testSchemaIntrospection(ctx context.Context, t *testing.T, baseClient *quar
 		// `quark_*` tables (used internally for migration state /
 		// future use) must not surface in the user-facing schema view.
 		// SQLite also has `sqlite_*` system tables — same filter.
+		//
+		// The contract under test is "the filter actually filters",
+		// not "no internal tables happen to exist". To make the
+		// assertion meaningful we **create** a `quark_filter_probe`
+		// table before introspecting and verify it's NOT in the
+		// result. Without this seed the test would pass even if the
+		// `NOT LIKE 'quark_%'` clause were removed from the
+		// introspector — a regression invisible to the suite.
+		dropTable(baseClient, "quark_filter_probe")
+		if _, err := baseClient.Raw().ExecContext(ctx,
+			`CREATE TABLE quark_filter_probe (id INTEGER PRIMARY KEY)`); err != nil {
+			t.Fatalf("seed quark_filter_probe: %v", err)
+		}
+		defer dropTable(baseClient, "quark_filter_probe")
+
 		schema, err := baseClient.IntrospectSchema(ctx)
 		if err != nil {
 			t.Fatalf("IntrospectSchema: %v", err)
 		}
+		var sawProbe bool
 		for _, table := range schema.Tables {
+			if table.Name == "quark_filter_probe" {
+				sawProbe = true
+			}
 			if len(table.Name) >= 6 && table.Name[:6] == "quark_" {
 				t.Errorf("internal table %q leaked into introspection result", table.Name)
 			}
 			if len(table.Name) >= 7 && table.Name[:7] == "sqlite_" {
 				t.Errorf("SQLite system table %q leaked into introspection result", table.Name)
 			}
+		}
+		if sawProbe {
+			t.Errorf("quark_filter_probe leaked — the NOT LIKE filter is not effective")
 		}
 	})
 }

@@ -7,7 +7,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sort"
 )
 
 // --- SQLite ------------------------------------------------------------------
@@ -72,10 +71,19 @@ func sqliteListColumns(ctx context.Context, exec Executor, table string) ([]Colu
 	// sqliteListTables already only returns names from sqlite_master
 	// (the schema itself is trusted), but the defence-in-depth is
 	// cheap.
+	//
+	// Quoting note: `fmt.Sprintf("%q", …)` would apply Go-style string
+	// quoting (with `\"`-escapes for quote chars), which is NOT the
+	// same as SQLite's identifier quoting (doubled `""` for quote
+	// escape). They coincide for ASCII identifiers without special
+	// chars — and `ValidateIdentifier` already rejects anything that
+	// could trigger a divergence — but we use the SQL-standard form
+	// `"<name>"` (which SQLite accepts as an identifier quote)
+	// explicitly so the quoting intent is clear at the call site.
 	if err := NewSQLGuard().ValidateIdentifier(table); err != nil {
 		return nil, fmt.Errorf("sqlite introspect: bad table name %q: %w", table, err)
 	}
-	q := fmt.Sprintf("PRAGMA table_info(%q)", table)
+	q := fmt.Sprintf(`PRAGMA table_info("%s")`, table)
 	rows, err := exec.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
@@ -227,18 +235,4 @@ func pgListColumns(ctx context.Context, exec Executor, table string) ([]Column, 
 		out = append(out, col)
 	}
 	return out, rows.Err()
-}
-
-// --- helpers shared across dialects -----------------------------------------
-
-// sortTablesByName mutates a Tables slice into alphabetical order. Used
-// only by tests; the per-dialect IntrospectSchema implementations
-// already sort via SQL `ORDER BY table_name`. This helper exists so
-// generated Schemas (e.g. derived from Go models in F3-3) can match
-// the canonical ordering without duplicating sort logic in every
-// caller.
-func sortTablesByName(tables []Table) {
-	sort.Slice(tables, func(i, j int) bool {
-		return tables[i].Name < tables[j].Name
-	})
 }
