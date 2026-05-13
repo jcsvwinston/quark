@@ -278,16 +278,32 @@ Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
 
 ### F3-4 · Migración transaccional + resumable
 
-- **Objetivo**: cada migración aborta limpio si una operación falla.
-- **Acción**:
-  1. Wrapper `Migration.Run(ctx, ops []Operation)` que abre tx, aplica
-     cada op, commit al final. Savepoints intermedios para que un fallo
-     no pierda el progreso.
-  2. MySQL/MariaDB no son transaccionales para DDL → state checkpoint
-     en `quark_migration_state(op_index, status, resume_token)`. La
-     siguiente invocación retoma desde el último checkpoint exitoso.
-- **Done**: test que mata el proceso a mitad de una migración de 10
-  ops; siguiente run completa los 10 sin re-aplicar los primeros.
+- ~~**F3-4-tx**~~ **Cerrado** — `Client.ApplyPlan` wrappea ahora
+  BEGIN/COMMIT en engines con transactional DDL (PG / MSSQL /
+  SQLite). MySQL / MariaDB / Oracle pasan por la ruta no-tx
+  (DDL implicit-commits, no aporta envolver). Refactor interno:
+  `createIndexOn` / `addForeignKeyOn` toman `Executor`; los
+  publicos `CreateIndex` / `AddForeignKey` envuelven con `c.db`.
+  Todos los helpers per-op del executor (`dropIndex`,
+  `dropForeignKey`, `addCheck`, `dropCheck`, `applyCreateTable`)
+  igualmente parametrizados.
+
+  Tests: `TestApplyPlan_SQLite_RollbackOnMidPlanFailure` (unit),
+  `TestSupportsTransactionalDDL` (table-driven 7 cases),
+  `ApplyPlan_TransactionalRollback` integration en SharedSuite
+  con branching per-dialect (rollback expected en PG/MSSQL/SQLite,
+  partial commit expected en MySQL/MariaDB).
+
+- **F3-4-resumable** (follow-up): checkpoint state en
+  `quark_migration_state(plan_hash, op_index, status, applied_at)`
+  para MySQL / MariaDB / Oracle. La siguiente invocación lee el
+  último op_index con `status=success` y skipea hasta op_index+1.
+  Plan hash sirve para detectar plan-drift entre runs (si el
+  plan cambió, no se puede reanudar — error con instrucción).
+
+- **Done F3-4 entero**: test que mata el proceso a mitad de una
+  migración de 10 ops; siguiente run completa los 10 sin re-aplicar
+  los primeros. Pendiente para F3-4-resumable.
 
 ### F3-5 · Dry-run plan
 

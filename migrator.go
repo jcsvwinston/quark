@@ -130,6 +130,19 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 //
 //	client.CreateIndex(ctx, "users", "idx_users_email", []string{"email"}, true)
 func (c *Client) CreateIndex(ctx context.Context, table, indexName string, columns []string, unique bool) error {
+	return c.createIndexOn(ctx, c.db, table, indexName, columns, unique)
+}
+
+// createIndexOn is the [Executor]-parameterised variant of
+// [Client.CreateIndex] that the transactional ApplyPlan path
+// (F3-4-tx) uses to route DDL through a `*sql.Tx`. The public
+// CreateIndex wraps this with `c.db` as the executor.
+//
+// Splitting this out keeps the public API stable while letting
+// ApplyPlan's transactional wrapper share the same per-dialect
+// quirks (MSSQL IF NOT EXISTS guard, MySQL 1061 silent-ignore,
+// Oracle ORA-01408 silent-ignore).
+func (c *Client) createIndexOn(ctx context.Context, exec Executor, table, indexName string, columns []string, unique bool) error {
 	if len(columns) == 0 {
 		return fmt.Errorf("CreateIndex: at least one column required")
 	}
@@ -157,7 +170,7 @@ func (c *Client) CreateIndex(ctx context.Context, table, indexName string, colum
 			uniqueKW, c.dialect.Quote(indexName), c.dialect.Quote(table), strings.Join(quotedCols, ", "))
 	}
 
-	_, err := c.db.ExecContext(ctx, query)
+	_, err := exec.ExecContext(ctx, query)
 	if err != nil {
 		errStr := err.Error()
 		// Oracle: index already exists
@@ -182,6 +195,15 @@ func (c *Client) CreateIndex(ctx context.Context, table, indexName string, colum
 //
 //	client.AddForeignKey(ctx, "orders", "fk_orders_user", []string{"user_id"}, "users", []string{"id"}, "CASCADE", "SET NULL")
 func (c *Client) AddForeignKey(ctx context.Context, table, constraintName string, columns []string, refTable string, refColumns []string, onDelete, onUpdate string) error {
+	return c.addForeignKeyOn(ctx, c.db, table, constraintName, columns, refTable, refColumns, onDelete, onUpdate)
+}
+
+// addForeignKeyOn is the [Executor]-parameterised variant of
+// [Client.AddForeignKey]. Same role as `createIndexOn` —
+// transactional ApplyPlan uses it to route the ALTER TABLE
+// through a `*sql.Tx`, while the public AddForeignKey wraps with
+// `c.db`.
+func (c *Client) addForeignKeyOn(ctx context.Context, exec Executor, table, constraintName string, columns []string, refTable string, refColumns []string, onDelete, onUpdate string) error {
 	if len(columns) == 0 || len(refColumns) == 0 {
 		return fmt.Errorf("AddForeignKey: columns and refColumns must not be empty")
 	}
@@ -211,7 +233,7 @@ func (c *Client) AddForeignKey(ctx context.Context, table, constraintName string
 		actions,
 	)
 
-	_, err := c.db.ExecContext(ctx, query)
+	_, err := exec.ExecContext(ctx, query)
 	if err != nil {
 		if c.dialect.Name() == "oracle" && strings.Contains(err.Error(), "ORA-02264") {
 			return nil // already exists

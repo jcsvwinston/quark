@@ -502,12 +502,23 @@ if !plan.IsEmpty() {
 ```
 
 ApplyPlan walks the ops in order and dispatches each to the
-per-dialect DDL. **Not transactional** in F3-3-execute — a mid-plan
-failure leaves the schema partially applied. The returned error
-carries the op index and the op's String() so you can identify
-where things broke. F3-4 will wrap ApplyPlan in BEGIN / COMMIT
-(for engines that support transactional DDL — PG, MSSQL, SQLite)
-plus checkpoint state for MySQL/MariaDB.
+per-dialect DDL.
+
+**Transactional behaviour** (F3-4-tx):
+
+- **PostgreSQL, MSSQL, SQLite** — DDL is transactional on these
+  engines. `ApplyPlan` opens a `BEGIN`, runs all ops, and `COMMIT`s.
+  A mid-plan failure rolls the whole plan back, leaving the schema
+  in its pre-plan state. This is the safety net for running
+  migrations against live databases on these engines.
+- **MySQL, MariaDB, Oracle** — DDL implicitly commits on every
+  statement, so wrapping is pointless. `ApplyPlan` falls through to
+  the no-tx path; a mid-plan failure leaves the schema partially
+  applied. The returned error carries the op index and the op's
+  `String()` so you can identify where things broke and resume
+  manually. The eventual F3-4-resumable follow-up adds a
+  `quark_migration_state` checkpoint table to automate resumption
+  on these engines.
 
 **Known limitations**:
 - **OpAlterColumn** today only emits DDL for the Type change;

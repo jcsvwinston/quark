@@ -5,6 +5,35 @@ package quark
 
 import "testing"
 
+// TestSupportsTransactionalDDL pins the dialect-classification
+// behind ApplyPlan's BEGIN/COMMIT wrapper. The list is empirical,
+// not aspirational — see the function godoc for the rationale per
+// dialect. A failure here means either a real change in support
+// or someone accidentally adding an unsupported engine to the tx
+// path (which would silently fail since the BEGIN/COMMIT would be
+// no-ops around implicit commits).
+func TestSupportsTransactionalDDL(t *testing.T) {
+	cases := []struct {
+		dialect string
+		want    bool
+	}{
+		{"postgres", true},
+		{"mssql", true},
+		{"sqlite", true},
+		{"mysql", false},
+		{"mariadb", false},
+		{"oracle", false},
+		{"unknown_dialect", false}, // default branch
+	}
+	for _, tc := range cases {
+		t.Run(tc.dialect, func(t *testing.T) {
+			if got := supportsTransactionalDDL(tc.dialect); got != tc.want {
+				t.Errorf("supportsTransactionalDDL(%q) = %v, want %v", tc.dialect, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestWrapExpressionInParens is an internal (package-private) test
 // for the CHECK expression wrapper, in the `quark` package rather
 // than `quark_test` so the unexported function is callable. The

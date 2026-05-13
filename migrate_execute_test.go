@@ -147,6 +147,56 @@ func TestApplyPlan_SQLite_RejectsDropCheck(t *testing.T) {
 	}
 }
 
+// TestApplyPlan_SQLite_RollbackOnMidPlanFailure validates the
+// F3-4-tx contract: when an op mid-plan fails on a transactional-
+// DDL engine (SQLite here), the whole plan rolls back and the
+// schema is left in its pre-plan state.
+//
+// The plan we feed has two ops:
+//  1. OpCreateTable for a fresh table (would succeed in isolation).
+//  2. OpDropTable for a non-existent table (always fails).
+//
+// On a non-transactional engine the first op would land and the
+// second would fail, leaving the new table behind. On SQLite the
+// transaction rolls back and the new table doesn't exist after the
+// call. The test introspects after to confirm.
+func TestApplyPlan_SQLite_RollbackOnMidPlanFailure(t *testing.T) {
+	ctx := context.Background()
+	c := newSQLitePlanClient(t)
+
+	// OpDropTable on a non-existent name is the simplest
+	// guaranteed-fail op on all dialects without needing extra
+	// setup. If `IF EXISTS` support is ever added to OpDropTable
+	// (it isn't today; see migrate_execute.go), replace this with
+	// an op that fails for structural reasons — e.g. OpDropColumn
+	// on a non-existent column, or OpAddForeignKey referring to a
+	// non-existent ref table.
+	plan := quark.Plan{Ops: []quark.Operation{
+		quark.OpCreateTable{Table: quark.Table{
+			Name:    "tx_test_table",
+			Columns: []quark.Column{{Name: "id", Type: "INTEGER", Nullable: false}},
+		}},
+		quark.OpDropTable{Table: "doesnt_exist_xyz"},
+	}}
+
+	err := c.ApplyPlan(ctx, plan)
+	if err == nil {
+		t.Fatalf("plan with mid-failure should error, got nil")
+	}
+
+	// After the failure, the partially-applied `tx_test_table`
+	// MUST NOT exist (transaction rolled back).
+	schema, err := c.IntrospectSchema(ctx)
+	if err != nil {
+		t.Fatalf("introspect: %v", err)
+	}
+	for _, table := range schema.Tables {
+		if table.Name == "tx_test_table" {
+			t.Errorf("tx_test_table should NOT exist after rollback, but does — transaction wrapper failed")
+		}
+	}
+}
+
 // TestApplyPlan_SQLite_RejectsAddCheck: same SQLite limitation as
 // DropFK / DropCheck — symmetric pin.
 func TestApplyPlan_SQLite_RejectsAddCheck(t *testing.T) {
