@@ -23,9 +23,9 @@ import (
 //
 //	root:root@tcp(127.0.0.1:3307)/quark_test
 func TestSuiteMariaDB(t *testing.T) {
-	dsn := os.Getenv("QUARK_TEST_MARIADB_DSN")
+	dsn := resolveMariaDBDSN(t)
 	if dsn == "" {
-		t.Skip("QUARK_TEST_MARIADB_DSN not set")
+		t.Skip("QUARK_TEST_MARIADB_DSN not set (rebuild with -tags=integration to spin up a container)")
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -47,9 +47,9 @@ func TestSuiteMariaDB(t *testing.T) {
 
 // TestMariaDBCache verifies in-memory and Redis cache behaviour against MariaDB.
 func TestMariaDBCache(t *testing.T) {
-	dsn := os.Getenv("QUARK_TEST_MARIADB_DSN")
+	dsn := resolveMariaDBDSN(t)
 	if dsn == "" {
-		t.Skip("QUARK_TEST_MARIADB_DSN not set")
+		t.Skip("QUARK_TEST_MARIADB_DSN not set (rebuild with -tags=integration to spin up a container)")
 	}
 
 	baseClient, err := quark.New("mysql", dsn)

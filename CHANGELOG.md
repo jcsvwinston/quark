@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Integration test matrix via testcontainers-go (F0-8)**: per-engine
+  helpers in `containers_test.go` (gated `//go:build integration`) boot
+  PostgreSQL, MySQL, MariaDB, MSSQL, and Oracle through testcontainers
+  and resolve a DSN with the precedence env var → container. Each suite
+  file delegates DSN resolution to `resolve<Engine>DSN(t)` instead of
+  reading `os.Getenv` directly. The default (`go test -short`) path stays
+  SQLite-only and doesn't import testcontainers-go. CI gains an
+  `integration` job with a 5-engine matrix that runs in parallel to the
+  existing Lint + SQLite jobs; Docker is pre-installed on the
+  `ubuntu-latest` runner so no extra setup. Closes the v0.x honor-system
+  state of the "6 motores verdes antes de mergear" hard rule.
+
 ## [0.4.0] - 2026-05-10
 
 Phase 2 release: composable query builder. Introduces a typed expression

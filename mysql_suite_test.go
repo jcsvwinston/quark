@@ -11,10 +11,13 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+// TestSuiteMySQL runs the full SharedSuite against MySQL. DSN precedence
+// follows the F0-8 pattern: env var first, then container fallback under
+// `-tags=integration` (see containers_test.go).
 func TestSuiteMySQL(t *testing.T) {
-	dsn := os.Getenv("QUARK_TEST_MYSQL_DSN")
+	dsn := resolveMySQLDSN(t)
 	if dsn == "" {
-		t.Skip("QUARK_TEST_MYSQL_DSN not set")
+		t.Skip("QUARK_TEST_MYSQL_DSN not set (rebuild with -tags=integration to spin up a container)")
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))

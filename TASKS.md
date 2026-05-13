@@ -20,11 +20,11 @@ Estado real del backlog post-v0.4.0 (release 2026-05-10, Fase 2 cerrada):
 
 1. **Bloque A — Cerrar Fase 0 de verdad (PRIORIDAD).** El header de arriba
    declara "Fase 0 cerrada" pero los items de **## Limpieza de Fase 0**
-   (F0-1..F0-5) y **## Setup de infraestructura** (F0-6..F0-10) **siguen sin
-   tachar**. Hasta auditarlos uno a uno con los comandos del slash command,
-   no se promueve nada a Fase 3. Item de mayor impacto sin cerrar:
-   **F0-8 (testcontainers)** — sin esto la Regla Dura #1 ("6 motores verdes
-   antes de mergear") es honor system.
+   (F0-1..F0-5) y **## Setup de infraestructura** (F0-6/F0-9/F0-10) **siguen
+   sin tachar**. F0-6 (deploy.yml a gh-pages), F0-7 (Docusaurus versioning),
+   y **F0-8 (testcontainers)** están cerrados — la matriz CI ya arranca
+   los 6 motores. Quedan F0-1..F0-5 (cosméticos del README/CHANGELOG/
+   examples/blog-api), F0-9 (release-please) y F0-10 (linter de docs).
 2. **Bloque B — Tipos diferidos de Fase 1** (`TASKS.md:329-336`): arrays
    Postgres con wrapper neutro, timezones por columna. Abrir issue de diseño
    antes de implementar timezones.
@@ -596,15 +596,35 @@ el nuevo sentinel; Historial en `docs/playbooks/security.md` y
 - **Acción**: `cd website && npm run docusaurus docs:version 0.2.0`. Commit del directorio generado.
 - **Done**: `versions.json` lista `["0.2.0"]`. Sitio sirve `/docs/` (next) y `/docs/0.2.0/`.
 
-### F0-8 · Setup testcontainers-go para los 6 motores
+### ~~F0-8 · Setup testcontainers-go para los 6 motores~~
 
-- **Objetivo**: que `go test ./...` arranque containers de Postgres, MySQL, MariaDB, MSSQL, Oracle (XE) por sí solo. Eliminar los `t.Skip` por env var.
-- **Acción**:
-  1. Añadir dependencia `github.com/testcontainers/testcontainers-go` y los módulos de cada motor.
-  2. Refactorizar `*_suite_test.go` por motor: helper `setupContainer(t)` que devuelve DSN, sin env vars.
-  3. Build tag `//go:build integration` para tests caros; default rápido sigue siendo SQLite.
-  4. CI matrix con job por motor.
-- **Done**: `go test -tags=integration ./...` levanta los 6 motores y corre el suite completo. CI verde con matriz.
+**Cerrado** — `containers_test.go` (gated `//go:build integration`)
+define `setupPostgresContainer`/`setupMySQLContainer`/`setupMariaDBContainer`/
+`setupMSSQLContainer`/`setupOracleContainer` que arrancan el motor con
+`testcontainers-go` (módulos oficiales para los 4 primeros; Oracle usa
+`testcontainers.GenericContainer` sobre `gvenzl/oracle-free:23-slim-faststart`
+porque no hay módulo dedicado). Cada helper expone un DSN listo para
+el driver del motor y registra cleanup vía `testcontainers.CleanupContainer`.
+
+Resolvers `resolve<Engine>DSN(t)` con prioridad env var → container:
+- Sin tag → `suite_dsn_no_integration_test.go` devuelve sólo el env var.
+  Si está vacío, el test se skipea (preserva el comportamiento actual
+  de la regla F0-8).
+- Con `-tags=integration` → `containers_test.go` lee el env var y,
+  si está vacío, arranca el container.
+
+Los 5 suite files (`postgres_/mysql_/mariadb_/mssql_/oracle_suite_test.go`)
+usan ese resolver en lugar de leer `os.Getenv` directamente.
+
+CI: `.github/workflows/ci.yml` añade un job `integration` con
+`strategy.matrix` por motor — corre en paralelo a `Lint` y
+`Test (SQLite)`, ambos siguen siendo el camino rápido del PR. Docker
+ya está pre-instalado en `ubuntu-latest` runners; cada motor tiene
+timeout 20 min (Oracle 30 min porque el primer arranque tarda ~90 s).
+
+SQLite sigue siendo el camino default sin Docker.
+
+Doc/changelog: actualizado en este PR.
 
 ### F0-9 · Instalar `release-please` o `semantic-release`
 
