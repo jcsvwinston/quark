@@ -98,7 +98,7 @@ func main() {
 client, _ = quark.New("postgres", "postgres://user:pass@localhost/db")
 ```
 
-See the [blog-api example](examples/blog-api/) for a full end-to-end REST API with migrations, tests, and curl examples.
+See the per-dialect runnable examples under [`examples/`](examples/) (one folder per supported engine).
 
 ---
 
@@ -108,11 +108,7 @@ See the [blog-api example](examples/blog-api/) for a full end-to-end REST API wi
 >
 > ```bash
 > git clone https://github.com/jcsvwinston/quark
-> go run ./examples/blog-api
-> curl -s -X POST http://localhost:8080/authors \
->   -H "Content-Type: application/json" \
->   -d '{"name":"Alice","email":"alice@example.com"}' | jq .
-> curl -s "http://localhost:8080/posts" | jq .
+> go run ./examples/sqlite
 > ```
 
 ---
@@ -159,74 +155,6 @@ For a cell-by-cell justification with code examples, see **[docs/comparison.md](
 - **Composite PKs** — First-class support for multi-column primary keys across all dialects
 - **Streaming** — `Iter()`, `Cursor()`, and `Paginate()` prevent OOM on large datasets
 - **CLI** — `quark model generate`, `quark migrate up`, `quark inspect schema` and more
-
----
-
-## 🚀 Quick Start
-
-```bash
-go get github.com/jcsvwinston/quark
-```
-
-```go
-package main
-
-import (
-    "context"
-    "log"
-
-    "github.com/jcsvwinston/quark"
-    _ "modernc.org/sqlite"
-)
-
-type User struct {
-    ID    int64  `db:"id"    pk:"true"`
-    Name  string `db:"name"  quark:"not_null"`
-    Email string `db:"email" quark:"unique"`
-    Age   int    `db:"age"`
-}
-
-func main() {
-    client, err := quark.New("sqlite", "file:app.db?cache=shared")
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer client.Close()
-
-    ctx := context.Background()
-
-    // Create the table
-    client.Migrate(ctx, &User{})
-
-    // Insert
-    u := User{Name: "Alice", Email: "alice@example.com", Age: 30}
-    quark.For[User](ctx, client).Create(&u)
-    // u.ID is now set
-
-    // Query
-    users, _ := quark.For[User](ctx, client).
-        Where("age", ">=", 18).
-        OrderBy("name", "ASC").
-        Limit(20).
-        List()
-
-    // Update (partial — only non-zero fields) → returns (rowsAffected int64, err error)
-    u.Name = "Alice Smith"
-    rows, err := quark.For[User](ctx, client).Update(&u)
-    _, _ = rows, err
-
-    // Delete
-    _, _ = quark.For[User](ctx, client).HardDelete(&u)
-
-    _ = users
-}
-```
-
-**Switch to PostgreSQL** — change one line, zero query code changes:
-
-```go
-client, _ = quark.New("postgres", "postgres://user:pass@localhost/db")
-```
 
 ---
 

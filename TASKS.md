@@ -541,40 +541,41 @@ el nuevo sentinel; Historial en `docs/playbooks/security.md` y
 
 ## Limpieza de Fase 0 (no son bugs P0 pero bloquean credibilidad pública)
 
-### F0-1 · Reconciliar versionado público
+### ~~F0-1 · Reconciliar versionado público~~
 
-- **Estado actual**: `RELEASE_NOTES_V1.md` anuncia v1.0.0; `CHANGELOG.md` sólo tiene 0.1.0/0.1.1; `SECURITY.md` dice "pre-1.0"; README dice "v0.x"; ROADMAP marca features de v0.2 como "Completed" sin tag v0.2.
-- **Acciones**:
-  1. Renombrar `docs/RELEASE_NOTES_V1.md` → `docs/RELEASE_NOTES_v0.2.md` (texto sin marketing, lista honesta de cambios desde 0.1.1).
-  2. Actualizar `CHANGELOG.md` con la entrada `[0.2.0] - 2026-MM-DD` que consolide todo lo entre 0.1.1 y hoy.
-  3. Alinear `README.md`: badge de versión, snippets que digan "v0.2".
-  4. Alinear `SECURITY.md`: cambiar "pre-1.0" por "v0.x — supported only on `main`".
-  5. Sincronizar `docs/ROADMAP.md` con el plan de fases de `docs/ANALISIS_MADUREZ.md` §4.
-- **Done**: taggear `v0.2.0` en git. Acción de release publica el sitio versionado.
+**Cerrado** — `RELEASE_NOTES_V1.md` ya no existe. CHANGELOG con
+entries por versión (v0.3.0 y v0.4.0). SECURITY.md actualizado a
+v0.4.x. README dice "v0.4 — late-alpha". ROADMAP sincronizado con
+fases. Versiones en sitio versionadas via Docusaurus.
 
-### F0-2 · Crear `examples/blog-api/` o eliminar las menciones
+### ~~F0-2 · Eliminar menciones a `examples/blog-api/`~~
 
-- **Estado**: README enlaza dos veces a `examples/blog-api/` (sección de demo y "go run"). El directorio no existe.
-- **Acción recomendada**: crear el ejemplo. Es una buena demo de multi-tenancy + relaciones + migraciones. Si no hay tiempo, eliminar las dos menciones del README.
-- **Done**: `cd examples/blog-api && go run main.go` arranca un servidor HTTP de ejemplo, o las menciones desaparecen.
+**Cerrado** — el directorio no se creó (no había tiempo para una
+demo completa de multi-tenancy + relaciones + migraciones bien
+pulida). Las dos menciones del README desaparecen: se sustituyen
+por punteros a los ejemplos por-dialecto en `examples/`. La
+sección "Demo" arranca `go run ./examples/sqlite`.
 
-### F0-3 · Corregir paths en `examples/README.md`
+### ~~F0-3 · Corregir paths en `examples/README.md`~~
 
-- **Estado**: `examples/README.md` instruye `go run pkg/quark/examples/sqlite/main.go` (path heredado de monorepo previo). La ruta real es `examples/sqlite/main.go`.
-- **Acción**: reemplazar todos los `pkg/quark/` → ``.
-- **Done**: cada comando `go run` del README funciona desde la raíz del repo.
+**Cerrado** — los 5 comandos `go run pkg/quark/examples/<engine>/main.go`
+pasan a `go run ./examples/<engine>/main.go`. Verificado:
+`go run ./examples/sqlite/main.go` ejecuta limpio desde la raíz
+del repo.
 
-### F0-4 · Consolidar Quick Start duplicado en README
+### ~~F0-4 · Consolidar Quick Start duplicado en README~~
 
-- **Estado**: README tiene dos Quick Starts (líneas ~34-92 y ~164-222). Copy-paste error.
-- **Acción**: dejar uno solo, el más actualizado, en posición tras la sección de "Why Quark".
-- **Done**: una sola sección Quick Start; lectura lineal sin duplicados.
+**Cerrado** — el segundo Quick Start (líneas ~161-225, copia
+casi exacta del primero) eliminado. Flujo del README ahora es:
+Status → Why Built → Quick Start → Demo → Why Quark? → Features
+→ SQLGuard → ... sin duplicados.
 
-### F0-5 · Reemplazar badge de coverage hardcoded
+### ~~F0-5 · Badge de coverage hardcoded~~
 
-- **Estado**: README muestra "Coverage 87%" como badge estático.
-- **Acción**: configurar codecov o usar `go tool cover` artifact en CI; badge dinámico que enlace al reporte real. Aceptable interim: eliminar el badge hasta que sea real.
-- **Done**: el porcentaje del badge se corresponde con `go test -coverprofile`.
+**Cerrado** — el badge `Coverage 87%` ya no aparece en el README.
+Los badges actuales son Go Reference, CI, Go Version, License,
+Release (todos dinámicos). Configurar codecov real queda como
+mejora opcional fuera de Fase 0.
 
 ---
 
