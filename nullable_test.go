@@ -2,6 +2,7 @@ package quark_test
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -54,8 +55,14 @@ func testNullable(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		if got.Born.Valid {
 			t.Errorf("Born expected NULL, got Valid=true V=%v", got.Born.V)
 		}
-		if !got.Score.Valid || got.Score.V != 98.6 {
-			t.Errorf("Score round-trip: %+v", got.Score)
+		// Postgres maps Go float64 → SQL `real` (single-precision IEEE-754)
+		// unless the schema requests `double precision`. The roundtrip of
+		// 98.6 through float32 lands at 98.5999984741211. SQLite and
+		// MySQL/MariaDB preserve full double precision. Compare with a
+		// tolerance large enough to cover the float32 rounding (~1e-5)
+		// but small enough to catch a genuine roundtrip bug.
+		if !got.Score.Valid || math.Abs(got.Score.V-98.6) > 1e-4 {
+			t.Errorf("Score round-trip: %+v (want ≈ 98.6)", got.Score)
 		}
 	})
 
