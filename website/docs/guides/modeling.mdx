@@ -144,6 +144,39 @@ structs, maps, slices, primitive types. Validation and migration of the
 shape itself is your responsibility — Quark stores the bytes verbatim and
 unmarshals them back into `T` on read.
 
+### Typed arrays — `Array[T]`
+
+For columns that hold a list of values, `quark.Array[T]` is the
+semantically-clearer alternative to `JSON[[]T]`. The wire format is the
+same (JSON-encoded) and the column type is the same per-dialect JSON
+shape; the difference is in the Go-side API:
+
+```go
+type Post struct {
+    ID   int64                `db:"id" pk:"true"`
+    Tags quark.Array[string]  `db:"tags"`
+}
+
+p := Post{Tags: quark.Array[string]{V: []string{"go", "orm"}}}
+client.Migrate(ctx, &Post{})
+quark.For[Post](ctx, client).Create(&p)
+
+// Helpers on the wrapper:
+n := p.Tags.Len()        // 2
+xs := p.Tags.Slice()     // []string{"go", "orm"}
+```
+
+`Array[T]` is intentionally **not** a Postgres-native `INT[]` /
+`TEXT[]` wrapper — operators like `@>`, `&&`, and `array_agg` don't
+fire on the JSON column it backs. For PG-native arrays with operators,
+drop down to `pgx`/`pgtype.Array` directly or use `RawQuery`. The
+neutral-wrapper design keeps the type usable on every dialect without
+importing `pgtype` or shifting behaviour at runtime.
+
+A nil `V` serialises to `[]` (empty array), not `null` — pair with
+`quark.Nullable[quark.Array[T]]` when you need to distinguish SQL NULL
+from "valid but empty".
+
 ### Binary columns
 
 A plain `[]byte` field maps to the dialect-native binary column:

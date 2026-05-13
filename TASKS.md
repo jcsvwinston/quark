@@ -326,9 +326,19 @@ subtests: StructValueRoundTrip (struct + slice + map + []byte), ZeroValueScansAs
 UpdateReplacesPayload (vía Tracked.Save para validar la integración con dirty
 tracking).
 
-Deferred a Fase 2 con su propio scope:
-- **Arrays Postgres** (`pgtype.Array`) — requiere wrapper neutro que
-  abstraiga el concepto sin pegar el dialect a `pgtype` directamente.
+Deferred a Bloque B con su propio scope:
+- ~~**Arrays Postgres** — wrapper neutro~~. **Cerrado en v0.6
+  (Unreleased)**. `array.go` introduce `Array[T any]` con
+  `Value`/`Scan` JSON-backed y migrate detection idéntica a
+  `JSON[T]` (`isQuarkArray` → `jsonColumnType` per dialect).
+  Decisión consciente: no PG-native `INT[]`/`TEXT[]`, no operadores
+  `@>`/`&&`, no import de `pgtype`. La razón viene del propio
+  spec ("wrapper neutro sin pegar el dialect a pgtype").
+  Cobertura: `array_test.go` (7 tests unitarios) + `testArray` en
+  SharedSuite (3 subtests: StringArrayRoundTrip,
+  ZeroValueArraysRoundTrip, UpdateReplacesArrayContents). Inherits
+  el skip de MSSQL JSON NVARCHAR(MAX) hasta que F0-8 followup E
+  cierre el byte-encoding bug.
 - **Timezones** (default UTC + override por columna) — diseño abierto sobre
   cómo configurar el override (tag `quark:"tz=UTC"` vs Client option).
 - **`shopspring/decimal` y `google/uuid` pre-registered**: el usuario puede
