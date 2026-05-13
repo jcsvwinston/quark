@@ -1,8 +1,11 @@
 # Quark — backlog táctico
 
-> **Fase 0 cerrada (2026-05-10).** Los 5 P0 originales están tachados abajo;
-> el repo queda consolidado en `main` sin branches huérfanas y con todas las
-> docs al día. Backlog vivo ahora en **Fase 1** (`docs/ANALISIS_MADUREZ.md` §4).
+> **Fase 0 cerrada de verdad (2026-05-13).** Los 5 P0 originales tachados,
+> F0-1..F0-10 todos cerrados, integration matrix bloqueante en 4/5 motores
+> (PG/MySQL/MariaDB/MSSQL; Oracle como gap documentado). El repo queda
+> consolidado en `main` sin branches huérfanas, docs al día, doc linter en
+> CI, release-please automatizando bumps. Backlog vivo ahora en **Fase 1
+> diferida (Bloque B)** y **Fase 3** (`docs/ANALISIS_MADUREZ.md` §4).
 >
 > Convención: cada tarea lleva su archivo:línea de origen, criterio de "done"
 > y dónde queda la documentación al cerrar.
@@ -14,28 +17,25 @@
 > **No empieces "explorando".** Invoca `/next-session [foco]` (definido en
 > `.claude/commands/next-session.md`) y trabaja el bloque que indique.
 >
-> Foco admitido: `f0` | `tipos` | `fase3` | `auto`. Si dudas, usa `auto`.
+> Foco admitido: `tipos` | `fase3` | `auto`. Si dudas, usa `auto`. El foco
+> `f0` ya no aplica — está cerrado.
 
-Estado real del backlog post-v0.4.0 (release 2026-05-10, Fase 2 cerrada):
+Estado real del backlog post-v0.4.0 + Bloque-A cerrado:
 
-1. **Bloque A — Cerrar Fase 0 de verdad (PRIORIDAD).** El header de arriba
-   declara "Fase 0 cerrada" pero los items de **## Limpieza de Fase 0**
-   (F0-1..F0-5) y **## Setup de infraestructura** (F0-6/F0-9/F0-10) **siguen
-   sin tachar**. F0-6 (deploy.yml a gh-pages), F0-7 (Docusaurus versioning),
-   y **F0-8 (testcontainers)** están cerrados — la matriz CI ya arranca
-   los 6 motores. Quedan F0-1..F0-5 (cosméticos del README/CHANGELOG/
-   examples/blog-api), F0-9 (release-please) y F0-10 (linter de docs).
-2. **Bloque B — Tipos diferidos de Fase 1** (`TASKS.md:329-336`): arrays
-   Postgres con wrapper neutro, timezones por columna. Abrir issue de diseño
-   antes de implementar timezones.
-3. **Bloque C — Apertura formal de Fase 3** (migraciones serias). Sólo tras
-   Bloque A. El plan vive en `docs/ANALISIS_MADUREZ.md` §4 Fase 3 — no se
-   duplica aquí; se descompone en `F3-1, F3-2, …` con la misma granularidad
-   que F1/F2 cuando se abra.
+1. ~~**Bloque A — Cerrar Fase 0 de verdad**~~. Hecho. F0-1..F0-10
+   tachados (PRs #28-#39). Integration matrix en CI bloqueante.
+   release-please workflow activo. Doc linter en CI.
+2. **Bloque B — Tipos diferidos de Fase 1** (sección "Fase 1" más abajo):
+   arrays Postgres con wrapper neutro, timezones por columna. Abrir issue
+   de diseño antes de implementar timezones.
+3. **Bloque C — Apertura formal de Fase 3** (migraciones serias). El plan
+   vive en `docs/ANALISIS_MADUREZ.md` §4 Fase 3 — no se duplica aquí; se
+   descompone en `F3-1, F3-2, …` con la misma granularidad que F1/F2
+   cuando se abra.
 
-Nada de Bloque C hasta que Bloque A esté **realmente** cerrado y CI corra
-los 6 motores verde. Esto extiende la coletilla del CLAUDE.md "Cuándo pasar
-a Fase 1".
+Bloque B o C — la elección depende de qué presione más el caller del ORM
+en producción. Por defecto del slash command: `auto` elige el de mayor
+leverage según el estado del repo.
 
 ---
 
