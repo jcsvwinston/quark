@@ -30,6 +30,16 @@ jobs:
             exit 1
           fi
 
+      - name: lint docs
+        # F0-10. Catches doc drift before it lands on main:
+        # marketing language ("production-ready" / "enterprise-grade"
+        # / "battle-tested"), references to the deleted
+        # `RELEASE_NOTES_V1.md`, and broken relative links inside the
+        # docs tree. Meta files (CLAUDE.md, TASKS.md, ADRs, blog
+        # posts, versioned snapshots) are exempt — they discuss the
+        # rules on purpose.
+        run: bash scripts/lint-docs.sh
+
   test:
     name: Test (SQLite)
     runs-on: ubuntu-latest

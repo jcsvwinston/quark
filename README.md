@@ -98,7 +98,7 @@ func main() {
 client, _ = quark.New("postgres", "postgres://user:pass@localhost/db")
 ```
 
-See the [blog-api example](examples/blog-api/) for a full end-to-end REST API with migrations, tests, and curl examples.
+See the per-dialect runnable examples under [`examples/`](examples/) (one folder per supported engine).
 
 ---
 
