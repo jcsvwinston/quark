@@ -722,15 +722,38 @@ de `website/docs/` en `website/versioned_docs/version-X.Y.Z/`. Ese
 paso sigue siendo manual via `/release` antes de mergear el PR de
 release-please. Documentado en el comentario del workflow.
 
-### F0-10 · Linter de docs
+### ~~F0-10 · Linter de docs~~
 
-- **Objetivo**: detectar drift entre código y docs. Bash o Go script en CI.
-- **Checks mínimos**:
-  - Cada feature listada en `ROADMAP.md` como "Completed" debe tener entrada en `CHANGELOG.md`.
-  - No debe haber referencias a `RELEASE_NOTES_V1` cuando la última tag no es v1.
-  - Enlaces internos en `docs/**/*.md` y `website/docs/**/*.md` no deben estar rotos.
-  - Cualquier API pública nueva (`go doc`) debe tener su página en `website/docs/`.
-- **Done**: CI rojo si alguno falla; verde tras corregir.
+**Cerrado** — `scripts/lint-docs.sh` corre como paso del job `Lint`
+en `.github/workflows/ci.yml`. CI rojo si alguno de los 3 checks
+falla. Implementados:
+
+1. **Anti-marketing**: detecta `production-ready`, `enterprise-grade`,
+   `battle-tested` en docs user-facing. Acepta negaciones (`Not v1.0
+   production-ready`, `isn't`, `todavía no`, etc.).
+2. **`RELEASE_NOTES_V1` leak**: reference al archivo borrado (F0-1).
+3. **Broken relative links**: parsea `[text](path)` en `*.md`/`*.mdx`
+   y verifica que el destino existe. Docusaurus-aware: prueba
+   variantes `<path>`, `<path>.md`, `<path>.mdx`, `<path>/index.md`,
+   `<path>/index.mdx`, y maneja `/docs/...` baseUrl-rooted como
+   `website/docs/...`.
+
+**Exempt** (legítimamente discuten las reglas o son histórico
+congelado): `CLAUDE.md`, `TASKS.md`, `docs/ANALISIS_MADUREZ.md`,
+`docs/adr/`, `.claude/`, `website/blog/`, `website/versioned_docs/`,
+`scripts/lint-docs.sh` mismo.
+
+**Checks no implementados** (out-of-scope para v0.4 — feasible
+después con go/parser + sidebar.ts AST):
+- "Cada feature listada en `ROADMAP.md` como Completed debe tener
+  entrada en `CHANGELOG.md`" — requiere parser de ambos archivos.
+- "Cualquier API pública nueva (`go doc`) debe tener su página en
+  `website/docs/`" — requiere inventario AST de exported symbols
+  y mapping a páginas del sitio.
+
+Estos dos checks añadidos son los de mayor leverage (drift de
+versionado + marketing) y los más baratos de mantener. Los otros
+dos quedan como ticket abierto para Fase 1+ si emerge la necesidad.
 
 ---
 
