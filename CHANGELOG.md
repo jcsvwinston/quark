@@ -40,6 +40,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **Per-Client model registry (F3-7)**: closes Phase 3. Adds three
+  methods on `*Client` for managing which models the Client is
+  responsible for, with convenience wrappers for the F3-3/F3-5
+  workflows:
+
+  - `Client.RegisterModel(models ...any) error` — appends models
+    to the per-Client registry. Validates every model up front
+    (must be struct or `*struct`, no untyped nil) and refuses
+    partial registration on failure. Safe for concurrent use.
+  - `Client.RegisteredModels() []any` — returns a snapshot of
+    registered models in registration order. Mutations to the
+    returned slice don't affect the internal registry.
+  - `Client.MigrateRegistered(ctx)` — convenience for
+    `Migrate(ctx, c.RegisteredModels()...)`. No-op (returns nil)
+    when nothing is registered.
+  - `Client.PlanMigrationRegistered(ctx)` — convenience for
+    `PlanMigration(ctx, c.RegisteredModels()...)`. Returns an
+    empty `Plan` when nothing is registered.
+
+  Intentionally additive — the global type-meta cache in
+  `internal/schema` is unchanged because it's correct as global
+  state (deterministic per `reflect.Type`). F3-7's per-Client
+  registry is about "which models this Client manages", NOT about
+  the meta-computation cache. Multi-tenant deployments with
+  multiple Clients (per ADR-0007) can now each track their own
+  model set without cross-contamination.
+
+  Calling `RegisterModel` multiple times APPENDS — it does NOT
+  dedupe. Documented and pinned by a test
+  (`TestClient_RegisterModel_DoesNotDeduplicate`) so a future
+  "smart dedup" doesn't silently change behaviour.
+
 - **`Client.Backfill` — orchestrated table backfill with resume
   tokens (F3-6)**: the data-ops counterpart to F3-3..F3-5's schema
   story. Iterates a table by primary key in batches, invokes a

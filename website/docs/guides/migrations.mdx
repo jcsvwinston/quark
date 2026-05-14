@@ -676,6 +676,34 @@ invocations against the same Name race on the state row — wrap
 with `Client.AcquireMigrationLock` if you need cross-process
 serialisation.
 
+## Per-Client model registry
+
+Instead of passing your model list to every migration call, register
+them once on the Client:
+
+```go
+client, _ := quark.New(dialect, dsn)
+if err := client.RegisterModel(&User{}, &Order{}, &Invoice{}); err != nil {
+    return err
+}
+// Later — no need to repeat the model list:
+if err := client.MigrateRegistered(ctx); err != nil { return err }
+plan, _ := client.PlanMigrationRegistered(ctx)
+```
+
+`RegisterModel` validates every model up-front (must be struct or
+`*struct`, no nil) and refuses partial registration on failure.
+`RegisteredModels()` returns a snapshot in registration order; the
+slice is a copy, so mutating it doesn't touch the internal state.
+Safe for concurrent use.
+
+**Note**: the registry **appends** — calling `RegisterModel` with the
+same type twice gives you two entries. That's a deliberate design
+choice; the registry doesn't try to be clever about identity.
+Multi-tenant deployments (per ADR-0007) where each tenant Client
+manages its own set of models benefit from per-Client state here
+— the registry doesn't leak across Clients.
+
 ## Recommended Production Flow
 
 1. Use `Migrate` freely in tests and local prototypes.
