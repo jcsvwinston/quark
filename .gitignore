@@ -3,6 +3,7 @@
 *.out
 quark
 blog-api
+/migrations
 
 # Example database files
 *.db

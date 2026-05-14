@@ -315,18 +315,37 @@ Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
   el proceso, lo cual prueba la misma propiedad sin el
   flakiness del kill.
 
-### F3-5 · Dry-run plan
+### F3-5 · CLI plan/verify/apply
 
-- **Objetivo**: `quark schema diff --plan` que muestra DDL up/down + warnings
-  de RiskLevel sin ejecutar nada. Estilo `terraform plan`.
-- **Acción**:
-  1. CLI command en `cmd/quark/commands/diff.go`: introspecciona el DB,
-     comparara con los modelos registrados (via `--models-pkg ./...`
-     o por convención), emite el plan.
-  2. Salida coloreada (azul=safe, amarillo=lossy, rojo=breaking) en TTY;
-     fallback a texto plano en pipes.
-- **Done**: ejemplo en `examples/blog-api/` (o crear `examples/migrations/`)
-  que muestra el output esperado.
+- ~~**F3-5**~~ **Cerrado** — package `quarkmigrate` con `Run(ctx,
+  action, client, models...)` y `RunWithOutput` (variante test-
+  friendly con writers explícitos). Tres actions: `plan` (exit 0,
+  informational), `verify` (exit 1 si non-empty — CI gate), `apply`
+  (corre el plan). Exit codes como constantes públicas
+  (`ExitSuccess`/`ExitDriftDetected`/`ExitError` = 0/1/2). Plan
+  output prefijado con primeros 8 chars del `Plan.Hash()` para
+  correlación con `quark_migration_state`.
+
+  Decisión: NO se ship un binario standalone porque Go no tiene
+  runtime model registration — el binario debe importar los
+  modelos del user. El patrón idiomático es que el user escriba
+  un `migrations/main.go` thin que importa `quarkmigrate` + sus
+  modelos. Ejemplo completo en `examples/migrations/main.go`.
+
+  Cobertura: 7 unit tests en `quarkmigrate/run_test.go` (ParseAction
+  table-driven con 7 casos; Run para los 3 actions × estados
+  empty/non-empty + error paths). Ejemplo compila en CI vía
+  `go build ./...`.
+
+  Deferred a follow-up:
+  - **Colored output** (azul/amarillo/rojo para safe/lossy/breaking).
+    Bloqueado por: F3-3 no clasifica ops por RiskLevel todavía.
+    Cuando aterrice RiskLevel (probable F3-6 o un PR independiente),
+    el render se extiende.
+  - **`Client.MigrateAtomic(ctx, models...)`** — wrapper que
+    combina AcquireMigrationLock + PlanMigration + ApplyPlan
+    en una sola call para non-tx engines. Flagged en godoc de
+    ApplyPlan; sin abrir PR hasta que F3-1 cubra Oracle.
 
 ### F3-6 · Backfill orquestado
 
