@@ -136,17 +136,24 @@ Punto de integración: el middleware pipeline o un observer dedicado —
 decidir en el PR cuál encaja mejor sin duplicar el timing que ya
 mide el otel Middleware.
 
-### F4-4 · Cache key con serialización determinista
+### ~~F4-4 · Cache key con serialización determinista~~
 
-**Fix de correctness, prerequisito de F4-5/F4-6.** `cache.go:35-45`
-construye el key con `fmt.Sprintf("%v", arg)`, que colisiona:
-`int64(1)` vs `string("1")`, `time.Time` de zonas distintas con mismo
-wall-clock, `nil` vs `""`. Reemplazar por serialización determinista
-length-prefixed (`binary.Write`) o `gob`, incluyendo el tipo en el
-encoding para que `1` int y `1` string no colisionen. El key sigue
-incluyendo `dialect.Name() + tenantID + schema + sqlStr`. Tests:
-`cache_all_engines_test.go` debe seguir verde + nuevos casos de
-no-colisión. Sin esto, F4-5 cachearía sobre keys frágiles.
+**Cerrado** — `generateCacheKey` (`cache.go`) abandona
+`fmt.Sprintf("%v", arg)`. Encoding **type-tagged y length-prefixed**:
+cada campo fijo (`dialect.Name()` / `tenantID` / `schema` / `sqlStr`)
+va length-prefixed; cada bind arg lleva un byte de tipo (`cacheArg*`)
++ valor en big-endian. Cierra las 3 clases de colisión: tipo
+(`int64(1)` vs `string("1")` vs `uint64` vs `float64` vs `bool` vs
+`nil`), boundary (sin separadores `"my"+"sql"` ≡ `"mysql"+""`,
+`"ab"+""` ≡ `"a"+"b"`), y `nil` vs `""`. `time.Time` keyeado por
+`UnixNano()` — mismo instante en zonas distintas = mismo key (hit
+legítimo). Tipos no primitivos → `fmt.Sprintf("%#v", v)` (incluye el
+tipo Go, no invoca `Stringer`). Reflection-free (ADR-0002). Cobertura:
+`cache_test.go` (5 tests: determinismo, type/boundary/nil collision,
+time same-instant/distinct, discriminantes de query); el integration
+`cache_all_engines_test.go` sigue verde (el comportamiento hit/miss no
+cambia — sólo se endurece el key). Doc: `docs/playbooks/cache.md`
+§"Cache key" + CHANGELOG `### Fixed`.
 
 ### F4-5 · Cache stampede protection (ADR-0011)
 
