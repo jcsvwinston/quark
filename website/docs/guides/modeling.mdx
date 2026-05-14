@@ -234,6 +234,53 @@ CreatedAt time.Time `db:"created_at" default:"CURRENT_TIMESTAMP"`
 Active    bool      `db:"active" default:"1"`
 ```
 
+### Timezones
+
+By default a `time.Time` field passes through to the driver untouched —
+the historical behaviour, and still the default. Two opt-in knobs let you
+take control of the timezone:
+
+- **`quark.WithDefaultTZ(loc)`** — a Client-wide fallback for every
+  `time.Time` column that doesn't carry its own tag.
+- **`quark:"tz=Europe/Madrid"`** — a per-column override tag.
+
+```go
+client, _ := quark.New("pgx", dsn, quark.WithDefaultTZ(time.UTC))
+
+type Event struct {
+    ID        int64     `db:"id" pk:"true"`
+    CreatedAt time.Time `db:"created_at"`                          // uses the client default
+    LocalTime time.Time `db:"local_time" quark:"tz=Europe/Madrid"` // column override wins
+    DeletedAt quark.Nullable[time.Time] `db:"deleted_at" quark:"tz=Europe/Madrid"`
+}
+```
+
+The precedence is **column tag → client default → pass-through**.
+
+**The wire contract is UTC-always.** When a column resolves to a
+timezone, the `time.Time` is converted to UTC on the way to the database
+— every dialect stores the same instant — and converted to the configured
+location in memory when scanned back. The tag therefore only affects how
+the field reads in Go, never what is persisted. The tag is honoured on
+`time.Time`, `*time.Time` and `Nullable[time.Time]` fields, including when
+the model is loaded through `Preload`.
+
+The IANA name is validated **eagerly**: an invalid `tz=` value makes
+`Client.RegisterModel` and `Client.Migrate` fail fast with
+[`ErrInvalidTimezone`](/docs/reference/api/errors), so a typo breaks the
+app at startup rather than on the first query that touches the column.
+
+A column with neither a tag nor a client default is untouched — the
+feature is fully opt-in and adds nothing for callers that don't use it.
+See [ADR-0010](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0010-per-column-timezone-override.md)
+for the design rationale.
+
+:::note
+A custom type that wraps `time.Time` and is registered via
+`RegisterTypeMapper` is **not** intercepted by the timezone path — it owns
+its `Scanner` / `Valuer` and is responsible for its own zone handling.
+:::
+
 ## Primary Keys
 
 Use `pk:"true"` for explicit primary keys:

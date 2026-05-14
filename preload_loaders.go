@@ -213,7 +213,7 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 			scanDest := make([]any, len(cols))
 			for i, col := range cols {
 				if fm, ok := relModel.FieldByCol[col]; ok {
-					scanDest[i] = makeScanDest(relVal.Field(fm.Index))
+					scanDest[i] = makeScanDest(relVal.Field(fm.Index), q.preloadColumnTZ(relModel, fm))
 				} else {
 					var discard any
 					scanDest[i] = &discard
@@ -314,7 +314,7 @@ func (q *BaseQuery) scanAndMapStandard(rows *sql.Rows, parents reflect.Value, re
 		scanDest := make([]any, len(cols))
 		for i, col := range cols {
 			if fm, ok := relModel.FieldByCol[strings.ToLower(col)]; ok {
-				scanDest[i] = makeScanDest(relVal.Field(fm.Index))
+				scanDest[i] = makeScanDest(relVal.Field(fm.Index), q.preloadColumnTZ(relModel, fm))
 			} else {
 				var discard any
 				scanDest[i] = &discard
@@ -354,7 +354,7 @@ func (q *BaseQuery) scanAndMapPolymorphic(rows *sql.Rows, parents reflect.Value,
 		scanDest := make([]any, len(cols))
 		for i, col := range cols {
 			if fm, ok := relModel.FieldByCol[strings.ToLower(col)]; ok {
-				scanDest[i] = makeScanDest(relVal.Field(fm.Index))
+				scanDest[i] = makeScanDest(relVal.Field(fm.Index), q.preloadColumnTZ(relModel, fm))
 			} else {
 				var discard any
 				scanDest[i] = &discard

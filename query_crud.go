@@ -363,7 +363,7 @@ func (q *BaseQuery) buildInsert(v reflect.Value) (string, []any, error) {
 
 		columns = append(columns, q.dialect.Quote(dbTag))
 		placeholders = append(placeholders, q.dialect.Placeholder(argIndex))
-		args = append(args, v.Field(i).Interface())
+		args = append(args, q.bindColumnArg(dbTag, v.Field(i).Interface()))
 		argIndex++
 	}
 
@@ -383,7 +383,7 @@ func (q *BaseQuery) buildInsert(v reflect.Value) (string, []any, error) {
 			if fm, ok := q.meta.FieldByCol[q.tenantCol]; ok {
 				columns = append(columns, q.dialect.Quote(q.tenantCol))
 				placeholders = append(placeholders, q.dialect.Placeholder(argIndex))
-				args = append(args, v.Field(fm.Index).Interface())
+				args = append(args, q.bindColumnArg(q.tenantCol, v.Field(fm.Index).Interface()))
 				argIndex++
 			}
 		}
@@ -747,7 +747,7 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 		}
 
 		setClauses = append(setClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(dbTag), q.dialect.Placeholder(argIndex)))
-		args = append(args, fieldValue.Interface())
+		args = append(args, q.bindColumnArg(dbTag, fieldValue.Interface()))
 		argIndex++
 	}
 
@@ -857,7 +857,7 @@ func (q *BaseQuery) buildUpdateMap(data map[string]any) (string, []any, error) {
 		}
 
 		setClauses = append(setClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(col), q.dialect.Placeholder(argIndex)))
-		args = append(args, val)
+		args = append(args, q.bindColumnArg(col, val))
 		argIndex++
 	}
 
@@ -1465,6 +1465,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 	t := first.Type()
 	var columns []string
 	var colIndexes []int
+	var colTags []string // raw db tags, parallel to colIndexes, for per-column tz resolution
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		dbTag := columnFromDBTag(field.Tag.Get("db"))
@@ -1479,6 +1480,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		}
 		columns = append(columns, q.dialect.Quote(dbTag))
 		colIndexes = append(colIndexes, i)
+		colTags = append(colTags, dbTag)
 	}
 
 	// Oracle's INSERT ALL statement is incompatible with GENERATED ALWAYS AS IDENTITY
@@ -1502,7 +1504,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 			q.ensureTenantID(v)
 			rowArgs := make([]any, len(colIndexes))
 			for j, ci := range colIndexes {
-				rowArgs[j] = v.Field(ci).Interface()
+				rowArgs[j] = q.bindColumnArg(colTags[j], v.Field(ci).Interface())
 			}
 			if _, err := q.executeExec(ctx, sqlStr, rowArgs); err != nil {
 				return err
@@ -1533,7 +1535,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		placeholders := make([]string, len(colIndexes))
 		for j, ci := range colIndexes {
 			placeholders[j] = q.dialect.Placeholder(argIndex)
-			args = append(args, v.Field(ci).Interface())
+			args = append(args, q.bindColumnArg(colTags[j], v.Field(ci).Interface()))
 			argIndex++
 		}
 		sqlBuf.WriteString("(")
@@ -1736,7 +1738,7 @@ func (q *Query[T]) upsertBatchStandard(
 		phs := make([]string, len(cols))
 		for j, c := range cols {
 			phs[j] = q.dialect.Placeholder(argIndex)
-			args = append(args, v.Field(c.index).Interface())
+			args = append(args, q.bindColumnArg(c.dbTag, v.Field(c.index).Interface()))
 			argIndex++
 		}
 		sqlBuf.WriteString("(")
@@ -1781,7 +1783,7 @@ func (q *Query[T]) upsertBatchMSSQLBulk(
 		phs := make([]string, len(cols))
 		for j, c := range cols {
 			phs[j] = q.dialect.Placeholder(argIndex)
-			args = append(args, v.Field(c.index).Interface())
+			args = append(args, q.bindColumnArg(c.dbTag, v.Field(c.index).Interface()))
 			argIndex++
 		}
 		valueRows = append(valueRows, "("+strings.Join(phs, ", ")+")")

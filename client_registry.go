@@ -60,6 +60,13 @@ func (c *Client) RegisterModel(models ...any) error {
 		if t.Kind() != reflect.Struct {
 			return fmt.Errorf("RegisterModel: model must be a struct or *struct, got %s", t.Kind())
 		}
+		// Fail fast on an invalid quark:"tz=..." tag: surface it now,
+		// at registration, rather than on the first query that binds or
+		// scans the column. computeModelMeta records the parse failure
+		// on the cached meta; we wrap it in the public sentinel here.
+		if meta := GetModelMetaByType(t); meta != nil && meta.TZError != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidTimezone, meta.TZError)
+		}
 	}
 	c.registeredModelsMu.Lock()
 	defer c.registeredModelsMu.Unlock()

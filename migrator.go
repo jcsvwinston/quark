@@ -42,6 +42,10 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 	if meta == nil {
 		return fmt.Errorf("failed to get metadata for %s", t.Name())
 	}
+	// Fail fast on an invalid quark:"tz=..." tag before emitting any DDL.
+	if meta.TZError != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidTimezone, meta.TZError)
+	}
 
 	var columns []string
 	for _, field := range meta.Fields {
