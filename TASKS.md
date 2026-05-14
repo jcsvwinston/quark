@@ -727,8 +727,50 @@ Deferred a Bloque B con su propio scope:
   ZeroValueArraysRoundTrip, UpdateReplacesArrayContents). Inherits
   el skip de MSSQL JSON NVARCHAR(MAX) hasta que F0-8 followup E
   cierre el byte-encoding bug.
-- **Timezones** (default UTC + override por columna) — diseño abierto sobre
-  cómo configurar el override (tag `quark:"tz=UTC"` vs Client option).
+- **Timezones por columna** — diseño pre-aprobado en sesión post-v0.6.0 (2026-05-14).
+  Pendiente ADR-0010 + implementación. Decisiones fijadas (no re-abrir sin
+  ADR sucesor):
+  1. **Estrategia híbrida**: `quark.WithDefaultTZ(loc *time.Location)` como
+     Client option + tag `quark:"tz=Europe/Madrid"` override per-columna.
+     Tag-key `tz` (alineado con `size`/`precision` del F1-4).
+  2. **Semántica wire**: UTC siempre. Bind convierte `time.Time` a UTC antes
+     del driver; scan parsea y aplica `.In(loc)` en memoria. `loc` afecta
+     sólo la representación in-memory del struct. Tests pin: SELECT raw debe
+     devolver UTC en los 5 motores CI; struct en memoria debe estar en `loc`.
+  3. **Validación**: fail-fast. `time.LoadLocation` se ejecuta cuando el
+     modelo se registra (`RegisterModel`) o cuando `Migrate` procesa el
+     FieldMeta. Zona IANA inválida → `ErrInvalidTimezone` (sentinel nuevo
+     en `errors.go`). `FieldMeta.TZ *time.Location` (parseado eager). No
+     lazy load.
+  4. **`Nullable[time.Time]`**: el unwrap del `sql.Null[T]` (helper
+     `isSQLNull` ya en `internal/migrate`) debe propagar la conversión al
+     `.V` interno cuando `.Valid=true`. Contrato uniforme con `time.Time`
+     directo. Tocará 2-3 sitios en `query_crud.go` + subtests específicos
+     en `testTZ`.
+  5. **Sin Client default + sin tag**: pass-through del driver
+     (comportamiento actual de v0.6). Feature 100% opt-in. Cero riesgo de
+     regresión silenciosa al actualizar.
+  6. **Custom types vía `RegisterTypeMapper`**: gap documentado en ADR-0010.
+     Tipos que envuelvan `time.Time` con su propio Scanner/Valuer no son
+     interceptados — el caller maneja tz por su cuenta.
+
+  Ruta de implementación (1 PR `feat(types): per-column timezone override`):
+  - `errors.go`: `ErrInvalidTimezone` sentinel.
+  - `internal/schema.parseDBTag`: parser de `tz=<IANA>` → `time.LoadLocation`
+    eager → `FieldMeta.TZ *time.Location`.
+  - `client.go`: `quark.WithDefaultTZ(loc *time.Location) Option`;
+    `Client.defaultTZ *time.Location` (nil = pass-through).
+  - `query_crud.go`: en el bind y el scan, resolver `loc` con orden
+    `FieldMeta.TZ → Client.defaultTZ → nil (pass-through)`. Convertir a UTC
+    en bind cuando `loc != nil`; `.In(loc)` en scan cuando `loc != nil`.
+    Cubrir el unwrap de `sql.Null[time.Time]` en los mismos call sites.
+  - `tz_test.go` + `testTZ` en SharedSuite: subtests
+    ClientDefaultRoundTrip, TagOverrideRoundTrip, NullableTimeWithTZ,
+    WireFormatIsAlwaysUTC (SELECT raw), InvalidTimezoneFailsOnRegister,
+    NoDefaultNoTagIsPassthrough.
+  - Doc: `website/docs/guides/modeling.mdx` § Timezones; `CHANGELOG`
+    `### Added`; ADR-0010 archivado en `docs/adr/`.
+  - Sin breaking changes; v0.7 minor.
 - **`shopspring/decimal` y `google/uuid` pre-registered**: el usuario puede
   registrarlos en su init con `RegisterTypeMapper` (F1-4); Quark no los
   pre-registra para no añadir dependencias obligatorias. Documentado en el
