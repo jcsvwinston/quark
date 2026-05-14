@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-14
+
+Phase 3 release — schema-as-code migrations. Closes F3-1 through F3-7:
+distributed migration lock; neutral schema introspection across the
+4 CI dialects + SQLite (columns, indexes, foreign keys, check
+constraints); pure-Go schema diff; the models→Plan pipeline; transactional
+and resumable `ApplyPlan`; `quarkmigrate` plan/verify/apply CLI
+workflow; orchestrated `Backfill` with resume tokens; and per-Client
+model registry. Also lands `Array[T]` — typed wrapper for list-shaped
+columns, closing the Bloque B Arrays Postgres item from Phase 1
+deferred work. No breaking changes; no migration guide. Detailed
+notes in [`docs/RELEASE_NOTES_v0.6.0.md`](docs/RELEASE_NOTES_v0.6.0.md).
+
 ### Documentation
 
 - **Phase 3 formally opened** ([ADR-0009](docs/adr/0009-migrations-introspection-diff-not-versioned-files.md))

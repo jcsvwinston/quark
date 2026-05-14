@@ -1,11 +1,19 @@
 # Quark — backlog táctico
 
-> **Fase 0 cerrada de verdad (2026-05-13).** Los 5 P0 originales tachados,
-> F0-1..F0-10 todos cerrados, integration matrix bloqueante en 4/5 motores
-> (PG/MySQL/MariaDB/MSSQL; Oracle como gap documentado). El repo queda
-> consolidado en `main` sin branches huérfanas, docs al día, doc linter en
-> CI, release-please automatizando bumps. Backlog vivo ahora en **Fase 1
-> diferida (Bloque B)** y **Fase 3** (`docs/ANALISIS_MADUREZ.md` §4).
+> **Phase 3 cerrada (2026-05-14, v0.6.0).** Los 7 items F3-1..F3-7
+> entregados; `Array[T]` (Bloque B / Arrays Postgres) también dentro
+> de v0.6.0. Schema-as-code migrations en producción: introspection
+> neutral en los 4 motores CI + SQLite, diff puro en Go,
+> `PlanMigration` con round-trip vacío en los 5 motores, `ApplyPlan`
+> transaccional en PG/MSSQL/SQLite + resumable en MySQL/MariaDB/Oracle,
+> `quarkmigrate` CLI, `Backfill` orquestado, registry per-Client,
+> lock distribuido. Sin breaking changes. Backlog vivo ahora en
+> **Fase 1 diferida (Bloque B) / Timezones** y **Fase 4** (observability +
+> cache stampede; `docs/ANALISIS_MADUREZ.md` §4).
+>
+> **Fase 0 cerrada (2026-05-13, v0.5.0)** — los 5 P0 originales
+> tachados, F0-1..F0-10 todos cerrados, integration matrix bloqueante
+> en 4/5 motores (PG/MySQL/MariaDB/MSSQL; Oracle como gap documentado).
 >
 > Convención: cada tarea lleva su archivo:línea de origen, criterio de "done"
 > y dónde queda la documentación al cerrar.
@@ -17,42 +25,36 @@
 > **No empieces "explorando".** Invoca `/next-session [foco]` (definido en
 > `.claude/commands/next-session.md`) y trabaja el bloque que indique.
 >
-> Foco admitido: `tipos` | `fase3` | `auto`. Si dudas, usa `auto`. El foco
-> `f0` ya no aplica — está cerrado.
+> Foco admitido: `tipos` | `fase4` | `auto`. Si dudas, usa `auto`. Los focos
+> `f0` y `fase3` ya no aplican — ambos cerrados.
 
-Estado real del backlog post-v0.5.0 (release 2026-05-13, sesión que
-cerró Fase 0 + abrió Phase 3):
+Estado real del backlog post-v0.6.0 (release 2026-05-14, sesión que
+cerró Phase 3 + taggeó v0.6.0):
 
-1. ~~**Bloque A — Cerrar Fase 0 de verdad**~~. Cerrado. F0-1..F0-10
-   tachados. v0.5.0 publicada.
-2. **Bloque B — Tipos diferidos de Fase 1** (sección "Fase 1" más abajo).
-   - `Array[T]` cerrado en v0.6-Unreleased (PR #42).
+1. ~~**Bloque A — Cerrar Fase 0 de verdad**~~. Cerrado en v0.5.0.
+   F0-1..F0-10 tachados.
+2. ~~**Bloque C — Phase 3**~~. Cerrado en v0.6.0. F3-1..F3-7 entregados;
+   ADR-0009 archivado.
+3. **Bloque B — Tipos diferidos de Fase 1** (sección "Fase 1" más abajo).
+   - ~~`Array[T]`~~ — cerrado en v0.6.0 (PR #42).
    - **Timezones por columna** sigue abierto — necesita ADR de diseño
      antes de implementar (tag `quark:"tz=UTC"` vs Client option vs híbrido).
-3. **Bloque C — Phase 3 (apertura formal hecha)**. ADR-0009 ancla la
-   estrategia (code-first + diff bidireccional). F3-1..F3-7
-   decompuestos en este TASKS más abajo. Progreso:
-   - ~~**F3-1** Distributed migration lock~~ — PR #44 merged.
-   - **F3-2 core** (SQLite + PG) — PR #45 abierto, awaiting CI tras
-     pasar code-reviewer con 3 fixes (commit `5a85efb8`).
-   - **F3-2 follow-ups** pendientes: -mysql, -mariadb, -mssql,
-     -oracle (diferido sin CI), -indexes, -fks, -checks.
-   - **F3-3..F3-7** pendientes.
+     Sesión `tipos` debe arrancar por escribir el ADR-0010.
+4. **Fase 4 — observability + cache stampede + deadlock retry**
+   (`docs/ROADMAP.md` § Phase 4; `docs/ANALISIS_MADUREZ.md` §4 Fase 4).
+   Sin ADR ni decomposición todavía. Apertura formal pendiente.
 
 **Próxima acción concreta** (al arrancar sesión nueva):
-1. `gh pr checks 45` — si CI verde, mergear PR #45.
-2. Decidir: ¿seguir F3-2 follow-ups (mysql/mariadb es un buen
-   próximo paso, comparten 90% código) o saltar a F3-3 (diff core)?
-   F3-3 puede arrancar con sólo PG+SQLite y los follow-ups
-   completar el matrix después.
+1. Decidir foco: `tipos` (ADR-0010 + timezones) vs `fase4` (apertura formal).
+   Ambos son válidos; `tipos` es sesión más corta y cierra un item pendiente
+   conocido. `fase4` requiere descomposición y abre ciclo nuevo.
 
-**Foco sugerido** del slash command: `fase3` (Phase 3 en curso, sigue
-siendo el siguiente macro-deliverable).
+**Foco sugerido** del slash command: `tipos` para cerrar el último item
+de Bloque B antes de abrir Fase 4.
 
 **Disciplina recordada**: `code-reviewer` subagent obligatorio antes
 de cada PR (regla CLAUDE.md #6); `/next-session` plantilla de cierre
-al final de cada sesión. En la sesión que cerró v0.5.0 + abrió Phase
-3 ambos slippearon — recuperados al final.
+al final de cada sesión.
 
 ---
 
