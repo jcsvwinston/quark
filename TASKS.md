@@ -185,16 +185,21 @@ Detección por código de error del driver:
 - MSSQL `1205`
 - Oracle `ORA-00060`
 
-Helper en `db_errors.go` (mismo patrón que `isUniqueViolation` de
-P0-3). Exponential backoff con jitter, máximo N intentos.
+Helper `isDeadlock(err)` en `db_errors.go` (mismo patrón que
+`isUniqueViolation` de P0-3, con `errors.As` contra los tipos de los
+6 drivers). Exponential backoff con jitter, máximo N intentos.
 **Disabled por default**; `WithDeadlockRetry(n)` lo habilita. El retry
 envuelve la unidad transaccional completa, no la query suelta — un
 deadlock aborta la transacción entera, así que reintentar una query
-sin reabrir la tx no tiene sentido. Decidir en el PR el punto de
-integración (probablemente el wrapper de `Tx`). Tests: difícil
-provocar deadlocks deterministas cross-engine — al menos unit tests
-del mapeo de códigos + un integration test que fuerce el deadlock en
-PG (dos tx con orden de lock invertido).
+sin reabrir la tx no tiene sentido. **Punto de integración:
+`Client.Tx(ctx, fn)` (`tx.go:56`)** — el runner closure-based ya
+ejecuta `fn` dentro de BEGIN/COMMIT; el retry re-ejecuta `fn` con una
+tx nueva cuando `isDeadlock(err)` y quedan intentos. `BeginTx` (la
+variante manual, `tx.go:38`) queda fuera de scope: sin closure no hay
+forma de re-ejecutar el trabajo del caller. Tests: difícil provocar
+deadlocks deterministas cross-engine — al menos unit tests del mapeo
+de códigos + un integration test que fuerce el deadlock en PG (dos tx
+con orden de lock invertido).
 
 ### Cierre de Fase 4
 
