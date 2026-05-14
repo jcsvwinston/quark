@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-14
+
+Phase 3 release — schema-as-code migrations. Closes F3-1 through F3-7:
+distributed migration lock; neutral schema introspection across the
+4 CI dialects + SQLite (columns, indexes, foreign keys, check
+constraints); pure-Go schema diff; the models→Plan pipeline; transactional
+and resumable `ApplyPlan`; `quarkmigrate` plan/verify/apply CLI
+workflow; orchestrated `Backfill` with resume tokens; and per-Client
+model registry. Also lands `Array[T]` — typed wrapper for list-shaped
+columns, closing the Bloque B Arrays Postgres item from Phase 1
+deferred work. No breaking changes; no migration guide. Detailed
+notes in [`docs/RELEASE_NOTES_v0.6.0.md`](docs/RELEASE_NOTES_v0.6.0.md).
+
+PRs included in this release:
+[#42] (`Array[T]`),
+[#43] (Phase 3 ADR-0009),
+[#44] (F3-1 migration lock),
+[#45] (F3-2 core: SQLite + PG),
+[#47] (F3-2 MySQL + MariaDB),
+[#48] (F3-2 MSSQL),
+[#49] (F3-2 indexes),
+[#50] (F3-2 FKs),
+[#51] (F3-2 checks),
+[#52] (F3-3 diff core),
+[#53] (F3-3 plan + SQLite PK fix),
+[#54] (F3-3 execute),
+[#55] (F3-3 types + defaults normalisation),
+[#56] (F3-4 transactional `ApplyPlan`),
+[#57] (F3-4 resumable `ApplyPlan`),
+[#58] (F3-5 `quarkmigrate` CLI),
+[#59] (F3-6 `Backfill`),
+[#60] (F3-7 per-Client model registry).
+
 ### Documentation
 
 - **Phase 3 formally opened** ([ADR-0009](docs/adr/0009-migrations-introspection-diff-not-versioned-files.md))
@@ -450,6 +483,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Intentionally **not** tied to `pgx`/`pgtype` — neutral-wrapper design
   per TASKS § Bloque B. Inherits the MSSQL JSON Scan skip until the
   NVARCHAR(MAX) encoding bug (F0-8 followup E) is resolved.
+
+[#42]: https://github.com/jcsvwinston/quark/pull/42
+[#43]: https://github.com/jcsvwinston/quark/pull/43
+[#44]: https://github.com/jcsvwinston/quark/pull/44
+[#45]: https://github.com/jcsvwinston/quark/pull/45
+[#47]: https://github.com/jcsvwinston/quark/pull/47
+[#48]: https://github.com/jcsvwinston/quark/pull/48
+[#49]: https://github.com/jcsvwinston/quark/pull/49
+[#50]: https://github.com/jcsvwinston/quark/pull/50
+[#51]: https://github.com/jcsvwinston/quark/pull/51
+[#52]: https://github.com/jcsvwinston/quark/pull/52
+[#53]: https://github.com/jcsvwinston/quark/pull/53
+[#54]: https://github.com/jcsvwinston/quark/pull/54
+[#55]: https://github.com/jcsvwinston/quark/pull/55
+[#56]: https://github.com/jcsvwinston/quark/pull/56
+[#57]: https://github.com/jcsvwinston/quark/pull/57
+[#58]: https://github.com/jcsvwinston/quark/pull/58
+[#59]: https://github.com/jcsvwinston/quark/pull/59
+[#60]: https://github.com/jcsvwinston/quark/pull/60
 
 ## [0.5.0] - 2026-05-13
 

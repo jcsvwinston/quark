@@ -38,7 +38,21 @@
 - [x] **F1-5** — Soft-delete scopes: `WithTrashed` / `OnlyTrashed` / `Restore`.
 - [x] **F1-6** — Optimistic locking (`quark:"version"` + `ErrStaleEntity`).
 
-## v0.5.0 — Phase 0 cleanup (this release)
+## v0.6.0 — Phase 3 (this release)
+
+Schema-as-code migrations. Closes the F3-1 through F3-7 backlog:
+
+- [x] **F3-1** — Distributed migration lock (`Client.AcquireMigrationLock`). PG `pg_advisory_lock` + `lock_timeout`; MySQL / MariaDB `GET_LOCK` / `RELEASE_LOCK`; MSSQL `sp_getapplock @LockOwner='Session'`. Optional `MigrationLocker` interface on Dialect; SQLite / Oracle return `ErrUnsupportedFeature`.
+- [x] **F3-2** — Neutral schema introspection (`Client.IntrospectSchema`). `Schema{Tables[]Table{Columns, Indexes, ForeignKeys, Checks}}` populated across SQLite / PostgreSQL / MySQL / MariaDB / MSSQL. Oracle deferred pending CI image fix; SQLite `Checks` deferred (no catalog).
+- [x] **F3-3** — Pure-Go schema diff (`Diff`) + models→Plan pipeline (`Client.PlanMigration`) + executor (`Client.ApplyPlan`) + cross-dialect type / default normalisation. Round-trip identity contract: `Migrate(model)` followed by `PlanMigration(model)` returns an empty `Plan` on all five CI motors.
+- [x] **F3-4** — Transactional `ApplyPlan` on PG / MSSQL / SQLite; resumable `ApplyPlan` on MySQL / MariaDB / Oracle via `quark_migration_state(plan_hash, op_index)` checkpoints. `Plan.Hash()` exposes the deterministic plan identity for CI gates.
+- [x] **F3-5** — `quarkmigrate` package: `plan` / `verify` / `apply` actions with explicit exit codes (`ExitSuccess` / `ExitDriftDetected` / `ExitError`). Library not binary — users embed in a thin `migrations/main.go`. Example in `examples/migrations/`.
+- [x] **F3-6** — Orchestrated `Client.Backfill(ctx, BackfillSpec)` with PK-based batching and `quark_backfill_state(name, last_pk)` resume tokens. Idempotent on completion.
+- [x] **F3-7** — Per-Client model registry (`Client.RegisterModel` / `RegisteredModels` / `MigrateRegistered` / `PlanMigrationRegistered`). Additive; the global type-meta cache stays.
+
+Also lands `Array[T]` (typed wrapper for list-shaped columns; JSON-backed; closes Bloque B / Arrays Postgres from Phase 1 deferred work).
+
+## v0.5.0 — Phase 0 cleanup
 
 No new public API. Closes the F0-1 through F0-10 backlog:
 
@@ -61,13 +75,6 @@ No new public API. Closes the F0-1 through F0-10 backlog:
 - [x] **F2-IN-chunking** — Eager-loading paths chunk parent keys at 1000 (Oracle/MSSQL caps).
 - [x] **F2-having-agg** — `HavingAggregate(fn, column, op, value)` with COUNT/SUM/AVG/MIN/MAX whitelist.
 - [x] **F2-join-builder** — Structured `Join(table).On(col, op, otherCol)` retires the v0.3.x string-raw form (BREAKING; see [`MIGRATION_v0.4.0.md`](MIGRATION_v0.4.0.md)).
-
-## Phase 3 — schema diff + migrations (v0.6)
-
-- [ ] Real introspection-based schema diff (types, NOT NULL, defaults, indexes, FKs).
-- [ ] Distributed migration locking (`pg_advisory_xact_lock` / `GET_LOCK` / `sp_getapplock` / `DBMS_LOCK`).
-- [ ] Transactional migrations where the engine allows; resumable migrations on MySQL.
-- [ ] Backfill orchestration with resume tokens.
 
 ## Phase 4 — observability + cache (v0.7)
 
