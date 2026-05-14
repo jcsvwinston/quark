@@ -40,6 +40,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **`Client.Backfill` — orchestrated table backfill with resume
+  tokens (F3-6)**: the data-ops counterpart to F3-3..F3-5's schema
+  story. Iterates a table by primary key in batches, invokes a
+  user callback per batch with the PK list, and persists the
+  highest PK seen in a `quark_backfill_state(name, last_pk,
+  updated_at)` table keyed by spec name. A process kill / callback
+  error / deliberate retry resumes at `WHERE pk > last_pk` rather
+  than re-running the entire table.
+
+  Idempotent on completion: a re-invocation with the same Name
+  after all batches were processed finds nothing to do and
+  returns nil immediately.
+
+  API:
+
+      type BackfillSpec struct {
+          Name      string                                              // resume key
+          Table     string                                              // source table
+          PKColumn  string                                              // default "id"
+          BatchSize int                                                 // default 1000
+          Process   func(ctx context.Context, batchPKs []int64) error
+      }
+      func (c *Client) Backfill(ctx context.Context, spec BackfillSpec) error
+
+  Why the callback receives PKs (not row contents): backfill SQL
+  is rarely "SELECT * + transform"; it's "UPDATE ... WHERE id IN
+  (...)" or "INSERT ... SELECT ... WHERE id IN (...)" where the
+  user already knows the relevant columns. Passing PKs keeps the
+  helper out of the way and avoids a generics-or-reflect API
+  expansion.
+
+  Limitations: integer PKs only (text PKs and composite PKs out
+  of scope for F3-6-core); positive PKs assumed for the
+  `last_pk=0` fresh-start case (negative-PK tables need pre-seeded
+  state). Concurrency follows the same pattern as ApplyPlan's
+  resumable path — wrap with `AcquireMigrationLock` if you need
+  cross-process serialisation.
+
+  Per-dialect catalog tables created via the same pattern as
+  `quark_migration_state` (MSSQL sys.tables guard, Oracle
+  swallows ORA-00955). Filtered out of `IntrospectSchema` by the
+  existing `quark_*` exclusion so the state table doesn't surface
+  in user plans.
+
 - **`quarkmigrate` package — plan/verify/apply CLI workflow (F3-5)**:
   a thin library helper that turns a configured `quark.Client` plus
   a set of Go model values into a three-action CLI workflow
