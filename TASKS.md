@@ -349,16 +349,38 @@ Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
 
 ### F3-6 · Backfill orquestado
 
-- **Objetivo**: data migrations que no caben en una sola transacción.
-  Resume token persistido para reanudar tras fallo.
-- **Acción**:
-  1. `Migration.Backfill(fn func(*Tx, []ID) error, batchSize int)`.
-  2. La estructura del backfill (iterar por PK, almacenar último ID
-     procesado) la maneja el helper; el caller sólo escribe la
-     función-por-batch.
-  3. Resume token en `quark_migration_state` (mismo schema de F3-4).
-- **Done**: test cross-engine con tabla de 10k rows + backfill que
-  duplica un campo; verificar que el helper recorre todos los batches.
+- ~~**F3-6**~~ **Cerrado** — `Client.Backfill(ctx, BackfillSpec)`
+  en `migrate_backfill.go`. `BackfillSpec{Name, Table, PKColumn,
+  BatchSize, Process}` describe el work; helper itera por PK
+  ascending, llama callback con `batchPKs []int64`, persiste
+  `last_pk` en `quark_backfill_state` (per-dialect: PG/SQLite/MySQL/
+  MariaDB usan `CREATE TABLE IF NOT EXISTS`, MSSQL guard via
+  `sys.tables`, Oracle swallow ORA-00955; default
+  `ErrUnsupportedFeature`).
+
+  Decisión de API: callback recibe PKs (no row contents) porque
+  backfill SQL es "UPDATE ... WHERE id IN (...)" en práctica, no
+  "SELECT + transform"; pasar PKs evita expansión a generics o
+  reflect.
+
+  Cobertura: 5 tests + sub-tests en `migrate_backfill_test.go` —
+  happy path (10 rows, batch 4 → 3 batches en ascending order);
+  resume tras callback error (batch 2 falla → re-invoke pickea
+  desde batch 2 con PKs 5..10); idempotencia post-completion
+  (re-call con mismo Name = 0 callbacks); validación de inputs
+  (Name/Table/Process empty, identifier injection); custom
+  PKColumn.
+
+  State table separada de `quark_migration_state` (la del
+  F3-4-resumable) — F3-4 keyea por (plan_hash, op_index); F3-6
+  keyea por (name). Distintas semánticas, distintos schemas.
+
+  Limitaciones documentadas (future work si hay demanda):
+  - Solo integer PKs. Text PKs y composite PKs out of scope.
+  - Asume positive PKs (last_pk=0 fresh-start). Tablas con PKs
+    negativos necesitan pre-seed manual.
+  - Concurrencia: igual que ApplyPlan resumable — wrap con
+    AcquireMigrationLock si necesitas cross-process serialisation.
 
 ### F3-7 · Per-client model registry
 

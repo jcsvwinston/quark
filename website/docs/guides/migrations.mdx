@@ -626,6 +626,56 @@ lowercase. **Round-trip is clean on all 5 supported dialects** —
 `PlanMigration(model)` after `Migrate(model)` returns an empty
 Plan on PG, MySQL, MariaDB, MSSQL, and SQLite.
 
+## Backfill
+
+`Client.Backfill(ctx, BackfillSpec)` orchestrates a row-by-row data
+backfill in batches. Use it after a schema migration adds a column
+that needs to be populated from existing rows — the helper handles
+PK pagination, batching, and resume tokens; you write only the
+per-batch UPDATE.
+
+```go
+// The user owns the SQL inside Process. Backfill just hands you
+// the PK list per batch — write whatever UPDATE / INSERT-SELECT
+// your data work needs, using your dialect's idioms.
+err := client.Backfill(ctx, quark.BackfillSpec{
+    Name:      "fill_user_email_hash",  // resume key
+    Table:     "users",
+    PKColumn:  "id",                    // defaults to "id"
+    BatchSize: 1000,                    // defaults to 1000
+    Process: func(ctx context.Context, batchPKs []int64) error {
+        // Portable across all 6 dialects: build a parameterised
+        // IN clause from the PK list. (PostgreSQL-only users can
+        // simplify to `WHERE id = ANY($1)` with `pq.Array(batchPKs)`.)
+        placeholders := make([]string, len(batchPKs))
+        args := make([]any, len(batchPKs))
+        for i, pk := range batchPKs {
+            placeholders[i] = client.Dialect().Placeholder(i + 1)
+            args[i] = pk
+        }
+        sql := fmt.Sprintf(
+            "UPDATE users SET email_hash = ... WHERE id IN (%s)",
+            strings.Join(placeholders, ","))
+        _, err := client.Raw().ExecContext(ctx, sql, args...)
+        return err
+    },
+})
+```
+
+The helper persists the highest PK from each successful batch in
+`quark_backfill_state(name, last_pk, updated_at)`. A process kill,
+callback error, or deliberate retry resumes from `WHERE pk >
+last_pk` — no re-processing of earlier batches. A subsequent call
+with the same Name after the backfill completes is a fast no-op
+(idempotent).
+
+**Limitations**: integer PKs only (text and composite PKs out of
+scope for F3-6); positive PKs assumed for the fresh-start case.
+**Concurrency**: like `ApplyPlan`'s resumable path, two concurrent
+invocations against the same Name race on the state row — wrap
+with `Client.AcquireMigrationLock` if you need cross-process
+serialisation.
+
 ## Recommended Production Flow
 
 1. Use `Migrate` freely in tests and local prototypes.
