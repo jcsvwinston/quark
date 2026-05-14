@@ -28,6 +28,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        # release-please-action@v4 still declares Node 20 in its
+        # action.yml. GitHub forces Node 20 JS actions to Node 24 on
+        # 2026-06-02; this env var opts in early so the workflow keeps
+        # running through the transition. Remove once the action ships
+        # a Node 24 release.
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
