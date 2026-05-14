@@ -26,7 +26,15 @@ var timeFormats = []string{
 
 // timeScanner wraps a *time.Time destination so that []uint8 / string values
 // returned by MySQL/MariaDB (when parseTime is not set) are parsed correctly.
-type timeScanner struct{ dest *time.Time }
+//
+// When loc is non-nil the scanned value is converted with .In(loc) before it
+// lands in the destination — this is the read half of the per-column timezone
+// contract (ADR-0010). loc nil keeps the historical behaviour: the value is
+// stored exactly as the driver returned it.
+type timeScanner struct {
+	dest *time.Time
+	loc  *time.Location
+}
 
 func (ts timeScanner) Scan(src any) error {
 	if src == nil {
@@ -37,11 +45,22 @@ func (ts timeScanner) Scan(src any) error {
 	case time.Time:
 		*ts.dest = v
 	case []byte:
-		return ts.parse(string(v))
+		if err := ts.parse(string(v)); err != nil {
+			return err
+		}
 	case string:
-		return ts.parse(v)
+		if err := ts.parse(v); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("timeScanner: unsupported type %T", src)
+	}
+	// Applied to every shape, including a driver-supplied time.Time that
+	// already carries a zone (PG/pgx TIMESTAMPTZ): .In only changes the
+	// representation, not the instant, so re-localising is safe and gives
+	// the per-column contract a single, consistent application point.
+	if ts.loc != nil {
+		*ts.dest = ts.dest.In(ts.loc)
 	}
 	return nil
 }
@@ -56,8 +75,12 @@ func (ts timeScanner) parse(s string) error {
 	return fmt.Errorf("timeScanner: cannot parse %q as time", s)
 }
 
-// nullTimeScanner wraps a **time.Time (nullable) destination with the same []uint8 handling.
-type nullTimeScanner struct{ dest **time.Time }
+// nullTimeScanner wraps a **time.Time (nullable) destination with the same
+// []uint8 handling and the same loc conversion as timeScanner.
+type nullTimeScanner struct {
+	dest **time.Time
+	loc  *time.Location
+}
 
 func (ns nullTimeScanner) Scan(src any) error {
 	if src == nil {
@@ -65,22 +88,53 @@ func (ns nullTimeScanner) Scan(src any) error {
 		return nil
 	}
 	t := new(time.Time)
-	if err := (timeScanner{dest: t}).Scan(src); err != nil {
+	if err := (timeScanner{dest: t, loc: ns.loc}).Scan(src); err != nil {
 		return err
 	}
 	*ns.dest = t
 	return nil
 }
 
-// makeScanDest returns a slice of scan destinations for a row, wrapping *time.Time
-// and **time.Time fields with the appropriate scanner.
-func makeScanDest(field reflect.Value) any {
+// nullableTimeScanner wraps a *Nullable[time.Time] (== *sql.Null[time.Time])
+// destination. It reuses timeScanner for the robust []uint8 / string parsing
+// and the loc conversion, then rebuilds the Null wrapper. Only installed when
+// loc is non-nil — without a configured timezone the field keeps using
+// sql.Null[time.Time]'s own Scanner, so the v0.6 behaviour is untouched.
+type nullableTimeScanner struct {
+	dest *sql.Null[time.Time]
+	loc  *time.Location
+}
+
+func (ns nullableTimeScanner) Scan(src any) error {
+	if src == nil {
+		*ns.dest = sql.Null[time.Time]{}
+		return nil
+	}
+	var t time.Time
+	if err := (timeScanner{dest: &t, loc: ns.loc}).Scan(src); err != nil {
+		return err
+	}
+	*ns.dest = sql.Null[time.Time]{V: t, Valid: true}
+	return nil
+}
+
+// makeScanDest returns the scan destination for a single column, wrapping
+// time-shaped fields so MySQL/MariaDB []uint8 values parse correctly and so
+// the per-column timezone (loc) is applied on the way in. loc nil means no
+// timezone conversion — for *sql.Null[time.Time] that also means the field
+// keeps its native Scanner rather than being wrapped at all.
+func makeScanDest(field reflect.Value, loc *time.Location) any {
 	iface := field.Addr().Interface()
 	switch dst := iface.(type) {
 	case *time.Time:
-		return timeScanner{dest: dst}
+		return timeScanner{dest: dst, loc: loc}
 	case **time.Time:
-		return nullTimeScanner{dest: dst}
+		return nullTimeScanner{dest: dst, loc: loc}
+	case *sql.Null[time.Time]:
+		if loc == nil {
+			return iface
+		}
+		return nullableTimeScanner{dest: dst, loc: loc}
 	}
 	return iface
 }
@@ -909,21 +963,40 @@ func (q *Query[T]) scanRow(rows *sql.Rows, dest *T) error {
 		return err
 	}
 
+	// Resolve the per-column timezone state once per row. When the feature
+	// is inactive for this query, tzOn is false and every column scans with
+	// loc nil — makeScanDest then behaves exactly as it did in v0.6.
+	tzOn := q.tzActive()
+	var clientDefaultTZ *time.Location
+	if tzOn && q.client != nil {
+		clientDefaultTZ = q.client.defaultTZ
+	}
+
 	scanDest := make([]any, len(columns))
 	for i, col := range columns {
 		matched := false
 		// Fast path: use cached metadata
 		if q.meta != nil {
 			if fm, ok := q.meta.FieldByCol[strings.ToLower(col)]; ok {
-				scanDest[i] = makeScanDest(elem.Field(fm.Index))
+				var loc *time.Location
+				if tzOn {
+					loc = resolveFieldTZ(fm, clientDefaultTZ)
+				}
+				scanDest[i] = makeScanDest(elem.Field(fm.Index), loc)
 				matched = true
 			}
 		}
 		if !matched {
-			// Slow path: reflection lookup
+			// Slow path: reflection lookup. No FieldMeta here, so only the
+			// client default can apply — a column tag override needs the
+			// cached metadata.
 			field := q.findField(elem, col)
 			if field.IsValid() && field.CanAddr() {
-				scanDest[i] = makeScanDest(field)
+				var loc *time.Location
+				if tzOn {
+					loc = clientDefaultTZ
+				}
+				scanDest[i] = makeScanDest(field, loc)
 				matched = true
 			} else {
 				var discard any
@@ -1140,7 +1213,7 @@ func (q *Query[T]) scanAndMapPolymorphicRelations(rows *sql.Rows, results []T, r
 		scanDest := make([]any, len(cols))
 		for i, col := range cols {
 			if fm, ok := relModel.FieldByCol[strings.ToLower(col)]; ok {
-				scanDest[i] = makeScanDest(relVal.Field(fm.Index))
+				scanDest[i] = makeScanDest(relVal.Field(fm.Index), q.preloadColumnTZ(relModel, fm))
 			} else {
 				var discard any
 				scanDest[i] = &discard

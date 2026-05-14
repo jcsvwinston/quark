@@ -43,6 +43,14 @@ type Client struct {
 	// meta computation cache.
 	registeredModelsMu sync.Mutex
 	registeredModels   []any
+
+	// defaultTZ is the fallback timezone for time.Time columns that do
+	// not carry their own quark:"tz=..." tag. nil (the zero value) means
+	// pass-through — the time.Time goes to the driver untouched, which is
+	// the historical v0.6 behaviour. Set via WithDefaultTZ. A column tag
+	// always overrides this. See docs/adr/0010 for the wire-format
+	// contract (UTC on the wire, loc applied in memory on scan).
+	defaultTZ *time.Location
 }
 
 // ClientProvider is an interface that provides a database client.

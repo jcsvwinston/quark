@@ -54,6 +54,15 @@ var (
 	// being requested.
 	ErrUnsupportedFeature = errors.New("feature not supported by dialect")
 
+	// ErrInvalidTimezone indicates that a model field carries a
+	// quark:"tz=..." tag whose value is not a valid IANA timezone name
+	// (i.e. time.LoadLocation rejected it). It is surfaced fail-fast by
+	// Client.RegisterModel and Client.Migrate so an invalid timezone
+	// breaks the application at startup, not on the first query that
+	// touches the column. The wrapped error names the field, the column
+	// and the offending timezone string.
+	ErrInvalidTimezone = errors.New("invalid column timezone")
+
 	// ErrDialectNotSupported indicates that the database dialect is not supported.
 	ErrDialectNotSupported = errors.New("dialect not supported")
 

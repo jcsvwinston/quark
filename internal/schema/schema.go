@@ -4,10 +4,12 @@
 package schema
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // RelationMeta holds metadata about a model relation.
@@ -97,6 +99,20 @@ type ModelMeta struct {
 	// schema-compute time so the hot Update / Save paths don't have to
 	// re-scan Fields.
 	VersionFieldIndex int
+
+	// HasTZ is true when at least one field carries a valid quark:"tz=..."
+	// tag. The hot bind / scan paths read this flag first so models that
+	// don't use per-column timezones pay nothing — no FieldByCol lookup,
+	// no type switch.
+	HasTZ bool
+
+	// TZError holds the first timezone-parsing failure encountered while
+	// computing this model's metadata, or nil. computeModelMeta cannot
+	// return an error (the public GetModelMeta API doesn't expose one),
+	// so an invalid quark:"tz=..." value is recorded here and surfaced
+	// fail-fast by Client.RegisterModel / Client.Migrate, which wrap it
+	// in quark.ErrInvalidTimezone.
+	TZError error
 }
 
 // FieldMeta holds metadata about a single struct field.
@@ -127,6 +143,17 @@ type FieldMeta struct {
 	// "AND version = ?" in WHERE; a zero rows-affected on the response
 	// surfaces ErrStaleEntity. Only one field per model may carry this tag.
 	IsVersion bool
+
+	// TZName is the raw IANA timezone string from quark:"tz=Europe/Madrid",
+	// or "" when the field has no tz tag. TZ is the parsed *time.Location.
+	// Parsing happens eagerly in computeModelMeta (no lazy load): an
+	// invalid name leaves both zero-valued and records ModelMeta.TZError.
+	// When TZ is non-nil the bind path converts the field's time.Time to
+	// UTC for the wire and the scan path applies .In(TZ) in memory.
+	// Applies to time.Time, *time.Time and Nullable[time.Time] fields;
+	// ignored for non-time Go types.
+	TZName string
+	TZ     *time.Location
 }
 
 // modelRegistry caches ModelMeta by reflect.Type.
@@ -303,11 +330,14 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 		defaultVal := ""
 		unique := false
 		isVersion := false
+		tzName := ""
 		if quarkTag := field.Tag.Get("quark"); quarkTag != "" {
 			for _, part := range strings.Split(quarkTag, ",") {
 				part = strings.TrimSpace(part)
 				if strings.HasPrefix(part, "rename:") {
 					oldCol = strings.TrimPrefix(part, "rename:")
+				} else if strings.HasPrefix(part, "tz=") {
+					tzName = strings.TrimSpace(strings.TrimPrefix(part, "tz="))
 				} else if part == "not_null" {
 					notNull = true
 				} else if part == "unique" {
@@ -327,6 +357,25 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 			defaultVal = def
 		}
 
+		// Resolve the per-column timezone eagerly. An invalid IANA name
+		// records the first error on the model meta (surfaced fail-fast
+		// by RegisterModel / Migrate) and leaves the field untagged so a
+		// later valid field can still flip HasTZ.
+		var tzLoc *time.Location
+		if tzName != "" {
+			loc, err := time.LoadLocation(tzName)
+			if err != nil {
+				if meta.TZError == nil {
+					meta.TZError = fmt.Errorf("field %s (column %s): invalid timezone %q: %w",
+						field.Name, dbTag, tzName, err)
+				}
+				tzName = ""
+			} else {
+				tzLoc = loc
+				meta.HasTZ = true
+			}
+		}
+
 		fm := FieldMeta{
 			Index:     i,
 			Column:    dbTag,
@@ -341,6 +390,8 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 			Precision: fieldPrecision,
 			Scale:     fieldScale,
 			IsVersion: isVersion,
+			TZName:    tzName,
+			TZ:        tzLoc,
 		}
 		meta.Fields = append(meta.Fields, fm)
 		meta.FieldByCol[strings.ToLower(dbTag)] = &meta.Fields[len(meta.Fields)-1]

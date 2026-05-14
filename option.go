@@ -83,6 +83,27 @@ func WithCacheStore(s CacheStore) Option {
 	}
 }
 
+// WithDefaultTZ sets the fallback timezone for time.Time columns that do
+// not carry their own quark:"tz=..." tag.
+//
+// The contract (see docs/adr/0010): time.Time values always go to the
+// database as UTC — the column stores the same instant regardless of
+// engine — and are converted to loc in memory when scanned back. loc
+// therefore affects only how the struct field reads in Go, not what is
+// persisted.
+//
+// A column-level quark:"tz=America/New_York" tag always overrides this
+// default. When neither a default nor a tag is set, time.Time values
+// pass through to the driver untouched (the historical v0.6 behaviour),
+// so this feature is fully opt-in.
+//
+//	client, _ := quark.New("pgx", dsn, quark.WithDefaultTZ(time.UTC))
+func WithDefaultTZ(loc *time.Location) Option {
+	return func(c *Client) {
+		c.defaultTZ = loc
+	}
+}
+
 // PoolOption is a configuration option for the database connection pool.
 // These are applied to the *sql.DB before creating the Client.
 type PoolOption interface {

@@ -157,6 +157,27 @@ client, err := quark.New("postgres", dsn,
 )
 ```
 
+### `WithDefaultTZ(loc *time.Location) Option`
+
+Sets the fallback timezone for `time.Time` columns that don't carry their
+own `quark:"tz=..."` tag. A column-level tag always overrides this; a
+column with neither a tag nor a default passes through to the driver
+untouched, so the feature is fully opt-in.
+
+The wire contract is **UTC-always**: `time.Time` values go to the database
+as UTC (every dialect stores the same instant) and are converted to `loc`
+in memory when scanned back. `loc` therefore affects only how the struct
+field reads in Go, not what is persisted.
+
+```go
+client, err := quark.New("pgx", dsn,
+    quark.WithDefaultTZ(time.UTC),
+)
+```
+
+See [Timezones](/docs/guides/modeling#timezones) for the per-column
+override tag and the full precedence rules.
+
 ## For
 
 ### `For[T any](ctx context.Context, provider ClientProvider) *Query[T]`

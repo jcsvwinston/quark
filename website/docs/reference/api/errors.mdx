@@ -12,6 +12,7 @@ var (
     ErrInvalidJoin         = errors.New("invalid JOIN ON clause")
     ErrStaleEntity         = errors.New("stale entity (optimistic-locking conflict)")
     ErrUnsupportedFeature  = errors.New("feature not supported by dialect")
+    ErrInvalidTimezone     = errors.New("invalid column timezone")
     ErrDialectNotSupported = errors.New("dialect not supported")
     ErrConnection          = errors.New("database connection error")
     ErrTimeout             = errors.New("query timeout")
@@ -48,6 +49,15 @@ identifier-to-identifier comparisons (`a.b = c.d`) joined by `AND`/`OR`
 and the operators `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Literals,
 function calls, subqueries, and parentheses are rejected — the string-raw
 form is deprecated and will be replaced by a structured builder in v0.4.
+
+`ErrInvalidTimezone` is returned by `Client.RegisterModel` and
+`Client.Migrate` when a model field carries a `quark:"tz=..."` tag whose
+value is not a valid IANA timezone name (`time.LoadLocation` rejected it).
+It is surfaced fail-fast — the model is rejected at registration or
+migration time, not on the first query that binds or scans the column.
+The wrapped error names the field, the column and the offending timezone
+string. See [Timezones](/docs/guides/modeling#timezones) for the
+per-column timezone contract.
 
 ## Error Checking
 

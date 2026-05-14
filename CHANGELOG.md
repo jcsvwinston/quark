@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-column timezone override** ([ADR-0010](docs/adr/0010-per-column-timezone-override.md)):
+  closes the last deferred type from Phase 1's Bloque B. Two opt-in
+  knobs control the timezone of `time.Time` columns:
+
+  - `quark.WithDefaultTZ(loc *time.Location)` — a Client-wide fallback
+    for `time.Time` columns without their own tag.
+  - `quark:"tz=Europe/Madrid"` — a per-column override tag.
+
+  Precedence is column tag → client default → pass-through. The wire
+  contract is **UTC-always**: when a column resolves to a location, the
+  `time.Time` is converted to UTC on the way to the driver (every
+  dialect stores the same instant) and to the configured location in
+  memory on scan. The tag is honoured on `time.Time`, `*time.Time` and
+  `Nullable[time.Time]` fields, including through `Preload`. An invalid
+  IANA name is rejected fail-fast by `Client.RegisterModel` and
+  `Client.Migrate` with the new `ErrInvalidTimezone` sentinel. A column
+  with neither a tag nor a client default passes through to the driver
+  untouched — the feature is fully opt-in and changes nothing for
+  callers that don't use it. The bind/scan hot paths gate on an O(1)
+  flag so models and clients without timezones pay no overhead
+  (ADR-0002 — no extra reflect in hot paths).
+
+- **`ErrInvalidTimezone`** sentinel error — surfaced by
+  `Client.RegisterModel` / `Client.Migrate` when a `quark:"tz=..."` tag
+  carries an invalid IANA timezone name. The wrapped error names the
+  field, the column and the offending string.
+
 ## [0.6.0] - 2026-05-14
 
 Phase 3 release — schema-as-code migrations. Closes F3-1 through F3-7:
