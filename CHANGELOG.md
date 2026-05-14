@@ -40,6 +40,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to F3-2-{fks, checks} — `Table` ships with column +
   index metadata for now.
 
+- **`quarkmigrate` package — plan/verify/apply CLI workflow (F3-5)**:
+  a thin library helper that turns a configured `quark.Client` plus
+  a set of Go model values into a three-action CLI workflow
+  designed to be embedded in a user-side `migrations/main.go`:
+
+  - `plan`: print the plan, exit 0 (informational).
+  - `verify`: print the plan, exit 1 if non-empty (CI gate use).
+  - `apply`: print the plan, run it if non-empty, exit 0 on success.
+
+  Operational error (PlanMigration / ApplyPlan failure, unknown
+  action) is exit 2 across all three actions. Exit codes are
+  exposed as constants `ExitSuccess` (0) / `ExitDriftDetected` (1)
+  / `ExitError` (2) for callers that want to assert on them.
+
+  `quarkmigrate.Run(ctx, action, client, models...)` is the public
+  entry point; `RunWithOutput` is the test-friendly variant that
+  takes explicit writers. `ParseAction(s)` accepts the literal
+  strings `"plan"`, `"verify"`, `"apply"`, plus `""` (defaults to
+  `plan`).
+
+  Plan output is prefixed with the short Plan.Hash() so users can
+  correlate runs against the `quark_migration_state` resumable
+  table when running on MySQL / MariaDB / Oracle.
+
+  Example wrapper in `examples/migrations/main.go` — a complete
+  user-side `main.go` showing how to read DSN/dialect from env,
+  pass models, and route exit codes. Adapt to a real project by
+  swapping in the user's model package.
+
+  Why a library and not a binary: Go has no runtime model
+  registration (the binary would need to import the user's
+  models package, which only their code can do). The thin
+  wrapper pattern is the idiomatic answer — users own a tiny
+  `main.go` that imports both quarkmigrate and their models.
+
 - **Resumable `ApplyPlan` on non-transactional engines (F3-4-resumable)**:
   closes F3-4 entirely. On MySQL, MariaDB, and Oracle (where DDL
   implicitly commits and the F3-4-tx wrapper has no effect),

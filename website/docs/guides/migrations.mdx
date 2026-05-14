@@ -543,9 +543,73 @@ per-dialect DDL.
   CONSTRAINT`, the workaround is the 12-step table-rebuild
   procedure (separate follow-up).
 
-The CLI plan command (F3-5) will be the typical consumer; in user
-code you can use `IsEmpty()` as a "did anything drift?" probe in
-health checks or CI gates, and `ApplyPlan` to close the loop.
+The CLI plan command (F3-5) is the typical consumer; see below.
+In direct user code you can use `IsEmpty()` as a "did anything
+drift?" probe in health checks or CI gates, and `ApplyPlan` to
+close the loop.
+
+### CLI workflow via `quarkmigrate`
+
+The `quarkmigrate` package wraps `PlanMigration` + `ApplyPlan` in a
+three-action CLI workflow. Users write a tiny `migrations/main.go`
+that imports both `quarkmigrate` and their own model types — Go
+has no runtime model registration so the binary has to be the
+user's, but `quarkmigrate.Run` carries all the orchestration.
+
+```go
+// myapp/migrations/main.go
+package main
+import (
+    "context"
+    "fmt"
+    "os"
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/quarkmigrate"
+    "myapp/models"
+)
+func argOrEmpty(args []string, i int) string {
+    if i < len(args) {
+        return args[i]
+    }
+    return ""
+}
+func main() {
+    client, err := quark.New(os.Getenv("QUARK_DIALECT"), os.Getenv("QUARK_DSN"))
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "quark.New: %v\n", err)
+        os.Exit(quarkmigrate.ExitError)
+    }
+    defer client.Close()
+    action, err := quarkmigrate.ParseAction(argOrEmpty(os.Args, 1))
+    if err != nil {
+        fmt.Fprintln(os.Stderr, err)
+        os.Exit(quarkmigrate.ExitError)
+    }
+    os.Exit(quarkmigrate.Run(context.Background(), action, client,
+        &models.User{}, &models.Order{}))
+}
+```
+
+Then from CI / Makefile:
+
+```sh
+go run ./migrations plan      # informational, exit 0
+go run ./migrations verify    # exit 1 if schema has drifted
+go run ./migrations apply     # run the plan
+```
+
+Exit codes (exposed as `quarkmigrate.ExitSuccess` / `ExitDriftDetected`
+/ `ExitError`):
+
+| Code | Meaning |
+| --- | --- |
+| 0 | plan / verify with empty plan, or apply succeeded |
+| 1 | verify with non-empty plan — drift detected (CI gate signal) |
+| 2 | operational error (couldn't plan, couldn't apply, unknown action) |
+
+A complete runnable example lives at `examples/migrations/` —
+SQLite by default, switch dialects via `QUARK_DIALECT` /
+`QUARK_DSN`.
 
 `PlanMigration` carries indexes / FKs / checks from the current
 schema over to the desired one before diffing, because struct tags
