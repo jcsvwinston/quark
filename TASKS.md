@@ -1,5 +1,13 @@
 # Quark — backlog táctico
 
+> **Bloque B cerrado entero (2026-05-14, [Unreleased] → v0.7.0).**
+> `Array[T]` (v0.6.0) y timezones por columna (PR #63) entregados;
+> Fase 1 queda sin tipos diferidos. Timezones: estrategia híbrida
+> `WithDefaultTZ` + tag `quark:"tz=..."`, wire UTC-always, fail-fast
+> con `ErrInvalidTimezone`, opt-in puro (ADR-0010). Backlog vivo ahora
+> sólo en **Fase 4** (observability + cache stampede + deadlock retry;
+> `docs/ANALISIS_MADUREZ.md` §4) — sin abrir todavía.
+>
 > **Phase 3 cerrada (2026-05-14, v0.6.0).** Los 7 items F3-1..F3-7
 > entregados; `Array[T]` (Bloque B / Arrays Postgres) también dentro
 > de v0.6.0. Schema-as-code migrations en producción: introspection
@@ -7,9 +15,7 @@
 > `PlanMigration` con round-trip vacío en los 5 motores, `ApplyPlan`
 > transaccional en PG/MSSQL/SQLite + resumable en MySQL/MariaDB/Oracle,
 > `quarkmigrate` CLI, `Backfill` orquestado, registry per-Client,
-> lock distribuido. Sin breaking changes. Backlog vivo ahora en
-> **Fase 1 diferida (Bloque B) / Timezones** y **Fase 4** (observability +
-> cache stampede; `docs/ANALISIS_MADUREZ.md` §4).
+> lock distribuido. Sin breaking changes.
 >
 > **Fase 0 cerrada (2026-05-13, v0.5.0)** — los 5 P0 originales
 > tachados, F0-1..F0-10 todos cerrados, integration matrix bloqueante
@@ -25,32 +31,39 @@
 > **No empieces "explorando".** Invoca `/next-session [foco]` (definido en
 > `.claude/commands/next-session.md`) y trabaja el bloque que indique.
 >
-> Foco admitido: `tipos` | `fase4` | `auto`. Si dudas, usa `auto`. Los focos
-> `f0` y `fase3` ya no aplican — ambos cerrados.
+> Foco admitido: `fase4` | `auto`. Si dudas, usa `auto`. Los focos
+> `f0`, `fase3` y `tipos` ya no aplican — los tres cerrados.
 
-Estado real del backlog post-v0.6.0 (release 2026-05-14, sesión que
-cerró Phase 3 + taggeó v0.6.0):
+Estado real del backlog post-v0.6.0 (releases v0.5.0 / v0.6.0 hechos;
+[Unreleased] acumula timezones por columna para v0.7.0):
 
 1. ~~**Bloque A — Cerrar Fase 0 de verdad**~~. Cerrado en v0.5.0.
    F0-1..F0-10 tachados.
 2. ~~**Bloque C — Phase 3**~~. Cerrado en v0.6.0. F3-1..F3-7 entregados;
    ADR-0009 archivado.
-3. **Bloque B — Tipos diferidos de Fase 1** (sección "Fase 1" más abajo).
+3. ~~**Bloque B — Tipos diferidos de Fase 1**~~. Cerrado entero.
    - ~~`Array[T]`~~ — cerrado en v0.6.0 (PR #42).
-   - **Timezones por columna** sigue abierto — necesita ADR de diseño
-     antes de implementar (tag `quark:"tz=UTC"` vs Client option vs híbrido).
-     Sesión `tipos` debe arrancar por escribir el ADR-0010.
+   - ~~**Timezones por columna**~~ — cerrado en [Unreleased] (PR #63),
+     ADR-0010 archivado. Estrategia híbrida, wire UTC-always, fail-fast.
 4. **Fase 4 — observability + cache stampede + deadlock retry**
    (`docs/ROADMAP.md` § Phase 4; `docs/ANALISIS_MADUREZ.md` §4 Fase 4).
-   Sin ADR ni decomposición todavía. Apertura formal pendiente.
+   Sin ADR ni decomposición todavía. Apertura formal pendiente —
+   **único bloque vivo del backlog.**
 
 **Próxima acción concreta** (al arrancar sesión nueva):
-1. Decidir foco: `tipos` (ADR-0010 + timezones) vs `fase4` (apertura formal).
-   Ambos son válidos; `tipos` es sesión más corta y cierra un item pendiente
-   conocido. `fase4` requiere descomposición y abre ciclo nuevo.
+1. `/next-session fase4` — sesión de apertura/planning, NO de entrega:
+   escribir ADR-0011 (decisión de scope/owner del cache stampede
+   protection), descomponer Fase 4 en items F4-1..F4-N en este TASKS
+   con la granularidad de F1/F2/F3, abrir issues de planning.
+2. Considerar antes: ¿taggear v0.7.0 con timezones por columna? Hay un
+   feature en [Unreleased] sin release. `/release v0.7.0` cuando se
+   decida cortar — no es bloqueante para abrir Fase 4 pero conviene no
+   dejar [Unreleased] creciendo como pasó con Phase 3.
 
-**Foco sugerido** del slash command: `tipos` para cerrar el último item
-de Bloque B antes de abrir Fase 4.
+**Foco sugerido** del slash command: `fase4` — es el único bloque que
+queda. Pero si se prefiere cerrar versión antes de abrir ciclo nuevo,
+`/release v0.7.0` primero (lección de la sesión que arrastró todo
+Phase 3 en [Unreleased]).
 
 **Disciplina recordada**: `code-reviewer` subagent obligatorio antes
 de cada PR (regla CLAUDE.md #6); `/next-session` plantilla de cierre
@@ -727,50 +740,31 @@ Deferred a Bloque B con su propio scope:
   ZeroValueArraysRoundTrip, UpdateReplacesArrayContents). Inherits
   el skip de MSSQL JSON NVARCHAR(MAX) hasta que F0-8 followup E
   cierre el byte-encoding bug.
-- **Timezones por columna** — diseño pre-aprobado en sesión post-v0.6.0 (2026-05-14).
-  Pendiente ADR-0010 + implementación. Decisiones fijadas (no re-abrir sin
-  ADR sucesor):
-  1. **Estrategia híbrida**: `quark.WithDefaultTZ(loc *time.Location)` como
-     Client option + tag `quark:"tz=Europe/Madrid"` override per-columna.
-     Tag-key `tz` (alineado con `size`/`precision` del F1-4).
-  2. **Semántica wire**: UTC siempre. Bind convierte `time.Time` a UTC antes
-     del driver; scan parsea y aplica `.In(loc)` en memoria. `loc` afecta
-     sólo la representación in-memory del struct. Tests pin: SELECT raw debe
-     devolver UTC en los 5 motores CI; struct en memoria debe estar en `loc`.
-  3. **Validación**: fail-fast. `time.LoadLocation` se ejecuta cuando el
-     modelo se registra (`RegisterModel`) o cuando `Migrate` procesa el
-     FieldMeta. Zona IANA inválida → `ErrInvalidTimezone` (sentinel nuevo
-     en `errors.go`). `FieldMeta.TZ *time.Location` (parseado eager). No
-     lazy load.
-  4. **`Nullable[time.Time]`**: el unwrap del `sql.Null[T]` (helper
-     `isSQLNull` ya en `internal/migrate`) debe propagar la conversión al
-     `.V` interno cuando `.Valid=true`. Contrato uniforme con `time.Time`
-     directo. Tocará 2-3 sitios en `query_crud.go` + subtests específicos
-     en `testTZ`.
-  5. **Sin Client default + sin tag**: pass-through del driver
-     (comportamiento actual de v0.6). Feature 100% opt-in. Cero riesgo de
-     regresión silenciosa al actualizar.
-  6. **Custom types vía `RegisterTypeMapper`**: gap documentado en ADR-0010.
-     Tipos que envuelvan `time.Time` con su propio Scanner/Valuer no son
-     interceptados — el caller maneja tz por su cuenta.
-
-  Ruta de implementación (1 PR `feat(types): per-column timezone override`):
-  - `errors.go`: `ErrInvalidTimezone` sentinel.
-  - `internal/schema.parseDBTag`: parser de `tz=<IANA>` → `time.LoadLocation`
-    eager → `FieldMeta.TZ *time.Location`.
-  - `client.go`: `quark.WithDefaultTZ(loc *time.Location) Option`;
-    `Client.defaultTZ *time.Location` (nil = pass-through).
-  - `query_crud.go`: en el bind y el scan, resolver `loc` con orden
-    `FieldMeta.TZ → Client.defaultTZ → nil (pass-through)`. Convertir a UTC
-    en bind cuando `loc != nil`; `.In(loc)` en scan cuando `loc != nil`.
-    Cubrir el unwrap de `sql.Null[time.Time]` en los mismos call sites.
-  - `tz_test.go` + `testTZ` en SharedSuite: subtests
-    ClientDefaultRoundTrip, TagOverrideRoundTrip, NullableTimeWithTZ,
-    WireFormatIsAlwaysUTC (SELECT raw), InvalidTimezoneFailsOnRegister,
-    NoDefaultNoTagIsPassthrough.
-  - Doc: `website/docs/guides/modeling.mdx` § Timezones; `CHANGELOG`
-    `### Added`; ADR-0010 archivado en `docs/adr/`.
-  - Sin breaking changes; v0.7 minor.
+- ~~**Timezones por columna**~~. **Cerrado en [Unreleased] → v0.7.0
+  (PR #63)**. ADR-0010 archivado. Estrategia híbrida: Client option
+  `quark.WithDefaultTZ(loc *time.Location)` + tag `quark:"tz=Europe/Madrid"`
+  override per-columna; precedencia tag → client default → pass-through.
+  Wire UTC-always: `timezone.go` introduce `bindTimeValue` (bind →
+  `.UTC()`) y los scanners (`timeScanner`/`nullTimeScanner`/nuevo
+  `nullableTimeScanner`) aplican `.In(loc)` en memoria. `FieldMeta.TZ`
+  parseado eager en `computeModelMeta`; zona IANA inválida →
+  `ModelMeta.TZError` → `ErrInvalidTimezone` fail-fast en `RegisterModel`
+  / `Migrate`. Hot path gateado por `BaseQuery.tzActive()` (flag O(1)) —
+  cero overhead sin tz (ADR-0002). Bind cubierto en los 8 call sites
+  (`buildInsert`/`buildUpdate`/`buildUpdateMap`/`UpdateFields`/batch
+  single+multi/upsert standard+MSSQL/`buildMerge`); scan en `scanRow` +
+  4 preload loaders. Aplica a `time.Time`, `*time.Time`,
+  `Nullable[time.Time]`, incl. vía `Preload`. Cobertura:
+  `timezone_test.go` (unit: `bindTimeValue`, `resolveFieldTZ`, parsing
+  del tag + invalid-tz) + `testTZ` en SharedSuite (6 subtests:
+  ClientDefaultRoundTrip, TagOverrideRoundTrip, NullableTimeWithTZ,
+  WireInstantStableAcrossZones, UpdateFieldsWithTZ,
+  NoDefaultNoTagIsPassthrough) + `TestRegisterModel/Migrate_InvalidTimezone`.
+  Verde en los 4 motores CI + SQLite. Doc:
+  `website/docs/guides/modeling.mdx` § Timezones,
+  `website/docs/reference/api/{client,errors}.mdx`, CHANGELOG `### Added`.
+  Sin breaking changes. Gap documentado: custom types vía
+  `RegisterTypeMapper` no son interceptados (manejan su zona).
 - **`shopspring/decimal` y `google/uuid` pre-registered**: el usuario puede
   registrarlos en su init con `RegisterTypeMapper` (F1-4); Quark no los
   pre-registra para no añadir dependencias obligatorias. Documentado en el
