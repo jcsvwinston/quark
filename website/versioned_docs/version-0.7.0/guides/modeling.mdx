@@ -1,0 +1,544 @@
+---
+sidebar_position: 3
+title: Modeling
+description: Model structs, table names, field tags, primary keys, validation, hooks, and schema metadata.
+---
+
+# Modeling
+
+Quark models are plain Go structs. There is no code generation step and no base
+model type to embed. A field participates in persistence when it has a `db` tag;
+relations participate when they have a `rel` tag.
+
+```go
+type Product struct {
+    ID        int64      `db:"id" pk:"true"`
+    SKU       string     `db:"sku" quark:"unique,not_null" validate:"required"`
+    Name      string     `db:"name" quark:"not_null"`
+    Price     float64    `db:"price" default:"0.00" quark:"not_null"`
+    Stock     int        `db:"stock" default:"0"`
+    CreatedAt time.Time  `db:"created_at"`
+    UpdatedAt time.Time  `db:"updated_at"`
+    DeletedAt *time.Time `db:"deleted_at"`
+}
+```
+
+## Table Names
+
+By default Quark pluralizes and snake-cases the struct name:
+
+| Struct | Default table |
+| --- | --- |
+| `User` | `users` |
+| `Category` | `categories` |
+| `APIKey` | `api_keys` |
+| `Address` | `addresses` |
+
+Implement `TableName() string` when your database name is explicit or legacy:
+
+```go
+func (Product) TableName() string {
+    return "catalog_products"
+}
+```
+
+The metadata is cached per Go type after the first parse, so repeated queries do
+not repeatedly reflect over the same struct shape.
+
+## Field Tags
+
+| Tag | Read by | Purpose |
+| --- | --- | --- |
+| `db:"column"` | CRUD, queries, migrations | Maps a Go field to a SQL column. |
+| `db:"column,size=512"` | `Migrate`, `Sync` | Sets VARCHAR/CHAR length (or NVARCHAR/VARCHAR2 per dialect). |
+| `db:"column,precision=18,scale=4"` | `Migrate`, `Sync`, custom mappers | Forwards precision/scale to DECIMAL emitters and `TypeMapper` callbacks. |
+| `db:"-"` | Metadata parser | Ignores the field. |
+| `pk:"true"` | CRUD, migrations | Marks the primary key or a composite-key member. |
+| `quark:"not_null"` | `Migrate` | Emits `NOT NULL`. |
+| `nullable:"false"` | `Migrate` | Also emits `NOT NULL`. |
+| `default:"value"` | `Migrate` | Emits `DEFAULT value` exactly as written. |
+| `quark:"unique"` | `Migrate` | Emits `UNIQUE`. |
+| `quark:"version"` | `Update`, `UpdateFields`, `Tracked.Save` | Optimistic-locking column. SET `version = version + 1`, WHERE `version = <loaded>`. Conflict → `ErrStaleEntity`. |
+| `quark:"rename:old_col"` | `Sync` | Renames `old_col` to the current `db` column. |
+| `validate:"rule"` | `Create`, `Upsert`, batch writes | Runs `go-playground/validator/v10` rules. |
+
+The `quark` tag accepts comma-separated values:
+
+```go
+Email string `db:"email" quark:"unique,not_null"`
+```
+
+The `db` tag accepts the column name first, followed by sizing options. Unknown
+options are ignored, so existing tags keep working as features are added:
+
+```go
+type Profile struct {
+    ID    int64           `db:"id" pk:"true"`
+    Bio   string          `db:"bio,size=512"`
+    Price decimal.Decimal `db:"price,precision=18,scale=4"`
+}
+```
+
+### Nullable columns
+
+For columns that are SQL-NULL-valued, the idiomatic option is the generic
+`quark.Nullable[T]` wrapper (a re-export of `database/sql.Null[T]` from
+Go 1.22+ with friendlier constructors):
+
+```go
+import "github.com/jcsvwinston/quark"
+
+type Profile struct {
+    ID    int64                       `db:"id" pk:"true"`
+    Bio   quark.Nullable[string]      `db:"bio"`
+    Born  quark.Nullable[time.Time]   `db:"born"`
+}
+
+p := Profile{
+    Bio:  quark.SomeOf("hello"),       // SET
+    Born: quark.NullOf[time.Time](),   // SQL NULL
+}
+```
+
+`Nullable[T]` already implements `sql.Scanner` and `driver.Valuer` so the
+round-trip uses the standard library's fast paths — no extra reflect on
+your hot path. The migrate layer recognises the wrapper and emits T's
+column type, so you don't have to register a custom mapper for common
+combinations.
+
+The previous idiom of `*time.Time` / `sql.NullString` continues to work,
+but `Nullable[T]` is the recommended form for new code: it avoids the
+implicit heap allocation of pointer-as-nullable and reads more naturally
+at the call site (`p.Bio.Valid` vs. `p.Bio == nil`).
+
+### Typed JSON columns
+
+For columns that hold serialised Go values, the idiomatic option is the
+generic `quark.JSON[T]` wrapper. It implements `sql.Scanner` and
+`driver.Valuer` via `encoding/json`, so the round-trip uses the standard
+library's plumbing:
+
+```go
+type Settings struct {
+    Theme  string `json:"theme"`
+    Volume int    `json:"volume"`
+}
+
+type Profile struct {
+    ID       int64                  `db:"id" pk:"true"`
+    Settings quark.JSON[Settings]   `db:"settings"`
+}
+
+p := Profile{Settings: quark.JSON[Settings]{V: Settings{Theme: "dark", Volume: 7}}}
+_ = quark.For[Profile](ctx, client).Create(&p)
+```
+
+The migrate layer recognises `JSON[T]` and emits the dialect-native column
+type — `JSONB` on Postgres, `JSON` on MySQL/MariaDB, `TEXT` on SQLite,
+`NVARCHAR(MAX)` on SQL Server, `CLOB` on Oracle. Pair with
+`quark.Nullable[quark.JSON[T]]` when you need to distinguish SQL NULL from
+an empty payload.
+
+`JSON[T]` accepts any `T` that round-trips through `encoding/json`:
+structs, maps, slices, primitive types. Validation and migration of the
+shape itself is your responsibility — Quark stores the bytes verbatim and
+unmarshals them back into `T` on read.
+
+### Typed arrays — `Array[T]`
+
+For columns that hold a list of values, `quark.Array[T]` is the
+semantically-clearer alternative to `JSON[[]T]`. The wire format is the
+same (JSON-encoded) and the column type is the same per-dialect JSON
+shape; the difference is in the Go-side API:
+
+```go
+type Post struct {
+    ID   int64                `db:"id" pk:"true"`
+    Tags quark.Array[string]  `db:"tags"`
+}
+
+p := Post{Tags: quark.Array[string]{V: []string{"go", "orm"}}}
+client.Migrate(ctx, &Post{})
+quark.For[Post](ctx, client).Create(&p)
+
+// Helpers on the wrapper:
+n := p.Tags.Len()        // 2
+xs := p.Tags.Slice()     // []string{"go", "orm"}
+```
+
+`Array[T]` is intentionally **not** a Postgres-native `INT[]` /
+`TEXT[]` wrapper — operators like `@>`, `&&`, and `array_agg` don't
+fire on the JSON column it backs. For PG-native arrays with operators,
+drop down to `pgx`/`pgtype.Array` directly or use `RawQuery`. The
+neutral-wrapper design keeps the type usable on every dialect without
+importing `pgtype` or shifting behaviour at runtime.
+
+A nil `V` serialises to `[]` (empty array), not `null` — pair with
+`quark.Nullable[quark.Array[T]]` when you need to distinguish SQL NULL
+from "valid but empty".
+
+### Binary columns
+
+A plain `[]byte` field maps to the dialect-native binary column:
+
+| Dialect | Type |
+| --- | --- |
+| PostgreSQL | `BYTEA` |
+| MySQL / MariaDB | `BLOB` |
+| SQLite | `BLOB` |
+| SQL Server | `VARBINARY(MAX)` |
+| Oracle | `BLOB` |
+
+```go
+type File struct {
+    ID    int64  `db:"id" pk:"true"`
+    Bytes []byte `db:"bytes"`
+}
+```
+
+### Custom type mappers
+
+For Go types beyond the built-in primitives (`shopspring/decimal.Decimal`,
+`google/uuid.UUID`, your own value types), register a mapper at process
+startup with `quark.RegisterTypeMapper`. The mapper receives the dialect
+name and the parsed `TypeOptions`; return the dialect-specific SQL type:
+
+```go
+func init() {
+    quark.RegisterTypeMapper(reflect.TypeOf(uuid.UUID{}), func(d string, _ quark.TypeOptions) string {
+        if d == "postgres" {
+            return "UUID"
+        }
+        return "VARCHAR(36)"
+    })
+}
+```
+
+Pointer types are stripped before registration, so the mapper above also
+covers `*uuid.UUID`. Re-registering the same type overwrites the previous
+mapper. The `time.Duration` mapper ships with Quark and emits `BIGINT`
+(`NUMBER(19)` on Oracle) — override it if you'd rather store durations as
+text or in a different unit.
+
+The mapper handles only the DDL side. Round-trip read/write goes through
+`database/sql` — the type must implement `sql.Scanner` + `driver.Valuer`,
+or already be supported by the underlying driver, for `Create` / `Find`
+to work with it.
+
+`default` is inserted into DDL without quoting. Use the form your database
+expects:
+
+```go
+Status    string    `db:"status" default:"'draft'"`
+CreatedAt time.Time `db:"created_at" default:"CURRENT_TIMESTAMP"`
+Active    bool      `db:"active" default:"1"`
+```
+
+### Timezones
+
+By default a `time.Time` field passes through to the driver untouched —
+the historical behaviour, and still the default. Two opt-in knobs let you
+take control of the timezone:
+
+- **`quark.WithDefaultTZ(loc)`** — a Client-wide fallback for every
+  `time.Time` column that doesn't carry its own tag.
+- **`quark:"tz=Europe/Madrid"`** — a per-column override tag.
+
+```go
+client, _ := quark.New("pgx", dsn, quark.WithDefaultTZ(time.UTC))
+
+type Event struct {
+    ID        int64     `db:"id" pk:"true"`
+    CreatedAt time.Time `db:"created_at"`                          // uses the client default
+    LocalTime time.Time `db:"local_time" quark:"tz=Europe/Madrid"` // column override wins
+    DeletedAt quark.Nullable[time.Time] `db:"deleted_at" quark:"tz=Europe/Madrid"`
+}
+```
+
+The precedence is **column tag → client default → pass-through**.
+
+**The wire contract is UTC-always.** When a column resolves to a
+timezone, the `time.Time` is converted to UTC on the way to the database
+— every dialect stores the same instant — and converted to the configured
+location in memory when scanned back. The tag therefore only affects how
+the field reads in Go, never what is persisted. The tag is honoured on
+`time.Time`, `*time.Time` and `Nullable[time.Time]` fields, including when
+the model is loaded through `Preload`.
+
+The IANA name is validated **eagerly**: an invalid `tz=` value makes
+`Client.RegisterModel` and `Client.Migrate` fail fast with
+[`ErrInvalidTimezone`](/docs/reference/api/errors), so a typo breaks the
+app at startup rather than on the first query that touches the column.
+
+A column with neither a tag nor a client default is untouched — the
+feature is fully opt-in and adds nothing for callers that don't use it.
+See [ADR-0010](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0010-per-column-timezone-override.md)
+for the design rationale.
+
+:::note
+A custom type that wraps `time.Time` and is registered via
+`RegisterTypeMapper` is **not** intercepted by the timezone path — it owns
+its `Scanner` / `Valuer` and is responsible for its own zone handling.
+:::
+
+## Primary Keys
+
+Use `pk:"true"` for explicit primary keys:
+
+```go
+type User struct {
+    ID int64 `db:"id" pk:"true"`
+}
+```
+
+If no field is tagged with `pk:"true"`, Quark falls back to a field tagged
+`db:"id"`. Integer single-column primary keys are treated as database-generated
+when their value is zero on insert.
+
+String primary keys are caller-supplied:
+
+```go
+type Session struct {
+    ID     string `db:"id" pk:"true"`
+    UserID int64  `db:"user_id"`
+}
+```
+
+## Composite Primary Keys
+
+Tag more than one field with `pk:"true"`:
+
+```go
+type OrderItem struct {
+    OrderID   int64 `db:"order_id" pk:"true"`
+    ProductID int64 `db:"product_id" pk:"true"`
+    Quantity  int   `db:"quantity"`
+}
+```
+
+`Migrate` emits a table-level `PRIMARY KEY (order_id, product_id)` constraint.
+`Update`, `Delete`, and `HardDelete` include every key column in the predicate.
+
+```go
+item := OrderItem{OrderID: 1001, ProductID: 42, Quantity: 3}
+if err := quark.For[OrderItem](ctx, client).Create(&item); err != nil {
+    return err
+}
+
+item.Quantity = 5
+rows, err := quark.For[OrderItem](ctx, client).Update(&item)
+```
+
+`Find(id)` is for simple primary keys. For composite keys, query with explicit
+predicates:
+
+```go
+item, err := quark.For[OrderItem](ctx, client).
+    Where("order_id", "=", 1001).
+    Where("product_id", "=", 42).
+    First()
+```
+
+## Zero-Value Update Semantics
+
+`Update` and `UpdateBatch` perform partial updates. Fields with zero values are
+not included in the `SET` clause:
+
+```go
+user := User{ID: 7, Name: "New Name"}
+rows, err := quark.For[User](ctx, client).Update(&user)
+```
+
+This updates `name` and leaves `active`, `score`, pointer fields, and empty
+strings untouched. To write a zero value intentionally, use `UpdateMap`:
+
+```go
+rows, err := quark.For[User](ctx, client).
+    Where("id", "=", 7).
+    UpdateMap(map[string]any{
+        "active": false,
+        "score":  0,
+    })
+```
+
+## Optimistic Locking
+
+A model with a numeric field tagged `quark:"version"` opts into optimistic
+locking. Every `Update`, `UpdateFields`, and `Tracked.Save` then includes
+`version = version + 1` in the `SET` clause and `AND version = <loaded>` in
+the `WHERE` clause:
+
+```go
+type Account struct {
+    ID      int64  `db:"id" pk:"true"`
+    Owner   string `db:"owner"`
+    Balance int64  `db:"balance"`
+    Version int64  `db:"version" quark:"version"`
+}
+
+a, _ := quark.For[Account](ctx, client).Find(42)
+a.Balance = 150
+_, err := quark.For[Account](ctx, client).Update(&a)
+// emitted: UPDATE "accounts" SET "balance" = $1, "version" = "version" + 1
+//          WHERE "id" = $2 AND "version" = $3
+// args: [150, 42, <loaded version>]
+```
+
+When another writer has already advanced the version since `Find`, the row
+won't match the predicate, the update affects zero rows, and Quark returns
+`quark.ErrStaleEntity` without writing:
+
+```go
+if errors.Is(err, quark.ErrStaleEntity) {
+    // reload, replay, retry — or surface the conflict to the user.
+}
+```
+
+On success Quark bumps the entity's version field in memory so a subsequent
+`Update` sees the new value without a re-read. The version column is
+automatically `NOT NULL` (a NULL version cannot be incremented). Only one
+field per model may carry the tag.
+
+`Tracked.Save` follows the same contract; a save with no actual column
+changes is still a no-op (zero rows, no SQL emitted, version not bumped).
+
+## Soft Deletes
+
+A nullable `deleted_at` column enables soft delete for `Delete`:
+
+```go
+type User struct {
+    ID        int64      `db:"id" pk:"true"`
+    Email     string     `db:"email"`
+    DeletedAt *time.Time `db:"deleted_at"`
+}
+```
+
+### Automatic scope
+
+Reads, counts, and aggregates add `deleted_at IS NULL` automatically — soft-
+deleted rows are invisible by default. Three scope modifiers shift the
+filter:
+
+| Modifier | Predicate added | Use |
+| --- | --- | --- |
+| (default) | `deleted_at IS NULL` | Normal application reads. |
+| `WithTrashed()` | (no filter) | Listings that should include trashed rows (admin / audit). |
+| `OnlyTrashed()` | `deleted_at IS NOT NULL` | Show only the trash; pre-step for restore or hard-delete UIs. |
+| `Unscoped()` | (no filter) | Backward-compatible alias of `WithTrashed`. |
+
+```go
+trash, _ := quark.For[User](ctx, client).OnlyTrashed().List()
+all,   _ := quark.For[User](ctx, client).WithTrashed().Limit(100).List()
+live,  _ := quark.For[User](ctx, client).List()             // default
+```
+
+### Restore
+
+`Restore` clears `deleted_at` on the row identified by the entity's primary
+key. Restoring a row that is already live is a 0-row no-op rather than a
+stealth NULL write — so a misuse can't corrupt non-trashed data:
+
+```go
+got, _ := quark.For[User](ctx, client).OnlyTrashed().Find(42)
+rows, err := quark.For[User](ctx, client).Restore(&got)
+```
+
+On success the entity's `DeletedAt` field is cleared in memory too so the
+in-process struct reflects the restored state.
+
+### Hard delete
+
+Use `HardDelete` for a permanent deletion. `DeleteBy` and `DeleteBatch`
+perform hard deletes in the current API and require explicit IDs or
+predicates.
+
+## Validation
+
+Quark validates models before `Create`, `Upsert`, `CreateBatch`, and
+`UpsertBatch`. It uses `go-playground/validator/v10` tags by default:
+
+```go
+type Account struct {
+    ID    int64  `db:"id" pk:"true"`
+    Email string `db:"email" validate:"required,email"`
+    Role  string `db:"role" validate:"oneof=admin member viewer"`
+}
+```
+
+For rules that need code, implement a `Validate(context.Context) error` method.
+Quark calls it before falling back to tag validation:
+
+```go
+func (a *Account) Validate(ctx context.Context) error {
+    if strings.HasSuffix(a.Email, "@example.invalid") {
+        return errors.New("reserved test domain")
+    }
+    return nil
+}
+```
+
+## Lifecycle Hooks
+
+Model methods can run around writes:
+
+```go
+func (u *User) BeforeCreate(ctx context.Context) error {
+    now := time.Now()
+    u.CreatedAt = now
+    u.UpdatedAt = now
+    return nil
+}
+
+func (u *User) BeforeUpdate(ctx context.Context) error {
+    u.UpdatedAt = time.Now()
+    return nil
+}
+```
+
+Available hook interfaces are:
+
+| Hook | Called by |
+| --- | --- |
+| `BeforeCreate(ctx)` | `Create` |
+| `AfterCreate(ctx)` | `Create` |
+| `BeforeUpdate(ctx)` | `Update` |
+| `AfterUpdate(ctx)` | `Update` |
+| `BeforeDelete(ctx)` | `Delete`, `HardDelete` |
+| `AfterDelete(ctx)` | `Delete`, `HardDelete` |
+
+`UpdateMap`, `CreateBatch`, `Upsert`, and batch operations validate data, but do
+not run every entity lifecycle hook in the same way as `Create`, `Update`, and
+`Delete`. Use service-level code when a bulk workflow needs per-row side effects.
+
+## Relation Fields
+
+Relation fields use `rel` tags instead of `db` tags:
+
+```go
+type User struct {
+    ID      int64     `db:"id" pk:"true"`
+    Profile *Profile `rel:"has_one" join:"user_id"`
+    Posts   []Post   `rel:"has_many" join:"user_id"`
+    TeamID  int64    `db:"team_id"`
+    Team    *Team    `rel:"belongs_to" join:"team_id"`
+}
+```
+
+Because relation fields do not have `db` tags, they are not treated as columns.
+They are loaded with `Preload` and can be recursively persisted during
+association saves. See [Relations](relations) for the full tag matrix.
+
+## Inspecting Metadata
+
+`GetModelMeta[T]` exposes the cached model metadata:
+
+```go
+meta := quark.GetModelMeta[User]()
+fmt.Println(meta.Table)
+fmt.Println(meta.PK.Column)
+fmt.Println(meta.FieldByCol["email"].Index)
+```
+
+This is useful for framework integration, diagnostics, custom tooling, and tests
+that need to assert how Quark interpreted a model.

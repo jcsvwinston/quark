@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-14
+
+Minor release — per-column timezones. Closes the last deferred type
+from Phase 1's Bloque B: `time.Time` columns can now declare a
+timezone (`quark:"tz=Europe/Madrid"`) or inherit a Client-wide default
+(`quark.WithDefaultTZ`), with a UTC-always wire contract. No breaking
+changes; no migration guide. Fully additive — callers that don't use
+the feature see no change from v0.6. Detailed notes in
+[`docs/RELEASE_NOTES_v0.7.0.md`](docs/RELEASE_NOTES_v0.7.0.md).
+
+PRs included in this release: [#63] (per-column timezone override).
+
 ### Added
 
 - **Per-column timezone override** ([ADR-0010](docs/adr/0010-per-column-timezone-override.md)):
@@ -35,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Client.RegisterModel` / `Client.Migrate` when a `quark:"tz=..."` tag
   carries an invalid IANA timezone name. The wrapped error names the
   field, the column and the offending string.
+
+[#63]: https://github.com/jcsvwinston/quark/pull/63
 
 ## [0.6.0] - 2026-05-14
 

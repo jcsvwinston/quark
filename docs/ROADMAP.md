@@ -38,7 +38,16 @@
 - [x] **F1-5** — Soft-delete scopes: `WithTrashed` / `OnlyTrashed` / `Restore`.
 - [x] **F1-6** — Optimistic locking (`quark:"version"` + `ErrStaleEntity`).
 
-## v0.6.0 — Phase 3 (this release)
+## v0.7.0 — Per-column timezones (this release)
+
+Minor release. Closes the last deferred type from Phase 1's Bloque B
+(see [ADR-0010](adr/0010-per-column-timezone-override.md)):
+
+- [x] **Per-column timezones** — `time.Time` columns can declare a timezone via the `quark:"tz=Europe/Madrid"` tag or inherit a Client-wide default via `quark.WithDefaultTZ(loc)`. Precedence is column tag → client default → driver pass-through. Wire contract is UTC-always: values go to the database as UTC and are converted to the configured location in memory on scan. Honoured on `time.Time`, `*time.Time` and `Nullable[time.Time]`, including through `Preload`. An invalid IANA name fails fast in `RegisterModel` / `Migrate` with the new `ErrInvalidTimezone` sentinel. Fully opt-in — no change for callers that don't use it.
+
+With this, Phase 1's Bloque B is closed entire (`Array[T]` shipped in v0.6.0).
+
+## v0.6.0 — Phase 3
 
 Schema-as-code migrations. Closes the F3-1 through F3-7 backlog:
 
@@ -76,14 +85,14 @@ No new public API. Closes the F0-1 through F0-10 backlog:
 - [x] **F2-having-agg** — `HavingAggregate(fn, column, op, value)` with COUNT/SUM/AVG/MIN/MAX whitelist.
 - [x] **F2-join-builder** — Structured `Join(table).On(col, op, otherCol)` retires the v0.3.x string-raw form (BREAKING; see [`MIGRATION_v0.4.0.md`](MIGRATION_v0.4.0.md)).
 
-## Phase 4 — observability + cache (v0.7)
+## Phase 4 — observability + cache (v0.8)
 
 - [ ] OTel metrics (counters, histograms).
 - [ ] SQL redaction in spans.
 - [ ] Cache stampede protection + granular invalidation.
 - [ ] Deadlock retry with exponential backoff.
 
-## Phase 5 — RLS + hooks + events (v0.8)
+## Phase 5 — RLS + hooks + events (v0.9)
 
 - [ ] Real Postgres RLS (`SET LOCAL app.tenant_id` + `CREATE POLICY` template).
 - [ ] Transactional hooks (`OnCommit` / `OnRollback`, `BeforeFind` / `AfterFind`).
