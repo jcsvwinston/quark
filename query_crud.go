@@ -550,7 +550,7 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		// Safe Sprintf: dbTag is validated by the guard above, and
 		// dialect.Placeholder emits only literal placeholder syntax.
 		setClauses = append(setClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(dbTag), q.dialect.Placeholder(argIndex)))
-		args = append(args, v.Field(idx).Interface())
+		args = append(args, q.bindColumnArg(dbTag, v.Field(idx).Interface()))
 		argIndex++
 	}
 
@@ -1339,7 +1339,7 @@ func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCol
 		if !q.meta.HasCompositePK && i == q.pk.Index && isZeroPKValue(v.Field(i)) {
 			continue
 		}
-		allCols = append(allCols, colVal{col: dbTag, val: v.Field(i).Interface()})
+		allCols = append(allCols, colVal{col: dbTag, val: q.bindColumnArg(dbTag, v.Field(i).Interface())})
 	}
 
 	conflictSet := make(map[string]bool, len(conflictCols))

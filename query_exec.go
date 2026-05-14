@@ -55,6 +55,10 @@ func (ts timeScanner) Scan(src any) error {
 	default:
 		return fmt.Errorf("timeScanner: unsupported type %T", src)
 	}
+	// Applied to every shape, including a driver-supplied time.Time that
+	// already carries a zone (PG/pgx TIMESTAMPTZ): .In only changes the
+	// representation, not the instant, so re-localising is safe and gives
+	// the per-column contract a single, consistent application point.
 	if ts.loc != nil {
 		*ts.dest = ts.dest.In(ts.loc)
 	}

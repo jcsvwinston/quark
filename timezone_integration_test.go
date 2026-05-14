@@ -183,6 +183,38 @@ func testTZ(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		}
 	})
 
+	t.Run("UpdateFieldsWithTZ", func(t *testing.T) {
+		// UpdateFields is a distinct bind call site from buildUpdate —
+		// pin that it also honours the column tz tag.
+		dropTable(baseClient, "tz_tag_docs")
+		if err := baseClient.Migrate(ctx, &tzTagDoc{}); err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+		defer dropTable(baseClient, "tz_tag_docs")
+
+		d := &tzTagDoc{Name: "grace", Madrid: instant, Tokyo: instant, OptMadrid: quark.SomeOf(instant)}
+		if err := quark.For[tzTagDoc](ctx, baseClient).Create(d); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		newInstant := instant.Add(48 * time.Hour)
+		d.Madrid = newInstant.In(tokyo) // deliberately in a different zone
+		if _, err := quark.For[tzTagDoc](ctx, baseClient).UpdateFields(d, "madrid"); err != nil {
+			t.Fatalf("UpdateFields: %v", err)
+		}
+
+		got, err := quark.For[tzTagDoc](ctx, baseClient).Find(d.ID)
+		if err != nil {
+			t.Fatalf("find: %v", err)
+		}
+		if !got.Madrid.Equal(newInstant) {
+			t.Errorf("UpdateFields lost the instant: want %v, got %v", newInstant, got.Madrid.UTC())
+		}
+		if got.Madrid.Location().String() != "Europe/Madrid" {
+			t.Errorf("UpdateFields round-trip location = %v, want Europe/Madrid", got.Madrid.Location())
+		}
+	})
+
 	t.Run("NoDefaultNoTagIsPassthrough", func(t *testing.T) {
 		// baseClient has no WithDefaultTZ and tzClientDoc has no tag — this
 		// is the historical v0.6 path. The feature must be fully opt-in:
@@ -205,8 +237,6 @@ func testTZ(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 			t.Errorf("passthrough must preserve the instant: want %v, got %v", instant, got.CreatedAt)
 		}
 	})
-
-	_ = tokyo // referenced via tags; kept for clarity of intent
 }
 
 // TestRegisterModel_InvalidTimezone pins the fail-fast contract: an invalid
