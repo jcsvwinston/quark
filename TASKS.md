@@ -1,12 +1,16 @@
 # Quark — backlog táctico
 
-> **Bloque B cerrado entero (2026-05-14, [Unreleased] → v0.7.0).**
-> `Array[T]` (v0.6.0) y timezones por columna (PR #63) entregados;
-> Fase 1 queda sin tipos diferidos. Timezones: estrategia híbrida
-> `WithDefaultTZ` + tag `quark:"tz=..."`, wire UTC-always, fail-fast
-> con `ErrInvalidTimezone`, opt-in puro (ADR-0010). Backlog vivo ahora
-> sólo en **Fase 4** (observability + cache stampede + deadlock retry;
-> `docs/ANALISIS_MADUREZ.md` §4) — sin abrir todavía.
+> **Fase 4 abierta formalmente (2026-05-14).** ADR-0011 ancla el cache
+> stampede protection (wrapper común sobre `CacheStore`). Descompuesta
+> en 7 items F4-1..F4-7 más abajo. Decisiones de scope fijadas: XFetch
+> entra (F4-5), negative caching y gzip diferidos. Es el **único bloque
+> vivo** del backlog — no hay implementación todavía, sólo la apertura.
+> Orden de ataque: F4-4 primero (fix de correctness, prerequisito).
+>
+> **v0.7.0 publicada (2026-05-14).** Timezones por columna entregadas;
+> Bloque B cerrado entero. Estrategia híbrida `WithDefaultTZ` + tag
+> `quark:"tz=..."`, wire UTC-always, fail-fast con `ErrInvalidTimezone`,
+> opt-in puro (ADR-0010, PR #63). `[Unreleased]` queda limpio.
 >
 > **Phase 3 cerrada (2026-05-14, v0.6.0).** Los 7 items F3-1..F3-7
 > entregados; `Array[T]` (Bloque B / Arrays Postgres) también dentro
@@ -34,40 +38,175 @@
 > Foco admitido: `fase4` | `auto`. Si dudas, usa `auto`. Los focos
 > `f0`, `fase3` y `tipos` ya no aplican — los tres cerrados.
 
-Estado real del backlog post-v0.6.0 (releases v0.5.0 / v0.6.0 hechos;
-[Unreleased] acumula timezones por columna para v0.7.0):
+Estado real del backlog post-v0.7.0 (releases v0.5.0 / v0.6.0 / v0.7.0
+hechos; `[Unreleased]` limpio; Fase 4 abierta y descompuesta):
 
 1. ~~**Bloque A — Cerrar Fase 0 de verdad**~~. Cerrado en v0.5.0.
    F0-1..F0-10 tachados.
 2. ~~**Bloque C — Phase 3**~~. Cerrado en v0.6.0. F3-1..F3-7 entregados;
    ADR-0009 archivado.
-3. ~~**Bloque B — Tipos diferidos de Fase 1**~~. Cerrado entero.
-   - ~~`Array[T]`~~ — cerrado en v0.6.0 (PR #42).
-   - ~~**Timezones por columna**~~ — cerrado en [Unreleased] (PR #63),
-     ADR-0010 archivado. Estrategia híbrida, wire UTC-always, fail-fast.
-4. **Fase 4 — observability + cache stampede + deadlock retry**
-   (`docs/ROADMAP.md` § Phase 4; `docs/ANALISIS_MADUREZ.md` §4 Fase 4).
-   Sin ADR ni decomposición todavía. Apertura formal pendiente —
-   **único bloque vivo del backlog.**
+3. ~~**Bloque B — Tipos diferidos de Fase 1**~~. Cerrado entero en
+   v0.7.0. `Array[T]` (PR #42) + timezones por columna (PR #63,
+   ADR-0010).
+4. **Fase 4 — observability + cache de producción + deadlock retry**.
+   Apertura formal hecha (ADR-0011 + F4-1..F4-7 descompuestos, ver
+   sección "## Fase 4" más abajo). **Único bloque vivo.** Falta toda
+   la implementación.
 
 **Próxima acción concreta** (al arrancar sesión nueva):
-1. `/next-session fase4` — sesión de apertura/planning, NO de entrega:
-   escribir ADR-0011 (decisión de scope/owner del cache stampede
-   protection), descomponer Fase 4 en items F4-1..F4-N en este TASKS
-   con la granularidad de F1/F2/F3, abrir issues de planning.
-2. Considerar antes: ¿taggear v0.7.0 con timezones por columna? Hay un
-   feature en [Unreleased] sin release. `/release v0.7.0` cuando se
-   decida cortar — no es bloqueante para abrir Fase 4 pero conviene no
-   dejar [Unreleased] creciendo como pasó con Phase 3.
+1. `/next-session fase4` — sesión de **entrega**: implementar el
+   primer item. Empezar por **F4-4** (cache key determinista) — es
+   fix de correctness y prerequisito de F4-5/F4-6. 1 PR con
+   `code-reviewer` + docs + CHANGELOG `### Added`, igual que cualquier
+   F-item de F1/F2/F3.
+2. Quick win ortogonal pendiente: el workflow `release-please-action@v4`
+   corre sobre Node 20, que GitHub fuerza a Node 24 el **2026-06-02**.
+   Bumpear la versión del action o añadir `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`
+   antes de esa fecha. Puede ir como primer commit de la próxima sesión
+   o en su propio PR de mantenimiento.
 
-**Foco sugerido** del slash command: `fase4` — es el único bloque que
-queda. Pero si se prefiere cerrar versión antes de abrir ciclo nuevo,
-`/release v0.7.0` primero (lección de la sesión que arrastró todo
-Phase 3 en [Unreleased]).
+**Foco sugerido** del slash command: `fase4` — implementar F4-N en
+orden (F4-4 → F4-1..F4-3 → F4-5/F4-6 → F4-7). Cada item su propio PR;
+no acumular en `[Unreleased]` sin cortar versión (lección de Phase 3).
 
 **Disciplina recordada**: `code-reviewer` subagent obligatorio antes
 de cada PR (regla CLAUDE.md #6); `/next-session` plantilla de cierre
 al final de cada sesión.
+
+---
+
+## Fase 4 — Observabilidad y caché de producción (apertura formal)
+
+> Spec narrativo: `docs/ANALISIS_MADUREZ.md` §4 Fase 4. Decisión
+> arquitectónica del cache stampede: [`docs/adr/0011-cache-stampede-protection-wrapper.md`](docs/adr/0011-cache-stampede-protection-wrapper.md).
+> Playbooks aplicables: `docs/playbooks/cache.md` (F4-4..F4-6),
+> `docs/playbooks/dialects.md` (F4-7 — códigos de error por driver).
+> Objetivo de fase: que en prod sepas qué pasa y la caché no se incendie.
+> Salida: v0.8.0 con observabilidad y caché defendibles en SRE review.
+
+Apertura formal hecha en sesión post-v0.7.0 (2026-05-14). Decisiones de
+scope fijadas con el usuario:
+
+- **Probabilistic early expiration (XFetch)**: ENTRA, dentro de F4-5.
+- **Negative caching**: DIFERIDO — future work, no en Fase 4.
+- **Compresión gzip de values**: DIFERIDO — future work, no en Fase 4.
+- **Cache stampede protection**: wrapper común sobre `CacheStore`
+  (ADR-0011), singleflight in-process; el caso cross-instancia queda
+  como gap documentado, ADR sucesor si hay demanda real.
+
+Descomposición en 7 items entregables independientemente. Orden de
+ataque sugerido: **F4-4 primero** (cache key determinista es fix de
+correctness y prerequisito de F4-5/F4-6), luego observabilidad
+(F4-1..F4-3, el análisis avisa "sin métricas serias, optimizar
+prematuramente"), luego F4-5/F4-6 (caché pesada), F4-7 al final.
+Cada item es 1 PR con `code-reviewer` + docs en `website/docs/` +
+CHANGELOG `### Added`.
+
+### F4-1 · OTel metrics
+
+`otel/otel.go` hoy sólo emite **spans** (tracing); no hay métricas.
+Añadir un `meter` que emita:
+- counter `quark.queries.total`
+- histogram `quark.queries.duration`
+- histogram `quark.queries.rows`
+
+Todos etiquetados por `db.system`, `db.operation`, `db.table` (mismas
+convenciones que los spans actuales). Resuelto lazy del
+`MeterProvider` global, igual que el `tracer()` actual hace con el
+`TracerProvider` (`otel/otel.go:30`). Sin romper la API del
+`Middleware` existente. Doc: `website/docs/advanced/caching-observability.mdx`
++ `website/docs/reference/api/observability.mdx`.
+
+### F4-2 · Redacción de SQL en spans
+
+Opción `WithSpanRedaction(mode)` que sustituye los args por `?` en el
+atributo `db.statement` de los spans. **Default ON** (opt-out
+explícito) — un span no debe filtrar valores de usuario por defecto.
+Se añade al `Middleware` de `otel/otel.go`; el SQL ya va parametrizado,
+así que la redacción es sobre el render del statement + args, no sobre
+el SQL crudo. Doc en `observability.mdx`.
+
+### F4-3 · Slow query log estructurado
+
+Log estructurado (`slog`) cuando una query supera un threshold
+configurable. Threshold vía opción (`WithSlowQueryThreshold(d)`); 0 =
+desactivado (default). Emite a `Client.logger` con
+`table`/`operation`/`duration`/`sql` (sql redactado si F4-2 lo está).
+Punto de integración: el middleware pipeline o un observer dedicado —
+decidir en el PR cuál encaja mejor sin duplicar el timing que ya
+mide el otel Middleware.
+
+### F4-4 · Cache key con serialización determinista
+
+**Fix de correctness, prerequisito de F4-5/F4-6.** `cache.go:35-45`
+construye el key con `fmt.Sprintf("%v", arg)`, que colisiona:
+`int64(1)` vs `string("1")`, `time.Time` de zonas distintas con mismo
+wall-clock, `nil` vs `""`. Reemplazar por serialización determinista
+length-prefixed (`binary.Write`) o `gob`, incluyendo el tipo en el
+encoding para que `1` int y `1` string no colisionen. El key sigue
+incluyendo `dialect.Name() + tenantID + schema + sqlStr`. Tests:
+`cache_all_engines_test.go` debe seguir verde + nuevos casos de
+no-colisión. Sin esto, F4-5 cachearía sobre keys frágiles.
+
+### F4-5 · Cache stampede protection (ADR-0011)
+
+Wrapper común `stampedeStore` sobre `CacheStore` (ADR-0011). Tres
+mecanismos juntos — el playbook exige "todo o nada":
+- **Singleflight** in-process por cache key
+  (`golang.org/x/sync/singleflight` o equivalente propio).
+- **TTL con jitter** ±`jitterPct` (default 10%, configurable).
+- **XFetch / probabilistic early expiration**: persiste delta de
+  cómputo + timestamp junto al value; `Get` decide probabilísticamente
+  el refresh temprano.
+
+Activación: por defecto cuando hay `WithCache(...)` — no opt-in. Una
+opción ajusta `jitterPct` y permite desactivar XFetch; el singleflight
+no se desactiva. `memory.Store` y `redis.Store` NO se tocan. Gap
+documentado: singleflight no cubre cross-instancia (ver ADR-0011).
+Doc: `cache.md` actualizado + `caching-observability.mdx`.
+
+### F4-6 · Invalidación granular por PK + fix Redis tag-key TTL
+
+Hoy `executeExec` (`query_crud.go:43`) invalida por `q.table` entero —
+seguro pero ineficiente (un `UPDATE ... WHERE id=1` borra toda query
+cacheada que toque la tabla). Añadir invalidación por PK afectada: las
+mutaciones registran las PKs cambiadas y emiten invalidaciones
+precisas; el tag por tabla queda como fallback para mutaciones donde
+las PKs no se conocen (DELETE WHERE complejo). Incluye el fix del
+`cache/redis/redis.go:58`: el TTL del SET de tag (`ttl + 24h`) se
+sobreescribe en vez de tomar el máximo — usar `EXPIREAT` con
+`MAX(actual, nuevo)` o cleanup periódico, para no dejar keys huérfanas.
+
+### F4-7 · Retry de deadlocks
+
+Detección por código de error del driver:
+- PostgreSQL `40P01` (`pq.Error.Code` / pgconn SQLSTATE)
+- MySQL / MariaDB `1213`
+- MSSQL `1205`
+- Oracle `ORA-00060`
+
+Helper `isDeadlock(err)` en `db_errors.go` (mismo patrón que
+`isUniqueViolation` de P0-3, con `errors.As` contra los tipos de los
+6 drivers). Exponential backoff con jitter, máximo N intentos.
+**Disabled por default**; `WithDeadlockRetry(n)` lo habilita. El retry
+envuelve la unidad transaccional completa, no la query suelta — un
+deadlock aborta la transacción entera, así que reintentar una query
+sin reabrir la tx no tiene sentido. **Punto de integración:
+`Client.Tx(ctx, fn)` (`tx.go:56`)** — el runner closure-based ya
+ejecuta `fn` dentro de BEGIN/COMMIT; el retry re-ejecuta `fn` con una
+tx nueva cuando `isDeadlock(err)` y quedan intentos. `BeginTx` (la
+variante manual, `tx.go:38`) queda fuera de scope: sin closure no hay
+forma de re-ejecutar el trabajo del caller. Tests: difícil provocar
+deadlocks deterministas cross-engine — al menos unit tests del mapeo
+de códigos + un integration test que fuerce el deadlock en PG (dos tx
+con orden de lock invertido).
+
+### Cierre de Fase 4
+
+Cuando F4-1..F4-7 estén ✅, taggear **v0.8.0** vía `/release v0.8.0`.
+Diferidos a future work (no bloquean el cierre de fase): negative
+caching, compresión gzip de values. Mientras Fase 4 esté en progreso
+(cualquier F4-N abierto), v0.8 no se taggea.
 
 ---
 
