@@ -60,6 +60,54 @@ func TestGenerateCacheKey_TypeCollision(t *testing.T) {
 	}
 }
 
+// TestGenerateCacheKey_WidthCollapse pins the intentional design: all
+// signed-int widths collapse to one key, all unsigned widths to one key,
+// both float widths to one key — because int(1) and int64(1) bind to the
+// same wire value and run identical SQL, so sharing a key is a legitimate
+// hit. Cross-kind (int vs uint vs float) must still stay distinct.
+func TestGenerateCacheKey_WidthCollapse(t *testing.T) {
+	const sql = "SELECT * FROM t WHERE c = ?"
+
+	t.Run("signed widths share a key", func(t *testing.T) {
+		want := keyFor("", "", sql, int64(1))
+		for _, v := range []any{int(1), int8(1), int16(1), int32(1)} {
+			if got := keyFor("", "", sql, v); got != want {
+				t.Errorf("%T(1) keyed as %s, want int64(1)'s key %s (width collapse is by design)", v, got, want)
+			}
+		}
+	})
+
+	t.Run("unsigned widths share a key", func(t *testing.T) {
+		want := keyFor("", "", sql, uint64(1))
+		for _, v := range []any{uint(1), uint8(1), uint16(1), uint32(1)} {
+			if got := keyFor("", "", sql, v); got != want {
+				t.Errorf("%T(1) keyed as %s, want uint64(1)'s key %s", v, got, want)
+			}
+		}
+	})
+
+	t.Run("float32 1.0 collapses to float64 1.0", func(t *testing.T) {
+		// float32(1.0) widens to exactly float64(1.0): legitimate hit.
+		if keyFor("", "", sql, float32(1.0)) != keyFor("", "", sql, float64(1.0)) {
+			t.Error("float32(1.0) and float64(1.0) are the same value, must share a key")
+		}
+		// float32(0.1) widens to a different bit pattern than float64(0.1):
+		// distinct values, must NOT collide.
+		if keyFor("", "", sql, float32(0.1)) == keyFor("", "", sql, float64(0.1)) {
+			t.Error("float32(0.1) and float64(0.1) are distinct values, must not collide")
+		}
+	})
+
+	t.Run("cross-kind stays distinct", func(t *testing.T) {
+		i := keyFor("", "", sql, int64(1))
+		u := keyFor("", "", sql, uint64(1))
+		f := keyFor("", "", sql, float64(1))
+		if i == u || i == f || u == f {
+			t.Errorf("int64/uint64/float64 of value 1 must all differ: int=%s uint=%s float=%s", i, u, f)
+		}
+	})
+}
+
 // TestGenerateCacheKey_BoundaryCollision pins that field boundaries are
 // length-prefixed: without separators, "ab"+"" hashed the same stream as
 // "a"+"b", and tenant "my"+schema "sql" the same as tenant "mysql"+schema "".
@@ -117,6 +165,31 @@ func TestGenerateCacheKey_Time(t *testing.T) {
 			t.Errorf("instants one second apart must not collide — both %s", a)
 		}
 	})
+
+	t.Run("zero time is stable", func(t *testing.T) {
+		// time.Time{} is a valid bind arg (e.g. "no date filter"). Its
+		// UnixNano() is a fixed sentinel value, so the key is stable and
+		// zone-independent like any other instant.
+		z := keyFor("", "", sql, time.Time{})
+		if z != keyFor("", "", sql, time.Time{}.UTC()) {
+			t.Error("zero time must key the same as its .UTC() form")
+		}
+		if z == keyFor("", "", sql, instant) {
+			t.Error("zero time must not collide with a real instant")
+		}
+	})
+}
+
+// TestGenerateCacheKey_DialectDiscriminates pins that the dialect name is
+// part of the key — the same SQL string cached under SQLite must never be
+// served to a PostgreSQL client (placeholder syntax and semantics differ).
+func TestGenerateCacheKey_DialectDiscriminates(t *testing.T) {
+	const sql = "SELECT * FROM users WHERE id = ?"
+	sqliteQ := &BaseQuery{dialect: SQLite()}
+	pgQ := &BaseQuery{dialect: PostgreSQL()}
+	if sqliteQ.generateCacheKey(sql, []any{int64(1)}) == pgQ.generateCacheKey(sql, []any{int64(1)}) {
+		t.Error("same SQL under different dialects must yield different keys")
+	}
 }
 
 // TestGenerateCacheKey_QueryDiscriminants pins that the SQL string and the

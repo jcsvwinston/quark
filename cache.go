@@ -101,6 +101,22 @@ func writeLenPrefixed(h io.Writer, s string) {
 // "predictable Stringer collision" vector noted in docs/playbooks/cache.md.
 // The encoding is deliberately reflection-free (ADR-0002): a plain type
 // switch over the value.
+//
+// Width collapse is intentional. All signed-int widths share cacheArgInt,
+// all unsigned widths share cacheArgUint, both float widths share
+// cacheArgFloat. The cache key must collide exactly when two calls would
+// produce the same database result: int(1) and int64(1) bind to the same
+// wire value and run identical SQL, so sharing a key is a legitimate hit,
+// not a dangerous collision. What MUST stay distinct is cross-kind —
+// int64(1) vs uint64(1) vs float64(1) vs string("1") — and the kind tags
+// guarantee that. (float32(x) is widened to float64 before hashing, so
+// float32(0.1) and float64(0.1) differ — distinct bit patterns — while
+// float32(1.0) and float64(1.0) share a key, again a legitimate hit.)
+//
+// Caveat: a map passed as a bind arg lands in the default branch, and
+// fmt.Sprintf("%#v", aMap) does not guarantee key order — the cache key
+// would not be stable across runs. Maps are not a normal database/sql
+// bind type; callers that pass one own that instability.
 func writeCacheArg(h io.Writer, arg any) {
 	switch v := arg.(type) {
 	case nil:
