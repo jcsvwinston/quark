@@ -285,7 +285,11 @@ Versionado contradictorio (v1.0 anunciado vs CHANGELOG en 0.1.1 vs SECURITY pre-
 - **Dry-run con plan de cambios** (estilo `terraform plan`) que muestra DDL up/down y warnings (drop columns, narrowing types, lossy conversions).
 - **Estilo expand-contract** documentado y soportado vía guía.
 - **Backfill orquestado**: `Migration.Backfill(fn func(*Tx) error, batchSize int)` que itera por PK con resume token.
-- **Sustituir registry global** por registry por cliente.
+- **Sustituir registry global** por registry por cliente. **F3-7: parcialmente
+  cerrado** — el _model registry_ per-Client está implementado
+  (`client_registry.go`); el _versioned migration registry_ de
+  `migrate/migrate.go` sigue siendo global y queda como deuda de
+  Fase 4+ (ver `docs/playbooks/migrations.md` §"Dos registries").
 
 **Salida:** v0.5.0 con migraciones que un equipo serio aceptaría.
 

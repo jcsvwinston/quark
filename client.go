@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,6 +26,23 @@ type Client struct {
 	cacheStore CacheStore
 	driverName string
 	dataSource string
+
+	// registeredModels holds the list of models the user has
+	// pre-registered with this Client via [Client.RegisterModel].
+	// Per-Client (not global) so multi-tenant deployments with
+	// different Clients can manage different model sets. Mutex-
+	// protected because RegisterModel is documented as safe to
+	// call concurrently with itself (rare but easy to surface for
+	// users who init their schema lazily).
+	//
+	// NOT to be confused with the global [GetModelMetaByType]
+	// cache in `internal/schema` — that one is keyed by
+	// `reflect.Type` and is correct as global state (the cached
+	// meta is deterministic per type). F3-7's per-Client registry
+	// is about which models this Client manages, not about the
+	// meta computation cache.
+	registeredModelsMu sync.Mutex
+	registeredModels   []any
 }
 
 // ClientProvider is an interface that provides a database client.

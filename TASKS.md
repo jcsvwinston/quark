@@ -384,19 +384,39 @@ Doc: `website/docs/guides/migrations.mdx` § Schema Introspection
 
 ### F3-7 · Per-client model registry
 
-- **Objetivo**: sustituir el registro global de modelos (`getModelMeta`
-  package-level) por un registro por `*Client`. Permite tests
-  independientes y multi-tenant strict.
-- **Acción**:
-  1. `Client.RegisterModel[T]()` que añade meta al registry del Client.
-  2. `client.Migrate(ctx, &Model{})` registra implícitamente.
-  3. `quark.For[T](ctx, client)` busca primero en el registro del Client,
-     fallback al global durante la transición.
-  4. Tras un release con el cambio, deprecar el global y borrarlo en el
-     siguiente.
-- **Done**: tests existentes pasan sin cambios; nuevo test que demuestra
-  que dos Clients pueden registrar modelos con el mismo nombre Go sin
-  conflicto.
+- ~~**F3-7 (additive scope)**~~ **Cerrado** —
+  `Client.RegisterModel(models ...any) error`,
+  `Client.RegisteredModels() []any`,
+  `Client.MigrateRegistered(ctx)`,
+  `Client.PlanMigrationRegistered(ctx)` en `client_registry.go`.
+  Per-Client list mutex-protegida; safe for concurrent use.
+  Validación up-front (no partial registration on failure).
+  Cobertura: 11 unit tests incluyendo race-detector smoke
+  (TestClient_RegisterModel_ConcurrentSafe), snapshot semantics,
+  no-dedup contract, validation, end-to-end MigrateRegistered.
+
+  **Scope DECISION**: F3-7 fue intencionalmente recortado a
+  ADITIVO (en lugar del plan original "sustituir el global"). El
+  global type-meta cache en `internal/schema` se queda — es
+  correct as global state porque la meta es determinista per
+  `reflect.Type`. F3-7 añade per-Client state para "qué modelos
+  maneja este Client", NO para "cuál es el meta de tipo X".
+  Multi-tenant (ADR-0007) ya no necesita el reemplazo total
+  porque cada Client puede tener su propio model set sin
+  cross-contamination del meta cache.
+
+  Decisión NO en este PR (deferred a un follow-up si surge
+  demanda):
+  - **Implicit registration via `Client.Migrate(ctx, &Model{})`**:
+    el plan original quería que Migrate registrara
+    implícitamente; lo dejé explícito para evitar el "magic
+    registry" donde el user no sabe por qué un modelo está
+    registrado.
+  - **`quark.For[T](ctx, client)` generic con registry lookup**:
+    requiere Go generics + un fallback al global. Out of scope
+    para F3-7-additive.
+  - **Deprecación del global**: no hay deprecación pending.
+    El global es correct as-is.
 
 ### Cierre de Phase 3
 

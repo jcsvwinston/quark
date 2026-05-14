@@ -56,11 +56,29 @@ Hoy: documenta en producción que las migraciones deben ejecutarse desde un úni
 
 No hay diff reversible automático. `Migration.Down` lo escribe el desarrollador. Si se equivoca, el rollback puede romper la base. Atlas/Alembic generan el down a partir del diff de schema; Quark hoy no.
 
-### Registry global mutable
+### Dos registries — un cerrado (F3-7), uno aún pendiente
 
-`migrate/migrate.go:19` — `var registry = map[string]*Migration{}` con `Reset()` para tests. Anti-patrón: dos clientes en el mismo proceso comparten registry. Si Nucleus instancia un cliente por tenant + un cliente para datos de admin compartidos en el mismo proceso, ambos ven las mismas migraciones.
+Quark tiene HOY dos conceptos de "registry":
 
-Plan Fase 3: registry por `*Client`.
+1. **Model registry per-Client** (`client_registry.go`, cerrado en F3-7).
+   `Client.RegisterModel(...)` + `Client.RegisteredModels()` per-instance,
+   mutex-protegido. Multi-tenant safe — cada Client gestiona su propio
+   model set sin cross-contamination. Esto NO toca el global type-meta
+   cache de `internal/schema` (`modelRegistry sync.Map`), que es correcto
+   como global state porque la meta es determinista per `reflect.Type`.
+
+2. **Versioned migration registry global y mutable** (`migrate/migrate.go:19` —
+   `var registry = map[string]*Migration{}` con `Reset()` para tests).
+   Anti-patrón sigue vivo: dos clientes en el mismo proceso comparten
+   este registry. Si Nucleus instancia un cliente por tenant + un cliente
+   para datos de admin compartidos en el mismo proceso, ambos ven las
+   mismas migraciones versionadas. F3-7 NO cierra esto — el scope de F3-7
+   fue intencionalmente aditivo (el model registry per-Client) y no tocó
+   el global de migraciones versionadas.
+
+Pendiente (Fase 4+): mover el global de `migrate/migrate.go` a per-Client
+también. Patrón a seguir: el mismo de F3-7 (`Client.RegisterMigration(...)`
++ `Client.RegisteredMigrations()`).
 
 ### Migrator versionado NO envuelve `Up` en transacción (en MySQL)
 
