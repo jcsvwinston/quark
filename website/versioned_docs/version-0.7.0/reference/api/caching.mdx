@@ -1,0 +1,121 @@
+# Caching API Reference
+
+Quark cache support is opt-in per client and per query.
+
+## Query Cache
+
+### `Cache(ttl time.Duration, tags ...string) *Query[T]`
+
+Enables result caching for a query.
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Limit(100).
+    Cache(5*time.Minute, "users", "users:active").
+    List()
+```
+
+The query will only use caching if the client has a cache store:
+
+```go
+client, err := quark.New("postgres", dsn,
+    quark.WithCacheStore(store),
+)
+```
+
+Cache keys include:
+
+| Component | Purpose |
+| --- | --- |
+| Dialect name | Separates SQL syntax by engine. |
+| Tenant ID | Prevents row-level tenant cache leaks. |
+| Schema | Prevents schema-per-tenant cache leaks. |
+| SQL string | Separates query shapes. |
+| Arguments | Separates parameter values. |
+
+## Tags
+
+If no tags are passed, Quark tags the cache entry with the model table name:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Cache(5*time.Minute).
+    List()
+```
+
+If custom tags are passed, Quark uses exactly those tags. Include the table tag
+when you want automatic invalidation on writes to catch the entry:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Cache(5*time.Minute, "users", "users:active").
+    List()
+```
+
+Successful write executions invalidate the model table tag.
+
+## CacheStore
+
+```go
+type CacheStore interface {
+    Get(ctx context.Context, key string) ([]byte, error)
+    Set(ctx context.Context, key string, val []byte, ttl time.Duration, tags ...string) error
+    Delete(ctx context.Context, key string) error
+    InvalidateTags(ctx context.Context, tags ...string) error
+}
+```
+
+Cached values are JSON-encoded `[]T` results.
+
+## Memory Store
+
+```go
+import "github.com/jcsvwinston/quark/cache/memory"
+
+store := memory.New()
+defer store.Close()
+
+client, err := quark.New("sqlite", "file:app.db?cache=shared",
+    quark.WithCacheStore(store),
+)
+```
+
+The memory store is process-local, thread-safe, and supports tag invalidation
+through an in-memory reverse index.
+
+## Redis Store
+
+```go
+import rediscache "github.com/jcsvwinston/quark/cache/redis"
+
+store := rediscache.New(rediscache.Options{
+    Addr:     "localhost:6379",
+    Password: "",
+    DB:       0,
+})
+
+if err := store.Ping(ctx); err != nil {
+    return err
+}
+
+client, err := quark.New("postgres", dsn,
+    quark.WithCacheStore(store),
+)
+```
+
+Redis keys use these prefixes:
+
+| Prefix | Purpose |
+| --- | --- |
+| `quark:cache:` | Cached query payloads. |
+| `quark:tag:` | Redis set mapping tags to cache keys. |
+
+## Manual Invalidation
+
+```go
+err := store.InvalidateTags(ctx, "users:active")
+```
+
+Use manual invalidation when a cache entry is tagged by a business concept or
+when writes happen outside Quark.
