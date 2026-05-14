@@ -17,6 +17,7 @@
 | [0008](0008-docs-en-mismo-pr-que-api.md) | Documentación se modifica en el mismo PR que la API | Accepted | — |
 | [0009](0009-migrations-introspection-diff-not-versioned-files.md) | Migrations: introspection-based diff, not (only) versioned files | Accepted | Fase 3 |
 | [0010](0010-per-column-timezone-override.md) | Timezones por columna — híbrido Client default + tag, wire UTC | Accepted | Fase 1 |
+| [0011](0011-cache-stampede-protection-wrapper.md) | Cache stampede protection vía wrapper común sobre CacheStore | Accepted | Fase 4 |
 
 ## Cómo añadir un ADR nuevo
 
