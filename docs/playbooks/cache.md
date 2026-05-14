@@ -50,15 +50,29 @@ Esto es seguro (nunca devuelves stale data) pero ineficiente (alta tasa de inval
 
 Plan Fase 4: invalidación granular por PK afectada. Mutaciones registran las PKs cambiadas y se emiten invalidaciones precisas. Tag por tabla queda como fallback para casos donde no se conocen las PKs (DELETE WHERE complex).
 
-### Cache key serializa args con `%v`
+### ~~Cache key serializa args con `%v`~~ — cerrado (F4-4)
 
-`cache.go:35-45` construye el key con `fmt.Sprintf("%v", arg)`. Esto colisiona:
+**Cerrado** — `generateCacheKey` (`cache.go`) ya no usa
+`fmt.Sprintf("%v", arg)`. El encoding es ahora **type-tagged y
+length-prefixed**: cada componente fijo (`dialect`, `tenantID`,
+`schema`, `sqlStr`) va length-prefixed, y cada bind arg lleva un byte
+de tipo (`cacheArg*`) más su valor en big-endian. Cierra las tres
+clases de colisión:
 
-- `int64(1)` y `string("1")` ambos producen `"1"` → misma key, riesgo de devolver resultado equivocado si el SELECT estaba parametrizado.
-- `time.Time` con timezones distintas pero mismo wall-clock pueden colisionar.
-- `nil` y string vacío.
+- **tipo**: `int64(1)` y `string("1")` tenían tags distintos → keys
+  distintos. Idem `uint64` / `float64` / `bool` / `nil`.
+- **boundary**: sin separadores, `"my"+"sql"` hasheaba el mismo stream
+  que `"mysql"+""`, y args `"ab"+""` igual que `"a"+"b"`. El
+  length-prefix lo elimina.
+- **nil**: `nil` tiene su propio tag, no colisiona con `""`.
 
-Plan Fase 4: serialización determinista con `gob` o length-prefixed con `binary.Write`.
+`time.Time` se keyea por `UnixNano()`: el mismo instante en zonas
+distintas da el mismo key (cache hit legítimo), instantes distintos
+nunca colisionan. Tipos no primitivos caen a `fmt.Sprintf("%#v", v)`
+(incluye el tipo Go, no invoca `Stringer` — cierra el vector de
+colisión por `Stringer` predecible documentado más abajo).
+Reflection-free (ADR-0002). Cobertura: `cache_test.go` (determinismo,
+type/boundary/nil collision, time, discriminantes de query).
 
 ### TTL del tag-key Redis = `ttl + 24h`
 
@@ -98,13 +112,14 @@ Cuando llegue Fase 4, no implementes singleflight en cada call site. Hazlo a niv
 ## Roadmap de mejora
 
 - **Fase 4**:
-  - Singleflight por cache key.
-  - TTL con jitter (±10% configurable, `jitterPct` opción).
-  - Probabilistic early expiration opcional.
-  - Invalidación granular por PK además de tabla.
-  - Cache key con serialización determinista.
-  - Negative caching opcional (cachear `ErrNoRows`).
-  - Compresión opcional (gzip) para values grandes.
+  - ~~Cache key con serialización determinista~~ — cerrado (F4-4).
+  - Singleflight por cache key — F4-5 (ADR-0011, wrapper común).
+  - TTL con jitter (±10% configurable, `jitterPct` opción) — F4-5.
+  - Probabilistic early expiration (XFetch) — F4-5 (in scope).
+  - Invalidación granular por PK además de tabla — F4-6.
+  - Negative caching — diferido a future work (fuera de Fase 4).
+  - Compresión opcional (gzip) para values grandes — diferido a
+    future work (fuera de Fase 4).
 
 ## Tests críticos a no romper
 

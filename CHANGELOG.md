@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cache key collisions (F4-4)** — `generateCacheKey` no longer encodes
+  bind arguments with `fmt.Sprintf("%v", arg)`. The encoding is now
+  type-tagged and length-prefixed, closing three collision classes a
+  parameterised cached SELECT could hit: type collisions (`int64(1)` vs
+  `string("1")`, also `uint64` / `float64` / `bool` / `nil`), boundary
+  collisions (no separators meant tenant `"my"`+schema `"sql"` hashed
+  the same stream as `"mysql"`+`""`, and args `"ab"`+`""` the same as
+  `"a"`+`"b"`), and `nil` vs `""`. `time.Time` is keyed by `UnixNano()`
+  so the same instant in different zones is one key (a legitimate hit).
+  Unknown types fall back to `%#v` (includes the Go type, does not
+  invoke a `Stringer`). Reflection-free (ADR-0002). Prerequisite for
+  the F4-5/F4-6 cache work.
+
 ## [0.7.0] - 2026-05-14
 
 Minor release — per-column timezones. Closes the last deferred type
