@@ -173,22 +173,37 @@ time same-instant/distinct, discriminantes de query); el integration
 cambia — sólo se endurece el key). Doc: `docs/playbooks/cache.md`
 §"Cache key" + CHANGELOG `### Fixed`.
 
-### F4-5 · Cache stampede protection (ADR-0011)
+### ~~F4-5 · Cache stampede protection (ADR-0011)~~
 
-Wrapper común `stampedeStore` sobre `CacheStore` (ADR-0011). Tres
-mecanismos juntos — el playbook exige "todo o nada":
-- **Singleflight** in-process por cache key
-  (`golang.org/x/sync/singleflight` o equivalente propio).
-- **TTL con jitter** ±`jitterPct` (default 10%, configurable).
-- **XFetch / probabilistic early expiration**: persiste delta de
-  cómputo + timestamp junto al value; `Get` decide probabilísticamente
-  el refresh temprano.
+**Cerrado** — `stampedeStore` (`cache_stampede.go`) envuelve cualquier
+`CacheStore` con singleflight + TTL jitter + XFetch. Activación
+automática en `WithCacheStore` (no opt-in, "todo o nada" del playbook).
+Componentes:
 
-Activación: por defecto cuando hay `WithCache(...)` — no opt-in. Una
-opción ajusta `jitterPct` y permite desactivar XFetch; el singleflight
-no se desactiva. `memory.Store` y `redis.Store` NO se tocan. Gap
-documentado: singleflight no cubre cross-instancia (ver ADR-0011).
-Doc: `cache.md` actualizado + `caching-observability.mdx`.
+- **Singleflight** (`golang.org/x/sync/singleflight`): N callers
+  colapsan a 1 compute. El query path (`query_exec.go:List`) usa el
+  método interno `getOrCompute` cuando type-assert detecta
+  `*stampedeStore`; stores de terceros caen al cache-aside histórico.
+- **TTL jitter**: factor uniforme `[1-jitterPct, 1+jitterPct]` por
+  Set, default `±10%`, ajustable con `WithCacheJitter(pct)`.
+- **XFetch**: cada entrada lleva metadata embebida (`xfetchEntry`
+  length-prefixed con magic `QSPD`/version 0x01 + deltaNs + computedAt
+  + expiresAt + data). Fórmula Vattani:
+  `timeLeft ≤ delta * β * (-ln(rand()))`. Ajustable con
+  `WithCacheXFetchBeta(β)`; `β=0` desactiva XFetch.
+
+`memory.Store` / `redis.Store` / terceros NO cambian — la interfaz
+`CacheStore` no rompe. Gap conocido: singleflight in-process; cross-
+instancia queda como ADR sucesor (ADR-0011 §Cuándo reabrir).
+Cobertura: `cache_stampede_test.go` (10 tests: round-trip encoding,
+detección de entradas foráneas, jitter en rango, XFetch boundary
+cases — delta=0/expirado/lejos-de-expiry, singleflight bajo 50
+goroutines concurrentes, hit-after-first-compute, clamping de config,
+panic en inner nil). Doc: `docs/playbooks/cache.md` § "Sin protección
+contra cache stampede" (deuda marcada cerrada),
+`website/docs/advanced/caching-observability.mdx` § "Stampede
+protection", `website/docs/reference/api/caching.mdx`, CHANGELOG
+`### Added`.
 
 ### F4-6 · Invalidación granular por PK + fix Redis tag-key TTL
 

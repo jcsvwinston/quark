@@ -31,16 +31,38 @@ Ninguno crítico hoy. Hay **deuda estructural** que limita uso en producción.
 
 ## Limitaciones críticas (deuda Fase 4)
 
-### Sin protección contra cache stampede
+### ~~Sin protección contra cache stampede~~ — cerrado (F4-5, ADR-0011)
 
-Si una clave caliente expira y N requests llegan simultáneamente, **todas miss y emiten la query**. Resultado: tormenta de queries idénticas a la DB.
+**Cerrado** — `stampedeStore` (`cache_stampede.go`) envuelve cualquier
+`CacheStore` con las tres protecciones, instalado automáticamente por
+`WithCacheStore` (no opt-in). Los stores concretos (`memory.Store`,
+`redis.Store`, o de terceros) no cambian — la interfaz pública
+`CacheStore` no rompe.
 
-Hoy el cache no usa:
-- **Singleflight**: que la primera request en miss compute la respuesta y las demás esperen.
-- **Probabilistic early expiration** (XFetch algorithm): refresh la clave antes de expirar con probabilidad creciente, evitando convergencia en el momento de expirar.
-- **Jitter en TTL**: ±10% para que claves cacheadas en lote no expiren simultáneamente.
+- **Singleflight** in-process (`golang.org/x/sync/singleflight`):
+  N callers concurrentes para la misma key colapsan a 1 compute. El
+  query path (`query_exec.go:List`) usa el método `getOrCompute` del
+  wrapper cuando hace type-assert con `*stampedeStore` (siempre que
+  hay caché).
+- **TTL jitter**: cada `Set` multiplica el TTL por un factor uniforme
+  en `[1-jitterPct, 1+jitterPct]`. Default `±10%`, configurable con
+  `WithCacheJitter(pct)`. `0` desactiva jitter.
+- **XFetch / probabilistic early refresh**: cada entrada lleva
+  metadata (`deltaNs`/`computedAt`/`expiresAt`) embebida como
+  `xfetchEntry` length-prefixed. `Get` evalúa
+  `timeLeft ≤ delta * β * (-ln(rand()))` (Vattani et al.). Default
+  `β = 1.0`, ajustable con `WithCacheXFetchBeta(β)`. `β = 0` desactiva
+  XFetch.
 
-Plan Fase 4: introducir las tres protecciones por defecto.
+Gap documentado (ADR-0011 §Consecuencias): el singleflight **no cubre
+cross-instancia** (N procesos → N computes). El stampede in-process es
+el caso severo y común y queda resuelto al 100%; cross-instancia se
+aborda en ADR sucesor si surge demanda real.
+
+Cobertura: `cache_stampede_test.go` (10 tests: encoding/decoding,
+detección de entradas legacy, jitter en rango, XFetch boundary cases,
+singleflight bajo carga concurrente con 50 goroutines, hit-after-first,
+clamping de configuración).
 
 ### Invalidación grosera por tabla
 
@@ -113,9 +135,10 @@ Cuando llegue Fase 4, no implementes singleflight en cada call site. Hazlo a niv
 
 - **Fase 4**:
   - ~~Cache key con serialización determinista~~ — cerrado (F4-4).
-  - Singleflight por cache key — F4-5 (ADR-0011, wrapper común).
-  - TTL con jitter (±10% configurable, `jitterPct` opción) — F4-5.
-  - Probabilistic early expiration (XFetch) — F4-5 (in scope).
+  - ~~Singleflight por cache key~~ — cerrado (F4-5, ADR-0011).
+  - ~~TTL con jitter (±10% configurable, `jitterPct` opción)~~ —
+    cerrado (F4-5).
+  - ~~Probabilistic early expiration (XFetch)~~ — cerrado (F4-5).
   - Invalidación granular por PK además de tabla — F4-6.
   - Negative caching — diferido a future work (fuera de Fase 4).
   - Compresión opcional (gzip) para values grandes — diferido a

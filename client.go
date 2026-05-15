@@ -49,6 +49,13 @@ type Client struct {
 	// disables the feature entirely. Set via WithSlowQueryThreshold.
 	slowQueryThreshold time.Duration
 
+	// Cache stampede tuning (F4-5, ADR-0011). Defaults set in New() so
+	// callers that don't tune get sane behaviour. The wrapper installs
+	// once at construction time using these values.
+	stampedeJitterPct  float64
+	stampedeXFetchOn   bool
+	stampedeXFetchBeta float64
+
 	// defaultTZ is the fallback timezone for time.Time columns that do
 	// not carry their own quark:"tz=..." tag. nil (the zero value) means
 	// pass-through — the time.Time goes to the driver untouched, which is
@@ -115,6 +122,12 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 		limits:     DefaultLimits(),
 		driverName: driverName,
 		dataSource: dataSource,
+		// Cache stampede defaults (F4-5, ADR-0011). The wrapper is
+		// installed below if WithCacheStore is configured. Options can
+		// override these before the wrapper is built.
+		stampedeJitterPct:  0.1, // ±10%
+		stampedeXFetchOn:   true,
+		stampedeXFetchBeta: 1.0,
 	}
 
 	// Auto-detect dialect from driverName if not specified
@@ -136,6 +149,17 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 		if clientOpt, ok := opt.(Option); ok {
 			clientOpt(c)
 		}
+	}
+
+	// Install the stampede protection wrapper around any caller-supplied
+	// CacheStore (F4-5, ADR-0011). This is "todo o nada" per the cache
+	// playbook: singleflight + jitter + (optionally) XFetch are layered
+	// on every Quark-managed cache, never opt-in. memory.Store and
+	// redis.Store are NOT touched — they keep working unchanged inside
+	// the wrapper. Done after the options loop so WithCacheJitter and
+	// WithCacheXFetchBeta have already taken effect.
+	if c.cacheStore != nil {
+		c.cacheStore = newStampedeStore(c.cacheStore, c.stampedeJitterPct, c.stampedeXFetchOn, c.stampedeXFetchBeta)
 	}
 
 	c.logger.Info("quark client initialized",

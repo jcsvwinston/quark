@@ -55,6 +55,42 @@ users, err := quark.For[User](ctx, client).
 
 Successful write executions invalidate the model table tag.
 
+## Stampede protection
+
+Every `CacheStore` passed to `WithCacheStore` is wrapped automatically
+with singleflight + TTL jitter + XFetch (ADR-0011). The wrapper
+implements `CacheStore`, so existing third-party stores keep working
+unchanged inside it. Two `Option`s tune the wrapper; both are optional.
+
+### `WithCacheJitter(pct float64) Option`
+
+Sets the ±jitter factor applied to every TTL. Default `0.1` (±10%).
+Range `[0, 1]`; values outside are clamped. Setting to `0` disables
+jitter — singleflight and XFetch stay active.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithCacheStore(memory.New()),
+    quark.WithCacheJitter(0.2), // ±20%
+)
+```
+
+### `WithCacheXFetchBeta(beta float64) Option`
+
+Tunes the XFetch probabilistic-early-refresh threshold (Vattani et al.).
+Default `1.0`. Range `β ≥ 0`. Higher β triggers earlier refresh; `β = 0`
+disables XFetch — singleflight and jitter stay active.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithCacheStore(memory.New()),
+    quark.WithCacheXFetchBeta(0),  // XFetch off
+)
+```
+
+See [Caching and Observability — Stampede protection](/docs/advanced/caching-observability#stampede-protection)
+for the design rationale and the cross-instance gap.
+
 ## CacheStore
 
 ```go
