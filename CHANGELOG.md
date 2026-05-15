@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cache stampede protection (F4-5, [ADR-0011](docs/adr/0011-cache-stampede-protection-wrapper.md))**
+  — every `CacheStore` installed via `WithCacheStore` is now wrapped
+  automatically with three in-process protections:
+
+  - **Singleflight** (via `golang.org/x/sync/singleflight`): `N`
+    concurrent callers for the same cache key collapse to a single
+    compute. A miss never produces a database stampede on a hot key.
+  - **TTL jitter**: every `Set` randomises the TTL by `±jitterPct`
+    (default `±10%`), so batch-warmed entries don't expire in lockstep.
+  - **XFetch / probabilistic early refresh**: every entry carries
+    metadata (compute delta + timestamps) embedded as a length-prefixed
+    `xfetchEntry`. `Get` evaluates the Vattani probability threshold
+    and signals early refresh near expiry, smoothing the load curve.
+
+  Two new `Option`s tune the wrapper:
+
+  - `quark.WithCacheJitter(pct float64)` — `0..1`, default `0.1`. `0`
+    disables jitter; singleflight + XFetch stay on.
+  - `quark.WithCacheXFetchBeta(beta float64)` — `β ≥ 0`, default `1.0`.
+    `β = 0` disables XFetch; singleflight + jitter stay on.
+
+  The wrapper implements the public `CacheStore` interface, so
+  `memory.Store`, `redis.Store` and any third-party store keep working
+  unchanged inside it. The query path uses a richer in-package
+  `getOrCompute` shortcut when the wrapper is present (the default once
+  `WithCacheStore` is configured); third-party stores still get the
+  historical cache-aside dance. Known gap: singleflight is in-process
+  only — cross-instance stampede is not covered (ADR successor if
+  demand appears).
+
 - **Slow query log (F4-3)** — new `quark.WithSlowQueryThreshold(d)`
   Client option. When set, every operation whose duration exceeds `d`
   emits a structured WARN through `Client.logger` (`*slog.Logger`)

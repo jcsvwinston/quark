@@ -69,6 +69,47 @@ _ = store.InvalidateTags(ctx, "users:active")
 Without the `"users"` tag, a write to the `users` table will not know that your
 custom tag represents user data.
 
+## Stampede protection
+
+Every CacheStore installed via `WithCacheStore` is wrapped automatically
+with three in-process protections (ADR-0011):
+
+- **Singleflight** — `N` concurrent callers for the same key collapse to
+  one compute. The others wait on the result. A miss never produces a
+  database stampede on a hot key.
+- **TTL jitter** — every `Set` randomises the TTL by ±`jitterPct`
+  (default `±10%`), so batch-warmed entries don't all expire in the
+  same instant.
+- **Probabilistic early refresh (XFetch)** — near expiry, `Get` may
+  signal *refresh me now* probabilistically; the value is recomputed
+  while the cached copy is still valid, flattening the load curve.
+
+The wrapper is installed without changes to the underlying store
+(`memory.Store`, `redis.Store`, or any third-party `CacheStore`) and
+without changes to the public `CacheStore` interface — opt-out is not
+possible (the protections are "all or nothing", per the cache playbook).
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithCacheStore(memory.New()),
+    quark.WithCacheJitter(0.2),         // ±20% TTL jitter (default 0.1)
+    quark.WithCacheXFetchBeta(0.5),     // tune XFetch aggressiveness
+)
+```
+
+Tuning knobs:
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `WithCacheJitter(pct)` | `0.1` | Range `[0, 1]`; values outside are clamped. `0` disables jitter, singleflight + XFetch stay on. |
+| `WithCacheXFetchBeta(β)` | `1.0` | Range `β ≥ 0`. Higher β triggers earlier refresh. `β = 0` disables XFetch, singleflight + jitter stay on. |
+
+**Known limitation**: the singleflight is **in-process** only. A
+multi-replica deployment still allows N processes to each compute the
+same hot key — much less severe than the in-process stampede, but real.
+An ADR successor adds a distributed-lock hook if cross-instance demand
+appears.
+
 ## Memory Store
 
 ```go

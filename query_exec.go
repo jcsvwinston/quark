@@ -217,51 +217,140 @@ func (q *Query[T]) List() ([]T, error) {
 		q.limit = q.client.limits.MaxResults
 	}
 
-	// 1. Check Cache
-	var cacheKey string
-	if q.cache.Enabled && q.client.cacheStore != nil {
-		cacheKey = q.generateCacheKey(sqlStr, args)
-		if data, err := q.client.cacheStore.Get(q.ctx, cacheKey); err == nil {
-			var results []T
-			if err := json.Unmarshal(data, &results); err == nil {
-				q.client.logger.Debug("cache hit", "key", cacheKey, "table", q.table)
-				return results, nil
-			}
-		}
-	}
-
-	// 2. Execute (through middleware if configured)
+	// 1. Resolve the timeout context once. It's used by both the
+	// stampede getOrCompute path and the legacy cache-aside fallback.
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	start := time.Now()
-	rows, err := q.executeQuery(ctx, sqlStr, args)
-	duration := time.Since(start)
+	// computeFromDB executes the SQL, scans the rows, marshals the
+	// result slice and notifies observers. Used both as the singleflight
+	// compute callback (when the cacheStore is a *stampedeStore) and
+	// directly by the legacy cache-aside path. Wrapping it once keeps
+	// the observer / log semantics identical: exactly one observer
+	// event per actual SQL trip, regardless of how many concurrent
+	// callers were collapsed by singleflight.
+	computeFromDB := func(ctx context.Context) ([]T, []byte, error) {
+		start := time.Now()
+		rows, err := q.executeQuery(ctx, sqlStr, args)
+		duration := time.Since(start)
+		if err != nil {
+			return nil, nil, fmt.Errorf("query failed: %w", wrapDBError(err))
+		}
+		defer rows.Close()
 
-	if err != nil {
-		return nil, fmt.Errorf("query failed: %w", wrapDBError(err))
+		var results []T
+		for rows.Next() {
+			var entity T
+			if scanErr := q.scanRow(rows, &entity); scanErr != nil {
+				return nil, nil, scanErr
+			}
+			results = append(results, entity)
+		}
+		if rerr := rows.Err(); rerr != nil {
+			return nil, nil, wrapDBError(rerr)
+		}
+
+		data, _ := json.Marshal(results)
+
+		q.notifyObservers(QueryEvent{
+			SQL:       sqlStr,
+			Args:      args,
+			Duration:  duration,
+			Table:     q.table,
+			Operation: "SELECT",
+			Rows:      int64(len(results)),
+		})
+		return results, data, nil
 	}
-	defer rows.Close()
 
-	// Scan results
-	var results []T
-	for rows.Next() {
-		var entity T
-		if err := q.scanRow(rows, &entity); err != nil {
+	// 2. Try the cache path. When a *stampedeStore is installed (the
+	// default once WithCacheStore is in play), the singleflight + XFetch
+	// machinery routes through getOrCompute. Other CacheStore
+	// implementations stay on the historical cache-aside dance.
+	var (
+		cacheKey string
+		results  []T
+	)
+	if q.cache.Enabled && q.client.cacheStore != nil {
+		cacheKey = q.generateCacheKey(sqlStr, args)
+		// stampedeStore is the wrapper auto-installed by WithCacheStore
+		// (see ADR-0011). Third-party CacheStore implementations fail
+		// this assertion and stay on the historical cache-aside path
+		// below — that's documented and intentional.
+		if ss, ok := q.client.cacheStore.(*stampedeStore); ok {
+			data, err := ss.getOrCompute(ctx, cacheKey, q.cache.TTL, q.cache.Tags, func(ctx context.Context) ([]byte, error) {
+				r, bytes, err := computeFromDB(ctx)
+				if err != nil {
+					return nil, err
+				}
+				results = r // capture for the post-compute path below
+				return bytes, nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			if results == nil {
+				// Came from cache (no compute) — unmarshal here.
+				if uerr := json.Unmarshal(data, &results); uerr != nil {
+					// Cached bytes don't match the current model shape
+					// (typically a schema change deployed with a warm
+					// cache). Delete the stale entry and re-enter
+					// getOrCompute so concurrent callers funnel through
+					// ONE singleflight compute instead of each running
+					// their own — preserves stampede protection across
+					// schema-incompatible cache rotations.
+					_ = ss.Delete(ctx, cacheKey)
+					results = nil // re-arm capture for the recompute path
+					data2, rerr := ss.getOrCompute(ctx, cacheKey, q.cache.TTL, q.cache.Tags, func(ctx context.Context) ([]byte, error) {
+						r, bytes, cerr := computeFromDB(ctx)
+						if cerr != nil {
+							return nil, cerr
+						}
+						results = r
+						return bytes, nil
+					})
+					if rerr != nil {
+						return nil, rerr
+					}
+					if results == nil {
+						// Singleflight result came from another waiter's
+						// fresh compute. Try one final unmarshal; if it
+						// still fails the model and cache really are
+						// incompatible — surface a real error rather
+						// than retry forever.
+						if uerr := json.Unmarshal(data2, &results); uerr != nil {
+							return nil, fmt.Errorf("cache payload incompatible with model: %w", uerr)
+						}
+					}
+				} else {
+					q.client.logger.Debug("cache hit", "key", cacheKey, "table", q.table)
+				}
+			}
+		} else {
+			// Legacy cache-aside for non-stampede CacheStore impls.
+			if data, err := q.client.cacheStore.Get(ctx, cacheKey); err == nil {
+				if uerr := json.Unmarshal(data, &results); uerr == nil {
+					q.client.logger.Debug("cache hit", "key", cacheKey, "table", q.table)
+				} else {
+					results = nil
+				}
+			}
+			if results == nil {
+				r, bytes, err := computeFromDB(ctx)
+				if err != nil {
+					return nil, err
+				}
+				results = r
+				_ = q.client.cacheStore.Set(ctx, cacheKey, bytes, q.cache.TTL, q.cache.Tags...)
+			}
+		}
+	} else {
+		// No cache configured — straight compute.
+		r, _, err := computeFromDB(ctx)
+		if err != nil {
 			return nil, err
 		}
-		results = append(results, entity)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, wrapDBError(err)
-	}
-
-	// 3. Save to Cache
-	if q.cache.Enabled && q.client.cacheStore != nil && cacheKey != "" {
-		if data, err := json.Marshal(results); err == nil {
-			_ = q.client.cacheStore.Set(q.ctx, cacheKey, data, q.cache.TTL, q.cache.Tags...)
-		}
+		results = r
 	}
 
 	if len(q.preloads) > 0 && len(results) > 0 {
@@ -269,17 +358,6 @@ func (q *Query[T]) List() ([]T, error) {
 			return nil, err
 		}
 	}
-
-	// Notify observers
-	q.notifyObservers(QueryEvent{
-		SQL:       sqlStr,
-		Args:      args,
-		Duration:  duration,
-		Error:     err,
-		Table:     q.table,
-		Operation: "SELECT",
-		Rows:      int64(len(results)),
-	})
 
 	return results, nil
 }

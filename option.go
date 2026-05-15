@@ -83,6 +83,35 @@ func WithCacheStore(s CacheStore) Option {
 	}
 }
 
+// WithCacheJitter tunes the ±jitter factor applied to every TTL when a
+// CacheStore is installed (F4-5, ADR-0011). Default 0.1 (±10%). Range
+// [0, 1]; values outside are clamped. Setting to 0 disables jitter but
+// keeps singleflight and XFetch on — the "todo o nada" of ADR-0011
+// applies to the wrapper's installation, not to each individual
+// protection. No effect when WithCacheStore is not used.
+func WithCacheJitter(pct float64) Option {
+	return func(c *Client) {
+		c.stampedeJitterPct = pct
+	}
+}
+
+// WithCacheXFetchBeta tunes the XFetch probabilistic-early-refresh
+// parameter (F4-5, ADR-0011). Default 1.0; range >= 0. Higher β makes
+// early refresh more aggressive; β = 0 disables XFetch entirely (still
+// keeps singleflight and jitter active). No effect when WithCacheStore
+// is not used.
+//
+// Both the on/off flag AND the stored beta are written on every call,
+// so a sequence like WithCacheXFetchBeta(2.0) → WithCacheXFetchBeta(0)
+// leaves no residual β behind: the final state is XFetch off with
+// stampedeXFetchBeta = 0.
+func WithCacheXFetchBeta(beta float64) Option {
+	return func(c *Client) {
+		c.stampedeXFetchOn = beta > 0
+		c.stampedeXFetchBeta = beta
+	}
+}
+
 // WithSlowQueryThreshold enables structured slow-query logging.
 //
 // Every query, exec, query-row, raw-query and raw-exec whose duration
