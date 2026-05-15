@@ -29,6 +29,11 @@ func (c *Client) logSlowQueryIfNeeded(e QueryEvent) {
 	if c.logger == nil {
 		return
 	}
+	// e.Args is intentionally omitted — see the F4-2 redaction principle:
+	// a structured log line must not surface bind values it has no
+	// authority to retain. Callers that want args in their pipeline
+	// should register their own QueryObserver and apply their own
+	// retention policy.
 	c.logger.Warn(
 		"slow query",
 		"duration_ms", e.Duration.Milliseconds(),

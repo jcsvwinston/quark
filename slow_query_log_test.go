@@ -123,3 +123,45 @@ func TestSlowQueryLog_NilLoggerIsSafe(t *testing.T) {
 	// Must not panic.
 	c.logSlowQueryIfNeeded(QueryEvent{Duration: time.Second, SQL: "SELECT 1"})
 }
+
+// TestSlowQueryLog_ZeroDurationDoesNotEmit pins the boundary the other
+// way: a QueryEvent with Duration=0 (e.g. cursor-style timing failures)
+// must not fire a spurious alert when a threshold is configured.
+func TestSlowQueryLog_ZeroDurationDoesNotEmit(t *testing.T) {
+	var buf bytes.Buffer
+	c := newClientForSlowLog(&buf, 100*time.Millisecond)
+	c.logSlowQueryIfNeeded(QueryEvent{Duration: 0, SQL: "SELECT 1"})
+	if buf.Len() > 0 {
+		t.Errorf("Duration=0 with threshold>0 must not emit; got: %s", buf.String())
+	}
+}
+
+// TestSlowQueryLog_NoArgsViaNotifyObservers exercises the real path:
+// every Quark operation reaches notifyObservers, which then calls
+// logSlowQueryIfNeeded. This pins that bind values populated on the
+// QueryEvent (as cursor.go and the *_exec sites do) never leak into the
+// slow-query log, even when the path is taken via the centralised
+// observer dispatcher.
+func TestSlowQueryLog_NoArgsViaNotifyObservers(t *testing.T) {
+	var buf bytes.Buffer
+	c := newClientForSlowLog(&buf, 10*time.Millisecond)
+	q := &BaseQuery{client: c}
+	q.notifyObservers(QueryEvent{
+		Duration:  time.Second,
+		Operation: "SELECT",
+		Table:     "users",
+		SQL:       "SELECT * FROM users WHERE secret = ?",
+		Args:      []any{"super-secret-via-cursor-path"},
+	})
+	if strings.Contains(buf.String(), "super-secret-via-cursor-path") {
+		t.Errorf("notifyObservers path leaked an arg into the slow log; got: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), `"args"`) {
+		t.Errorf("notifyObservers path must not emit an args field; got: %s", buf.String())
+	}
+	// And the SQL field IS there — the redaction is about values, not
+	// about the parameterised statement.
+	if !strings.Contains(buf.String(), `"sql":"SELECT * FROM users WHERE secret = ?"`) {
+		t.Errorf("slow log should carry the parameterised SQL; got: %s", buf.String())
+	}
+}
