@@ -1,13 +1,23 @@
 ---
 id: 0003
 title: RLS hoy es WHERE-injection cliente; motor real en Fase 5
-status: accepted
+status: superseded
 date: 2026-05-10
 deciders: jcsvwinston
 related: [0007]
 supersedes: null
+superseded-by: 0012
+superseded-date: 2026-05-15
 tags: [security, multi-tenancy, postgres]
 ---
+
+> **Superseded by [ADR-0012](0012-rls-real-postgres-set-local-plus-policies.md)** (2026-05-15).
+> Fase 5 entregó la modalidad nativa anticipada en este ADR:
+> `RowLevelSecurityNative` con `SET LOCAL app.tenant_id` + `CREATE POLICY`
+> en PG, manteniendo `RowLevelSecurityClient` (renombrada) en el resto de
+> motores. Las dos modalidades **no coexisten** en PG (mutuamente
+> excluyentes por router); el resto de motores conserva la modalidad
+> cliente como única opción de fila. Lee ADR-0012 para el diseño actual.
 
 # 0003 — RLS hoy es WHERE-injection cliente; motor real en Fase 5
 

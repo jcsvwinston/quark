@@ -99,12 +99,42 @@ No new public API. Closes the F0-1 through F0-10 backlog:
 - [x] **F2-having-agg** — `HavingAggregate(fn, column, op, value)` with COUNT/SUM/AVG/MIN/MAX whitelist.
 - [x] **F2-join-builder** — Structured `Join(table).On(col, op, otherCol)` retires the v0.3.x string-raw form (BREAKING; see [`MIGRATION_v0.4.0.md`](MIGRATION_v0.4.0.md)).
 
-## Phase 5 — RLS + hooks + events (v0.9)
+## Phase 5 — RLS real + transactional hooks + EventBus (v0.9 — apertura formal)
 
-- [ ] Real Postgres RLS (`SET LOCAL app.tenant_id` + `CREATE POLICY` template).
-- [ ] Transactional hooks (`OnCommit` / `OnRollback`, `BeforeFind` / `AfterFind`).
-- [ ] Real `EventBus`.
-- [ ] Optional audit log.
+Apertura formal 2026-05-15. ADRs archivados:
+[ADR-0012](adr/0012-rls-real-postgres-set-local-plus-policies.md) (RLS
+real PG `SET LOCAL` + `CREATE POLICY`, supersede ADR-0003) y
+[ADR-0013](adr/0013-transactional-hooks-and-sync-eventbus.md) (hooks
+transaccionales + EventBus síncrono en commit-phase). Descomposición
+F5-1..F5-7 en `TASKS.md`. Entrega esperada en v0.9.0.
+
+- [ ] **F5-1** — Rename `RowLevelSecurity` → `RowLevelSecurityClient` +
+  alias deprecado (retirada en v1.0). Foundation-only, sin lógica nueva.
+- [ ] **F5-2** — `RowLevelSecurityNative` motor real Postgres:
+  `SET LOCAL app.tenant_id = $1` por tx + intercepción en `Client.Tx` y
+  tx implícita de `Query[T]`. Warning en `client.Raw()` /
+  `client.Exec()` bajo router Native con `tenantID` en context.
+  PG-only; rechazo explícito en motores sin policies.
+- [ ] **F5-3** — CLI `quark tenant install-rls-policies [--dry-run]`:
+  generador de DDL (`ALTER TABLE ... FORCE ROW LEVEL SECURITY` +
+  `CREATE POLICY`) por modelo registrado. Reutiliza F3-1 (lock
+  distribuido) y F3-7 (registry per-Client).
+- [ ] **F5-4** — Hooks transaccionales — refactor `query_crud.go` para
+  pasar `*Tx`. `After*` hooks pasan a ejecutarse **post-commit**
+  (breaking minor; rollback descarta la cola). Añade
+  `BeforeFindHook` / `AfterFindHook`.
+- [ ] **F5-5** — `Tx.OnCommit(fn)` / `Tx.OnRollback(fn)` API pública
+  para side-effects arbitrarios. FIFO, errores no paran la cadena.
+  Helper `quark.TxFromContext(ctx)`.
+- [ ] **F5-6** — `EventBus` interfaz pública +
+  `LoggerEventBus`/`OTelEventBus` in-tree. `Client.UseEventBus(bus)`
+  engancha CRUD → bus vía `OnCommit`. Emisión **síncrona en
+  commit-phase, at-least-once**; outbox transaccional queda para Fase
+  6. LISTEN/NOTIFY PG fuera de scope.
+- [ ] **F5-7** — Audit log opcional: tabla `quark_audit` con diff
+  JSONB. `Client.EnableAuditLog(AuditConfig)` registra middleware que
+  captura diff (vía F1-1 `Tracked.Save`) y escribe vía
+  `tx.OnCommit`.
 
 ## Phase 6 — codegen + HA (v1.0)
 

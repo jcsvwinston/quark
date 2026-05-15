@@ -9,7 +9,7 @@
 |---:|---|---|---|
 | [0001](0001-active-record-no-data-mapper.md) | Persistencia: Active Record, no Data Mapper | Accepted | — |
 | [0002](0002-reflect-default-codegen-fase-6.md) | Reflect por defecto, codegen opt-in en Fase 6 | Accepted | Fase 6 |
-| [0003](0003-rls-cliente-fase-5-motor.md) | RLS hoy es WHERE-injection cliente; motor real en Fase 5 | Accepted | Fase 5 |
+| [0003](0003-rls-cliente-fase-5-motor.md) | RLS hoy es WHERE-injection cliente; motor real en Fase 5 | Superseded by [0012](0012-rls-real-postgres-set-local-plus-policies.md) | Fase 5 |
 | [0004](0004-cache-l2-integrada.md) | Caché L2 integrada (memory/redis), no plugin externo | Accepted | Fase 4 |
 | [0005](0005-no-nosql-solo-relacional.md) | Quark es relacional. No soporte NoSQL | Accepted | — |
 | [0006](0006-no-graphql-admin-auto.md) | Sin GraphQL ni admin auto-generado | Accepted | — |
@@ -18,6 +18,8 @@
 | [0009](0009-migrations-introspection-diff-not-versioned-files.md) | Migrations: introspection-based diff, not (only) versioned files | Accepted | Fase 3 |
 | [0010](0010-per-column-timezone-override.md) | Timezones por columna — híbrido Client default + tag, wire UTC | Accepted | Fase 1 |
 | [0011](0011-cache-stampede-protection-wrapper.md) | Cache stampede protection vía wrapper común sobre CacheStore | Accepted | Fase 4 |
+| [0012](0012-rls-real-postgres-set-local-plus-policies.md) | RLS real Postgres vía `SET LOCAL app.tenant_id` + `CREATE POLICY` | Accepted | Fase 5 |
+| [0013](0013-transactional-hooks-and-sync-eventbus.md) | Hooks transaccionales + EventBus síncrono en commit-phase | Accepted | Fase 5 |
 
 ## Cómo añadir un ADR nuevo
 
