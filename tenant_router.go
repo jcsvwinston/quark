@@ -29,10 +29,31 @@ const (
 	// builder constructs. This is **client-side tenant scoping**, not
 	// engine-enforced Row-Level Security: `client.Raw()` and `client.Exec()`
 	// bypass the predicate. See ADR-0012 and `docs/playbooks/tenant.md` for
-	// the limitations. On PostgreSQL, prefer RowLevelSecurityNative (F5-2)
-	// for engine-enforced isolation. On other engines this remains the
-	// only row-level option.
+	// the limitations. On PostgreSQL, prefer RowLevelSecurityNative for
+	// engine-enforced isolation. On other engines this remains the only
+	// row-level option.
 	RowLevelSecurityClient
+	// RowLevelSecurityNative delegates row-level isolation to the
+	// database engine via PostgreSQL row-level security policies. Each
+	// query is wrapped in a transaction that first calls
+	// `set_config('app.tenant_id', <tenantID>, true)` (i.e., SET LOCAL);
+	// `CREATE POLICY` clauses on each tenant-scoped table reference that
+	// session variable to filter rows. Unlike RowLevelSecurityClient,
+	// `client.Raw()` / `client.Exec()` are still filtered: the policy
+	// runs server-side and returns zero rows when `app.tenant_id` is not
+	// set on the current transaction — there is no client-side bypass.
+	//
+	// A structured warning for Raw/Exec callers under a Native router
+	// context is deferred to a follow-up (TASKS.md F5-2 closure block).
+	// The engine enforcement is the security boundary; the warning would
+	// be a developer-experience cue, not a safety net.
+	//
+	// Native is PostgreSQL-only. Constructing a Query[T] under a Native
+	// router with a non-PostgreSQL dialect returns ErrUnsupportedFeature.
+	//
+	// See ADR-0012 §"Cómo se ejecuta SET LOCAL por query" for the
+	// rationale and the F5-3 CLI for the DDL generator.
+	RowLevelSecurityNative
 )
 
 // RowLevelSecurity is the legacy name for RowLevelSecurityClient. The
@@ -50,8 +71,21 @@ const RowLevelSecurity = RowLevelSecurityClient
 type TenantConfig struct {
 	Strategy       TenantStrategy
 	MaxCachedPools int     // Maximum number of DB connection pools to keep open (for DatabasePerTenant)
-	BaseClient     *Client // Used for SchemaPerTenant and RowLevelSecurityClient
+	BaseClient     *Client // Used for SchemaPerTenant, RowLevelSecurityClient and RowLevelSecurityNative
 	TenantColumn   string  // Column name for RowLevelSecurityClient, default is "tenant_id"
+
+	// NativeRLSVar is the PostgreSQL session variable name used by
+	// RowLevelSecurityNative to carry the resolved tenant ID. Each
+	// query under a Native router is wrapped in a transaction that
+	// calls `set_config(NativeRLSVar, <tenantID>, true)` before
+	// executing; the `CREATE POLICY` clauses installed by
+	// `quark tenant install-rls-policies` (F5-3) reference the same
+	// variable.
+	//
+	// Defaults to "app.tenant_id". Must be a valid PostgreSQL
+	// configuration parameter name (lowercase, dot-namespaced).
+	// Ignored when Strategy is not RowLevelSecurityNative.
+	NativeRLSVar string
 }
 
 // DefaultTenantConfig provides sensible defaults.
@@ -60,7 +94,18 @@ func DefaultTenantConfig() TenantConfig {
 		Strategy:       DatabasePerTenant,
 		MaxCachedPools: 100,
 		TenantColumn:   "tenant_id",
+		NativeRLSVar:   "app.tenant_id",
 	}
+}
+
+// defaultNativeRLSVar returns the configured NativeRLSVar or the
+// "app.tenant_id" default. Callers should use this helper so the
+// fallback stays consistent across the codebase.
+func (cfg TenantConfig) defaultNativeRLSVar() string {
+	if cfg.NativeRLSVar == "" {
+		return "app.tenant_id"
+	}
+	return cfg.NativeRLSVar
 }
 
 // lruEntry represents a cached tenant client.
@@ -119,9 +164,9 @@ func (r *TenantRouter) GetClient(ctx context.Context) (*Client, error) {
 	switch r.config.Strategy {
 	case DatabasePerTenant:
 		return r.getOrCreateCached(tenantID)
-	case SchemaPerTenant, RowLevelSecurityClient:
+	case SchemaPerTenant, RowLevelSecurityClient, RowLevelSecurityNative:
 		if r.config.BaseClient == nil {
-			return nil, errors.New("BaseClient must be provided for SchemaPerTenant or RowLevelSecurityClient strategies")
+			return nil, errors.New("BaseClient must be provided for SchemaPerTenant, RowLevelSecurityClient or RowLevelSecurityNative strategies")
 		}
 		return r.config.BaseClient, nil
 	default:

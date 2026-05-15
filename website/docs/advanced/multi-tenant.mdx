@@ -34,9 +34,9 @@ Row-Level Security. The old name remains as a `Deprecated:` alias with
 identical value until v1.0; existing code keeps compiling without
 changes.
 
-On PostgreSQL, a future `RowLevelSecurityNative` strategy (Fase 5,
-F5-2) will delegate isolation to the database engine via `SET LOCAL
-app.tenant_id` and `CREATE POLICY`. The two are mutually exclusive per
+On PostgreSQL, [`RowLevelSecurityNative`](row-level-native) delegates
+isolation to the database engine via `set_config('app.tenant_id', ...)`
+and `CREATE POLICY`. The two strategies are mutually exclusive per
 router on PG; other dialects continue to use `RowLevelSecurityClient`
 as the only row-level option.
 

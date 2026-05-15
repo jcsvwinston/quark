@@ -240,6 +240,18 @@ func For[T any](ctx context.Context, provider ClientProvider) *Query[T] {
 				value:    tenantID,
 				logic:    "AND",
 			})
+		case RowLevelSecurityNative:
+			// PostgreSQL-only: the engine itself enforces isolation
+			// via row-level security policies referencing the session
+			// variable set by nativeRLSExecutor. We don't inject a
+			// WHERE predicate — the policy does it server-side. See
+			// ADR-0012.
+			if client.dialect.Name() != "postgres" {
+				q.err = fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
+					ErrUnsupportedFeature, client.dialect.Name())
+				return q
+			}
+			q.exec = newNativeRLSExecutor(client, tenantID, router.config.defaultNativeRLSVar())
 		}
 	}
 

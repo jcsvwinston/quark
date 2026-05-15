@@ -37,8 +37,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `quark.RowLevelSecurity` — usa `quark.RowLevelSecurityClient`. El
   alias se retira en v1.0. La nueva nomenclatura aclara que esta
   estrategia es WHERE-injection cliente; la modalidad de motor real
-  (PostgreSQL `SET LOCAL` + `CREATE POLICY`) llegará como
-  `RowLevelSecurityNative` en F5-2.
+  (PostgreSQL `set_config('app.tenant_id', ...)` + `CREATE POLICY`)
+  ya disponible como `RowLevelSecurityNative` (F5-2).
+
+### Added — F5-2 (Native PostgreSQL row-level security)
+- multi-tenant: nueva estrategia `quark.RowLevelSecurityNative`
+  (PG-only) que delega aislamiento al motor. Cada query se ejecuta
+  en una transacción implícita que emite
+  `SELECT set_config('app.tenant_id', <tenantID>, true)`; las
+  `CREATE POLICY` instaladas referencian ese setting para filtrar.
+  El motor enforza incluso desde `client.Raw()`. Ver
+  [`docs/adr/0012`](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md)
+  y [`row-level-native.mdx`](website/docs/advanced/row-level-native.mdx).
+- multi-tenant: `TenantConfig.NativeRLSVar` (default `"app.tenant_id"`)
+  para configurar el nombre del setting referenciado por las policies.
+- multi-tenant: `TenantRouter.Tx(ctx, fn)` — método recomendado bajo
+  Native. Abre una sola tx, emite `set_config`, invoca `fn(tx)`. Para
+  estrategias non-Native delega al `Client.Tx` subyacente sin emitir
+  el `set_config`.
+- multi-tenant: implicit-tx vía `For[T](ctx, router)` bajo Native
+  envuelve `Exec`/`Query`/`QueryRow` en transacciones implícitas con
+  `set_config` emitido antes. El commit ocurre vía
+  `context.AfterFunc(ctx, ...)` por la opacidad de `*sql.Rows`. Para
+  ctx long-lived (CLI batch), usar `router.Tx` explícito.
+- multi-tenant: construir un `Query[T]` bajo `RowLevelSecurityNative`
+  con dialecto no-PostgreSQL devuelve `ErrUnsupportedFeature`. Igual
+  comportamiento desde `TenantRouter.Tx`.
 
 ## [0.8.0] - 2026-05-15
 
