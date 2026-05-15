@@ -28,7 +28,16 @@ const batchChunkSize = 1000
 
 // executeExec runs an ExecContext through the middleware chain.
 // This is used for INSERT, UPDATE, DELETE operations.
-func (q *BaseQuery) executeExec(ctx context.Context, sqlStr string, args []any) (sql.Result, error) {
+//
+// extraTags are additional invalidation tags emitted alongside q.table
+// when the mutation succeeds. Callers that know the affected primary
+// key (Update / UpdateFields / Tracked.Save / Delete by PK) pass
+// `table:pk` so queries cached under that tag invalidate without
+// blowing away every listing on the table (F4-6, per docs/playbooks/cache.md).
+// Mutations that don't know the affected rows up-front (DeleteBatch
+// WHERE-complex, raw Exec) pass nothing and fall back to the
+// table-only invalidation that has been the historical default.
+func (q *BaseQuery) executeExec(ctx context.Context, sqlStr string, args []any, extraTags ...string) (sql.Result, error) {
 	if q.err != nil {
 		return nil, q.err
 	}
@@ -39,9 +48,19 @@ func (q *BaseQuery) executeExec(ctx context.Context, sqlStr string, args []any) 
 		duration := time.Since(start)
 		err := wrapDBError(execErr)
 
-		// Automatic Cache Invalidation (Maintain data freshness)
+		// Automatic Cache Invalidation (Maintain data freshness).
+		// One InvalidateTags call carries the table tag plus any
+		// caller-supplied row tag, so backing stores see a single
+		// invalidation batch per mutation.
 		if err == nil && q.client.cacheStore != nil && q.table != "" {
-			_ = q.client.cacheStore.InvalidateTags(ctx, q.table)
+			tags := make([]string, 0, 1+len(extraTags))
+			tags = append(tags, q.table)
+			for _, t := range extraTags {
+				if t != "" {
+					tags = append(tags, t)
+				}
+			}
+			_ = q.client.cacheStore.InvalidateTags(ctx, tags...)
 		}
 
 		// Notify observers
@@ -215,7 +234,9 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		if err != nil {
 			return 0, err
 		}
-		res, err := dq.executeExec(ctx, sqlStr, args)
+		// F4-6: pass the row tag so the same InvalidateTags call also
+		// scopes to `<table>:<pk>`, in addition to the table tag.
+		res, err := dq.executeExec(ctx, sqlStr, args, dq.rowTag(getPKValue(elem, meta.PK)))
 		if err != nil {
 			return 0, err
 		}
@@ -290,7 +311,17 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		}
 	}
 
-	// 3. Save HasOne/HasMany associations AFTER
+	// 3. F4-6: for Inserts the PK was only revealed AFTER executeExec
+	// populated it (RETURNING, LastInsertId or scanReturning above).
+	// The historical executeExec already invalidated the table tag,
+	// but not the row tag — emit it now so cached Find-by-PK entries
+	// for this fresh row's id (e.g. a follow-up read in the same
+	// transaction) hit a cold cache rather than a stale one.
+	if !actualUpdate && rowsAffected > 0 {
+		dq.invalidateRowTag(ctx, getPKValue(elem, meta.PK))
+	}
+
+	// 4. Save HasOne/HasMany associations AFTER
 	if err := dq.saveAssociations(elem, actualUpdate); err != nil {
 		return rowsAffected, err
 	}
@@ -625,7 +656,12 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	result, err := q.executeExec(ctx, sqlBuf.String(), args)
+	// F4-6: pass row tag (no-op for composite PKs — see rowTag).
+	var pkTag string
+	if !q.meta.HasCompositePK {
+		pkTag = q.rowTag(getPKValue(v, q.pk))
+	}
+	result, err := q.executeExec(ctx, sqlBuf.String(), args, pkTag)
 	if err != nil {
 		return 0, fmt.Errorf("UpdateFields failed: %w", err)
 	}
@@ -1067,7 +1103,8 @@ func (q *Query[T]) softDelete(pkValue any) (int64, error) {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	result, err := q.executeExec(ctx, sql.String(), args)
+	// F4-6: row tag for single-PK deletes (composite returns "" — gap).
+	result, err := q.executeExec(ctx, sql.String(), args, q.rowTag(pkValue))
 	if err != nil {
 		return 0, fmt.Errorf("soft delete failed: %w", err)
 	}
@@ -1112,7 +1149,8 @@ func (q *Query[T]) hardDeleteByPK(pkValue any) (int64, error) {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	result, err := q.executeExec(ctx, sql.String(), args)
+	// F4-6: row tag for single-PK deletes (composite returns "" — gap).
+	result, err := q.executeExec(ctx, sql.String(), args, q.rowTag(pkValue))
 	if err != nil {
 		return 0, fmt.Errorf("delete failed: %w", err)
 	}
@@ -1926,7 +1964,14 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 			if err != nil {
 				return err
 			}
-			if _, err := bq.executeExec(ctx, sqlStr, args); err != nil {
+			// F4-6: every entity in UpdateBatch carries its own PK in
+			// v — pass the row tag, just like UpdateFields. Composite
+			// PKs return "" and fall back to the table tag.
+			var pkTag string
+			if !bq.meta.HasCompositePK {
+				pkTag = bq.rowTag(getPKValue(v, q.pk))
+			}
+			if _, err := bq.executeExec(ctx, sqlStr, args, pkTag); err != nil {
 				return fmt.Errorf("update batch failed: %w", err)
 			}
 		}

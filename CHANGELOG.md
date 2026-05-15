@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-row cache invalidation + Redis tag-TTL fix (F4-6)** — two cache
+  improvements that ship together:
+
+  - `executeExec` now accepts an `extraTags ...string` variadic. When a
+    mutation knows its affected primary key (`Update`, `UpdateFields`,
+    `Tracked.Save`, soft / hard `Delete` by PK, `Create` after the new
+    ID is populated), it passes `<table>:<pk>` so the single
+    `InvalidateTags` call carries both the table tag (historical
+    default — listings stay consistent) AND the row tag. Callers can
+    now cache by-PK queries with the per-row tag and avoid the
+    "every row write flushes the whole table" amplification documented
+    in the cache playbook. Composite-PK models and mutations with
+    unknown rows (`DeleteBatch` WHERE-complex, `UpdateBatch`, raw
+    `Exec`) keep the table-only fallback.
+  - `cache/redis/redis.go:Set` replaces the historical single
+    `pipe.Expire(tag, ttl+24h)` with `pipe.ExpireNX(...)` followed by
+    `pipe.ExpireGT(...)`. The first initialises the tag-set TTL when
+    the SET was just created (no TTL); the second extends only when
+    the new TTL is greater than the current one. The tag-set TTL is
+    therefore the MAX across every key tagged with it — keys can no
+    longer outlive their tag entry and become unreachable through
+    `InvalidateTags`. Requires Redis 7.0+ (the `NX`/`GT` flags landed
+    there); older servers fall back to the historical (broken)
+    behaviour — documented gap.
+
+  Tests: `cache_invalidation_test.go` — `TestRowTag_Format` (5 cases),
+  `TestInvalidateRowTag_*` (4 cases), `TestExecuteExec_PassesRowTagAlongTable`
+  (3 cases pinning the wire-up). The Redis tag-TTL behaviour is harder
+  to unit-test without a live Redis 7+ server; the change is a 1-line
+  pipeline command swap with a defensive comment trail.
+
 - **Cache stampede protection (F4-5, [ADR-0011](docs/adr/0011-cache-stampede-protection-wrapper.md))**
   — every `CacheStore` installed via `WithCacheStore` is now wrapped
   automatically with three in-process protections:

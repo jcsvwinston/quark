@@ -64,13 +64,34 @@ detección de entradas legacy, jitter en rango, XFetch boundary cases,
 singleflight bajo carga concurrente con 50 goroutines, hit-after-first,
 clamping de configuración).
 
-### Invalidación grosera por tabla
+### ~~Invalidación grosera por tabla~~ — cerrado (F4-6)
 
-`executeExec` (`query_crud.go:43`) invalida por `q.table`. Si haces `UPDATE users SET name = 'x' WHERE id = 1`, **todas las queries cacheadas que tocan `users` se borran**. Aunque sean para otros usuarios, otros tenants, o queries que no leen `name`.
+**Cerrado** — `executeExec` (`query_crud.go`) ahora acepta `extraTags
+...string` variadic. Cuando una mutación conoce la PK afectada
+(`Update`, `UpdateFields`, `softDelete`, `hardDeleteByPK`, `Tracked.Save`,
+Insert post-PK-populate), pasa `<table>:<pk>` como tag adicional. La
+misma `InvalidateTags` call carga AMBOS tags — un solo round-trip al
+backing store por mutación.
 
-Esto es seguro (nunca devuelves stale data) pero ineficiente (alta tasa de invalidación = alta tasa de miss).
+Los callers pueden cachear queries by-PK con ese tag:
+`Find(1).Cache(ttl, "users:1")` invalida sólo cuando esa fila cambia,
+no cuando cualquier `users` se toca. Los listings siguen cacheados con
+el tag de tabla (`users`), invalidados siempre — la coherencia para
+listings se preserva.
 
-Plan Fase 4: invalidación granular por PK afectada. Mutaciones registran las PKs cambiadas y se emiten invalidaciones precisas. Tag por tabla queda como fallback para casos donde no se conocen las PKs (DELETE WHERE complex).
+Mutaciones que no conocen la PK (`DeleteBatch` con WHERE complejo,
+`UpdateBatch`, raw Exec, upserts no-PK-única) **sólo invalidan el tag
+de tabla** — el comportamiento histórico, seguro como fallback.
+**Composite PKs** caen al tag de tabla también (`rowTag()` retorna
+`""` para `HasCompositePK == true`); follow-up posible si surge
+demanda usar un encoding estable de PK compuesta para tag granular.
+
+Cobertura: `cache_invalidation_test.go` (3 grupos:
+`TestRowTag_Format` con 5 cases, `TestInvalidateRowTag_*` con 4
+cases, `TestExecuteExec_PassesRowTagAlongTable` con 3 cases verifica
+que la wire-up `executeExec(..., rowTag)` → `InvalidateTags(table,
+row)` funciona, sin tag → fallback al tag de tabla, tag vacío
+filtrado).
 
 ### ~~Cache key serializa args con `%v`~~ — cerrado (F4-4)
 
@@ -96,11 +117,19 @@ colisión por `Stringer` predecible documentado más abajo).
 Reflection-free (ADR-0002). Cobertura: `cache_test.go` (determinismo,
 type/boundary/nil collision, time, discriminantes de query).
 
-### TTL del tag-key Redis = `ttl + 24h`
+### ~~TTL del tag-key Redis = `ttl + 24h`~~ — cerrado (F4-6)
 
-`cache/redis/redis.go:58` configura el SET de tag con TTL `cacheTTL + 24h`. Si el mismo tag se reescribe con TTL distinto, no se actualiza al máximo, **se sobreescribe** — el TTL del SET puede quedar más corto que las claves que apunta, leak de keys huérfanas en el SET.
+**Cerrado** — `cache/redis/redis.go:Set` reemplaza el `pipe.Expire(...)`
+único por la combinación `ExpireNX` + `ExpireGT` en el pipe: el primero
+inicializa el TTL cuando el SET acaba de crearse (no tenía TTL), el
+segundo extiende cuando el nuevo > actual. **Nunca se acorta**, así
+que un key con TTL pequeño tageado tarde no deja keys huérfanas en el
+SET.
 
-Plan Fase 4: estrategia `EXPIREAT` con `MAX(current, new)` o cleanup periódico.
+Requiere **Redis 7.0+** (los flags `NX`/`GT` se introdujeron ahí). En
+Redis &lt; 7 los comandos son no-ops y el comportamiento histórico
+(broken) vuelve — gap documentado en el comentario inline y aceptado
+como requirement de Redis 7+ por defecto.
 
 ### Sólo cache-aside, no read-through ni write-through
 
@@ -139,7 +168,7 @@ Cuando llegue Fase 4, no implementes singleflight en cada call site. Hazlo a niv
   - ~~TTL con jitter (±10% configurable, `jitterPct` opción)~~ —
     cerrado (F4-5).
   - ~~Probabilistic early expiration (XFetch)~~ — cerrado (F4-5).
-  - Invalidación granular por PK además de tabla — F4-6.
+  - ~~Invalidación granular por PK además de tabla~~ — cerrado (F4-6).
   - Negative caching — diferido a future work (fuera de Fase 4).
   - Compresión opcional (gzip) para values grandes — diferido a
     future work (fuera de Fase 4).
