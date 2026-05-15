@@ -205,17 +205,34 @@ contra cache stampede" (deuda marcada cerrada),
 protection", `website/docs/reference/api/caching.mdx`, CHANGELOG
 `### Added`.
 
-### F4-6 · Invalidación granular por PK + fix Redis tag-key TTL
+### ~~F4-6 · Invalidación granular por PK + fix Redis tag-key TTL~~
 
-Hoy `executeExec` (`query_crud.go:43`) invalida por `q.table` entero —
-seguro pero ineficiente (un `UPDATE ... WHERE id=1` borra toda query
-cacheada que toque la tabla). Añadir invalidación por PK afectada: las
-mutaciones registran las PKs cambiadas y emiten invalidaciones
-precisas; el tag por tabla queda como fallback para mutaciones donde
-las PKs no se conocen (DELETE WHERE complejo). Incluye el fix del
-`cache/redis/redis.go:58`: el TTL del SET de tag (`ttl + 24h`) se
-sobreescribe en vez de tomar el máximo — usar `EXPIREAT` con
-`MAX(actual, nuevo)` o cleanup periódico, para no dejar keys huérfanas.
+**Cerrado** — dos mejoras de cache en un PR:
+
+1. **Invalidación por PK**: `executeExec` (`query_crud.go`) acepta
+   `extraTags ...string` variadic. Las mutaciones que conocen la PK
+   (`Update`/`UpdateFields`/`Tracked.Save`/`softDelete`/`hardDeleteByPK`/
+   `Create` post-PK-populate) pasan `<table>:<pk>` para que el mismo
+   `InvalidateTags` call cargue ambos tags. Helper `rowTag(pkValue)` en
+   `cache_invalidation.go` formatea el tag (`""` para composite PKs —
+   gap documentado). Mutaciones sin PK conocida (`DeleteBatch`/`UpdateBatch`
+   /raw `Exec`/upserts) usan sólo el tag de tabla — fallback histórico
+   intacto. Callers cachean queries by-PK con
+   `.Cache(ttl, "users", "users:1")` para invalidación granular.
+
+2. **Redis tag-TTL fix**: `cache/redis/redis.go:Set` reemplaza
+   `pipe.Expire(...)` por `pipe.ExpireNX(...)` + `pipe.ExpireGT(...)`
+   en el pipe. NX inicializa cuando el SET no tiene TTL; GT extiende
+   sólo cuando el nuevo > actual. **Nunca acorta** — keys con TTL
+   pequeño no dejan huérfanas. Requiere Redis 7.0+ (flags `NX`/`GT`);
+   gap documentado en comentario inline.
+
+Cobertura: `cache_invalidation_test.go` (12 sub-tests:
+`TestRowTag_Format` 5 cases, `TestInvalidateRowTag_*` 4 cases,
+`TestExecuteExec_PassesRowTagAlongTable` 3 cases). Doc:
+`docs/playbooks/cache.md` § "Invalidación grosera" + § "TTL del
+tag-key Redis" (ambas deudas tachadas), `website/docs/reference/api/caching.mdx`
+§ "Per-row invalidation", CHANGELOG `### Added`.
 
 ### F4-7 · Retry de deadlocks
 

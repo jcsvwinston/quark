@@ -55,6 +55,33 @@ users, err := quark.For[User](ctx, client).
 
 Successful write executions invalidate the model table tag.
 
+### Per-row invalidation (`<table>:<pk>`)
+
+When a mutation knows the affected primary key — `Update`, `UpdateFields`,
+`Tracked.Save`, the by-PK delete paths, and `Create` once the new ID is
+populated — Quark **also** invalidates the `<table>:<pk>` tag in the
+same `InvalidateTags` call. Cache by-PK queries with that tag to avoid
+flushing the whole table on every row write:
+
+```go
+user, err := quark.For[User](ctx, client).
+    Where("id", "=", 1).
+    Cache(5*time.Minute, "users", "users:1"). // both tags
+    First()
+```
+
+A later `quark.For[User](ctx, client).UpdateFields(&u, "name")` on the row
+with `id = 1` invalidates `users` (every listing on the table, as
+before) AND `users:1` (this single Find). Updates on a different row,
+e.g. `id = 2`, invalidate `users` (still consistent for listings) and
+`users:2` — `users:1` survives.
+
+Mutations whose affected rows aren't known up front (`DeleteBatch` with
+a complex WHERE, `UpdateBatch`, raw `Exec`) emit only the table tag —
+the historical fallback. **Composite-primary-key** models also fall back
+to the table tag; a follow-up may add a stable encoding of composite
+keys for per-row invalidation if demand surfaces.
+
 ## Stampede protection
 
 Every `CacheStore` passed to `WithCacheStore` is wrapped automatically

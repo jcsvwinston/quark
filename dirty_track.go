@@ -241,7 +241,12 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 		tenantID:  t.tenantID,
 		tenantCol: t.tenantCol,
 	}
-	result, err := bq.executeExec(ctx, sqlBuf.String(), args)
+	// F4-6: row tag for single-PK saves (composite returns "" — gap).
+	var pkTag string
+	if !t.meta.HasCompositePK {
+		pkTag = bq.rowTag(getPKValue(v, t.pk))
+	}
+	result, err := bq.executeExec(ctx, sqlBuf.String(), args, pkTag)
 	if err != nil {
 		return 0, fmt.Errorf("Tracked.Save failed: %w", err)
 	}

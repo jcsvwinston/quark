@@ -55,7 +55,21 @@ func (s *Store) Set(ctx context.Context, key string, val []byte, ttl time.Durati
 	for _, tag := range tags {
 		tagKey := "quark:tag:" + tag
 		pipe.SAdd(ctx, tagKey, cacheKey)
-		pipe.Expire(ctx, tagKey, ttl+(24*time.Hour)) // Keep tags slightly longer
+		// F4-6: extend the tag-set TTL to the MAX of the current and
+		// the new value — never SHORTEN it. The historical Expire(...)
+		// here shrank the tag-set TTL whenever a key with a shorter
+		// TTL was tagged, leaving keys cached with no surviving tag
+		// entry (so InvalidateTags couldn't reach them). The pair
+		// below covers both states atomically inside the pipeline:
+		//   ExpireNX: set TTL when the tag set has no TTL yet (the
+		//             SADD just created it).
+		//   ExpireGT: extend TTL only when the new value > current,
+		//             so a later short-lived key can't shorten it.
+		// Both commands require Redis 7.0+; on older servers they are
+		// no-ops and the historical (broken) behaviour returns —
+		// documented as a known gap in docs/playbooks/cache.md.
+		pipe.ExpireNX(ctx, tagKey, ttl+(24*time.Hour))
+		pipe.ExpireGT(ctx, tagKey, ttl+(24*time.Hour))
 	}
 
 	_, err := pipe.Exec(ctx)
