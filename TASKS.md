@@ -234,13 +234,32 @@ Cobertura: `cache_invalidation_test.go` (12 sub-tests:
 tag-key Redis" (ambas deudas tachadas), `website/docs/reference/api/caching.mdx`
 § "Per-row invalidation", CHANGELOG `### Added`.
 
-### F4-7 · Retry de deadlocks
+### ~~F4-7 · Retry de deadlocks~~
 
-Detección por código de error del driver:
-- PostgreSQL `40P01` (`pq.Error.Code` / pgconn SQLSTATE)
-- MySQL / MariaDB `1213`
-- MSSQL `1205`
-- Oracle `ORA-00060`
+**Cerrado** — `WithDeadlockRetry(maxAttempts)` Option (`option.go`) +
+`isDeadlock(err)` helper (`db_errors.go`, mismo patrón que
+`isUniqueViolation` de P0-3) + retry loop en `Client.Tx`
+(`tx.go:56-...`). El closure se re-ejecuta contra una tx fresca con
+exponential backoff + ±50% jitter (10ms doblando, cap 1s) cuando el
+error matchea uno de los 4 motores multi-writer (PG 40P01, MySQL 1213,
+MSSQL 1205, Oracle ORA-00060). SQLite es single-writer y nunca emite
+deadlock real — el option es no-op en SQLite por construcción. Ctx
+cancelado durante backoff → aborta. Disabled por default (maxAttempts
+≤ 1); opt-in puro. `runTxOnce` extraído como helper interno para que
+el loop pueda re-invocar la unidad transaccional completa. Cobertura:
+`db_errors_test.go` (3 tests, 13 sub-cases del classifier incluyendo
+wrapped errors y no-collision con isUniqueViolation),
+`tx_deadlock_retry_test.go` (5 tests: no-retry-by-default, retry-
+eventually-commits, retry-exhausted con unwrap, non-deadlock-
+propagates-immediately, cancelled-context-aborts-backoff). Doc:
+`website/docs/reference/api/client.mdx` § "WithDeadlockRetry",
+CHANGELOG `### Added`.
+
+**Detección por código de error del driver:**
+- PostgreSQL `40P01` (`pgconn.PgError.Code` SQLSTATE)
+- MySQL / MariaDB `1213` (`gomysql.MySQLError.Number`)
+- MSSQL `1205` (`mssql.Error.Number`)
+- Oracle `ORA-00060` (`goora.OracleError.ErrCode == 60`)
 
 Helper `isDeadlock(err)` en `db_errors.go` (mismo patrón que
 `isUniqueViolation` de P0-3, con `errors.As` contra los tipos de los

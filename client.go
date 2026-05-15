@@ -56,6 +56,13 @@ type Client struct {
 	stampedeXFetchOn   bool
 	stampedeXFetchBeta float64
 
+	// Deadlock retry budget for Client.Tx (F4-7). 0 (the default) means
+	// no retry — a deadlock from inside the closure propagates on the
+	// first attempt. Values >= 2 enable retry: the closure runs up to
+	// this many times against fresh transactions, with exponential
+	// backoff + jitter between attempts. Set via WithDeadlockRetry.
+	deadlockRetries int
+
 	// defaultTZ is the fallback timezone for time.Time columns that do
 	// not carry their own quark:"tz=..." tag. nil (the zero value) means
 	// pass-through — the time.Time goes to the driver untouched, which is

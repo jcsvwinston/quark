@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math/rand/v2"
 	"time"
 )
 
@@ -53,7 +54,47 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 //	    quark.ForTx[Order](ctx, tx).Create(&order)
 //	    return nil // auto-commit
 //	})
+//
+// When WithDeadlockRetry(maxAttempts) is configured (F4-7), a deadlock
+// raised from inside fn triggers a fresh-transaction retry with
+// exponential backoff + jitter, up to maxAttempts total attempts.
+// Non-deadlock errors propagate immediately. Disabled by default —
+// callers explicitly opt in to retry semantics.
 func (c *Client) Tx(ctx context.Context, fn func(tx *Tx) error) error {
+	maxAttempts := c.deadlockRetries
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			if err := waitDeadlockBackoff(ctx, attempt-1); err != nil {
+				return fmt.Errorf("deadlock retry aborted: %w (last tx error: %v)", err, lastErr)
+			}
+			if c.logger != nil {
+				c.logger.Warn("transaction retry after deadlock",
+					"attempt", attempt, "max_attempts", maxAttempts)
+			}
+		}
+
+		err := c.runTxOnce(ctx, fn)
+		if err == nil {
+			return nil
+		}
+		if !isDeadlock(err) {
+			return err
+		}
+		lastErr = err
+	}
+	return fmt.Errorf("deadlock retry exhausted after %d attempts: %w", maxAttempts, lastErr)
+}
+
+// runTxOnce executes fn inside a fresh transaction exactly once,
+// committing on success and rolling back on error or panic. This is
+// the historical Client.Tx behaviour, lifted into its own function so
+// the retry loop above can re-invoke it.
+func (c *Client) runTxOnce(ctx context.Context, fn func(tx *Tx) error) error {
 	tx, err := c.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -74,6 +115,38 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Tx) error) error {
 	}
 
 	return tx.Commit()
+}
+
+// waitDeadlockBackoff sleeps with exponential backoff and ±50% jitter
+// between deadlock-retry attempts. Capped at 1s so an unbounded retry
+// loop with high maxAttempts can't stall a request indefinitely.
+// Returns the context error if the context is cancelled while waiting.
+//
+// attemptIdx is the 1-based index of the gap (1 means before attempt 2,
+// 2 before attempt 3, etc.): the base wait doubles every retry
+// (10ms → 20ms → 40ms → 80ms → 160ms → 320ms → 640ms → 1s cap),
+// each shifted by uniform jitter into [base/2, 3·base/2).
+func waitDeadlockBackoff(ctx context.Context, attemptIdx int) error {
+	if attemptIdx < 1 {
+		attemptIdx = 1
+	}
+	shift := attemptIdx - 1
+	if shift > 6 {
+		shift = 6
+	}
+	base := 10 * time.Millisecond * (1 << shift)
+	if base > time.Second {
+		base = time.Second
+	}
+	// math/rand/v2 is goroutine-safe; no locking required.
+	jitter := time.Duration(rand.Float64() * float64(base))
+	wait := base/2 + jitter
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(wait):
+		return nil
+	}
 }
 
 // Commit commits the transaction.
