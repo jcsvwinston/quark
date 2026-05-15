@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- docs: [ADR-0012](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md)
+  — RLS real Postgres vía `SET LOCAL app.tenant_id` + `CREATE POLICY`.
+  Supersedes ADR-0003. Anticipa F5-1..F5-3 (rename + motor Native +
+  CLI `quark tenant install-rls-policies`).
+- docs: [ADR-0013](docs/adr/0013-transactional-hooks-and-sync-eventbus.md)
+  — hooks transaccionales (`Before*` inside-tx-abortable, `After*`
+  post-commit, nuevos `BeforeFindHook`/`AfterFindHook`), `Tx.OnCommit`/
+  `Tx.OnRollback`, y `EventBus` síncrono en commit-phase (at-least-once,
+  sin outbox). Anticipa F5-4..F5-7.
+- docs: `TASKS.md` Fase 5 — descomposición formal en F5-1..F5-7 con
+  archivo:línea, definition of done y estimación por ítem.
+- docs: `docs/ROADMAP.md` Phase 5 — entrega esperada en v0.9.0.
+- docs: `docs/playbooks/tenant.md` actualizado tras ADR-0012 (frontmatter,
+  P0-1 movido a histórico, plan apuntando a F5-1/F5-2/F5-3).
+
+### Changed
+- docs: ADR-0003 marcado `superseded` por ADR-0012 (banner + frontmatter
+  `superseded-by: 0012` + entrada de índice).
+
 ## [0.8.0] - 2026-05-15
 
 Phase 4 release — observability, stampede-protected caché, and resilience.

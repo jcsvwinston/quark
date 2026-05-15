@@ -52,18 +52,24 @@ limpio):
    F3-1..F3-7 entregados; ADR-0009 archivado.
 4. ~~**Fase 4 — observability + cache + deadlock retry**~~. Cerrado en
    v0.8.0. F4-1..F4-7 entregados; ADR-0011 archivado.
-5. **Fase 5 — RLS real + hooks transaccionales + EventBus** (próxima).
-   `docs/ROADMAP.md` § "Phase 5"; `docs/ANALISIS_MADUREZ.md` §4 Fase 5.
-   Sin ADR ni descomposición todavía — apertura formal pendiente,
-   mismo patrón que la apertura de Fase 4 (PR #67).
+5. **Fase 5 — RLS real + hooks transaccionales + EventBus** (apertura
+   formal hecha 2026-05-15). `docs/ROADMAP.md` § "Phase 5";
+   `docs/ANALISIS_MADUREZ.md` §4 Fase 5. ADRs archivados:
+   [ADR-0012](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md)
+   (RLS real PG vía `SET LOCAL` + `CREATE POLICY`, supersede ADR-0003)
+   y [ADR-0013](docs/adr/0013-transactional-hooks-and-sync-eventbus.md)
+   (hooks transaccionales + EventBus síncrono en commit-phase).
+   Descomposición en F5-1..F5-7 más abajo. Entrega esperada en v0.9.0.
 
 **Próxima acción concreta** (al arrancar sesión nueva):
-1. `/next-session fase5` — sesión de **apertura/planning**, NO de
-   entrega: descomponer Fase 5 en items F5-N en este TASKS, decidir
-   si hace falta uno o varios ADRs (RLS real cambia el contrato de
-   tenant — probablemente ADR-0012), abrir issues de planning. El
-   reviewer suele detectar lo que dejas implícito; antes del primer
-   `feat:` deja TODO con archivo:línea y criterio de done.
+1. `/next-session fase5` — sesión de **entrega**: arrancar por **F5-1**
+   (renombrado de constante + alias deprecado) por ser foundation-only
+   sin riesgo arquitectónico, luego F5-2 (skeleton `RowLevelSecurityNative`
+   en PG), F5-3 (generador de policies), y desde ahí en paralelo F5-4..F5-7.
+   Cada F5-N es 1 PR independiente con `code-reviewer` + docs en
+   `website/docs/` + entrada en CHANGELOG `### Added` / `### Changed` /
+   `### Deprecated`. **Regla de break**: si tocas hooks (F5-4..F5-6),
+   escribe `docs/MIGRATION_v0.9.0.md` en el mismo PR.
 
 **Items abiertos heredados de Fase 4** (deuda menor, no bloquea
 Fase 5):
@@ -81,6 +87,335 @@ con el mismo rigor que Fase 4. Cada F5-N como su propio PR.
 **Disciplina recordada**: `code-reviewer` subagent obligatorio antes
 de cada PR (regla CLAUDE.md #6); `/next-session` plantilla de cierre
 al final de cada sesión.
+
+---
+
+## Fase 5 — RLS real + hooks transaccionales + EventBus (apertura formal)
+
+> Spec narrativo: `docs/ANALISIS_MADUREZ.md` §4 Fase 5. Decisiones
+> arquitectónicas:
+> [ADR-0012](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md)
+> (RLS real PG vía `SET LOCAL` + `CREATE POLICY`, supersede ADR-0003) y
+> [ADR-0013](docs/adr/0013-transactional-hooks-and-sync-eventbus.md)
+> (hooks transaccionales + EventBus síncrono en commit-phase).
+> Playbooks aplicables: `docs/playbooks/tenant.md` (F5-1..F5-3),
+> `docs/playbooks/query-builder.md` (F5-4..F5-5),
+> `docs/playbooks/security.md` (F5-7 audit log).
+> Objetivo de fase: aislamiento real (no disciplina) en PG, y semántica
+> de hooks/eventos predecible en transacciones. Entrega esperada en
+> v0.9.0.
+
+Apertura formal hecha en sesión post-v0.8.0 (2026-05-15). Decisiones de
+scope fijadas con el usuario:
+
+- **RLS coexistencia en PG**: NO coexisten. `RowLevelSecurityNative`
+  reemplaza a `RowLevelSecurityClient` en PG (mutuamente excluyentes
+  por router). En motores sin policies (MySQL/MariaDB/MSSQL/Oracle/
+  SQLite) sigue `RowLevelSecurityClient` como única opción de fila.
+  Ver ADR-0012.
+- **Semántica de hooks**: `Before*` corren dentro de tx y error aborta
+  el commit; `After*` se encolan en el `*Tx` y disparan tras commit OK
+  (rollback los descarta). Nuevo `OnCommit(fn)` / `OnRollback(fn)` para
+  side-effects arbitrarios. Ver ADR-0013.
+- **EventBus delivery**: **síncrono en commit-phase, at-least-once**.
+  No outbox transaccional (eso es Fase 6 si aparece). Ver ADR-0013.
+- **`LISTEN/NOTIFY` PG (listener side)**: fuera de scope para Fase 5.
+  Requiere conexión dedicada fuera del pool; queda devolviendo
+  `ErrDialectNotSupported` hasta Fase 6.
+- **Audit log opcional**: ENTRA, dentro de F5-7. Tabla `quark_audit`
+  + capture vía `tx.OnCommit` con diff de `Tracked.Save` (F1-1 ya
+  existe — se reutiliza).
+
+Descomposición en 7 items entregables independientemente. Orden de
+ataque sugerido:
+
+1. **F5-1 primero** (rename + alias deprecado): foundation-only, sin
+   riesgo arquitectónico. Desbloquea F5-2..F5-3 sin dejar a usuarios
+   con código roto.
+2. **F5-2 y F5-3 en paralelo**: F5-2 implementa el motor (`SET LOCAL` +
+   intercepción de `Tx`), F5-3 el generador CLI. Pueden coexistir en
+   PRs separados; F5-3 depende del schema introspection (F3-2) ya
+   entregado en v0.6.0.
+3. **F5-4 y F5-5 en serie**: F5-4 refactoriza `query_crud.go` para
+   pasar `*Tx` al motor de hooks; F5-5 añade `OnCommit`/`OnRollback`
+   sobre esa base. Romper esto en dos PRs reduce el blast radius.
+4. **F5-6 EventBus** (depende de F5-5 — `OnCommit` es el callsite).
+5. **F5-7 Audit log** (depende de F5-6 — el bus es el transporte).
+
+Cada item es 1 PR con `code-reviewer` + docs en `website/docs/` +
+CHANGELOG `### Added` / `### Changed` / `### Deprecated` según
+corresponda. **Si tocas hooks (F5-4..F5-6)** escribe
+`docs/MIGRATION_v0.9.0.md` en el mismo PR — el cambio de "After inline"
+a "After post-commit" es breaking minor (ADR-0013).
+
+### F5-1 · Rename `RowLevelSecurity` → `RowLevelSecurityClient` + deprecation
+
+**Foundation. Sin lógica nueva — sólo rename + alias.**
+
+**Localización**:
+- `tenant_router.go:29` — `RowLevelSecurity` constante.
+- `tenant_router.go:36-37` — comentario en `TenantConfig` ("RLS uses…").
+- `client.go:233-235` — `case RowLevelSecurity:` en el switch.
+- `examples/` — cualquier referencia a la constante.
+- `website/docs/multi-tenancy/*.mdx` — todas las menciones.
+
+**Definition of done**:
+- Constante actual renombrada a `RowLevelSecurityClient`.
+- Alias deprecado añadido: `const RowLevelSecurity = RowLevelSecurityClient`
+  con comentario `// Deprecated: use RowLevelSecurityClient.` (gopls
+  marcará el uso como deprecated).
+- Comentario en `tenant_router.go:27-29` actualiza la descripción a
+  "client-side WHERE injection" sin ambigüedad.
+- Tests existentes siguen verdes (alias = mismo valor; el switch no
+  cambia comportamiento).
+- Doc en `website/docs/multi-tenancy/row-level.mdx` documenta el alias
+  y apunta a F5-2 para la modalidad nativa.
+- CHANGELOG `### Deprecated`: `RowLevelSecurity` reemplazada por
+  `RowLevelSecurityClient`; alias se retira en v1.0.
+
+**Estimación**: 1 sesión corta (~2 h).
+
+### F5-2 · `RowLevelSecurityNative` motor real (PG `SET LOCAL` + tx hooking)
+
+**Implementa el aislamiento de motor anticipado en ADR-0012.**
+
+**Localización**:
+- `tenant_router.go` — añadir constante `RowLevelSecurityNative` tras
+  `RowLevelSecurityClient`. Validación en `NewTenantRouter`: rechazar
+  combinaciones inválidas (Native sin PG; Native + Client en mismo
+  router).
+- `client.go:233-235` — el switch añade rama Native que **no** inyecta
+  `q.tenantID/q.tenantCol` (la policy lo hace).
+- `client.go` `Tx(...)` y `client.go` `For[T]` (rama implícita) —
+  envolver con `SET LOCAL app.tenant_id = $1` como primer statement
+  cuando router es Native.
+- `client.Raw()` y `client.Exec()` — emitir warning estructurado
+  `quark.tenant.raw_under_native_rls` cuando context lleva tenantID y
+  router es Native (la policy bloquea por defecto, pero el warning
+  ayuda al debugging).
+
+**Definition of done**:
+- Constante `RowLevelSecurityNative` añadida y validada.
+- `Client.Tx` y la tx implícita de `Query[T]` emiten `SET LOCAL
+  app.tenant_id = $1` como primer statement bajo router Native.
+- `client.Raw()` y `client.Exec()` loguean warning si context.tenantID
+  no nulo bajo router Native (la policy hará su trabajo; el warning
+  documenta).
+- Integration test cross-engine: dos tenants, modelo `Order`, policy
+  instalada manualmente en el suite, queries de tenant A no ven filas
+  de tenant B; **skip explícito** (sin `t.Skip` por env var — usar
+  `testcontainers` y build-tag `//go:build integration`) en motores no
+  PG, con razón documentada.
+- Doc en `website/docs/multi-tenancy/row-level-native.mdx`: cuándo
+  usar, qué garantías da, qué pasa con `client.Raw()`, ejemplo de
+  configuración.
+- CHANGELOG `### Added`: `RowLevelSecurityNative` (PG-only).
+
+**Estimación**: 1-2 sesiones largas (~6-10 h). Bloque crítico de la
+fase.
+
+### F5-3 · CLI `quark tenant install-rls-policies`
+
+**Generador de DDL para Native: reutiliza schema introspection (F3-2)
+y migration lock (F3-1).**
+
+**Localización**:
+- `quarktenant/` (paquete nuevo en la raíz del módulo, siguiendo el
+  patrón de `quarkmigrate/` entregado en F3-5 — biblioteca, no binario;
+  el usuario embebe en un `tenant/main.go` propio).
+- Subcomando `install-rls-policies [--dry-run] [--tenant-col=...]`.
+- Output: SQL templated por modelo registrado en el Client (uso del
+  registry per-Client F3-7):
+
+```sql
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders FORCE ROW LEVEL SECURITY;
+CREATE POLICY orders_tenant_isolation ON orders
+    USING (tenant_id = current_setting('app.tenant_id', true)::text);
+```
+
+**Definition of done**:
+- Subcomando funcional con `--dry-run` (stdout) y `--apply` (vía
+  `Client.AcquireMigrationLock`).
+- Tipo de la columna inferido del modelo registrado (`text`/`uuid`/
+  `bigint`).
+- Rechazo explícito en motor no-PG con mensaje claro
+  (`ErrDialectNotSupported`).
+- Test e2e en suite PG: registrar 3 modelos, correr `--dry-run`,
+  asertar SQL emitido; correr `--apply`, asertar `pg_policies` lo
+  contiene.
+- Doc `website/docs/multi-tenancy/row-level-native.mdx` incluye
+  ejemplo del CLI.
+- Ejemplo en `examples/tenant-rls-native/main.go`.
+- CHANGELOG `### Added`: `quark tenant install-rls-policies` CLI.
+
+**Estimación**: 1 sesión media (~4-5 h).
+
+### F5-4 · Hooks transaccionales — Refactor `query_crud.go` para pasar `*Tx`
+
+**Refactor preparatorio para F5-5. Cambio interno, sin nuevo API
+externo todavía.**
+
+**Localización**:
+- `query_crud.go` — cuerpo de `Create`/`Update`/`UpdateFields`/`Delete`/
+  `Tracked.Save`. Hoy abren tx implícita en algunos casos; pasar a
+  patrón uniforme: si `q.tx != nil` usar esa, si no abrir una
+  implícita.
+- `hooks.go` — añadir `BeforeFindHook` / `AfterFindHook` con la misma
+  superficie que los existentes (sólo añade interfaces; no cambia
+  ejecución todavía).
+- `query_exec.go` — invocar `BeforeFind` antes del scan, `AfterFind`
+  tras llenar la slice.
+- `tx.go` — añadir cola interna de `afterHooks []func() error` y
+  `onCommitHooks []func(ctx) error` / `onRollbackHooks []func(ctx) error`
+  (las dos últimas se rellenan en F5-5; la cola de afterHooks se
+  rellena ya aquí).
+- `Tx.Commit()` / `Tx.Rollback()` — disparar la cola `afterHooks`
+  tras commit OK; descartarla en rollback.
+
+**Definition of done**:
+- Tras este PR, los hooks `After*` corren **post-commit** cuando hay
+  tx (implícita o explícita). Antes corrían inline; el comportamiento
+  observable cambia para casos con tx explícita.
+- `BeforeFindHook` y `AfterFindHook` definidos en `hooks.go` y
+  enganchados en `query_exec.go`.
+- Test de regresión: tx que falla en commit no dispara `AfterCreate`;
+  tx con commit OK lo dispara una vez en orden FIFO.
+- Test cross-engine que los hooks existentes siguen funcionando con la
+  nueva semántica.
+- Doc en `website/docs/guides/hooks.mdx`: tabla "qué corre dónde"
+  (Before in-tx-abortable, After post-commit-observational).
+- `docs/MIGRATION_v0.9.0.md` creado con la sección "Hook semantics
+  change" (breaking minor).
+- CHANGELOG `### Changed`: hooks `After*` post-commit; `### Added`:
+  `BeforeFindHook` / `AfterFindHook`.
+
+**Estimación**: 2 sesiones (~8 h). Riesgoso porque toca el path
+crítico.
+
+### F5-5 · `Tx.OnCommit(fn)` / `Tx.OnRollback(fn)` API pública
+
+**Construye sobre F5-4. API nueva para side-effects arbitrarios
+controlados por commit/rollback.**
+
+**Localización**:
+- `tx.go` — métodos públicos `OnCommit(func(context.Context) error)` y
+  `OnRollback(func(context.Context) error)` que añaden a las colas
+  internas creadas en F5-4.
+- `Tx.Commit()` — tras `db.Commit()` OK, disparar `onCommitHooks` en
+  FIFO secuencial; cualquier error loguea con span OTel
+  `quark.hook.on_commit_error` y **no para la cadena**.
+- `Tx.Rollback()` — análogo con `onRollbackHooks` (mismo principio
+  no-bloqueante).
+- Helper `quark.TxFromContext(ctx) *Tx` para hooks que necesiten el tx
+  actual (alternativa a cambiar la firma de `hooks.go`, ADR-0013
+  rechazó cambiar las interfaces).
+
+**Definition of done**:
+- API `OnCommit`/`OnRollback` documentada.
+- Test: 3 OnCommit registrados en FIFO se ejecutan en orden tras
+  commit; uno falla → los otros 2 siguen; rollback los descarta.
+- Test: OnRollback se dispara en rollback (no en commit).
+- `TxFromContext` documentado y testeado.
+- Doc en `website/docs/guides/transactions.mdx` § "Side-effects on
+  commit/rollback".
+- CHANGELOG `### Added`: `Tx.OnCommit` / `Tx.OnRollback` /
+  `quark.TxFromContext`.
+
+**Estimación**: 1 sesión (~4 h). Bajo riesgo si F5-4 está sólido.
+
+### F5-6 · `EventBus` real — interfaz pública + `LoggerEventBus`/`OTelEventBus`
+
+**Reemplaza el placeholder de `events.go:50` (CreateListener →
+ErrDialectNotSupported). Emisión síncrona vía `OnCommit`.**
+
+**Localización**:
+- `events.go` — definir interfaz `EventBus` pública:
+
+```go
+type EventBus interface {
+    Publish(ctx context.Context, event Event) error
+}
+
+type Event interface {
+    Kind() string  // "created" | "updated" | "deleted"
+    Table() string
+    Payload() any
+}
+```
+
+- `events.go` — `LoggerEventBus` (slog) y `OTelEventBus` (span emit)
+  in-tree.
+- `client.go` — `Client.UseEventBus(bus EventBus)` engancha el bus al
+  pipeline CRUD: cada `Create/Update/Delete` registra un `OnCommit`
+  que llama a `bus.Publish`.
+- `events.go:CreateListener` se mantiene devolviendo
+  `ErrDialectNotSupported` (LISTEN/NOTIFY explícitamente fuera de
+  scope, ver ADR-0013).
+- `events.go:Notify` se documenta como "pg_notify only, no relacionado
+  con `EventBus.Publish`" para evitar confusión.
+
+**Definition of done**:
+- Interfaz `EventBus` y `Event` públicas.
+- `LoggerEventBus` y `OTelEventBus` con tests unitarios.
+- `Client.UseEventBus` engancha al pipeline; test e2e que un `Create`
+  emite `created` evento tras commit OK y nada tras rollback.
+- Test: emit que falla **no revierte** la tx (ya commitéo) pero loguea
+  span `quark.event.emit_failure` y propaga error envuelto
+  `ErrEventEmitFailed`.
+- Doc en `website/docs/advanced/events.mdx`: cómo conectar un bus
+  externo (NATS / Kafka skeleton), warning de "at-least-once, no
+  outbox".
+- CHANGELOG `### Added`: `EventBus` interfaz pública +
+  `LoggerEventBus` / `OTelEventBus`.
+
+**Estimación**: 1 sesión larga (~5-6 h).
+
+### F5-7 · Audit log opcional — tabla `quark_audit` con diff por `OnCommit`
+
+**Construye sobre F5-5 (OnCommit) + F5-6 (EventBus) + F1-1 (Tracked
+dirty tracking, ya entregado).**
+
+**Localización**:
+- `audit.go` (nuevo) — `Client.EnableAuditLog(opts AuditConfig)` que:
+  1. Asegura existencia de tabla `quark_audit(id BIGSERIAL PK,
+     ts TIMESTAMPTZ, tenant_id TEXT, user_id TEXT, table_name TEXT,
+     operation TEXT, pk TEXT, diff JSONB)` vía `MigrateRegistered`
+     (F3-7).
+  2. Registra un middleware que en `Create/Update/Delete` captura el
+     diff (de `Tracked.Save` cuando aplica; del row entero en
+     `Create`/`Delete`) y registra `tx.OnCommit(func(ctx) error {
+     return audit.write(ctx, entry) })`.
+- `audit.go` `AuditConfig`: `UserFromContext func(context.Context) string`,
+  `TenantFromContext func(context.Context) string`,
+  `IncludeTables []string` / `ExcludeTables []string`.
+- `website/docs/advanced/audit-log.mdx` — guía completa.
+
+**Definition of done**:
+- Tabla `quark_audit` creada automáticamente al llamar
+  `EnableAuditLog`.
+- CRUD bajo `Client.EnableAuditLog` genera entradas con diff JSON
+  correcto (test: crear → INSERT con `diff = {"id":1,"name":"foo"}`;
+  update → `{"name":{"old":"foo","new":"bar"}}`; delete → diff del row
+  completo).
+- Tests cross-engine en los 5 motores CI (PG/MySQL/MariaDB/MSSQL/SQLite).
+- Doc completa con ejemplos de `UserFromContext` y filtros.
+- CHANGELOG `### Added`: `Client.EnableAuditLog` + `audit_log` doc.
+
+**Estimación**: 1-2 sesiones (~6-8 h). Bloque opcional — si la fase se
+alarga, F5-7 se diferiría a v0.9.1 sin bloquear el resto.
+
+### Cierre de Fase 5
+
+Al cerrar los 7 items y antes de taggear `v0.9.0`:
+
+- Verificar que `docs/MIGRATION_v0.9.0.md` lista los breaking minors
+  (hooks `After*` post-commit, rename `RowLevelSecurity` →
+  `RowLevelSecurityClient` con alias).
+- Versionar docs (`npm run docusaurus docs:version 0.9.0`).
+- Actualizar header de TASKS.md a "Fase 5 cerrada".
+- Marcar Fase 5 como `[x]` en `docs/ROADMAP.md` con PR refs.
+- Correr `/release v=0.9.0` (el slash command valida todo).
 
 ---
 

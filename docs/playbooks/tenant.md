@@ -4,21 +4,29 @@ module: tenant
 files:
   - tenant_router.go
   - client.go
-last_review: 2026-05-10
-related_adrs: [0003, 0007]
-related_p0: [P0-1]
-phase: 0
+last_review: 2026-05-15
+related_adrs: [0007, 0012]
+related_p0: []
+phase: 5
 ---
 
 # Playbook: Multi-Tenancy
 
 ## Qué cubrimos
 
-Tres estrategias coexistentes (ADR 0007):
+Tres estrategias coexistentes (ADR 0007). Tras ADR-0012 (Fase 5
+apertura), las dos modalidades de fila se distinguen explícitamente:
 
 1. **`DatabasePerTenant`**: una DB por tenant. `TenantRouter` mantiene un LRU de `*Client` por tenant ID. Aislamiento físico fuerte.
 2. **`SchemaPerTenant`** (sólo PG y MSSQL real, MySQL no tiene schemas): una DB, un schema por tenant. `q.schema = tenantID` en `client.go:170`.
-3. **`RowLevelSecurity`** (renombrar a `RowLevelSecurityClient` en Fase 5, ver ADR 0003): inyecta `WHERE tenant_id = ?` en cada query del builder.
+3. **`RowLevelSecurityClient`** (constante actual `RowLevelSecurity`,
+   renombrado en F5-1 con alias deprecado): inyecta `WHERE tenant_id = ?`
+   en cada query del builder. **Disponible en los 6 motores. NO es RLS
+   de motor** — ver "Limitaciones críticas" abajo.
+4. **`RowLevelSecurityNative`** (Fase 5, F5-2, PG-only): aislamiento
+   por motor mediante `SET LOCAL app.tenant_id = $1` + `CREATE POLICY`
+   por tabla. Mutuamente excluyente con `RowLevelSecurityClient` en el
+   mismo router. Ver ADR-0012.
 
 `TenantRouter` se construye con `quark.NewTenantRouter(config, factory)`. La estrategia se elige una vez por router; una aplicación puede tener varios routers con estrategias distintas.
 
@@ -26,44 +34,28 @@ Tres estrategias coexistentes (ADR 0007):
 
 ## Bugs P0 vivos
 
-### P0-1 · `Or()` no propaga `tenantID/tenantCol` (FUGA DE AISLAMIENTO)
+Sin P0 vivos en este módulo. Ver histórico abajo.
 
-**Severidad: ALTA. Bug de seguridad explotable.**
+## Histórico — P0 cerrados
 
-**Localización**: `query_builder.go:175-186` (en el módulo query-builder, pero el impacto se siente aquí). `Or()` crea un `BaseQuery` blanco hardcodeado sin copiar los campos de aislamiento.
+### P0-1 · `Or()` no propaga `tenantID/tenantCol` (cerrado en v0.3.0)
 
-**Escenario que rompe**:
+**Severidad original: ALTA — fuga de aislamiento.**
 
-```go
-// Con estrategia RowLevelSecurity, contexto del tenant A
-result, _ := quark.For[Order](ctx, router).
-    Where("status", "=", "pending").
-    Or(func(q quark.QueryBuilder) {
-        q.Where("status", "=", "paid")
-    }).
-    List()
-// Resultado: incluye filas de tenant B, porque el grupo OR
-// no llevó la condición tenant_id = A.
-```
+**Cerrado**: `query_builder.go` introdujo `(b *BaseQuery) cloneForGroup() BaseQuery` que copia `tenantID`, `tenantCol`, `schema`, `cache`, `limits`, `client`, `dialect`, `guard`. `Or()` usa ese clone, manteniendo el filtro en el grupo. Test de regresión cubierto en `p0_fixes_test.go`.
 
-**Fix esperado**: `Or()` debe clonar TODOS los campos de aislamiento del padre. Patrón: extraer `(b *BaseQuery) cloneForGroup() BaseQuery` que copie `tenantID`, `tenantCol`, `schema`, `cache`, `limits`, `client`, `dialect`, `guard`.
-
-**Test de regresión obligatorio**: levantar dos tenants en estrategia RLS, ejecutar la query con `Or` desde tenant A, y asertar:
-1. El SQL emitido contiene `tenant_id = ?` (no se pierde).
-2. No se devuelven filas de tenant B.
-
-Tests en los 6 motores.
+**Por qué se mantiene en el playbook**: el patrón `cloneForGroup` es la disciplina obligatoria para cualquier helper nuevo que clone `BaseQuery` (ver "Anti-patterns a vigilar" abajo). Si introduces `WhereGroup`, AST `And/Or/Not`, subqueries componibles — **deben** usar el clone, o replicas el bug en sitio nuevo.
 
 ## Limitaciones críticas
 
-### `RowLevelSecurity` NO es RLS de motor
+### `RowLevelSecurityClient` NO es RLS de motor
 
 Es WHERE-injection cliente. El comentario en el código lo admite (`tenant_router.go:28-29`).
 
 **Consecuencias**:
 
 - `client.Raw()` y `client.Exec()` se saltan la inyección. **Cualquier query que emita el caller fuera del builder NO está aislada.**
-- Bugs en la propagación (P0-1 con `Or()`, futuros bugs con subqueries, joins, CTEs) son fugas de seguridad.
+- Bugs en la propagación (historial: P0-1 con `Or()`; futuros bugs con subqueries, joins, CTEs introducidos sin `cloneForGroup`) son fugas de seguridad.
 
 **Cómo gestionarlo hoy**:
 
@@ -71,7 +63,14 @@ Es WHERE-injection cliente. El comentario en el código lo admite (`tenant_route
 2. Considerar emitir WARN en logs cuando `client.Raw()` se llama bajo un context que tiene tenantID.
 3. Cualquier helper que clone `BaseQuery` debe propagar tenant explícitamente. El `code-reviewer` lo vigila.
 
-**Plan**: ADR 0003. Fase 5 introduce `RowLevelSecurityNative` con `SET LOCAL app.tenant_id` + `CREATE POLICY` Postgres. La estrategia actual queda con sufijo `Client` y deprecation warning.
+**Plan (ADR-0012, Fase 5)**: F5-1 rename `RowLevelSecurity` →
+`RowLevelSecurityClient` con alias deprecado. F5-2 introduce
+`RowLevelSecurityNative` exclusivo de PG con `SET LOCAL app.tenant_id` +
+`CREATE POLICY`. En PG, las dos modalidades son mutuamente excluyentes
+por router (ADR-0012 §"Modelo de coexistencia"). Resto de motores
+conservan `RowLevelSecurityClient` como única opción de fila —
+documentación pública debe seguir cualificando "client-side tenant
+scoping" fuera de PG.
 
 ### Factory de nuevo tenant ejecuta bajo `mu.Lock`
 
@@ -89,7 +88,7 @@ Mitigación pendiente: `singleflight` por tenant ID. Hasta entonces, mantén fac
 
 Hoy el caller debe crear el schema manualmente al onboardear un tenant (`CREATE SCHEMA tenant_xxx`) antes de usar el router. No hay automatismo. Y las migraciones no se aplican automáticamente al schema nuevo — eso es responsabilidad del caller también.
 
-Plan Fase 5: `quark tenant onboard <tenantID>` que crea el schema + aplica migraciones.
+Plan (deuda heredada, fuera de scope explícito de los F5-N pero seguramente cae en algún PR de F5-2/F5-3): `quark tenant onboard <tenantID>` que crea el schema + aplica migraciones. No bloquea la apertura formal de Fase 5.
 
 ## Anti-patterns a vigilar
 
@@ -134,24 +133,39 @@ tenantID := ctx.Value("tenant_id").(string)
 client.RawQuery(ctx, "SELECT * FROM orders WHERE tenant_id = ?", tenantID)
 ```
 
-### Asumir que `RowLevelSecurity` aísla mediante motor
+### Asumir que `RowLevelSecurityClient` aísla mediante motor
 
-Es disciplina aplicada por el ORM, no aislamiento del motor. No publicites como "Row-Level Security" sin cualificar — usa "tenant scoping", "client-side row filtering" o similar.
+Es disciplina aplicada por el ORM, no aislamiento del motor. No publicites como "Row-Level Security" sin cualificar — usa "tenant scoping", "client-side row filtering" o similar. La modalidad de motor real es `RowLevelSecurityNative` (PG-only, F5-2).
 
 ## Decisiones que afectan al módulo
 
-- **ADR 0003**: RLS hoy es cliente, motor en Fase 5.
-- **ADR 0007**: tres estrategias coexisten; cualquier helper debe respetarlas todas.
+- **ADR-0012** (Fase 5): RLS real PG vía `SET LOCAL` + `CREATE POLICY`;
+  modalidad Native PG-only, Client en resto de motores. Supersede
+  ADR-0003.
+- **ADR-0007**: tres estrategias coexisten; cualquier helper debe
+  respetarlas todas.
+- **ADR-0003** (superseded por ADR-0012): histórico que documenta por
+  qué la modalidad Client se admitió como WHERE-injection antes de
+  Fase 5.
 
 ## Roadmap de mejora
 
-- **Fase 0**: cerrar P0-1 (`Or()` propagation).
-- **Fase 5**:
-  - `RowLevelSecurityNative` con `SET LOCAL app.tenant_id` + Postgres policies.
-  - `quark tenant install-rls-policies` CLI.
-  - `quark tenant onboard <tenantID>` para `SchemaPerTenant`.
-  - `singleflight` en factory.
-  - Renombrar `RowLevelSecurity` → `RowLevelSecurityClient` con deprecation.
+- **Fase 5** (apertura formal hecha; entrega esperada v0.9.0; ver
+  TASKS.md §"Fase 5"):
+  - F5-1 — Renombrar `RowLevelSecurity` → `RowLevelSecurityClient` con
+    deprecation.
+  - F5-2 — `RowLevelSecurityNative` con `SET LOCAL app.tenant_id` +
+    Postgres policies (PG-only, exclusivo con Client en mismo router).
+  - F5-3 — `quark tenant install-rls-policies` CLI generador de DDL.
+  - (Fuera de scope explícito de F5) `quark tenant onboard <tenantID>`
+    para `SchemaPerTenant`, `singleflight` en factory — deuda menor
+    documentada abajo.
+
+**Deuda menor heredada (no bloquea Fase 5)**:
+
+- Factory bajo `mu.Lock` en `tenant_router.go:128` (apartado abajo) —
+  pendiente `singleflight` por tenant ID.
+- `SchemaPerTenant` no auto-crea schema — pendiente CLI `onboard`.
 
 ## Tests críticos a no romper
 
