@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0](https://github.com/jcsvwinston/quark/compare/v0.7.0...v0.8.0) (2026-05-15)
+
+
+### Added
+
+* **cache:** per-PK invalidation + redis tag-TTL fix (F4-6) ([#74](https://github.com/jcsvwinston/quark/issues/74)) ([f93fec8](https://github.com/jcsvwinston/quark/commit/f93fec8b4a76a0f99c16d8b11d528423b6d4008f))
+* **cache:** stampede protection — singleflight + jitter + XFetch (F4-5) ([#72](https://github.com/jcsvwinston/quark/issues/72)) ([17843fa](https://github.com/jcsvwinston/quark/commit/17843fa8b776ced45a089292caa9276d47b4ee45))
+* **observability:** structured slow query log (F4-3) ([#71](https://github.com/jcsvwinston/quark/issues/71)) ([9d525ba](https://github.com/jcsvwinston/quark/commit/9d525ba1b4c008a450b2c943fd73fd9d2bd2a6be))
+* **otel:** metrics + span redaction (F4-1 + F4-2) ([#70](https://github.com/jcsvwinston/quark/issues/70)) ([0a8f622](https://github.com/jcsvwinston/quark/commit/0a8f622ab079a261a6cef57ef1bac5342bffd59a))
+* **resilience:** deadlock retry on Client.Tx (F4-7) ([#75](https://github.com/jcsvwinston/quark/issues/75)) ([72a8238](https://github.com/jcsvwinston/quark/commit/72a82388488bd46128dcea945fc1584ceb674d7b))
+
+
+### Fixed
+
+* **cache:** deterministic type-tagged cache key (F4-4) ([#69](https://github.com/jcsvwinston/quark/issues/69)) ([a982bf9](https://github.com/jcsvwinston/quark/commit/a982bf9768dc99bbc96919c48a0047296fb254c1))
+
 ## [Unreleased]
 
 ### Added
