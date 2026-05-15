@@ -60,13 +60,13 @@ type stampedeStore struct {
 	inner     CacheStore
 	jitterPct float64 // 0..1; 0.1 = ±10%
 	xfetchOn  bool
-	beta      float64 // XFetch tuning; >0; default 1.0
+	beta      float64      // XFetch tuning; >0; default 1.0
 	logger    *slog.Logger // optional; nil = silent
 
-	sf      singleflight.Group
-	randMu  sync.Mutex // guards rng — math/rand is not goroutine-safe
-	rng     *rand.Rand
-	nowFn   func() time.Time // injectable for tests
+	sf     singleflight.Group
+	randMu sync.Mutex // guards rng — math/rand is not goroutine-safe
+	rng    *rand.Rand
+	nowFn  func() time.Time // injectable for tests
 }
 
 // newStampedeStore wraps inner with the three stampede protections.
