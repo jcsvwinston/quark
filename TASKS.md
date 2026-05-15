@@ -148,7 +148,29 @@ corresponda. **Si tocas hooks (F5-4..F5-6)** escribe
 `docs/MIGRATION_v0.9.0.md` en el mismo PR — el cambio de "After inline"
 a "After post-commit" es breaking minor (ADR-0013).
 
-### F5-1 · Rename `RowLevelSecurity` → `RowLevelSecurityClient` + deprecation
+### ~~F5-1 · Rename `RowLevelSecurity` → `RowLevelSecurityClient` + deprecation~~
+
+**Cerrado (2026-05-15, PR #78)** — `tenant_router.go` declara
+`RowLevelSecurityClient` como la constante canónica con doc-comment que
+explicita "client-side WHERE injection" y deja `RowLevelSecurity` como
+`// Deprecated:` alias del mismo valor (sunset v1.0). El `switch` de
+`client.go:233`, los comentarios internos en `query_builder.go` /
+`dirty_track.go` / `query_crud.go`, los tests existentes
+(`quark_test.go`, `dirty_track_test.go`, `suite_test.go`,
+`tenant_router_test.go`) y el ejemplo `examples/postgres/main.go` usan
+ahora el nombre canónico. `TestRowLevelSecurityAliasBackwardCompat`
+(`tenant_router_test.go:23-44`) guarda valor-equality y type-check de
+asignación vía el alias; lleva sunset comment ligado a la eliminación
+del alias en v1.0. Doc viva (`website/docs/advanced/multi-tenant.mdx`),
+referencia (`reference/api/multi-tenant.mdx`), comparison
+(`reference/comparison.mdx`), README, `docs/ENGLISH_DOCS.md`,
+ADR-0007, CLAUDE.md y CHANGELOG `### Changed`/`### Deprecated`
+sincronizados. El snapshot versionado v0.8.0 lleva `:::note Renamed
+in v0.9.0` admonitions sin reescribir la historia (tablas y snippets
+de v0.8.0 conservan el nombre original — eso es lo que esa release
+entregó). Code-reviewer aprobado en R2 tras cerrar 1 blocker
+(versioned-docs admonitions) + 2 nits (paths en TASKS.md, sunset
+comment). Build / vet / gofmt / lint-docs / tests cortos verdes.
 
 **Foundation. Sin lógica nueva — sólo rename + alias.**
 
