@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.0] - 2026-05-15
 
-Phase 4 release — observability, production-grade caché, and resilience.
+Phase 4 release — observability, stampede-protected caché, and resilience.
 Closes F4-1 through F4-7: OTel metrics + span redaction; structured
 slow query log; deterministic cache key (the post-v0.7 fix that became
 the F4-5 prerequisite); cache stampede protection (singleflight +

@@ -40,7 +40,7 @@
 
 ## v0.8.0 — Phase 4 (this release)
 
-Observability, production-grade caché, resilience. Closes the F4-1
+Observability, stampede-protected caché, resilience. Closes the F4-1
 through F4-7 backlog (see [ADR-0011](adr/0011-cache-stampede-protection-wrapper.md)
 for the cache wrapper decision):
 

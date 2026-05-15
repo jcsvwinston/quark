@@ -4,7 +4,7 @@
 > **Status:** late-alpha. Not yet v1.0 production-ready.
 > See [`docs/ANALISIS_MADUREZ.md`](ANALISIS_MADUREZ.md) for the honest gap analysis between the current state and a planned v1.0.
 
-Phase 4 release. Closes F4-1 through F4-7: observability (OTel metrics, span argument redaction, structured slow-query log), production-grade caché (deterministic cache key, stampede protection via singleflight + ±jitter + XFetch wrapper, per-row invalidation and Redis tag-TTL fix), and resilience (deadlock retry with exponential backoff on `Client.Tx`). Every new feature is **opt-in** — the v0.7 surface keeps working unchanged. No breaking changes; no migration guide.
+Phase 4 release. Closes F4-1 through F4-7: observability (OTel metrics, span argument redaction, structured slow-query log), stampede-protected caché (deterministic cache key, singleflight + ±jitter + XFetch wrapper, per-row invalidation and Redis tag-TTL fix), and resilience (deadlock retry with exponential backoff on `Client.Tx`). Every new feature is **opt-in** — the v0.7 surface keeps working unchanged. No breaking changes; no migration guide.
 
 ## What's in this release
 
