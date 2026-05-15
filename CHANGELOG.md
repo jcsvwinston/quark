@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-15
+
+Phase 4 release — observability, stampede-protected caché, and resilience.
+Closes F4-1 through F4-7: OTel metrics + span redaction; structured
+slow query log; deterministic cache key (the post-v0.7 fix that became
+the F4-5 prerequisite); cache stampede protection (singleflight +
+jitter + XFetch via `stampedeStore` wrapper, ADR-0011); per-row cache
+invalidation + Redis tag-TTL fix; deadlock retry on `Client.Tx`. No
+breaking changes; every new feature is opt-in. Detailed notes in
+[`docs/RELEASE_NOTES_v0.8.0.md`](docs/RELEASE_NOTES_v0.8.0.md).
+
+PRs included in this release:
+[#67] (Phase 4 opening, ADR-0011),
+[#68] (release-please Node 24),
+[#69] (F4-4 cache key determinism — prerequisite, landed in 0.7.x but
+foundational for Phase 4),
+[#70] (F4-1 + F4-2 OTel metrics + span redaction),
+[#71] (F4-3 slow query log),
+[#72] + [#73] (F4-5 stampede protection + gofmt fix),
+[#74] (F4-6 per-PK invalidation + Redis tag-TTL),
+[#75] (F4-7 deadlock retry).
+
 ### Added
 
 - **Deadlock retry on `Client.Tx` (F4-7)** — new
@@ -147,6 +169,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Unknown types fall back to `%#v` (includes the Go type, does not
   invoke a `Stringer`). Reflection-free (ADR-0002). Prerequisite for
   the F4-5/F4-6 cache work.
+
+[#67]: https://github.com/jcsvwinston/quark/pull/67
+[#68]: https://github.com/jcsvwinston/quark/pull/68
+[#69]: https://github.com/jcsvwinston/quark/pull/69
+[#70]: https://github.com/jcsvwinston/quark/pull/70
+[#71]: https://github.com/jcsvwinston/quark/pull/71
+[#72]: https://github.com/jcsvwinston/quark/pull/72
+[#73]: https://github.com/jcsvwinston/quark/pull/73
+[#74]: https://github.com/jcsvwinston/quark/pull/74
+[#75]: https://github.com/jcsvwinston/quark/pull/75
 
 ## [0.7.0] - 2026-05-14
 

@@ -9,8 +9,8 @@ current tag for security updates.
 | Version | Supported |
 |---------|-----------|
 | `main` | ✅ |
-| `v0.7.x` | ✅ |
-| `v0.6.x` and earlier | ❌ — please upgrade |
+| `v0.8.x` | ✅ |
+| `v0.7.x` and earlier | ❌ — please upgrade |
 
 ---
 
