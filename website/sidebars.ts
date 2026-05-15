@@ -28,6 +28,7 @@ const sidebars: SidebarsConfig = {
         'guides/relations',
         'guides/migrations',
         'guides/transactions',
+        'guides/hooks',
         'guides/cli',
       ],
     },

@@ -52,7 +52,15 @@ type BaseQuery struct {
 	guard   *SQLGuard
 	pk      pkMeta
 	exec    Executor // *sql.DB or *sql.Tx
-	meta    *ModelMeta
+	// tx is the *quark.Tx the query was bound to via [ForTx], or
+	// nil when constructed via [For] against a plain Client. CRUD
+	// operations queue their After* hooks on tx.afterHooks so the
+	// hooks fire after Commit succeeds (F5-4) rather than inline.
+	// When tx is nil, hooks run inline (preserving the pre-F5-4
+	// behaviour for callers that never opened an explicit
+	// transaction).
+	tx   *Tx
+	meta *ModelMeta
 
 	// Query state (cloned on each builder method)
 	selectCols  []string
@@ -223,14 +231,22 @@ func (q *Query[T]) WhereBetween(column string, start, end any) *Query[T] {
 // Internal helper. Not part of the public API.
 func (b *BaseQuery) cloneForGroup() BaseQuery {
 	c := BaseQuery{
-		client:      b.client,
-		ctx:         b.ctx,
-		table:       b.table,
-		schema:      b.schema,
-		dialect:     b.dialect,
-		guard:       b.guard,
-		pk:          b.pk,
-		exec:        b.exec,
+		client:  b.client,
+		ctx:     b.ctx,
+		table:   b.table,
+		schema:  b.schema,
+		dialect: b.dialect,
+		guard:   b.guard,
+		pk:      b.pk,
+		exec:    b.exec,
+		// F5-4: propagate the tx back-reference so that any CRUD
+		// executed via a group sub-clause keeps queuing After
+		// hooks on the same tx. Today Or() builds only WHERE
+		// conditions and never executes CRUD, but copying the
+		// reference defensively closes a latent footgun if the
+		// group surface ever grows to accept CRUD inside the
+		// callback.
+		tx:          b.tx,
 		meta:        b.meta,
 		tenantID:    b.tenantID,
 		tenantCol:   b.tenantCol,

@@ -1,0 +1,144 @@
+# Migration guide — v0.8.0 → v0.9.0
+
+This is the migration guide for Phase 5 changes. The v0.9.0 release
+ships when **F5-4..F5-7** land; the items below are accumulated as
+each PR merges so the doc is final when the tag is cut.
+
+## Summary of breaking changes
+
+| Item | Surface | Severity | Action |
+| --- | --- | --- | --- |
+| Tenant strategy renamed | `quark.RowLevelSecurity` → `quark.RowLevelSecurityClient` | **None** for callers — deprecated alias keeps value | Optional: replace at your own pace; the alias is removed in v1.0. |
+| Hook timing change | `AfterCreate` / `AfterUpdate` / `AfterDelete` under `Client.Tx` | **Breaking minor** | Audit callers below. |
+
+Other Phase 5 deliveries (`RowLevelSecurityNative`, `quarktenant`
+CLI, `BeforeFindHook` / `AfterFindHook`, the upcoming
+`Tx.OnCommit` / `Tx.OnRollback` API, `EventBus`, audit log) are
+**purely additive** — no migration is required to keep existing code
+working.
+
+## Hook semantics change (F5-4)
+
+### What changed
+
+Under an **explicit transaction** opened via `Client.Tx` or
+`Client.BeginTx`, the `After*` hooks (`AfterCreateHook`,
+`AfterUpdateHook`, `AfterDeleteHook`) now fire **after the
+transaction commits**, in the order the CRUD operations were issued.
+Before v0.9.0, the hooks ran inline, immediately after the SQL
+statement — at a point where the surrounding transaction had not yet
+committed and could still roll back.
+
+The non-transactional path (CRUD via `For[T]` without an explicit
+`Tx`) is unchanged: hooks still run inline, immediately after the
+statement.
+
+### Why this is breaking
+
+If your `After*` hook performed application work that assumed the
+write was already persisted — emitting an event to a message broker,
+updating an in-memory cache, sending an email — there was a race in
+v0.8.0 and earlier where the hook could fire **before** the
+transaction committed. If the commit then failed (constraint
+deferred to commit time, optimistic-lock conflict, deadlock without
+retry), the hook had already run; the side effect would not be
+rolled back.
+
+v0.9.0 closes that race for `Client.Tx` callers. The hook now fires
+**after** the commit succeeds, exactly when the side effect can
+honestly assume the write is durable.
+
+### What to audit
+
+Search your code for `After*` hook implementations on tenant-scoped
+models that:
+
+1. Run inside `Client.Tx` (or via `ForTx[T]`).
+2. Read DB state that depends on the CRUD that triggered the hook.
+
+Before v0.9.0, that read saw the uncommitted state inside the
+transaction. After v0.9.0, the hook fires **outside** the
+transaction (post-commit), so the same read sees committed state.
+For most use cases this is what you actually wanted; if you relied
+on the old "still-inside-tx" semantics for, say, a chained `Update`
+that built on the same row, move that follow-up Update into the
+`fn` of `Client.Tx` rather than into the After hook.
+
+### What stays the same
+
+- `Before*` hooks still run inline before the SQL statement, both in
+  the transactional and the non-transactional path. Their error
+  return still aborts the operation (and, in the transactional case,
+  causes the surrounding transaction to roll back when the caller
+  propagates the error).
+- Non-transactional `For[T].Create/Update/Delete` keeps inline
+  After-hook semantics — `For[T]` was already a "fire and forget"
+  shape; wrapping every single-statement CRUD in an implicit
+  transaction would have added two round-trips per call for no
+  safety gain. The hook order remains: BeforeX → SQL → AfterX.
+- If `Tx.Rollback` is invoked (explicitly or because the
+  `Client.Tx` callback returned an error), the queued After hooks
+  are **discarded** entirely. The DB never committed; the side
+  effects never fire. This matches the contract you'd expect from
+  "After hooks observe committed state".
+
+### How the new semantics are implemented
+
+For the curious: each `*quark.Tx` now owns a FIFO queue
+(`afterHooks []func() error`). When the CRUD path calls an After
+hook against a Query that was bound to a transaction
+(`ForTx[T](ctx, tx)`), the hook closure is appended to the queue
+instead of being invoked inline. `Tx.Commit()` drains the queue
+after the underlying `*sql.Tx.Commit` succeeds. A hook returning an
+error post-commit is logged via the Client's slog logger (event
+`quark.hook.after_post_commit_error`) but does not block the rest
+of the cascade — once the commit is durable, no application code
+can undo it (ADR-0013 Regla 2).
+
+This same queue is the foundation that F5-5 will expose to
+application code as the public `Tx.OnCommit(fn)` / `Tx.OnRollback(fn)`
+API. F5-4 keeps the queue internal to keep the v0.9.0 surface
+minimal.
+
+## New optional features (no migration needed)
+
+### `BeforeFindHook` and `AfterFindHook` (F5-4)
+
+Two new interfaces in `hooks.go`:
+
+```go
+type BeforeFindHook interface { BeforeFind(ctx context.Context) error }
+type AfterFindHook  interface { AfterFind(ctx context.Context) error  }
+```
+
+Implement on `*Model` to hook around read operations: `List`,
+`First`, `Find`, `Iter`, `Cursor`. `BeforeFind` fires before any SQL
+is built; `AfterFind` fires exactly once after the result is
+hydrated (including relations from `Preload`). Iter and Cursor wire
+AfterFind only on successful completion.
+
+### `RowLevelSecurityNative` and `TenantRouter.Tx` (F5-2)
+
+See [`row-level-native.mdx`](../website/docs/advanced/row-level-native.mdx).
+Engine-enforced PostgreSQL RLS; opt-in.
+
+### `quarktenant` CLI (F5-3)
+
+Library-style CLI for installing the policies F5-2 needs. See
+[`row-level-native.mdx` — Option A](../website/docs/advanced/row-level-native.mdx#1-install-the-policy-on-each-tenant-scoped-table).
+Opt-in.
+
+## Items still pending in v0.9.0
+
+The following Phase 5 items will land before the v0.9.0 tag and this
+guide will be updated when they do:
+
+- **F5-5** — Public `Tx.OnCommit(fn)` / `Tx.OnRollback(fn)` API +
+  `quark.TxFromContext` helper.
+- **F5-6** — `EventBus` interface + in-tree `LoggerEventBus` /
+  `OTelEventBus` + `Client.UseEventBus` wiring.
+- **F5-7** — Optional audit log (`Client.EnableAuditLog`).
+
+No breaking changes are anticipated from those items; they are
+either net-new APIs or build on the F5-4 queue this guide already
+covers.

@@ -201,6 +201,12 @@ func (q *Query[T]) List() ([]T, error) {
 		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
 
+	// F5-4: BeforeFind fires before any SQL is built or cached.
+	// Returning an error from the hook short-circuits the call.
+	if err := q.callBeforeFind(q.ctx); err != nil {
+		return nil, err
+	}
+
 	// Safety: if no explicit limit, apply safe default
 	if !q.hasLimit {
 		q.limit = 100 // Safe default
@@ -359,6 +365,13 @@ func (q *Query[T]) List() ([]T, error) {
 		}
 	}
 
+	// F5-4: AfterFind fires once per call after results are
+	// hydrated (including relations from Preload), regardless of
+	// whether the rows came from cache or DB.
+	if err := q.callAfterFind(q.ctx); err != nil {
+		return nil, err
+	}
+
 	return results, nil
 }
 
@@ -418,6 +431,14 @@ func (q *Query[T]) Cursor() (*Cursor[T], error) {
 		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
 
+	// F5-4: BeforeFind fires before the cursor opens. AfterFind
+	// fires from the cursor's Close path (see cursor.go) so
+	// streaming consumers get the same exactly-once contract as
+	// List() — once per call, after rows are exhausted.
+	if err := q.callBeforeFind(q.ctx); err != nil {
+		return nil, err
+	}
+
 	sqlStr, args, err := q.buildSelect()
 	if err != nil {
 		return nil, err
@@ -453,6 +474,14 @@ func (q *Query[T]) Cursor() (*Cursor[T], error) {
 func (q *Query[T]) Iter(fn func(T) error) error {
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+	}
+
+	// F5-4: BeforeFind fires before any rows are pulled. AfterFind
+	// fires once the streaming loop completes WITHOUT error — a
+	// fn-returned error or rows.Err short-circuits AfterFind, since
+	// the read effectively did not "succeed".
+	if err := q.callBeforeFind(q.ctx); err != nil {
+		return err
 	}
 
 	sqlStr, args, err := q.buildSelect()
@@ -491,7 +520,10 @@ func (q *Query[T]) Iter(fn func(T) error) error {
 		}
 	}
 
-	return wrapDBError(rows.Err())
+	if err := wrapDBError(rows.Err()); err != nil {
+		return err
+	}
+	return q.callAfterFind(q.ctx)
 }
 
 // Count returns the total number of matching rows.

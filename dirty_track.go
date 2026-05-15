@@ -36,6 +36,11 @@ type Tracked[T any] struct {
 	pk      pkMeta
 	table   string
 	schema  string
+	// tx is the *Tx the loading query was bound to (via ForTx[T]),
+	// or nil when loaded against a plain Client. Save queues the
+	// AfterUpdate hook on it so the hook fires post-commit (F5-4),
+	// matching the contract of every other CRUD path.
+	tx *Tx
 	// tenantID and tenantCol are propagated from the loading query so Save
 	// preserves the RowLevelSecurityClient predicate (parallel to query_exec.go's
 	// cloneForGroup invariant — see playbooks/tenant.md § Historial P0-1).
@@ -278,7 +283,15 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 	}
 
 	if hook, ok := any(t.Entity).(AfterUpdateHook); ok {
-		if err := hook.AfterUpdate(ctx); err != nil {
+		// F5-4: when the Tracked was loaded inside an explicit
+		// transaction (Track() called on a ForTx-bound query), the
+		// AfterUpdate fires post-commit through the tx queue —
+		// same contract as every other CRUD path. Outside a tx, it
+		// runs inline as before.
+		fire := func() error { return hook.AfterUpdate(ctx) }
+		if t.tx != nil {
+			t.tx.queueAfterHook(fire)
+		} else if err := fire(); err != nil {
 			return rowsAffected, err
 		}
 	}
@@ -357,6 +370,7 @@ func (tq *TrackedQuery[T]) wrap(entity *T) *Tracked[T] {
 		schema:    q.schema,
 		tenantID:  q.tenantID,
 		tenantCol: q.tenantCol,
+		tx:        q.tx, // F5-4: propagate so Save queues AfterUpdate post-commit.
 	}
 }
 

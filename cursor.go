@@ -36,6 +36,12 @@ func (c *Cursor[T]) Scan(dest *T) error {
 }
 
 // Close releases resources and notifies observers.
+//
+// F5-4: when the underlying rows close cleanly (no rows.Err) and
+// the model implements [AfterFindHook], the hook fires here exactly
+// once. A row-level error short-circuits AfterFind because the read
+// effectively did not "succeed". Errors from AfterFind replace the
+// would-be-returned err, mirroring [Query.Iter].
 func (c *Cursor[T]) Close() error {
 	if c.closed {
 		return nil
@@ -43,7 +49,8 @@ func (c *Cursor[T]) Close() error {
 	c.closed = true
 	defer c.cancel()
 
-	err := c.rows.Close()
+	closeErr := c.rows.Close()
+	rowsErr := c.rows.Err()
 
 	// Notify observers
 	duration := time.Since(c.start)
@@ -55,7 +62,13 @@ func (c *Cursor[T]) Close() error {
 		Operation: "SELECT (cursor)",
 	})
 
-	return err
+	if closeErr != nil {
+		return closeErr
+	}
+	if rowsErr != nil {
+		return rowsErr
+	}
+	return c.query.callAfterFind(c.query.ctx)
 }
 
 // Err returns any error encountered during iteration.
