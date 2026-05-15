@@ -598,7 +598,7 @@ func testMultiTenant(ctx context.Context, t *testing.T, client *quark.Client) {
 	client.Migrate(ctx, &TenantData{})
 
 	cfg := quark.DefaultTenantConfig()
-	cfg.Strategy = quark.RowLevelSecurity
+	cfg.Strategy = quark.RowLevelSecurityClient
 	cfg.BaseClient = client
 
 	resolver := func(ctx context.Context) string {

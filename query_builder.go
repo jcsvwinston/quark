@@ -65,7 +65,7 @@ type BaseQuery struct {
 	hasLimit    bool   // tracks if Limit() was explicitly called
 	unscoped    bool   // if true, soft-delete filter is dropped (WithTrashed semantics)
 	onlyTrashed bool   // if true, the soft-delete filter is inverted to IS NOT NULL
-	tenantID    string // for RowLevelSecurity isolation
+	tenantID    string // for RowLevelSecurityClient isolation
 	tenantCol   string // column name for tenant isolation
 	cache       CacheConfig
 	groupBy     []string          // GROUP BY columns
@@ -212,7 +212,7 @@ func (q *Query[T]) WhereBetween(column string, start, end any) *Query[T] {
 // query-shape slices (where/orderBy/joins/preloads/groupBy/having/selectCols)
 // left empty so a callback can build a fresh sub-clause.
 //
-// When the parent has an active RowLevelSecurity tenantID, the tenant predicate
+// When the parent has an active RowLevelSecurityClient tenantID, the tenant predicate
 // is pre-injected into the returned where slice so any group built on top of it
 // inherits the isolation filter. This pre-injection is intentionally redundant
 // with the one in client.go's For[T] constructor: the constructor protects the
@@ -266,7 +266,7 @@ func (b *BaseQuery) cloneForGroup() BaseQuery {
 //
 // Generates: WHERE "active" = $1 OR ("role" = $2 AND "role" = $3)
 //
-// Under the RowLevelSecurity tenant strategy the OR group inherits the parent's
+// Under the RowLevelSecurityClient tenant strategy the OR group inherits the parent's
 // tenant_id predicate so it cannot escape isolation via SQL operator precedence.
 func (q *Query[T]) Or(fn func(*Query[T]) *Query[T]) *Query[T] {
 	blank := &Query[T]{BaseQuery: q.cloneForGroup()}

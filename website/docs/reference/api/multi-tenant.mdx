@@ -6,7 +6,7 @@
 |----------|-------------|----------|
 | `DatabasePerTenant` | Separate DB per tenant | Strong isolation, regulatory |
 | `SchemaPerTenant` | Schema per tenant | Medium isolation, shared pool |
-| `RowLevelSecurity` | WHERE tenant_id filter | Shared table, simple scaling |
+| `RowLevelSecurityClient` | Client-side `WHERE tenant_id = ?` injection on every Quark-built query (raw SQL bypasses it). Renamed from `RowLevelSecurity` in v0.9.0; legacy name kept as deprecated alias until v1.0. | Shared table, simple scaling. On PG, `RowLevelSecurityNative` (Fase 5, F5-2) will offer engine-enforced policies as an alternative. |
 
 ## TenantRouter
 
@@ -32,7 +32,7 @@ router := quark.NewTenantRouter(
 ## Usage with Queries
 
 ```go
-// RowLevelSecurity: WHERE tenant_id = 'acme' is auto-injected
+// RowLevelSecurityClient: WHERE tenant_id = 'acme' is auto-injected
 users, _ := quark.For[User](ctx, router).List()
 
 // SchemaPerTenant: queries "acme.users"

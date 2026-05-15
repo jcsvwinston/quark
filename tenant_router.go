@@ -24,17 +24,34 @@ const (
 	// SchemaPerTenant uses a single database connection pool but prefixes
 	// the table name with the tenant ID (e.g. "tenant_acme.users").
 	SchemaPerTenant
-	// RowLevelSecurity uses a single database connection pool and injects
-	// a "WHERE tenant_id = ?" condition to every query.
-	RowLevelSecurity
+	// RowLevelSecurityClient uses a single database connection pool and
+	// injects a "WHERE tenant_id = ?" predicate into every query the
+	// builder constructs. This is **client-side tenant scoping**, not
+	// engine-enforced Row-Level Security: `client.Raw()` and `client.Exec()`
+	// bypass the predicate. See ADR-0012 and `docs/playbooks/tenant.md` for
+	// the limitations. On PostgreSQL, prefer RowLevelSecurityNative (F5-2)
+	// for engine-enforced isolation. On other engines this remains the
+	// only row-level option.
+	RowLevelSecurityClient
 )
+
+// RowLevelSecurity is the legacy name for RowLevelSecurityClient. The
+// constant value is identical, so existing code and serialized configs
+// continue to work without changes.
+//
+// Deprecated: use RowLevelSecurityClient. The alias is scheduled for
+// removal in v1.0. The name change clarifies that this strategy is
+// client-side WHERE injection, not engine-enforced RLS — see ADR-0012
+// and (when available) RowLevelSecurityNative for the engine-enforced
+// PostgreSQL variant introduced in Fase 5.
+const RowLevelSecurity = RowLevelSecurityClient
 
 // TenantConfig configures the TenantRouter.
 type TenantConfig struct {
 	Strategy       TenantStrategy
 	MaxCachedPools int     // Maximum number of DB connection pools to keep open (for DatabasePerTenant)
-	BaseClient     *Client // Used for SchemaPerTenant and RowLevelSecurity
-	TenantColumn   string  // Column name for RowLevelSecurity, default is "tenant_id"
+	BaseClient     *Client // Used for SchemaPerTenant and RowLevelSecurityClient
+	TenantColumn   string  // Column name for RowLevelSecurityClient, default is "tenant_id"
 }
 
 // DefaultTenantConfig provides sensible defaults.
@@ -102,9 +119,9 @@ func (r *TenantRouter) GetClient(ctx context.Context) (*Client, error) {
 	switch r.config.Strategy {
 	case DatabasePerTenant:
 		return r.getOrCreateCached(tenantID)
-	case SchemaPerTenant, RowLevelSecurity:
+	case SchemaPerTenant, RowLevelSecurityClient:
 		if r.config.BaseClient == nil {
-			return nil, errors.New("BaseClient must be provided for SchemaPerTenant or RowLevelSecurity strategies")
+			return nil, errors.New("BaseClient must be provided for SchemaPerTenant or RowLevelSecurityClient strategies")
 		}
 		return r.config.BaseClient, nil
 	default:

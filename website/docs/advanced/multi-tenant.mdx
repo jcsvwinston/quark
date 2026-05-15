@@ -23,7 +23,24 @@ isolation strategies.
 | --- | --- | --- | --- |
 | `DatabasePerTenant` | Separate `*sql.DB` / `Client` per tenant. | `factory func(tenantID string) (*Client, error)` | Strong isolation, custom DSNs, tenant-specific scaling. |
 | `SchemaPerTenant` | Prefixes table names with the tenant ID as schema. | `BaseClient` | Shared database with schema namespaces. |
-| `RowLevelSecurity` | Injects `WHERE tenant_id = ?` into every query. | `BaseClient`, `TenantColumn` | Shared tables, application-level tenant filters. |
+| `RowLevelSecurityClient` | Injects `WHERE tenant_id = ?` into every query built by Quark. **Client-side scoping**, not engine-enforced — `client.Raw()` and `client.Exec()` bypass it. | `BaseClient`, `TenantColumn` | Shared tables, application-level tenant filters across all six dialects. |
+
+:::note Naming change in v0.9.0
+
+The constant was previously called `RowLevelSecurity`. Starting in v0.9.0
+(Fase 5) it is renamed to `RowLevelSecurityClient` to make explicit that
+this strategy is client-side WHERE injection — not engine-enforced
+Row-Level Security. The old name remains as a `Deprecated:` alias with
+identical value until v1.0; existing code keeps compiling without
+changes.
+
+On PostgreSQL, a future `RowLevelSecurityNative` strategy (Fase 5,
+F5-2) will delegate isolation to the database engine via `SET LOCAL
+app.tenant_id` and `CREATE POLICY`. The two are mutually exclusive per
+router on PG; other dialects continue to use `RowLevelSecurityClient`
+as the only row-level option.
+
+:::
 
 Tenant IDs must match `^[a-z0-9_-]+$`. This protects schema names and cache keys
 from unsafe values.
@@ -60,7 +77,7 @@ type Document struct {
 }
 
 cfg := quark.DefaultTenantConfig()
-cfg.Strategy = quark.RowLevelSecurity
+cfg.Strategy = quark.RowLevelSecurityClient
 cfg.BaseClient = client
 cfg.TenantColumn = "tenant_id"
 
@@ -178,7 +195,7 @@ type TenantConfig struct {
 
 | Field | Used by | Default | Notes |
 | --- | --- | --- | --- |
-| `Strategy` | All | `DatabasePerTenant` | One of `DatabasePerTenant`, `SchemaPerTenant`, `RowLevelSecurity`. |
+| `Strategy` | All | `DatabasePerTenant` | One of `DatabasePerTenant`, `SchemaPerTenant`, `RowLevelSecurityClient`. The legacy spelling `RowLevelSecurity` is accepted as a deprecated alias (same value) until v1.0. |
 | `MaxCachedPools` | Database per tenant | `100` | Maximum cached clients before LRU eviction. |
 | `BaseClient` | Schema / row-level | `nil` | Required for shared-database strategies. |
 | `TenantColumn` | Row-level | `tenant_id` | Column injected into queries and writes. |

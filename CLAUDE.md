@@ -74,7 +74,7 @@ Si encuentras una sesión abriendo PRs que tocan API pero no `website/docs/`, re
 
 - **Active Record, no Data Mapper.** Modelos son structs con tags + hooks. Nada de Unit of Work / Identity Map al estilo Hibernate.
 - **Reflect por defecto, codegen opt-in en Fase 6.** No bifurcar la API.
-- **Multi-tenancy: tres estrategias coexisten** (DBPerTenant / SchemaPerTenant / RowLevelSecurity). RLS hoy es WHERE-injection cliente; el motor real (PG `CREATE POLICY` con `SET LOCAL`) llega en Fase 5.
+- **Multi-tenancy: tres estrategias coexisten** (DBPerTenant / SchemaPerTenant / RowLevelSecurityClient — antes `RowLevelSecurity`, alias deprecado hasta v1.0). La modalidad cliente es WHERE-injection en el builder; `RowLevelSecurityNative` (Fase 5, F5-2, PG-only) entrega aislamiento por motor (`SET LOCAL app.tenant_id` + `CREATE POLICY`).
 - **Caché L2 integrada** (memory/redis), no plugin externo. Stampede protection y singleflight llegan en Fase 4.
 - **No NoSQL.** Quark es relacional.
 - **Sin GraphQL/admin auto-generado.** Eso es territorio ent.

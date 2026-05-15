@@ -157,7 +157,7 @@ a "After post-commit" es breaking minor (ADR-0013).
 - `tenant_router.go:36-37` — comentario en `TenantConfig` ("RLS uses…").
 - `client.go:233-235` — `case RowLevelSecurity:` en el switch.
 - `examples/` — cualquier referencia a la constante.
-- `website/docs/multi-tenancy/*.mdx` — todas las menciones.
+- `website/docs/advanced/multi-tenant.mdx` + `website/docs/reference/api/multi-tenant.mdx` + `website/docs/reference/comparison.mdx` — todas las menciones.
 
 **Definition of done**:
 - Constante actual renombrada a `RowLevelSecurityClient`.
@@ -168,8 +168,9 @@ a "After post-commit" es breaking minor (ADR-0013).
   "client-side WHERE injection" sin ambigüedad.
 - Tests existentes siguen verdes (alias = mismo valor; el switch no
   cambia comportamiento).
-- Doc en `website/docs/multi-tenancy/row-level.mdx` documenta el alias
-  y apunta a F5-2 para la modalidad nativa.
+- Doc en `website/docs/advanced/multi-tenant.mdx` documenta el alias
+  y apunta a F5-2 para la modalidad nativa (el sidebar `advanced/multi-tenant`
+  es la landing de multi-tenancy desde v0.4.x).
 - CHANGELOG `### Deprecated`: `RowLevelSecurity` reemplazada por
   `RowLevelSecurityClient`; alias se retira en v1.0.
 
@@ -206,9 +207,10 @@ a "After post-commit" es breaking minor (ADR-0013).
   de tenant B; **skip explícito** (sin `t.Skip` por env var — usar
   `testcontainers` y build-tag `//go:build integration`) en motores no
   PG, con razón documentada.
-- Doc en `website/docs/multi-tenancy/row-level-native.mdx`: cuándo
-  usar, qué garantías da, qué pasa con `client.Raw()`, ejemplo de
-  configuración.
+- Doc en `website/docs/advanced/row-level-native.mdx` (nuevo archivo
+  bajo el mismo sidebar `advanced/`; añadir entrada en
+  `website/sidebars.ts`): cuándo usar, qué garantías da, qué pasa con
+  `client.Raw()`, ejemplo de configuración.
 - CHANGELOG `### Added`: `RowLevelSecurityNative` (PG-only).
 
 **Estimación**: 1-2 sesiones largas (~6-10 h). Bloque crítico de la
@@ -244,8 +246,8 @@ CREATE POLICY orders_tenant_isolation ON orders
 - Test e2e en suite PG: registrar 3 modelos, correr `--dry-run`,
   asertar SQL emitido; correr `--apply`, asertar `pg_policies` lo
   contiene.
-- Doc `website/docs/multi-tenancy/row-level-native.mdx` incluye
-  ejemplo del CLI.
+- Doc `website/docs/advanced/row-level-native.mdx` (creada en F5-2)
+  incluye ejemplo del CLI.
 - Ejemplo en `examples/tenant-rls-native/main.go`.
 - CHANGELOG `### Added`: `quark tenant install-rls-policies` CLI.
 

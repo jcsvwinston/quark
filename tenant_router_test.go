@@ -10,6 +10,36 @@ import (
 	"github.com/jcsvwinston/quark"
 )
 
+// TestRowLevelSecurityAliasBackwardCompat guards the contract from F5-1
+// (Fase 5): the legacy name RowLevelSecurity must remain a usable alias
+// of RowLevelSecurityClient until v1.0. If this test breaks, the alias
+// was removed prematurely or the underlying value drifted — both would
+// break existing callers compiled against v0.x.
+//
+// Sunset: remove this test in the same PR that removes the
+// RowLevelSecurity alias declaration (scheduled for v1.0). Leaving it
+// here after the alias is gone is harmless but the file won't compile.
+//
+// See ADR-0012 §"Renombrado y deprecation" and tenant_router.go's
+// RowLevelSecurity declaration.
+func TestRowLevelSecurityAliasBackwardCompat(t *testing.T) {
+	// Both spellings must refer to the same TenantStrategy value.
+	if quark.RowLevelSecurity != quark.RowLevelSecurityClient {
+		t.Fatalf("alias drift: RowLevelSecurity(%d) != RowLevelSecurityClient(%d)",
+			quark.RowLevelSecurity, quark.RowLevelSecurityClient)
+	}
+
+	// The deprecated alias must still type-check in a TenantConfig.
+	// We do not exercise the router runtime here — the canonical name is
+	// exercised by every other test in this file; the alias only needs
+	// to compile and equal the canonical value.
+	//nolint:staticcheck // intentional use of the deprecated alias.
+	cfg := quark.TenantConfig{Strategy: quark.RowLevelSecurity}
+	if cfg.Strategy != quark.RowLevelSecurityClient {
+		t.Fatalf("config assignment drift via alias: got %d", cfg.Strategy)
+	}
+}
+
 // orRLSCapture records the SELECT SQL emitted while a query runs.
 type orRLSCapture struct {
 	mu   sync.Mutex
@@ -34,7 +64,7 @@ func (c *orRLSCapture) selects() []string {
 }
 
 // testOrRLSLeak is the regression test for P0-1: Or() must not let an OR group
-// escape the RowLevelSecurity tenant_id predicate via SQL operator precedence.
+// escape the RowLevelSecurityClient tenant_id predicate via SQL operator precedence.
 //
 // Scenario: two tenants ("ta", "tb") share a table. Each tenant has rows in
 // every status. A query under tenant "ta" with .Where(status=pending).Or(status=paid)
@@ -71,7 +101,7 @@ func testOrRLSLeak(ctx context.Context, t *testing.T, baseClient *quark.Client) 
 		}
 	}
 
-	// Build a router in RowLevelSecurity with a SQL-capturing observer.
+	// Build a router in RowLevelSecurityClient with a SQL-capturing observer.
 	cap := &orRLSCapture{}
 	observedClient, err := baseClient.WithOptions(quark.WithQueryObserver(cap))
 	if err != nil {
@@ -79,7 +109,7 @@ func testOrRLSLeak(ctx context.Context, t *testing.T, baseClient *quark.Client) 
 	}
 
 	cfg := quark.DefaultTenantConfig()
-	cfg.Strategy = quark.RowLevelSecurity
+	cfg.Strategy = quark.RowLevelSecurityClient
 	cfg.BaseClient = observedClient
 
 	type ctxKey string
@@ -90,7 +120,7 @@ func testOrRLSLeak(ctx context.Context, t *testing.T, baseClient *quark.Client) 
 		}
 		return ""
 	}
-	// factory is nil: RowLevelSecurity reuses the BaseClient and does not
+	// factory is nil: RowLevelSecurityClient reuses the BaseClient and does not
 	// need a per-tenant connection pool.
 	router := quark.NewTenantRouter(cfg, resolver, nil)
 

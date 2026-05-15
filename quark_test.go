@@ -759,9 +759,9 @@ func TestTenantRouter(t *testing.T) {
 	defer baseClient.Close()
 	baseClient.Migrate(context.Background(), &User{})
 
-	// Test RowLevelSecurity Strategy
+	// Test RowLevelSecurityClient Strategy
 	cfg := quark.DefaultTenantConfig()
-	cfg.Strategy = quark.RowLevelSecurity
+	cfg.Strategy = quark.RowLevelSecurityClient
 	cfg.BaseClient = baseClient
 
 	resolver := func(ctx context.Context) string {

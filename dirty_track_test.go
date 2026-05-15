@@ -318,7 +318,7 @@ func testDirtyTracking(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		}
 
 		cfg := quark.DefaultTenantConfig()
-		cfg.Strategy = quark.RowLevelSecurity
+		cfg.Strategy = quark.RowLevelSecurityClient
 		cfg.BaseClient = baseClient
 		type ctxKey string
 		const tenantKey ctxKey = "tenant_id"
