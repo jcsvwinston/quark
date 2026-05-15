@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **OTel metrics (F4-1)** — the `quark/otel` middleware now emits three
+  OpenTelemetry instruments alongside spans on the
+  `github.com/jcsvwinston/quark` meter:
+  - `quark.queries.total` — Int64 counter, every Quark operation
+    increments.
+  - `quark.queries.duration` — Float64 histogram in milliseconds,
+    wall-clock time of the wrapped operation.
+  - `quark.queries.rows` — Int64 histogram of `sql.Result.RowsAffected`,
+    emitted only on Exec (`SELECT` / `SELECT_ROW` would require wrapping
+    `*sql.Rows`; documented as future work).
+
+  Every data point carries `db.operation` (`EXEC` / `SELECT` /
+  `SELECT_ROW`) and, when set via `WithDBSystem`, `db.system`. The meter
+  is resolved lazily from the OTel global `MeterProvider`, same panic-safe
+  pattern as the tracer; tests use `sdkmetric.ManualReader` to verify
+  emission.
+
+- **Span argument redaction (F4-2)** — new `otel.WithSpanRedaction(mode)`
+  option. Default `RedactArgs` keeps bind values out of every span (only
+  the parameterised SQL reaches `db.statement`). Opt-in `IncludeArgs`
+  attaches `db.statement.args` as a string slice — for local debugging
+  only; a tracing backend MUST NOT see user values it has no authority to
+  retain.
+
+- **`otel.WithDBSystem(name)`** option — sets the `db.system` attribute
+  on spans and metrics (e.g. `"postgres"`). The middleware does not
+  introspect the Quark `Client`; callers pass the dialect name when
+  constructing the middleware. Default: attribute omitted.
+
 ### Fixed
 
 - **Cache key collisions (F4-4)** — `generateCacheKey` no longer encodes
