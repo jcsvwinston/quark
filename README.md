@@ -264,7 +264,7 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 
 ```go
 cfg := quark.DefaultTenantConfig()
-cfg.Strategy  = quark.DatabasePerTenant  // or SchemaPerTenant, RowLevelSecurity
+cfg.Strategy  = quark.DatabasePerTenant  // or SchemaPerTenant, RowLevelSecurityClient
 cfg.BaseClient = adminClient
 
 router := quark.NewTenantRouter(cfg,

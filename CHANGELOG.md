@@ -26,6 +26,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - docs: ADR-0003 marcado `superseded` por ADR-0012 (banner + frontmatter
   `superseded-by: 0012` + entrada de índice).
+- multi-tenant: la constante `TenantStrategy` `RowLevelSecurity` se
+  renombra a `RowLevelSecurityClient` (F5-1). El nombre antiguo
+  permanece como **alias deprecado con el mismo valor** — el código
+  existente sigue compilando sin cambios. La doc y los ejemplos
+  pasan a usar el nombre canónico. Ver
+  [ADR-0012](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md).
+
+### Deprecated
+- `quark.RowLevelSecurity` — usa `quark.RowLevelSecurityClient`. El
+  alias se retira en v1.0. La nueva nomenclatura aclara que esta
+  estrategia es WHERE-injection cliente; la modalidad de motor real
+  (PostgreSQL `SET LOCAL` + `CREATE POLICY`) llegará como
+  `RowLevelSecurityNative` en F5-2.
 
 ## [0.8.0] - 2026-05-15
 

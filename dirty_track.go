@@ -37,7 +37,7 @@ type Tracked[T any] struct {
 	table   string
 	schema  string
 	// tenantID and tenantCol are propagated from the loading query so Save
-	// preserves the RowLevelSecurity predicate (parallel to query_exec.go's
+	// preserves the RowLevelSecurityClient predicate (parallel to query_exec.go's
 	// cloneForGroup invariant — see playbooks/tenant.md § Historial P0-1).
 	tenantID  string
 	tenantCol string

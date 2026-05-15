@@ -230,7 +230,7 @@ func For[T any](ctx context.Context, provider ClientProvider) *Query[T] {
 		switch router.config.Strategy {
 		case SchemaPerTenant:
 			q.schema = tenantID
-		case RowLevelSecurity:
+		case RowLevelSecurityClient:
 			q.tenantID = tenantID
 			q.tenantCol = router.config.TenantColumn
 			// Pre-inject the RLS WHERE condition

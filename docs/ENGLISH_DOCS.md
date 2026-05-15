@@ -420,7 +420,7 @@ Redis cache is available in `cache/redis`.
 
 ```go
 cfg := quark.DefaultTenantConfig()
-cfg.Strategy = quark.RowLevelSecurity
+cfg.Strategy = quark.RowLevelSecurityClient
 cfg.BaseClient = client
 
 router := quark.NewTenantRouter(cfg, func(ctx context.Context) string {

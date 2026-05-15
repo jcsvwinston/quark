@@ -6,6 +6,19 @@ description: Use TenantRouter with database, schema, or row-level isolation.
 
 # Multi-Tenant
 
+:::note Renamed in v0.9.0
+
+The constant documented below as `RowLevelSecurity` was renamed to
+`RowLevelSecurityClient` in v0.9.0 (Fase 5, F5-1). The old name is kept
+as a `Deprecated:` alias with identical value until v1.0, so code
+written against this v0.8.0 documentation continues to compile on
+v0.9.0 without changes. New code should prefer `RowLevelSecurityClient`.
+
+See the [Multi-Tenant page for the next docs version](../../next/advanced/multi-tenant)
+and the v0.9.0 changelog for the full rationale.
+
+:::
+
 `TenantRouter` implements Quark's `ClientProvider` interface, so the same query
 entry point works for single-tenant and multi-tenant code:
 

@@ -503,7 +503,7 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 // don't accept aliases here, to keep the resolution unambiguous.
 //
 // The primary key is never overwritten; listing a PK column returns an
-// error. If the client is configured with the RowLevelSecurity tenant
+// error. If the client is configured with the RowLevelSecurityClient tenant
 // strategy, the tenant column is injected before the SET clause is built;
 // callers do not need to (and should not) list it explicitly.
 //

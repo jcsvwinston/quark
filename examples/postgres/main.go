@@ -40,10 +40,13 @@ func main() {
 	}
 	defer baseClient.Close()
 
-	// 3. Initialize TenantRouter for RLS
+	// 3. Initialize TenantRouter for client-side row-level scoping.
+	// (The engine-enforced RowLevelSecurityNative variant is delivered
+	// in Fase 5 F5-2; this example uses the client-side strategy that
+	// works across all six dialects.)
 	router := quark.NewTenantRouter(
 		quark.TenantConfig{
-			Strategy:     quark.RowLevelSecurity,
+			Strategy:     quark.RowLevelSecurityClient,
 			BaseClient:   baseClient,
 			TenantColumn: "tenant_id",
 		},
