@@ -1,16 +1,19 @@
 # Quark — backlog táctico
 
-> **Fase 4 abierta formalmente (2026-05-14).** ADR-0011 ancla el cache
-> stampede protection (wrapper común sobre `CacheStore`). Descompuesta
-> en 7 items F4-1..F4-7 más abajo. Decisiones de scope fijadas: XFetch
-> entra (F4-5), negative caching y gzip diferidos. Es el **único bloque
-> vivo** del backlog — no hay implementación todavía, sólo la apertura.
-> Orden de ataque: F4-4 primero (fix de correctness, prerequisito).
+> **Fase 4 cerrada (2026-05-15, v0.8.0).** Los 7 items F4-1..F4-7
+> entregados: OTel metrics + span redaction (#70), slow query log
+> (#71), cache key determinismo (#69), stampede protection vía
+> `stampedeStore` wrapper (singleflight + ±jitter + XFetch, ADR-0011;
+> #72 + gofmt #73), per-row invalidation + Redis tag-TTL fix (#74),
+> deadlock retry on `Client.Tx` (#75). Sin breaking changes; todas
+> las features opt-in. Cross-instance stampede queda como gap
+> documentado para ADR sucesor; deadlock retry test cross-engine
+> queda como follow-up.
 >
 > **v0.7.0 publicada (2026-05-14).** Timezones por columna entregadas;
 > Bloque B cerrado entero. Estrategia híbrida `WithDefaultTZ` + tag
 > `quark:"tz=..."`, wire UTC-always, fail-fast con `ErrInvalidTimezone`,
-> opt-in puro (ADR-0010, PR #63). `[Unreleased]` queda limpio.
+> opt-in puro (ADR-0010, PR #63).
 >
 > **Phase 3 cerrada (2026-05-14, v0.6.0).** Los 7 items F3-1..F3-7
 > entregados; `Array[T]` (Bloque B / Arrays Postgres) también dentro
@@ -35,39 +38,45 @@
 > **No empieces "explorando".** Invoca `/next-session [foco]` (definido en
 > `.claude/commands/next-session.md`) y trabaja el bloque que indique.
 >
-> Foco admitido: `fase4` | `auto`. Si dudas, usa `auto`. Los focos
-> `f0`, `fase3` y `tipos` ya no aplican — los tres cerrados.
+> Foco admitido: `fase5` | `auto`. Si dudas, usa `auto`. Los focos
+> `f0`, `fase3`, `tipos` y `fase4` ya no aplican — los cuatro cerrados.
 
-Estado real del backlog post-v0.7.0 (releases v0.5.0 / v0.6.0 / v0.7.0
-hechos; `[Unreleased]` limpio; Fase 4 abierta y descompuesta):
+Estado real del backlog post-v0.8.0 (releases v0.5.0 / v0.6.0 / v0.7.0
+/ v0.8.0 hechos; **Fases 0, 1, 2, 3 y 4 cerradas**; `[Unreleased]`
+limpio):
 
-1. ~~**Bloque A — Cerrar Fase 0 de verdad**~~. Cerrado en v0.5.0.
-   F0-1..F0-10 tachados.
-2. ~~**Bloque C — Phase 3**~~. Cerrado en v0.6.0. F3-1..F3-7 entregados;
-   ADR-0009 archivado.
-3. ~~**Bloque B — Tipos diferidos de Fase 1**~~. Cerrado entero en
-   v0.7.0. `Array[T]` (PR #42) + timezones por columna (PR #63,
-   ADR-0010).
-4. **Fase 4 — observability + cache de producción + deadlock retry**.
-   Apertura formal hecha (ADR-0011 + F4-1..F4-7 descompuestos, ver
-   sección "## Fase 4" más abajo). **Único bloque vivo.** Falta toda
-   la implementación.
+1. ~~**Bloque A — Cerrar Fase 0**~~. Cerrado en v0.5.0.
+2. ~~**Bloque B — Tipos diferidos de Fase 1**~~. Cerrado en v0.7.0
+   (`Array[T]` PR #42 + timezones por columna PR #63, ADR-0010).
+3. ~~**Bloque C — Phase 3 (migraciones)**~~. Cerrado en v0.6.0.
+   F3-1..F3-7 entregados; ADR-0009 archivado.
+4. ~~**Fase 4 — observability + cache + deadlock retry**~~. Cerrado en
+   v0.8.0. F4-1..F4-7 entregados; ADR-0011 archivado.
+5. **Fase 5 — RLS real + hooks transaccionales + EventBus** (próxima).
+   `docs/ROADMAP.md` § "Phase 5"; `docs/ANALISIS_MADUREZ.md` §4 Fase 5.
+   Sin ADR ni descomposición todavía — apertura formal pendiente,
+   mismo patrón que la apertura de Fase 4 (PR #67).
 
 **Próxima acción concreta** (al arrancar sesión nueva):
-1. `/next-session fase4` — sesión de **entrega**: implementar el
-   primer item. Empezar por **F4-4** (cache key determinista) — es
-   fix de correctness y prerequisito de F4-5/F4-6. 1 PR con
-   `code-reviewer` + docs + CHANGELOG `### Added`, igual que cualquier
-   F-item de F1/F2/F3.
-2. Quick win ortogonal pendiente: el workflow `release-please-action@v4`
-   corre sobre Node 20, que GitHub fuerza a Node 24 el **2026-06-02**.
-   Bumpear la versión del action o añadir `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`
-   antes de esa fecha. Puede ir como primer commit de la próxima sesión
-   o en su propio PR de mantenimiento.
+1. `/next-session fase5` — sesión de **apertura/planning**, NO de
+   entrega: descomponer Fase 5 en items F5-N en este TASKS, decidir
+   si hace falta uno o varios ADRs (RLS real cambia el contrato de
+   tenant — probablemente ADR-0012), abrir issues de planning. El
+   reviewer suele detectar lo que dejas implícito; antes del primer
+   `feat:` deja TODO con archivo:línea y criterio de done.
 
-**Foco sugerido** del slash command: `fase4` — implementar F4-N en
-orden (F4-4 → F4-1..F4-3 → F4-5/F4-6 → F4-7). Cada item su propio PR;
-no acumular en `[Unreleased]` sin cortar versión (lección de Phase 3).
+**Items abiertos heredados de Fase 4** (deuda menor, no bloquea
+Fase 5):
+- Cross-instance stampede protection (ADR-0011 §Cuándo reabrir): sólo
+  si surge demanda real de stampede cross-instancia. Sucesor de
+  ADR-0011 con un hook `DistributedLock` opcional.
+- F4-7 deadlock real cross-engine integration test (TASKS.md § F4-7
+  TODO): el classifier y el retry loop están unit-tested; falta un
+  test que provoque un deadlock real en PG con dos tx de orden
+  invertido.
+
+**Foco sugerido** del slash command: `fase5` — abrir la próxima fase
+con el mismo rigor que Fase 4. Cada F5-N como su propio PR.
 
 **Disciplina recordada**: `code-reviewer` subagent obligatorio antes
 de cada PR (regla CLAUDE.md #6); `/next-session` plantilla de cierre
@@ -75,14 +84,15 @@ al final de cada sesión.
 
 ---
 
-## Fase 4 — Observabilidad y caché de producción (apertura formal)
+## Fase 4 — Observabilidad y caché de producción (cerrada en v0.8.0)
 
 > Spec narrativo: `docs/ANALISIS_MADUREZ.md` §4 Fase 4. Decisión
 > arquitectónica del cache stampede: [`docs/adr/0011-cache-stampede-protection-wrapper.md`](docs/adr/0011-cache-stampede-protection-wrapper.md).
 > Playbooks aplicables: `docs/playbooks/cache.md` (F4-4..F4-6),
 > `docs/playbooks/dialects.md` (F4-7 — códigos de error por driver).
 > Objetivo de fase: que en prod sepas qué pasa y la caché no se incendie.
-> Salida: v0.8.0 con observabilidad y caché defendibles en SRE review.
+> **Cerrado en v0.8.0 (2026-05-15)** — los 7 items entregados, todas
+> las features opt-in, sin breaking changes.
 
 Apertura formal hecha en sesión post-v0.7.0 (2026-05-14). Decisiones de
 scope fijadas con el usuario:
@@ -277,12 +287,15 @@ deadlocks deterministas cross-engine — al menos unit tests del mapeo
 de códigos + un integration test que fuerce el deadlock en PG (dos tx
 con orden de lock invertido).
 
-### Cierre de Fase 4
+### ~~Cierre de Fase 4~~
 
-Cuando F4-1..F4-7 estén ✅, taggear **v0.8.0** vía `/release v0.8.0`.
-Diferidos a future work (no bloquean el cierre de fase): negative
-caching, compresión gzip de values. Mientras Fase 4 esté en progreso
-(cualquier F4-N abierto), v0.8 no se taggea.
+**Hecho** — v0.8.0 taggeada el 2026-05-15 con los 7 items entregados.
+Diferidos a future work explícitos (no bloquearon el cierre y caen en
+ADRs / issues posteriores cuando aparezca demanda real): negative
+caching, compresión gzip de values, cross-instance stampede
+protection (ADR sucesor de ADR-0011 con `DistributedLock` hook),
+integration test de deadlock cross-engine real con dos tx de lock
+invertido en PG.
 
 ---
 

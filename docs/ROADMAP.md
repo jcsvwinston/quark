@@ -38,7 +38,21 @@
 - [x] **F1-5** — Soft-delete scopes: `WithTrashed` / `OnlyTrashed` / `Restore`.
 - [x] **F1-6** — Optimistic locking (`quark:"version"` + `ErrStaleEntity`).
 
-## v0.7.0 — Per-column timezones (this release)
+## v0.8.0 — Phase 4 (this release)
+
+Observability, production-grade caché, resilience. Closes the F4-1
+through F4-7 backlog (see [ADR-0011](adr/0011-cache-stampede-protection-wrapper.md)
+for the cache wrapper decision):
+
+- [x] **F4-1 OTel metrics** — counter `quark.queries.total`, histograms `quark.queries.duration` (ms) and `quark.queries.rows` (Exec only) on the `github.com/jcsvwinston/quark` meter. Etiquetados por `db.operation` y `db.system` (cuando `WithDBSystem` está seteado).
+- [x] **F4-2 Span argument redaction** — `WithSpanRedaction(mode)`. Default `RedactArgs` keeps bind values off spans; `IncludeArgs` opts in for local debug.
+- [x] **F4-3 Slow query log** — `WithSlowQueryThreshold(d)`. Single comparison on the centralised observer path; bind args never logged.
+- [x] **F4-4 Cache key determinism** — type-tagged, length-prefixed encoding. Closes three collision classes (type / boundary / nil) the previous `%v` encoding allowed. Prerequisite of F4-5/F4-6.
+- [x] **F4-5 Cache stampede protection** — `stampedeStore` wrapper auto-installed by `WithCacheStore`: singleflight in-process + ±jitter TTL + Vattani XFetch. `WithCacheJitter` and `WithCacheXFetchBeta` tune the knobs. Cross-instance gap documented.
+- [x] **F4-6 Per-row invalidation + Redis tag-TTL fix** — `<table>:<pk>` tag in addition to the table tag on `Update`/`Delete`/`Tracked.Save`/`Create`; Redis tag-set TTL now takes the MAX via `ExpireNX` + `ExpireGT` (Redis 7+).
+- [x] **F4-7 Deadlock retry** — `WithDeadlockRetry(maxAttempts)` on `Client.Tx`. Exponential backoff + jitter, opt-in, ctx-aware. PG 40P01 / MySQL 1213 / MSSQL 1205 / Oracle ORA-00060.
+
+## v0.7.0 — Per-column timezones
 
 Minor release. Closes the last deferred type from Phase 1's Bloque B
 (see [ADR-0010](adr/0010-per-column-timezone-override.md)):
@@ -84,13 +98,6 @@ No new public API. Closes the F0-1 through F0-10 backlog:
 - [x] **F2-IN-chunking** — Eager-loading paths chunk parent keys at 1000 (Oracle/MSSQL caps).
 - [x] **F2-having-agg** — `HavingAggregate(fn, column, op, value)` with COUNT/SUM/AVG/MIN/MAX whitelist.
 - [x] **F2-join-builder** — Structured `Join(table).On(col, op, otherCol)` retires the v0.3.x string-raw form (BREAKING; see [`MIGRATION_v0.4.0.md`](MIGRATION_v0.4.0.md)).
-
-## Phase 4 — observability + cache (v0.8)
-
-- [ ] OTel metrics (counters, histograms).
-- [ ] SQL redaction in spans.
-- [ ] Cache stampede protection + granular invalidation.
-- [ ] Deadlock retry with exponential backoff.
 
 ## Phase 5 — RLS + hooks + events (v0.9)
 
