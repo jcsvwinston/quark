@@ -688,11 +688,17 @@ func (q *Query[T]) WhereJSON(column, path, operator string, value any) *Query[T]
 	return c
 }
 
-// notifyObservers notifies all registered observers of a query event.
+// notifyObservers notifies all registered observers of a query event and
+// emits the F4-3 slow-query log line when configured. Doing the slow-log
+// check here keeps every emit site honest: all five callers (cursor,
+// query_exec ×3, query_crud) already build a QueryEvent with the
+// authoritative duration, so the threshold check has the right number to
+// compare against without redundant timing.
 func (q *BaseQuery) notifyObservers(event QueryEvent) {
 	if q.client == nil {
 		return
 	}
+	q.client.logSlowQueryIfNeeded(event)
 	for _, obs := range q.client.observers {
 		obs.ObserveQuery(event)
 	}

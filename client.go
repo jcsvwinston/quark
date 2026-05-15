@@ -44,6 +44,11 @@ type Client struct {
 	registeredModelsMu sync.Mutex
 	registeredModels   []any
 
+	// slowQueryThreshold is the minimum duration that flags a query as
+	// "slow" for the F4-3 structured log line. Zero (the default)
+	// disables the feature entirely. Set via WithSlowQueryThreshold.
+	slowQueryThreshold time.Duration
+
 	// defaultTZ is the fallback timezone for time.Time columns that do
 	// not carry their own quark:"tz=..." tag. nil (the zero value) means
 	// pass-through — the time.Time goes to the driver untouched, which is
@@ -234,6 +239,7 @@ func (c *Client) RawQuery(ctx context.Context, query string, args ...any) (*sql.
 		Error:     err,
 		Operation: "RAW_QUERY",
 	}
+	c.logSlowQueryIfNeeded(qEvent)
 	for _, obs := range c.observers {
 		obs.ObserveQuery(qEvent)
 	}
@@ -269,6 +275,7 @@ func (c *Client) Exec(ctx context.Context, query string, args ...any) error {
 		Operation: "RAW_EXEC",
 		Rows:      rowsAffected,
 	}
+	c.logSlowQueryIfNeeded(qEvent)
 	for _, obs := range c.observers {
 		obs.ObserveQuery(qEvent)
 	}

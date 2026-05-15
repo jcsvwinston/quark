@@ -83,6 +83,26 @@ func WithCacheStore(s CacheStore) Option {
 	}
 }
 
+// WithSlowQueryThreshold enables structured slow-query logging.
+//
+// Every query, exec, query-row, raw-query and raw-exec whose duration
+// exceeds the threshold is emitted at WARN through Client.logger with
+// structured attributes (duration_ms, threshold_ms, operation, table,
+// rows, sql). Bind arguments are NOT included — the SQL is the
+// parameterised form, mirroring the F4-2 span redaction principle:
+// logs MUST NOT see user values they have no authority to retain.
+//
+// A threshold of 0 or negative (the default) disables the feature
+// entirely — the check is a single cheap comparison on the hot
+// observer path. Recommended starting point: 100ms.
+//
+//	client, _ := quark.New("pgx", dsn, quark.WithSlowQueryThreshold(100*time.Millisecond))
+func WithSlowQueryThreshold(d time.Duration) Option {
+	return func(c *Client) {
+		c.slowQueryThreshold = d
+	}
+}
+
 // WithDefaultTZ sets the fallback timezone for time.Time columns that do
 // not carry their own quark:"tz=..." tag.
 //
