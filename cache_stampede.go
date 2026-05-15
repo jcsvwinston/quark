@@ -33,6 +33,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"math/rand"
 	"sync"
@@ -60,6 +61,7 @@ type stampedeStore struct {
 	jitterPct float64 // 0..1; 0.1 = ±10%
 	xfetchOn  bool
 	beta      float64 // XFetch tuning; >0; default 1.0
+	logger    *slog.Logger // optional; nil = silent
 
 	sf      singleflight.Group
 	randMu  sync.Mutex // guards rng — math/rand is not goroutine-safe
@@ -70,10 +72,13 @@ type stampedeStore struct {
 // newStampedeStore wraps inner with the three stampede protections.
 // jitterPct is clamped to [0, 1]; beta is clamped to >= 0; xfetchOn=false
 // (or beta=0) disables XFetch but keeps singleflight + jitter active.
+// logger is optional — passed nil, the wrapper is silent (suitable for
+// tests). The Client wires its own *slog.Logger when installing the
+// wrapper from WithCacheStore.
 //
 // inner == nil is a programming error and panics — the wrapper is only
 // installed by WithCacheStore, which never passes nil.
-func newStampedeStore(inner CacheStore, jitterPct float64, xfetchOn bool, beta float64) *stampedeStore {
+func newStampedeStore(inner CacheStore, jitterPct float64, xfetchOn bool, beta float64, logger *slog.Logger) *stampedeStore {
 	if inner == nil {
 		panic("newStampedeStore: inner must not be nil")
 	}
@@ -91,6 +96,7 @@ func newStampedeStore(inner CacheStore, jitterPct float64, xfetchOn bool, beta f
 		jitterPct: jitterPct,
 		xfetchOn:  xfetchOn,
 		beta:      beta,
+		logger:    logger,
 		// time-seeded rng is fine: XFetch only needs non-pathological
 		// uniform draws; seeded for-uniqueness across processes.
 		rng:   rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -184,10 +190,15 @@ func (s *stampedeStore) getOrCompute(ctx context.Context, key string, ttl time.D
 		}
 		deltaNs := s.nowFn().Sub(start).Nanoseconds()
 		if setErr := s.setWithDelta(ctx, key, data, ttl, deltaNs, tags...); setErr != nil {
-			// Surface as warning but return data anyway — the compute
-			// succeeded; an unreachable cache is not a fatal error.
-			// Callers without a logger don't see this.
-			_ = setErr
+			// Compute succeeded; an unreachable cache is not a fatal
+			// error for THIS call, but it does mean every subsequent
+			// call will also pay the compute cost — surface it as WARN
+			// so operators see a failing backing without having to
+			// instrument it themselves.
+			if s.logger != nil {
+				s.logger.Warn("cache set failed after compute",
+					"key", key, "error", setErr)
+			}
 		}
 		return data, nil
 	})

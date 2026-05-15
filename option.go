@@ -100,12 +100,15 @@ func WithCacheJitter(pct float64) Option {
 // early refresh more aggressive; β = 0 disables XFetch entirely (still
 // keeps singleflight and jitter active). No effect when WithCacheStore
 // is not used.
+//
+// Both the on/off flag AND the stored beta are written on every call,
+// so a sequence like WithCacheXFetchBeta(2.0) → WithCacheXFetchBeta(0)
+// leaves no residual β behind: the final state is XFetch off with
+// stampedeXFetchBeta = 0.
 func WithCacheXFetchBeta(beta float64) Option {
 	return func(c *Client) {
 		c.stampedeXFetchOn = beta > 0
-		if beta > 0 {
-			c.stampedeXFetchBeta = beta
-		}
+		c.stampedeXFetchBeta = beta
 	}
 }
 

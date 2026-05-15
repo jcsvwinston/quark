@@ -273,6 +273,10 @@ func (q *Query[T]) List() ([]T, error) {
 	)
 	if q.cache.Enabled && q.client.cacheStore != nil {
 		cacheKey = q.generateCacheKey(sqlStr, args)
+		// stampedeStore is the wrapper auto-installed by WithCacheStore
+		// (see ADR-0011). Third-party CacheStore implementations fail
+		// this assertion and stay on the historical cache-aside path
+		// below — that's documented and intentional.
 		if ss, ok := q.client.cacheStore.(*stampedeStore); ok {
 			data, err := ss.getOrCompute(ctx, cacheKey, q.cache.TTL, q.cache.Tags, func(ctx context.Context) ([]byte, error) {
 				r, bytes, err := computeFromDB(ctx)
@@ -286,15 +290,38 @@ func (q *Query[T]) List() ([]T, error) {
 				return nil, err
 			}
 			if results == nil {
-				// Came from cache (no compute), unmarshal here.
+				// Came from cache (no compute) — unmarshal here.
 				if uerr := json.Unmarshal(data, &results); uerr != nil {
-					// Cached bytes can't be unmarshalled; fall back to
-					// a fresh compute as if the cache had missed.
-					r, _, cerr := computeFromDB(ctx)
-					if cerr != nil {
-						return nil, cerr
+					// Cached bytes don't match the current model shape
+					// (typically a schema change deployed with a warm
+					// cache). Delete the stale entry and re-enter
+					// getOrCompute so concurrent callers funnel through
+					// ONE singleflight compute instead of each running
+					// their own — preserves stampede protection across
+					// schema-incompatible cache rotations.
+					_ = ss.Delete(ctx, cacheKey)
+					results = nil // re-arm capture for the recompute path
+					data2, rerr := ss.getOrCompute(ctx, cacheKey, q.cache.TTL, q.cache.Tags, func(ctx context.Context) ([]byte, error) {
+						r, bytes, cerr := computeFromDB(ctx)
+						if cerr != nil {
+							return nil, cerr
+						}
+						results = r
+						return bytes, nil
+					})
+					if rerr != nil {
+						return nil, rerr
 					}
-					results = r
+					if results == nil {
+						// Singleflight result came from another waiter's
+						// fresh compute. Try one final unmarshal; if it
+						// still fails the model and cache really are
+						// incompatible — surface a real error rather
+						// than retry forever.
+						if uerr := json.Unmarshal(data2, &results); uerr != nil {
+							return nil, fmt.Errorf("cache payload incompatible with model: %w", uerr)
+						}
+					}
 				} else {
 					q.client.logger.Debug("cache hit", "key", cacheKey, "table", q.table)
 				}

@@ -101,7 +101,7 @@ func TestDecodeXfetchEntry_RejectsForeign(t *testing.T) {
 // come back unchanged from stampedeStore.Get — the wrapper is
 // transparent to user payload.
 func TestStampedeStore_GetSetRoundTrip(t *testing.T) {
-	ss := newStampedeStore(newFakeStore(), 0, false, 0)
+	ss := newStampedeStore(newFakeStore(), 0, false, 0, nil)
 	ctx := context.Background()
 	if err := ss.Set(ctx, "k", []byte("hello"), time.Hour); err != nil {
 		t.Fatalf("Set: %v", err)
@@ -121,7 +121,7 @@ func TestStampedeStore_GetSetRoundTrip(t *testing.T) {
 func TestStampedeStore_GetReportsCorruptAsMiss(t *testing.T) {
 	inner := newFakeStore()
 	inner.data["legacy"] = []byte("raw payload, no QSPD prefix")
-	ss := newStampedeStore(inner, 0, false, 0)
+	ss := newStampedeStore(inner, 0, false, 0, nil)
 	if _, err := ss.Get(context.Background(), "legacy"); !errors.Is(err, errStampedeMiss) {
 		t.Errorf("want errStampedeMiss for foreign bytes, got %v", err)
 	}
@@ -131,7 +131,7 @@ func TestStampedeStore_GetReportsCorruptAsMiss(t *testing.T) {
 // is the input; with jitterPct>0 the output stays inside the band.
 func TestJitterTTL(t *testing.T) {
 	t.Run("zero pct is identity", func(t *testing.T) {
-		ss := newStampedeStore(newFakeStore(), 0, false, 0)
+		ss := newStampedeStore(newFakeStore(), 0, false, 0, nil)
 		for _, ttl := range []time.Duration{0, time.Millisecond, time.Hour} {
 			if got := ss.jitterTTL(ttl); got != ttl {
 				t.Errorf("jitterPct=0: ttl %v → %v, want %v", ttl, got, ttl)
@@ -139,7 +139,7 @@ func TestJitterTTL(t *testing.T) {
 		}
 	})
 	t.Run("ten percent stays in band", func(t *testing.T) {
-		ss := newStampedeStore(newFakeStore(), 0.1, false, 0)
+		ss := newStampedeStore(newFakeStore(), 0.1, false, 0, nil)
 		ss.rng = rand.New(rand.NewSource(1)) // deterministic for the bound check
 		base := 100 * time.Millisecond
 		for i := 0; i < 100; i++ {
@@ -154,7 +154,7 @@ func TestJitterTTL(t *testing.T) {
 // TestShouldEarlyRefresh: with deltaNs=0 never; with deltaNs>0 and time
 // past expiry always; with deltaNs>0 and time well-before expiry rarely.
 func TestShouldEarlyRefresh(t *testing.T) {
-	ss := newStampedeStore(newFakeStore(), 0, true, 1.0)
+	ss := newStampedeStore(newFakeStore(), 0, true, 1.0, nil)
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC).UnixNano()
 	ss.nowFn = func() time.Time { return time.Unix(0, now) }
 
@@ -192,10 +192,12 @@ func TestShouldEarlyRefresh(t *testing.T) {
 // TestGetOrCompute_Singleflight is the F4-5 headline: N concurrent
 // callers for the same key collapse to ONE compute. Stresses the
 // wrapper to make the race condition visible if the singleflight ever
-// regresses.
+// regresses. Marked t.Parallel() so the race detector exercises this
+// alongside other concurrent tests when `go test -race ./...` runs.
 func TestGetOrCompute_Singleflight(t *testing.T) {
+	t.Parallel()
 	inner := newFakeStore()
-	ss := newStampedeStore(inner, 0, false, 0)
+	ss := newStampedeStore(inner, 0, false, 0, nil)
 	ctx := context.Background()
 
 	const N = 50
@@ -235,7 +237,7 @@ func TestGetOrCompute_Singleflight(t *testing.T) {
 // cache without invoking compute again — the standard hot-cache path.
 func TestGetOrCompute_HitsAfterFirstCompute(t *testing.T) {
 	inner := newFakeStore()
-	ss := newStampedeStore(inner, 0, false, 0)
+	ss := newStampedeStore(inner, 0, false, 0, nil)
 	ctx := context.Background()
 
 	var n int32
@@ -254,10 +256,47 @@ func TestGetOrCompute_HitsAfterFirstCompute(t *testing.T) {
 	}
 }
 
+// TestGetOrCompute_ErrorDoesNotPoison pins that a failing compute does
+// NOT cache the error or leave the wrapper in a stuck state — the next
+// caller retries from scratch. singleflight.Do propagates the error to
+// every concurrent waiter and then forgets it, which is the correct
+// behaviour: a transient DB hiccup must not block all future Gets.
+func TestGetOrCompute_ErrorDoesNotPoison(t *testing.T) {
+	inner := newFakeStore()
+	ss := newStampedeStore(inner, 0, false, 0, nil)
+	ctx := context.Background()
+
+	var calls int32
+	failOnce := func(_ context.Context) ([]byte, error) {
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			return nil, errors.New("transient db error")
+		}
+		return []byte("ok"), nil
+	}
+
+	if _, err := ss.getOrCompute(ctx, "k", time.Hour, nil, failOnce); err == nil {
+		t.Fatal("first getOrCompute must propagate the compute error")
+	}
+	// Second call: same key, same wrapper. The cache stayed empty, so a
+	// new singleflight group starts and failOnce returns the happy
+	// branch.
+	got, err := ss.getOrCompute(ctx, "k", time.Hour, nil, failOnce)
+	if err != nil {
+		t.Fatalf("second getOrCompute should succeed, got: %v", err)
+	}
+	if string(got) != "ok" {
+		t.Errorf("second getOrCompute = %q, want \"ok\"", got)
+	}
+	if calls != 2 {
+		t.Errorf("compute should have run exactly twice (one fail, one success), ran %d", calls)
+	}
+}
+
 // TestNewStampedeStore_ClampsConfig: out-of-range knobs are clamped to
 // safe values so user-supplied options can't break the wrapper.
 func TestNewStampedeStore_ClampsConfig(t *testing.T) {
-	ss := newStampedeStore(newFakeStore(), -0.5, true, -2.0)
+	ss := newStampedeStore(newFakeStore(), -0.5, true, -2.0, nil)
 	if ss.jitterPct != 0 {
 		t.Errorf("negative jitterPct should clamp to 0, got %v", ss.jitterPct)
 	}
@@ -265,7 +304,7 @@ func TestNewStampedeStore_ClampsConfig(t *testing.T) {
 		t.Errorf("negative beta should clamp to 0, got %v", ss.beta)
 	}
 
-	ss2 := newStampedeStore(newFakeStore(), 5, true, 1)
+	ss2 := newStampedeStore(newFakeStore(), 5, true, 1, nil)
 	if ss2.jitterPct != 1 {
 		t.Errorf("jitterPct > 1 should clamp to 1, got %v", ss2.jitterPct)
 	}
@@ -280,5 +319,5 @@ func TestNewStampedeStore_PanicsOnNilInner(t *testing.T) {
 			t.Error("expected panic on nil inner store")
 		}
 	}()
-	_ = newStampedeStore(nil, 0.1, true, 1.0)
+	_ = newStampedeStore(nil, 0.1, true, 1.0, nil)
 }

@@ -159,7 +159,7 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 	// the wrapper. Done after the options loop so WithCacheJitter and
 	// WithCacheXFetchBeta have already taken effect.
 	if c.cacheStore != nil {
-		c.cacheStore = newStampedeStore(c.cacheStore, c.stampedeJitterPct, c.stampedeXFetchOn, c.stampedeXFetchBeta)
+		c.cacheStore = newStampedeStore(c.cacheStore, c.stampedeJitterPct, c.stampedeXFetchOn, c.stampedeXFetchBeta, c.logger)
 	}
 
 	c.logger.Info("quark client initialized",
