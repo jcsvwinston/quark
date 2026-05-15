@@ -37,6 +37,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'advanced/multi-tenant',
+        'advanced/row-level-native',
         'advanced/caching-observability',
       ],
     },

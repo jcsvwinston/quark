@@ -198,7 +198,33 @@ comment). Build / vet / gofmt / lint-docs / tests cortos verdes.
 
 **Estimación**: 1 sesión corta (~2 h).
 
-### F5-2 · `RowLevelSecurityNative` motor real (PG `SET LOCAL` + tx hooking)
+### ~~F5-2 · `RowLevelSecurityNative` motor real (PG `SET LOCAL` + tx hooking)~~
+
+**Cerrado (2026-05-15, PR #79)** — `rls_native.go` (nuevo, ~180
+líneas) entrega `nativeRLSExecutor` que envuelve `*sql.DB` y emite
+`SELECT set_config($1, $2, true)` antes de cada `Exec`/`Query`/
+`QueryRow`; el commit de la tx implícita se registra vía
+`context.AfterFunc` por la opacidad de `*sql.Rows`/`*sql.Row` en
+`database/sql`. `TenantRouter.Tx(ctx, fn)` es la entrada recomendada
+para operaciones multi-paso: abre una sola tx, emite `set_config`,
+sin leak. `tenant_router.go` añade la constante `RowLevelSecurityNative`
+con doc-comment apuntando a ADR-0012; `TenantConfig.NativeRLSVar`
+default `"app.tenant_id"` con helper `defaultNativeRLSVar()`.
+`client.go For[T]` ramifica Native: valida `dialect.Name() == "postgres"`
+(fail-fast con `ErrUnsupportedFeature`) y reemplaza `q.exec` con
+`nativeRLSExecutor`; **no** inyecta `WHERE tenant_id = ?` — la policy
+PG lo hace server-side. Cobertura: `rls_native_test.go` (4 unit tests:
+non-PG via For[T], non-PG via router.Tx, default `NativeRLSVar`,
+router.Tx delega para Client/Schema/DBPerTenant) + `rls_native_postgres_test.go`
+(integration cross-engine con build-tag-free env-DSN path + 5 subtests:
+router.Tx ta/tb, For[T] implicit-tx ta/tb, Count via QueryRow, Create
+via ExecContext+QueryRowContext). Doc `website/docs/advanced/row-level-native.mdx`
+nueva con sidebar entry + cross-link desde `multi-tenant.mdx`.
+ADR-0007 / playbook tenant.md sincronizados con la 4ª estrategia
+documentada y caveats operacionales (request-scoped vs long-lived ctx).
+**Warning estructurado para `client.Raw()` bajo Native NO incluido**
+— deferido a follow-up: PG enforza la policy independientemente, el
+warning es UX y no de seguridad. La doc lo documenta.
 
 **Implementa el aislamiento de motor anticipado en ADR-0012.**
 

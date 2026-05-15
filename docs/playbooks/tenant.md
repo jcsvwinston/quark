@@ -23,10 +23,17 @@ apertura), las dos modalidades de fila se distinguen explícitamente:
    renombrado en F5-1 con alias deprecado): inyecta `WHERE tenant_id = ?`
    en cada query del builder. **Disponible en los 6 motores. NO es RLS
    de motor** — ver "Limitaciones críticas" abajo.
-4. **`RowLevelSecurityNative`** (Fase 5, F5-2, PG-only): aislamiento
-   por motor mediante `SET LOCAL app.tenant_id = $1` + `CREATE POLICY`
-   por tabla. Mutuamente excluyente con `RowLevelSecurityClient` en el
-   mismo router. Ver ADR-0012.
+4. **`RowLevelSecurityNative`** (Fase 5, F5-2 entregado, PG-only):
+   aislamiento por motor. Cada query se ejecuta dentro de una tx
+   implícita que emite `SELECT set_config('app.tenant_id', $1, true)`
+   antes; las `CREATE POLICY` instaladas en cada tabla tenant-scoped
+   referencian ese setting para filtrar filas. El motor enforza la
+   policy incluso desde `client.Raw()`. Mutuamente excluyente con
+   `RowLevelSecurityClient` en el mismo router. Entrada de uso:
+   `quark.TenantRouter.Tx(ctx, fn)` (recomendado) o
+   `quark.For[T](ctx, router)` (implicit-tx, request-scoped). El
+   variable name se configura vía `TenantConfig.NativeRLSVar`
+   (default `"app.tenant_id"`). Ver ADR-0012 y `rls_native.go`.
 
 `TenantRouter` se construye con `quark.NewTenantRouter(config, factory)`. La estrategia se elige una vez por router; una aplicación puede tener varios routers con estrategias distintas.
 
@@ -150,16 +157,50 @@ Es disciplina aplicada por el ORM, no aislamiento del motor. No publicites como 
 
 ## Roadmap de mejora
 
-- **Fase 5** (apertura formal hecha; entrega esperada v0.9.0; ver
-  TASKS.md §"Fase 5"):
-  - F5-1 — Renombrar `RowLevelSecurity` → `RowLevelSecurityClient` con
-    deprecation.
-  - F5-2 — `RowLevelSecurityNative` con `SET LOCAL app.tenant_id` +
-    Postgres policies (PG-only, exclusivo con Client en mismo router).
+- **Fase 5** (entrega esperada v0.9.0; ver TASKS.md §"Fase 5"):
+  - ~~F5-1~~ — Renombrar `RowLevelSecurity` → `RowLevelSecurityClient`
+    con deprecation (cerrado en PR #78).
+  - ~~F5-2~~ — `RowLevelSecurityNative` con `set_config('app.tenant_id', ...)`
+    + Postgres policies (PG-only, exclusivo con Client en mismo router).
+    `TenantRouter.Tx` + implicit-tx vía `nativeRLSExecutor`. Cerrado
+    en esta sesión (PR pendiente de merge — actualizar este puntero al
+    número real cuando se mergee).
   - F5-3 — `quark tenant install-rls-policies` CLI generador de DDL.
+  - F5-4..F5-7 — hooks transaccionales + EventBus + audit log.
   - (Fuera de scope explícito de F5) `quark tenant onboard <tenantID>`
     para `SchemaPerTenant`, `singleflight` en factory — deuda menor
     documentada abajo.
+
+### `RowLevelSecurityNative` — caveats operacionales
+
+**`*sql.Rows` / `*sql.Row` son structs opacos**, así que el wrapper
+`nativeRLSExecutor` no puede cerrar la tx implícita en `Close()` de
+los rows. En su lugar usa `context.AfterFunc(ctx, commit)` registrado
+contra el ctx del caller. Consecuencias:
+
+- HTTP handlers (ctx request-scoped): la tx commitea al return del
+  handler, conexión liberada al pool. Funciona transparente.
+- CLI batch jobs (ctx larga + muchas queries): cada query mantiene
+  su conexión hasta que el ctx termine. Puede saturar el pool.
+  **Para esos casos, usar `router.Tx` explícito** — una sola tx
+  para toda la operación, sin leak.
+- Streaming via `Iter` / `Cursor`: el cursor debe vivir dentro de la
+  tx. Usar `router.Tx` y correr el iterador dentro del callback.
+
+Mensaje claro para el usuario: **`router.Tx` es el camino recomendado
+para cualquier operación no trivial**; el implicit-tx vía `For[T]` es
+sólo el camino ergonómico para lecturas cortas en HTTP handlers.
+
+**Cómo verificar la policy está instalada**:
+```sql
+SELECT tablename, polname, polusing FROM pg_policies
+ WHERE tablename = 'orders';
+```
+Debe existir una policy que use `current_setting('app.tenant_id', true)`.
+Si la tabla devuelve 0 filas a una query que debería tener datos,
+ese es el primer chequeo. Otros candidatos: `FORCE ROW LEVEL SECURITY`
+faltante, mismatch entre `NativeRLSVar` del router y el nombre de
+setting en la policy.
 
 **Deuda menor heredada (no bloquea Fase 5)**:
 
