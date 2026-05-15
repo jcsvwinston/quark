@@ -264,7 +264,35 @@ warning es UX y no de seguridad. La doc lo documenta.
 **Estimación**: 1-2 sesiones largas (~6-10 h). Bloque crítico de la
 fase.
 
-### F5-3 · CLI `quark tenant install-rls-policies`
+### ~~F5-3 · CLI `quark tenant install-rls-policies`~~
+
+**Cerrado (2026-05-15, PR #81)** — nuevo paquete
+`github.com/jcsvwinston/quark/quarktenant` con dos archivos de
+producción (~280 líneas) más tests + example. `install.go` define
+`InstallOptions` (`TenantColumn`, `NativeRLSVar`, `ForceRLS` default
+true, `DryRun`, `LockTimeout`, `LockName`, `TenantColumnSQLCast`) y
+la función `InstallRLSPolicies(ctx, client, opts) ([]string, error)`
+que genera la DDL por modelo registrado (`ENABLE`/`FORCE ROW LEVEL
+SECURITY` + `CREATE POLICY <table>_tenant_isolation ... USING ...
+WITH CHECK ...`). Validación PG-only via `client.Dialect().Name()`,
+modelo-sin-columna via `ErrNoTenantColumn`, registro vacío via
+`ErrNoRegisteredModels`. Apply path: `Client.AcquireMigrationLock`
+(F3-1) + `client.Exec` por statement (requires `AllowRawQueries=true`
+en el client embedder). `run.go` define `Action` enum,
+`ActionInstallRLSPolicies`, `ParseAction`, `Run(ctx, args, client)` +
+`RunWithIO` con flags `--dry-run / --tenant-col / --native-rls-var /
+--cast / --no-force-rls / --lock-name`. Cobertura:
+`quarktenant/install_test.go` (7 unit tests: non-PG rejection,
+empty-registry guard order, nil client, default values, CLI unknown
+action, empty args, ParseAction round-trip) + `install_postgres_test.go`
+(PG integration con 3 subtests: dry-run renders sin apply, apply
+inserta pg_policies con nombre canónico, re-apply falla con
+duplicate-object). `examples/tenant-rls-native/main.go` ejemplo
+runnable. Doc `website/docs/advanced/row-level-native.mdx` añade
+sección "Option A — quarktenant CLI (recommended)" + warning para
+UUID/BIGINT con `--cast`. Reutiliza F3-1 (lock) y F3-7 (registry);
+**no reutiliza F3-2 (introspection)** — la DDL se genera a partir
+del modelo, no de la tabla viva. Estimación cumplida (~4-5 h).
 
 **Generador de DDL para Native: reutiliza schema introspection (F3-2)
 y migration lock (F3-1).**

@@ -41,6 +41,59 @@ portability across the six dialects matters more.
 
 ### 1. Install the policy on each tenant-scoped table
 
+You have two options: run the DDL yourself, or embed the
+`quarktenant` library and run it from CI.
+
+**Option A — `quarktenant` CLI (recommended)**: embed the library in
+a small `main.go` that registers your models on the Client and
+delegates to `quarktenant.Run`. The library reads every registered
+model and emits one `ALTER TABLE ... ENABLE/FORCE ROW LEVEL SECURITY`
+pair plus one `CREATE POLICY <table>_tenant_isolation` per table.
+
+```go
+// myapp/cmd/tenant/main.go
+package main
+
+import (
+    "context"
+    "os"
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/quarktenant"
+    _ "github.com/jackc/pgx/v5/stdlib"
+    "myapp/models"
+)
+
+func main() {
+    client, _ := quark.New("pgx", os.Getenv("QUARK_DSN"),
+        quark.WithLimits(quark.Limits{AllowRawQueries: true}))
+    defer client.Close()
+
+    _ = client.RegisterModel(&models.Order{}, &models.Invoice{})
+    os.Exit(quarktenant.Run(context.Background(), os.Args[1:], client))
+}
+```
+
+Then in CI / Makefile:
+
+```bash
+# Print the DDL the library would emit (no DB change)
+go run ./cmd/tenant install-rls-policies --dry-run
+
+# Apply for real. Acquires a distributed migration lock first.
+go run ./cmd/tenant install-rls-policies
+
+# Override the tenant column or session variable
+go run ./cmd/tenant install-rls-policies \
+    --tenant-col=org_id \
+    --native-rls-var=app.org_id
+```
+
+A complete runnable example lives at
+[`examples/tenant-rls-native/main.go`](https://github.com/jcsvwinston/quark/blob/main/examples/tenant-rls-native/main.go).
+
+**Option B — manual DDL**: write the SQL yourself and apply it
+through your normal schema-migration pipeline.
+
 ```sql
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders FORCE ROW LEVEL SECURITY;
@@ -60,9 +113,16 @@ application role IS the owner, which would silently make the policy
 decorative. `FORCE` removes that exemption so the policy applies to
 every role.
 
-The `quark tenant install-rls-policies` CLI in F5-3 will emit these
-templates automatically from the models registered on a Client. Until
-F5-3 ships, run the DDL manually as part of your migration pipeline.
+:::caution UUID / BIGINT tenant IDs need an explicit cast
+
+`current_setting()` always returns TEXT. When your tenant column is
+TEXT/VARCHAR the default `::text` cast just works. When the column is
+`UUID` or `BIGINT` you must override the cast — pass `--cast=uuid` to
+the CLI, or write the policy DDL manually with `::uuid` /
+`::bigint`. Otherwise the comparison fails at runtime and the policy
+returns zero rows.
+
+:::
 
 ### 2. Configure the router
 

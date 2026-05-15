@@ -165,7 +165,10 @@ Es disciplina aplicada por el ORM, no aislamiento del motor. No publicites como 
     `TenantRouter.Tx` + implicit-tx vía `nativeRLSExecutor`. Cerrado
     en esta sesión (PR pendiente de merge — actualizar este puntero al
     número real cuando se mergee).
-  - F5-3 — `quark tenant install-rls-policies` CLI generador de DDL.
+  - ~~F5-3~~ — `quark tenant install-rls-policies` CLI generador de
+    DDL. Cerrado en esta sesión: paquete `quarktenant` con
+    `InstallRLSPolicies` + `Run` library-style; ejemplo runnable en
+    `examples/tenant-rls-native/main.go`.
   - F5-4..F5-7 — hooks transaccionales + EventBus + audit log.
   - (Fuera de scope explícito de F5) `quark tenant onboard <tenantID>`
     para `SchemaPerTenant`, `singleflight` en factory — deuda menor

@@ -8,6 +8,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+#### F5-3 — `quarktenant` CLI for installing PG RLS policies
+- multi-tenant: new package `github.com/jcsvwinston/quark/quarktenant`
+  ships an embedded-library CLI (`install-rls-policies` subcommand)
+  that reads every model registered on a `*quark.Client`, generates
+  the per-table policy DDL (`ALTER TABLE ... ENABLE/FORCE ROW LEVEL
+  SECURITY` + `CREATE POLICY <table>_tenant_isolation`) and, when
+  `--dry-run` is absent, applies it inside a single PostgreSQL
+  transaction under a distributed migration lock. A failure mid-stream
+  rolls back the entire install. See
+  [`row-level-native.mdx`](website/docs/advanced/row-level-native.mdx)
+  for the embedding pattern and
+  [`examples/tenant-rls-native/main.go`](examples/tenant-rls-native/main.go)
+  for a runnable example.
+- multi-tenant: `quarktenant.InstallOptions` covers `TenantColumn`,
+  `NativeRLSVar`, `ForceRLS` (default true), `DryRun`, `LockTimeout`,
+  `LockName`, and `TenantColumnSQLCast`. The cast value is validated
+  against a single-type-token whitelist (`text`, `uuid`, `bigint`,
+  `varchar(64)`, …) and rejected with `ErrInvalidCast` otherwise —
+  SQL-injection guard for the `--cast` flag.
+- multi-tenant: `quarktenant.Run(ctx, args, client)` returns an exit
+  code (`ExitSuccess=0`, `ExitError=2`) suitable for the user's
+  `main.go` shell, mirroring the `quarkmigrate.Run` shape. CLI flags:
+  `--dry-run`, `--tenant-col`, `--native-rls-var`, `--cast`,
+  `--no-force-rls`, `--lock-name`, `--lock-timeout`.
+
+#### F5-2 — Native PostgreSQL row-level security
+- multi-tenant: nueva estrategia `quark.RowLevelSecurityNative`
+  (PG-only) que delega aislamiento al motor. Cada query se ejecuta
+  en una transacción implícita que emite
+  `SELECT set_config('app.tenant_id', <tenantID>, true)`; las
+  `CREATE POLICY` instaladas referencian ese setting para filtrar.
+  El motor enforza incluso desde `client.Raw()`. Ver
+  [`docs/adr/0012`](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md)
+  y [`row-level-native.mdx`](website/docs/advanced/row-level-native.mdx).
+- multi-tenant: `TenantConfig.NativeRLSVar` (default `"app.tenant_id"`)
+  para configurar el nombre del setting referenciado por las policies.
+- multi-tenant: `TenantRouter.Tx(ctx, fn)` — método recomendado bajo
+  Native. Abre una sola tx, emite `set_config`, invoca `fn(tx)`. Para
+  estrategias non-Native delega al `Client.Tx` subyacente sin emitir
+  el `set_config`.
+- multi-tenant: implicit-tx vía `For[T](ctx, router)` bajo Native
+  envuelve `Exec`/`Query`/`QueryRow` en transacciones implícitas con
+  `set_config` emitido antes. El commit ocurre vía
+  `context.AfterFunc(ctx, ...)` por la opacidad de `*sql.Rows`. Para
+  ctx long-lived (CLI batch), usar `router.Tx` explícito.
+- multi-tenant: construir un `Query[T]` bajo `RowLevelSecurityNative`
+  con dialecto no-PostgreSQL devuelve `ErrUnsupportedFeature`. Igual
+  comportamiento desde `TenantRouter.Tx`.
+
+#### Fase 5 — apertura formal (planning)
 - docs: [ADR-0012](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md)
   — RLS real Postgres vía `SET LOCAL app.tenant_id` + `CREATE POLICY`.
   Supersedes ADR-0003. Anticipa F5-1..F5-3 (rename + motor Native +
@@ -39,30 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   estrategia es WHERE-injection cliente; la modalidad de motor real
   (PostgreSQL `set_config('app.tenant_id', ...)` + `CREATE POLICY`)
   ya disponible como `RowLevelSecurityNative` (F5-2).
-
-### Added — F5-2 (Native PostgreSQL row-level security)
-- multi-tenant: nueva estrategia `quark.RowLevelSecurityNative`
-  (PG-only) que delega aislamiento al motor. Cada query se ejecuta
-  en una transacción implícita que emite
-  `SELECT set_config('app.tenant_id', <tenantID>, true)`; las
-  `CREATE POLICY` instaladas referencian ese setting para filtrar.
-  El motor enforza incluso desde `client.Raw()`. Ver
-  [`docs/adr/0012`](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md)
-  y [`row-level-native.mdx`](website/docs/advanced/row-level-native.mdx).
-- multi-tenant: `TenantConfig.NativeRLSVar` (default `"app.tenant_id"`)
-  para configurar el nombre del setting referenciado por las policies.
-- multi-tenant: `TenantRouter.Tx(ctx, fn)` — método recomendado bajo
-  Native. Abre una sola tx, emite `set_config`, invoca `fn(tx)`. Para
-  estrategias non-Native delega al `Client.Tx` subyacente sin emitir
-  el `set_config`.
-- multi-tenant: implicit-tx vía `For[T](ctx, router)` bajo Native
-  envuelve `Exec`/`Query`/`QueryRow` en transacciones implícitas con
-  `set_config` emitido antes. El commit ocurre vía
-  `context.AfterFunc(ctx, ...)` por la opacidad de `*sql.Rows`. Para
-  ctx long-lived (CLI batch), usar `router.Tx` explícito.
-- multi-tenant: construir un `Query[T]` bajo `RowLevelSecurityNative`
-  con dialecto no-PostgreSQL devuelve `ErrUnsupportedFeature`. Igual
-  comportamiento desde `TenantRouter.Tx`.
 
 ## [0.8.0] - 2026-05-15
 
