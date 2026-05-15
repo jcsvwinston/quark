@@ -329,7 +329,47 @@ CREATE POLICY orders_tenant_isolation ON orders
 
 **Estimación**: 1 sesión media (~4-5 h).
 
-### F5-4 · Hooks transaccionales — Refactor `query_crud.go` para pasar `*Tx`
+### ~~F5-4 · Hooks transaccionales — `After*` fire post-commit~~
+
+**Cerrado (2026-05-15, PR #82)** — Plumbing core (`tx.go` +
+`query_builder.go`): `*quark.Tx` ahora lleva `afterHooks []func() error`
++ `hooksMu sync.Mutex`; `Tx.Commit` drena la cola en orden FIFO
+tras el commit OK (errores se loguean via `Client.logger` con event
+`quark.hook.after_post_commit_error`, no abortan); `Tx.Rollback`
+descarta la cola entera. `BaseQuery.tx *Tx` añadido para que la
+ruta CRUD detecte tx explícita; `ForTx[T]` lo puebla. Refactor de
+los 5 callsites `After*` en `query_crud.go` (1 AfterCreate, 2
+AfterUpdate, 2 AfterDelete) para usar `queueOrRunAfterHook(fn)` que
+encola si `q.tx != nil`, ejecuta inline si no. Decisión de scope:
+**non-tx CRUD NO se envuelve en implicit-tx** — el ADR-0013 lo
+pedía pero el coste (2 RPCs adicionales por op) no compensa el
+beneficio nulo (no hay tx para deshacer si no hay tx). El race que
+F5-4 cierra es exclusivamente del path explícito `Client.Tx`.
+
+`BeforeFindHook` / `AfterFindHook` añadidos a `hooks.go` con
+helpers `callBeforeFind`/`callAfterFind` en `hooks_find.go`
+(dispatch sobre zero `*T` por la opacidad de Generics). Wiring:
+`List` (BeforeFind antes de buildSelect, AfterFind tras Preload),
+`Find`/`First` (heredan vía `List`), `Iter` (BeforeFind antes del
+loop, AfterFind tras `rows.Err()` OK), `Cursor` (BeforeFind antes
+de open, AfterFind desde `Cursor.Close()` cuando `rows.Err()`
+nil).
+
+Cobertura: `hooks_tx_test.go` con 5 tests sequenciales (recorder
+global; `t.Parallel()` no aplica): AfterCreate fires after commit,
+AfterCreate skipped on rollback, non-tx still inline, BeforeFind/
+AfterFind fire around List, FIFO order de 3 creates inside one tx.
+
+Docs: nueva `website/docs/guides/hooks.mdx` con tabla "qué corre
+dónde" + sidebar entry. `docs/MIGRATION_v0.9.0.md` creado con
+audit checklist para callers que dependían del timing v0.8.0.
+CHANGELOG `### Changed` (breaking minor) + `### Added` con la
+descripción del queue. **NO entrega `Tx.OnCommit`/`Tx.OnRollback`
+público** — eso es F5-5, construye sobre esta cola interna.
+
+**Estimación cumplida**: 1 sesión larga (~6 h con tests + docs).
+
+### F5-4 (histórico spec)
 
 **Refactor preparatorio para F5-5. Cambio interno, sin nuevo API
 externo todavía.**

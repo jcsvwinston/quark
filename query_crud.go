@@ -26,6 +26,40 @@ type batchColDef struct {
 // universal safe chunk size covers all supported dialects.
 const batchChunkSize = 1000
 
+// queueOrRunAfterHook is the F5-4 dispatcher for `After*` hooks. It
+// has two modes:
+//
+//   - When the Query is bound to an explicit transaction
+//     (`q.tx != nil`, i.e. the caller used [ForTx]), the hook is
+//     appended to the per-tx FIFO queue and the helper returns nil
+//     immediately. [Tx.Commit] drains the queue after the database
+//     confirms the commit; [Tx.Rollback] discards it. Any error
+//     returned by the deferred hook is logged via the Client's
+//     slog logger but cannot abort the already-committed work.
+//
+//   - When the Query is not bound to a transaction (the caller used
+//     [For] against the Client directly), the hook is invoked
+//     inline and its error is propagated to the CRUD caller.
+//     Identical to the pre-F5-4 behaviour, so callers that never
+//     touched explicit transactions see no semantic change.
+//
+// The dispatch is intentionally not "always queue, always
+// post-commit" — opening an implicit transaction around every
+// single-statement CRUD call adds two RPCs (BeginTx, Commit) and a
+// connection pin per operation, and the safety it would buy is
+// limited to a hook that wants to observe a rolled-back state
+// (impossible in the no-tx case because there is no tx to roll
+// back). The explicit-tx path is the one that produced the
+// "after fired before commit" inconsistency in v0.x — that is the
+// one F5-4 fixes.
+func (q *BaseQuery) queueOrRunAfterHook(fn func() error) error {
+	if q.tx != nil {
+		q.tx.queueAfterHook(fn)
+		return nil
+	}
+	return fn()
+}
+
 // executeExec runs an ExecContext through the middleware chain.
 // This is used for INSERT, UPDATE, DELETE operations.
 //
@@ -357,7 +391,7 @@ func (q *Query[T]) Create(entity *T) error {
 	}
 
 	if hook, ok := any(entity).(AfterCreateHook); ok {
-		if err := hook.AfterCreate(q.ctx); err != nil {
+		if err := q.queueOrRunAfterHook(func() error { return hook.AfterCreate(q.ctx) }); err != nil {
 			return err
 		}
 	}
@@ -484,7 +518,7 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 	}
 
 	if hook, ok := any(entity).(AfterUpdateHook); ok {
-		if err := hook.AfterUpdate(q.ctx); err != nil {
+		if err := q.queueOrRunAfterHook(func() error { return hook.AfterUpdate(q.ctx) }); err != nil {
 			return rowsAffected, err
 		}
 	}
@@ -679,7 +713,7 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 	}
 
 	if hook, ok := any(entity).(AfterUpdateHook); ok {
-		if err := hook.AfterUpdate(q.ctx); err != nil {
+		if err := q.queueOrRunAfterHook(func() error { return hook.AfterUpdate(q.ctx) }); err != nil {
 			return rowsAffected, err
 		}
 	}
@@ -1001,7 +1035,7 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 
 	if err == nil {
 		if hook, ok := any(entity).(AfterDeleteHook); ok {
-			if hErr := hook.AfterDelete(q.ctx); hErr != nil {
+			if hErr := q.queueOrRunAfterHook(func() error { return hook.AfterDelete(q.ctx) }); hErr != nil {
 				return rows, hErr
 			}
 		}
@@ -1055,7 +1089,7 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	rows, err := q.hardDeleteByPK(pkValue)
 	if err == nil {
 		if hook, ok := any(entity).(AfterDeleteHook); ok {
-			if hErr := hook.AfterDelete(q.ctx); hErr != nil {
+			if hErr := q.queueOrRunAfterHook(func() error { return hook.AfterDelete(q.ctx) }); hErr != nil {
 				return rows, hErr
 			}
 		}

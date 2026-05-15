@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"time"
 )
 
@@ -24,6 +25,22 @@ type Executor interface {
 type Tx struct {
 	tx     *sql.Tx
 	client *Client
+
+	// afterHooks is the FIFO queue of model `After*` hooks
+	// ([AfterCreateHook], [AfterUpdateHook], [AfterDeleteHook]) that
+	// were registered while this transaction was open. Commit drains
+	// the queue once the underlying tx commit succeeds (F5-4);
+	// Rollback discards it. This is what makes "After hooks fire
+	// post-commit" semantically true without bleeding the database
+	// state of a partially-applied tx into application code.
+	//
+	// Access goes through queueAfterHook / drainAfterHooks /
+	// discardAfterHooks under hooksMu — Tx is intentionally
+	// shareable across goroutines (the wrapped *sql.Tx is, modulo
+	// the database/sql per-statement rules) and the queue must not
+	// race when concurrent CRUD calls register hooks.
+	afterHooks []func() error
+	hooksMu    sync.Mutex
 }
 
 // BeginTx starts a new database transaction with the given options.
@@ -155,13 +172,87 @@ func waitDeadlockBackoff(ctx context.Context, attemptIdx int) error {
 }
 
 // Commit commits the transaction.
+//
+// When commit succeeds, any model After* hooks queued during the
+// transaction lifetime are drained in FIFO order. A hook returning
+// an error is logged via the Client's slog logger (event:
+// `quark.hook.after_post_commit_error`) but does NOT block the
+// remaining hooks or fail the Commit — once the database confirmed
+// the commit, no application-level handler can undo it (ADR-0013
+// Regla 2). Commit failures surface the underlying database error
+// and the queued hooks are discarded.
+//
+// The context each After* hook receives is the context the originating
+// Query[T] captured at construction time (the ctx passed to
+// [ForTx]). If the caller installed a deadline on that context via
+// [context.WithTimeout] inside the [Client.Tx] callback, the hook
+// may observe an already-expired ctx after Commit returns. Hooks
+// that need a fresh context can derive one from
+// [context.Background] inside their implementation.
 func (t *Tx) Commit() error {
-	return t.tx.Commit()
+	if err := t.tx.Commit(); err != nil {
+		t.discardAfterHooks()
+		return err
+	}
+	t.drainAfterHooks(context.Background())
+	return nil
 }
 
 // Rollback aborts the transaction.
+//
+// All After* hooks queued during the transaction lifetime are
+// discarded without firing. This is the contract that lets callers
+// rely on "After hooks observe committed state": rolled-back work
+// never triggers the side-effects that would have followed it
+// (ADR-0013 Regla 2).
 func (t *Tx) Rollback() error {
+	t.discardAfterHooks()
 	return t.tx.Rollback()
+}
+
+// queueAfterHook appends fn to the per-tx After* hook queue. Called
+// from query_crud.go around each CRUD operation when the underlying
+// Query was bound to this transaction (BaseQuery.tx != nil); the
+// non-tx CRUD path runs After* hooks inline as before.
+//
+// queueAfterHook is safe to call from any goroutine that owns a
+// reference to the Tx; the hooksMu mutex serialises appends against
+// drainAfterHooks / discardAfterHooks.
+func (t *Tx) queueAfterHook(fn func() error) {
+	if t == nil || fn == nil {
+		return
+	}
+	t.hooksMu.Lock()
+	t.afterHooks = append(t.afterHooks, fn)
+	t.hooksMu.Unlock()
+}
+
+// drainAfterHooks runs every queued hook in FIFO order, logging
+// individual failures via Client.logger but never propagating the
+// error or stopping the cascade. The slice is cleared so a future
+// Commit (e.g., after savepoint round-trips that re-enter the
+// drain path) is a no-op.
+func (t *Tx) drainAfterHooks(ctx context.Context) {
+	t.hooksMu.Lock()
+	hooks := t.afterHooks
+	t.afterHooks = nil
+	t.hooksMu.Unlock()
+	for _, fn := range hooks {
+		if err := fn(); err != nil && t.client != nil && t.client.logger != nil {
+			t.client.logger.Warn("after-hook returned error post-commit",
+				"event", "quark.hook.after_post_commit_error",
+				"err", err)
+		}
+	}
+	_ = ctx // reserved for ADR-0013 Regla 3 (OnCommit signatures take ctx); kept on the helper now to avoid signature churn in F5-5
+}
+
+// discardAfterHooks drops the queue without firing any hook. Called
+// from Rollback and from Commit failures.
+func (t *Tx) discardAfterHooks() {
+	t.hooksMu.Lock()
+	t.afterHooks = nil
+	t.hooksMu.Unlock()
 }
 
 // Savepoint creates a savepoint with the given name.
@@ -234,6 +325,7 @@ func ForTx[T any](ctx context.Context, tx *Tx) *Query[T] {
 			table:   meta.Table,
 			pk:      meta.PK,
 			exec:    tx.tx,
+			tx:      tx, // F5-4: post-commit After-hook queue lives on tx.
 			meta:    meta,
 		},
 	}

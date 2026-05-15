@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### F5-4 — Transactional hooks (`After*` fire post-commit) + `BeforeFind`/`AfterFind`
+- hooks: new `quark.BeforeFindHook` / `quark.AfterFindHook`
+  interfaces; implementations are dispatched once per call to
+  `List`, `First`, `Find`, `Iter`, or `Cursor`. `BeforeFind` fires
+  before SQL is built; `AfterFind` fires after results are hydrated
+  (including `Preload`). `Iter` and `Cursor` fire `AfterFind` only
+  on successful completion.
+- tx: `*quark.Tx` now carries a FIFO queue of model `After*` hooks
+  that were issued through CRUD operations bound to that
+  transaction via `ForTx[T]`. `Tx.Commit` drains the queue after
+  the underlying `*sql.Tx.Commit` succeeds; `Tx.Rollback` discards
+  it. Hooks returning an error post-commit are logged via the
+  Client's `*slog.Logger` (event
+  `quark.hook.after_post_commit_error`) and the cascade continues
+  — once the database has confirmed the commit, application-level
+  handlers cannot undo it (ADR-0013 Regla 2).
+- docs: new `website/docs/guides/hooks.mdx` documenting all eight
+  hook interfaces, the v0.9.0 timing-change table, FIFO ordering,
+  and the `For[T]` vs `ForTx[T]` semantics. Sidebar entry added.
+
 #### F5-3 — `quarktenant` CLI for installing PG RLS policies
 - multi-tenant: new package `github.com/jcsvwinston/quark/quarktenant`
   ships an embedded-library CLI (`install-rls-policies` subcommand)
@@ -83,6 +103,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existente sigue compilando sin cambios. La doc y los ejemplos
   pasan a usar el nombre canónico. Ver
   [ADR-0012](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md).
+- hooks (**breaking minor**, F5-4): `AfterCreate` / `AfterUpdate` /
+  `AfterDelete` hooks invoked through a `Query[T]` bound to an
+  explicit transaction (via `ForTx[T]` inside `Client.Tx`) now fire
+  **after the transaction commits** instead of inline after the SQL
+  statement. The non-transactional path (`For[T]` against a plain
+  Client) is unchanged — hooks still fire inline. Callers that
+  relied on inline post-INSERT timing inside `Client.Tx` should
+  audit the change; see [`docs/MIGRATION_v0.9.0.md`](docs/MIGRATION_v0.9.0.md).
 
 ### Deprecated
 - `quark.RowLevelSecurity` — usa `quark.RowLevelSecurityClient`. El
