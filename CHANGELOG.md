@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Deadlock retry on `Client.Tx` (F4-7)** — new
+  `quark.WithDeadlockRetry(maxAttempts)` `Option`. When the
+  transaction closure returns an error that `isDeadlock` recognises
+  from the active driver — PG `40P01`, MySQL/MariaDB `1213`, MSSQL
+  `1205`, Oracle `ORA-00060` — the runner sleeps with exponential
+  backoff + ±50% jitter (10ms doubling, capped at 1s) and re-executes
+  the closure against a fresh transaction. Non-deadlock errors
+  propagate on the first attempt; a cancelled context aborts the
+  backoff and surfaces `ctx.Err()`.
+
+  The retry wraps the **entire** closure, never an individual query —
+  a deadlock aborts the whole tx, so re-running a single statement
+  inside a half-committed state would race. Disabled by default
+  (`maxAttempts <= 1`): callers explicitly opt in. SQLite is
+  single-writer and never raises a true deadlock; the option is a
+  no-op there.
+
+  New `isDeadlock(err)` helper in `db_errors.go` follows the same
+  driver-shape pattern as the existing `isUniqueViolation` (P0-3),
+  using `errors.As` against each driver's error type so wrapped errors
+  classify correctly. With this, **Phase 4 is complete** — F4-1
+  through F4-7 all closed.
+
 - **Per-row cache invalidation + Redis tag-TTL fix (F4-6)** — two cache
   improvements that ship together:
 

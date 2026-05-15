@@ -76,3 +76,52 @@ func isUniqueViolation(err error) bool {
 
 	return false
 }
+
+// isDeadlock reports whether err is a deadlock detected by one of the
+// supported drivers — the kind of error that aborts the entire current
+// transaction and is safe to retry by re-running the transaction
+// closure (F4-7). Errors that look like a deadlock but aren't safe to
+// blindly retry (e.g. SQLite SQLITE_BUSY, which is lock contention,
+// not a deadlock victim) are intentionally NOT classified here: SQLite
+// is a single-writer engine and never raises a true deadlock; callers
+// hitting BUSY should serialise writes, not retry. The four engines
+// below ARE multi-writer with deadlock detection:
+//
+//   - PostgreSQL: SQLSTATE 40P01 (deadlock_detected).
+//   - MySQL / MariaDB: ER_LOCK_DEADLOCK (1213).
+//   - SQL Server: error 1205 (chosen as deadlock victim).
+//   - Oracle: ORA-00060 (deadlock detected while waiting for resource).
+//
+// The driver-shape detection mirrors isUniqueViolation: errors.As walks
+// the Unwrap chain, so wrapped errors stay correctly classified.
+func isDeadlock(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// PostgreSQL (pgx).
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "40P01"
+	}
+
+	// MySQL / MariaDB.
+	var mysqlErr *gomysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1213
+	}
+
+	// SQL Server.
+	var mssqlErr mssql.Error
+	if errors.As(err, &mssqlErr) {
+		return mssqlErr.Number == 1205
+	}
+
+	// Oracle.
+	var oraErr *goora.OracleError
+	if errors.As(err, &oraErr) {
+		return oraErr.ErrCode == 60
+	}
+
+	return false
+}

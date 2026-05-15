@@ -83,6 +83,30 @@ func WithCacheStore(s CacheStore) Option {
 	}
 }
 
+// WithDeadlockRetry enables transparent retry of Client.Tx when the
+// transaction is killed by a deadlock (F4-7).
+//
+// maxAttempts is the total number of attempts (1 = no retry, the
+// historical behaviour; 0 or negative also disables). When the
+// transaction closure returns an error that isDeadlock recognises
+// from the active driver (PG 40P01, MySQL 1213, MSSQL 1205, Oracle
+// ORA-00060), the runner sleeps with exponential backoff + jitter
+// and re-executes the closure against a fresh transaction. Non-
+// deadlock errors propagate immediately.
+//
+// The retry wraps the ENTIRE closure, not individual queries — a
+// deadlock aborts the whole tx, so re-running just the failed query
+// would race against a half-committed state. Disabled by default to
+// keep the historical at-most-once-per-call semantics; opt in when
+// the workload genuinely deadlocks under contention.
+//
+//	client, _ := quark.New("pgx", dsn, quark.WithDeadlockRetry(3))
+func WithDeadlockRetry(maxAttempts int) Option {
+	return func(c *Client) {
+		c.deadlockRetries = maxAttempts
+	}
+}
+
 // WithCacheJitter tunes the ±jitter factor applied to every TTL when a
 // CacheStore is installed (F4-5, ADR-0011). Default 0.1 (±10%). Range
 // [0, 1]; values outside are clamped. Setting to 0 disables jitter but

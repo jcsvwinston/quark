@@ -157,6 +157,39 @@ client, err := quark.New("postgres", dsn,
 )
 ```
 
+### `WithDeadlockRetry(maxAttempts int) Option`
+
+Enables transparent retry of [`Client.Tx`](#tx) when the transaction
+closure returns a deadlock error from the active driver (PG `40P01`,
+MySQL/MariaDB `1213`, MSSQL `1205`, Oracle `ORA-00060`).
+
+The retry wraps the **entire** closure, not individual queries — a
+deadlock aborts the whole transaction, so re-running a single query
+inside a half-committed tx makes no sense. Non-deadlock errors
+propagate on the first attempt; the retry budget is irrelevant for
+them.
+
+`maxAttempts` is the total number of attempts (1 = no retry, the
+historical behaviour; 0 or negative also disables). Between attempts
+the runner sleeps with exponential backoff + ±50% jitter
+(10ms → 20ms → 40ms → … capped at 1s). A cancelled context aborts the
+backoff and returns the context error.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithDeadlockRetry(3),  // up to 3 attempts total
+)
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    // multi-statement work that may deadlock under contention
+    return nil
+})
+```
+
+Disabled by default: callers explicitly opt in to retry semantics —
+the at-most-once-per-call contract that has shipped since v0.1 stays
+the default. SQLite is single-writer and never raises a true deadlock,
+so the option is a no-op there.
+
 ### `WithDefaultTZ(loc *time.Location) Option`
 
 Sets the fallback timezone for `time.Time` columns that don't carry their
