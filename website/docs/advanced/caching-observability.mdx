@@ -221,9 +221,13 @@ auditing. Redact sensitive arguments before exporting them.
 import quarkotel "github.com/jcsvwinston/quark/otel"
 
 client, err := quark.New("postgres", dsn,
-    quark.WithMiddleware(quarkotel.New()),
+    quark.WithMiddleware(quarkotel.New(
+        quarkotel.WithDBSystem("postgres"),
+    )),
 )
 ```
+
+### Spans
 
 The OTel middleware creates spans named:
 
@@ -233,9 +237,39 @@ The OTel middleware creates spans named:
 | `QueryContext` | `quark.query` |
 | `QueryRowContext` | `quark.query_row` |
 
-Spans include `db.statement` and `db.operation`. Errors from `Exec` and `Query`
-are recorded on the span. `QueryRow` driver errors surface later during `Scan`,
-so the current middleware cannot observe every `QueryRow` scan error.
+Spans include `db.statement` (parameterised SQL — bind arguments are **not**
+attached by default, see span redaction below) and `db.operation`. Errors
+from `Exec` and `Query` are recorded on the span. `QueryRow` driver errors
+surface later during `Scan`, so the current middleware cannot observe every
+`QueryRow` scan error.
+
+### Span redaction
+
+Bind arguments are redacted from spans by default. Opt in to `IncludeArgs`
+only for local debugging:
+
+```go
+quarkotel.New(quarkotel.WithSpanRedaction(quarkotel.IncludeArgs))
+```
+
+See the [Observability API reference](/docs/reference/api/observability#span-redaction-withspanredaction)
+for the full contract.
+
+### Metrics
+
+The middleware also emits three OTel **metrics** instruments on the
+`github.com/jcsvwinston/quark` meter:
+
+| Instrument | Kind | Unit | Notes |
+| --- | --- | --- | --- |
+| `quark.queries.total` | counter | — | Every operation increments. |
+| `quark.queries.duration` | histogram | `ms` | Wall-clock duration including middleware overhead. |
+| `quark.queries.rows` | histogram | — | Rows affected — **Exec only**. `SELECT` does not emit (counting rows would require wrapping `*sql.Rows`). |
+
+Data points carry `db.operation` and — when `WithDBSystem` is set — `db.system`.
+
+Install your `MeterProvider` before the first query; the middleware resolves
+it lazily from the OTel global provider, same as the tracer.
 
 ## PostgreSQL Notifications
 

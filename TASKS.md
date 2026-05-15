@@ -102,29 +102,36 @@ prematuramente"), luego F4-5/F4-6 (caché pesada), F4-7 al final.
 Cada item es 1 PR con `code-reviewer` + docs en `website/docs/` +
 CHANGELOG `### Added`.
 
-### F4-1 · OTel metrics
+### ~~F4-1 · OTel metrics~~
 
-`otel/otel.go` hoy sólo emite **spans** (tracing); no hay métricas.
-Añadir un `meter` que emita:
-- counter `quark.queries.total`
-- histogram `quark.queries.duration`
-- histogram `quark.queries.rows`
+**Cerrado** — `otel/otel.go` añade `meter()` lazy (mismo patrón
+panic-safe que `tracer()`, líneas 102-119) más tres instruments
+inicializados con `sync.Once`: `quark.queries.total` (Int64Counter),
+`quark.queries.duration` (Float64Histogram, ms) y `quark.queries.rows`
+(Int64Histogram, sólo `Exec` vía `sql.Result.RowsAffected`). Cada data
+point lleva `db.operation` y, cuando se setea, `db.system` — helper
+`commonAttrs` compartido con la ruta de spans. **Gap intencional**:
+`db.table` queda fuera (el Middleware sólo ve el SQL parametrizado, no
+la tabla parseada — requeriría cambiar el contrato `Executor`); y
+`quark.queries.rows` no se emite en `Query`/`QueryRow` porque contar
+filas requiere envolver `*sql.Rows`. Ambos documentados en
+`observability.mdx`. Cobertura: `otel_test.go` con `SpanRecorder` +
+`sdkmetric.ManualReader` — defaults, opciones, redacción on/off,
+`db.system` en spans, contador + duración emiten, histograma rows sólo
+en Exec.
 
-Todos etiquetados por `db.system`, `db.operation`, `db.table` (mismas
-convenciones que los spans actuales). Resuelto lazy del
-`MeterProvider` global, igual que el `tracer()` actual hace con el
-`TracerProvider` (`otel/otel.go:30`). Sin romper la API del
-`Middleware` existente. Doc: `website/docs/advanced/caching-observability.mdx`
-+ `website/docs/reference/api/observability.mdx`.
+### ~~F4-2 · Redacción de SQL en spans~~
 
-### F4-2 · Redacción de SQL en spans
-
-Opción `WithSpanRedaction(mode)` que sustituye los args por `?` en el
-atributo `db.statement` de los spans. **Default ON** (opt-out
-explícito) — un span no debe filtrar valores de usuario por defecto.
-Se añade al `Middleware` de `otel/otel.go`; el SQL ya va parametrizado,
-así que la redacción es sobre el render del statement + args, no sobre
-el SQL crudo. Doc en `observability.mdx`.
+**Cerrado** — opción `WithSpanRedaction(mode)` en `otel/otel.go` con
+los modos `RedactArgs` (default ON) e `IncludeArgs` (opt-out explícito).
+Bajo `RedactArgs`, sólo el SQL parametrizado va a `db.statement`; bajo
+`IncludeArgs`, los args se renderizan a `db.statement.args`
+(`StringSlice`). Decisión de scope: como el SQL ya va parametrizado al
+Middleware, la redacción aplica al rendering opcional de args, no al
+SQL crudo. Helper `argsToStrings` usa `fmt.Sprintf("%v", arg)` — sin
+scrubbing extra (sólo opt-in, para debug local). Cobertura en
+`otel_test.go`: dos tests dedicados (`DefaultRedactionExcludesArgs`,
+`IncludeArgsAttachesArgs`).
 
 ### F4-3 · Slow query log estructurado
 

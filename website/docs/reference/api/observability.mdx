@@ -86,15 +86,63 @@ client, err := quark.New("postgres", dsn,
 )
 ```
 
-The middleware creates spans:
+The middleware emits **spans** and **metrics** for every database operation.
+Both tracer and meter are resolved lazily from the OTel global providers
+at query-execution time — install your `TracerProvider` / `MeterProvider`
+before the first query.
 
-| Execution | Span |
+### Spans
+
+| Execution | Span name |
 | --- | --- |
 | `ExecContext` | `quark.exec` |
 | `QueryContext` | `quark.query` |
 | `QueryRowContext` | `quark.query_row` |
 
-Attributes include `db.statement` and `db.operation`.
+Attributes: `db.statement` (parameterised SQL with placeholders), `db.operation`
+(`EXEC` / `SELECT` / `SELECT_ROW`), and — when `WithDBSystem` is set —
+`db.system`. Bind arguments are **not** attached to spans by default.
+
+### Span redaction (`WithSpanRedaction`)
+
+By default the middleware operates in **`RedactArgs`** mode: bind arguments
+never reach a span. Only the parameterised SQL ends up in `db.statement`.
+
+For local debugging you can opt in to **`IncludeArgs`**, which attaches a
+`db.statement.args` attribute (a string slice rendered via `fmt.Sprintf("%v", arg)`):
+
+```go
+quarkotel.New(quarkotel.WithSpanRedaction(quarkotel.IncludeArgs))
+```
+
+Use `IncludeArgs` only in development. A tracing backend MUST NOT see user
+values it has no authority to retain.
+
+### Metrics
+
+The middleware emits three instruments on the `github.com/jcsvwinston/quark`
+meter:
+
+| Instrument | Kind | Unit | Description |
+| --- | --- | --- | --- |
+| `quark.queries.total` | counter (Int64) | — | Every Quark operation increments this. |
+| `quark.queries.duration` | histogram (Float64) | `ms` | Wall-clock time of the operation, including middleware overhead. |
+| `quark.queries.rows` | histogram (Int64) | — | Rows affected, **Exec only** — emitted when `sql.Result.RowsAffected()` succeeds. `SELECT` / `SELECT_ROW` do not emit (counting them would require wrapping `*sql.Rows`, a future enhancement). |
+
+Every data point carries `db.operation` and — when `WithDBSystem` is set —
+`db.system`.
+
+### `WithDBSystem`
+
+The middleware sits below the query builder and does not introspect the
+Quark `Client`. If you want the `db.system` attribute populated, pass the
+dialect name explicitly:
+
+```go
+quarkotel.New(quarkotel.WithDBSystem("postgres"))
+```
+
+When unset, the attribute is omitted from spans and metrics.
 
 ## Hooks
 
