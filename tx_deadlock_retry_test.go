@@ -151,3 +151,64 @@ func TestTx_CancelledContextAbortsBackoff(t *testing.T) {
 		t.Errorf("attempts = %d, want 1 or 2 (cancel during backoff)", attempts)
 	}
 }
+
+// TestTx_AlreadyCancelledCtxFailsBeforeFirstAttempt: when the caller
+// hands in a ctx that is already done, BeginTx fails on the first
+// attempt with the context error — no closure invocation, no retry.
+// Pins the "caller stays in control" contract for the corner case the
+// retry loop happens to share with the historical no-retry path.
+func TestTx_AlreadyCancelledCtxFailsBeforeFirstAttempt(t *testing.T) {
+	c := newDeadlockClient(t, 5)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel BEFORE Tx runs
+
+	var attempts int
+	err := c.Tx(ctx, func(tx *quark.Tx) error {
+		attempts++
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected error from cancelled ctx, got nil")
+	}
+	if attempts != 0 {
+		t.Errorf("attempts = %d, want 0 (closure must not run when BeginTx fails on cancelled ctx)", attempts)
+	}
+}
+
+// TestTx_PanicInClosureStillRollsBackAndRePanics: the retry refactor
+// extracted runTxOnce; the panic-rollback-rethrow contract must
+// survive. A panic in the closure is NOT a deadlock, so the retry
+// loop does not run again — but the rollback DOES happen and the
+// panic DOES re-panic up the stack.
+func TestTx_PanicInClosureStillRollsBackAndRePanics(t *testing.T) {
+	c := newDeadlockClient(t, 5)
+
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+				if msg, ok := r.(string); !ok || msg != "boom" {
+					t.Errorf("recover = %v, want \"boom\"", r)
+				}
+			}
+		}()
+		_ = c.Tx(context.Background(), func(tx *quark.Tx) error {
+			panic("boom")
+		})
+	}()
+	if !panicked {
+		t.Fatal("panic from closure must re-panic out of Client.Tx")
+	}
+}
+
+// TODO(F4-7-followup): a real cross-engine deadlock integration test.
+// The classifier (db_errors_test.go) and the retry loop
+// (tx_deadlock_retry_test.go) are covered, but provoking a *real*
+// deadlock deterministically — typically two transactions with
+// inverted lock order — needs a multi-writer engine running in CI.
+// Postgres is the easiest target; the test would open two parallel
+// txs from the same process, take row locks in opposite order, and
+// assert that one of them retries successfully under
+// WithDeadlockRetry. Tracked as a Phase 4 follow-up in TASKS.md.

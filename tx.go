@@ -125,14 +125,19 @@ func (c *Client) runTxOnce(ctx context.Context, fn func(tx *Tx) error) error {
 // attemptIdx is the 1-based index of the gap (1 means before attempt 2,
 // 2 before attempt 3, etc.): the base wait doubles every retry
 // (10ms → 20ms → 40ms → 80ms → 160ms → 320ms → 640ms → 1s cap),
-// each shifted by uniform jitter into [base/2, 3·base/2).
+// each shifted by uniform jitter into [base/2, 3·base/2). Beyond the
+// seventh gap (`shift == 7` → 1.28s pre-cap) the 1s cap engages and
+// stays there.
 func waitDeadlockBackoff(ctx context.Context, attemptIdx int) error {
 	if attemptIdx < 1 {
 		attemptIdx = 1
 	}
 	shift := attemptIdx - 1
-	if shift > 6 {
-		shift = 6
+	if shift > 7 {
+		// One step past the value that engages the 1s cap below — any
+		// higher would only make the shift loop overflow without
+		// changing the (capped) result.
+		shift = 7
 	}
 	base := 10 * time.Millisecond * (1 << shift)
 	if base > time.Second {
