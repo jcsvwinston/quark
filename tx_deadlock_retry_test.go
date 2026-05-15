@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jcsvwinston/quark"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jcsvwinston/quark"
 
 	_ "modernc.org/sqlite"
 )
