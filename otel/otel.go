@@ -195,6 +195,10 @@ func (m *Middleware) commonAttrs(op string) []attribute.KeyValue {
 // startSpan opens a span for one operation and applies the redaction
 // policy: with RedactArgs, only the parameterised SQL reaches the span;
 // with IncludeArgs, the args are rendered onto db.statement.args.
+//
+// An empty args slice (nil or len==0) deliberately produces no
+// db.statement.args attribute under either mode — emitting an empty
+// slice would be noise, not signal.
 func (m *Middleware) startSpan(ctx context.Context, name, op, sqlStr string, args []any) (context.Context, trace.Span) {
 	attrs := m.commonAttrs(op)
 	attrs = append(attrs, attribute.String("db.statement", sqlStr))
@@ -211,6 +215,12 @@ func (m *Middleware) startSpan(ctx context.Context, name, op, sqlStr string, arg
 // records duration in ms, and — when hasRows is true — records the rows
 // histogram. Called once per operation from the deferred tails of the
 // WrapXxx wrappers so the duration covers the full call.
+//
+// Concurrency: initInstruments returns only after sync.Once finishes
+// running its closure (Go memory model: "return from f is sequenced
+// before the return from any call of Do"). The reads of m.metricsErr and
+// m.queries / m.durations / m.rows below therefore observe the values
+// written inside that closure. No further synchronisation is needed.
 func (m *Middleware) recordOp(ctx context.Context, op string, start time.Time, rows int64, hasRows bool) {
 	m.initInstruments()
 	if m.metricsErr != nil {

@@ -24,6 +24,11 @@ type fakeResult struct{ rows int64 }
 func (r fakeResult) LastInsertId() (int64, error) { return 0, nil }
 func (r fakeResult) RowsAffected() (int64, error) { return r.rows, nil }
 
+// NOTE: setupTracerRecorder and setupMetricReader both mutate the global
+// OTel TracerProvider / MeterProvider. Tests in this file therefore must
+// NOT call t.Parallel(): a concurrent test in this same process would
+// race against the cleanup-restore boundary. Run sequentially.
+
 // setupTracerRecorder installs a SpanRecorder as the global TracerProvider
 // for the duration of one test, returns the recorder, and restores the
 // previous provider on cleanup.
@@ -200,6 +205,52 @@ func TestMetrics_CounterAndDurationEmit(t *testing.T) {
 		if !present {
 			t.Errorf("metric %s was not emitted", name)
 		}
+	}
+}
+
+// TestWrapQueryRow_EmitsSpanAndCounter pins the QueryRow contract: error
+// status isn't set (errors surface only on the caller's Scan), but the
+// span IS emitted and the counter increments with op "SELECT_ROW". The
+// rows histogram does not see a data point (no result handle to consult).
+func TestWrapQueryRow_EmitsSpanAndCounter(t *testing.T) {
+	rec := setupTracerRecorder(t)
+	reader := setupMetricReader(t)
+	m := New()
+
+	qr := m.WrapQueryRow(func(ctx context.Context, _ quark.Executor, _ string, _ []any) *sql.Row {
+		return nil
+	})
+	_ = qr(context.Background(), nil, "SELECT 1 FROM t WHERE id = ?", []any{1})
+
+	spans := rec.Ended()
+	if len(spans) != 1 || spans[0].Name() != "quark.query_row" {
+		t.Fatalf("expected one quark.query_row span, got %d spans (%v)", len(spans), spans)
+	}
+	if got := findAttr(spans[0], "db.operation").AsString(); got != "SELECT_ROW" {
+		t.Errorf("db.operation = %q, want SELECT_ROW", got)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	var totalSum int64
+	for _, sm := range rm.ScopeMetrics {
+		for _, mt := range sm.Metrics {
+			if mt.Name != "quark.queries.total" {
+				continue
+			}
+			sum, ok := mt.Data.(metricdata.Sum[int64])
+			if !ok {
+				t.Fatalf("quark.queries.total is %T, want Sum[int64]", mt.Data)
+			}
+			for _, dp := range sum.DataPoints {
+				totalSum += dp.Value
+			}
+		}
+	}
+	if totalSum != 1 {
+		t.Errorf("quark.queries.total = %d after one QueryRow, want 1", totalSum)
 	}
 }
 
