@@ -133,15 +133,26 @@ scrubbing extra (sólo opt-in, para debug local). Cobertura en
 `otel_test.go`: dos tests dedicados (`DefaultRedactionExcludesArgs`,
 `IncludeArgsAttachesArgs`).
 
-### F4-3 · Slow query log estructurado
+### ~~F4-3 · Slow query log estructurado~~
 
-Log estructurado (`slog`) cuando una query supera un threshold
-configurable. Threshold vía opción (`WithSlowQueryThreshold(d)`); 0 =
-desactivado (default). Emite a `Client.logger` con
-`table`/`operation`/`duration`/`sql` (sql redactado si F4-2 lo está).
-Punto de integración: el middleware pipeline o un observer dedicado —
-decidir en el PR cuál encaja mejor sin duplicar el timing que ya
-mide el otel Middleware.
+**Cerrado** — `quark.WithSlowQueryThreshold(d time.Duration)` Option
+(option.go). Field `Client.slowQueryThreshold`. Punto de integración:
+`(*BaseQuery).notifyObservers` (`query_builder.go:691-705`) llama a
+`c.logSlowQueryIfNeeded(event)` ANTES del loop de observers. Los dos
+emit sites de raw (`Client.RawQuery`/`Client.Exec` en `client.go`)
+también pasan por el helper. Una sola pieza de código maneja los 7
+call sites de `QueryEvent`. Cero duplicación, sin re-medir tiempos
+(usa `event.Duration` que ya viene del emit site).
+`logSlowQueryIfNeeded` (`slow_query_log.go`) emite WARN vía
+`Client.logger` (`*slog.Logger`) con `duration_ms` / `threshold_ms` /
+`operation` / `table` / `rows` / `sql` (parametrizado — bind args NO
+incluidos, mismo principio que F4-2). Threshold `0` o negativo
+desactiva la feature (single comparison check, cero coste sin uso).
+Cobertura: `slow_query_log_test.go` (7 tests: disabled-by-default,
+negative-disabled, below-threshold, equal-threshold, above-threshold
+con todos los campos, no-args, nil-logger-safe). Doc:
+`observability.mdx` § Slow query log + `caching-observability.mdx`,
+CHANGELOG `### Added`.
 
 ### ~~F4-4 · Cache key con serialización determinista~~
 

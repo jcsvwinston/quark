@@ -76,6 +76,37 @@ func (l *LoggingMiddleware) WrapQuery(next quark.QueryFunc) quark.QueryFunc {
 }
 ```
 
+## Slow query log
+
+`WithSlowQueryThreshold(d)` enables a structured WARN log line for every
+Quark operation that takes longer than `d`. The line is emitted through
+`Client.logger` (the configured `*slog.Logger`) before any registered
+`QueryObserver` is notified.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithSlowQueryThreshold(100*time.Millisecond),
+)
+```
+
+Fields on the log record:
+
+| Attribute | Type | Source |
+| --- | --- | --- |
+| `duration_ms` | int64 | The observed duration in milliseconds. |
+| `threshold_ms` | int64 | The configured threshold in milliseconds. |
+| `operation` | string | `SELECT` / `EXEC` / `SELECT_ROW` / `RAW_QUERY` / `RAW_EXEC`. |
+| `table` | string | The Quark-managed table, when known (raw queries leave it empty). |
+| `rows` | int64 | Rows affected for `EXEC` / rows returned for `SELECT_ROW`; zero otherwise. |
+| `sql` | string | The parameterised SQL. **Bind arguments are NOT included** — same redaction principle as the F4-2 span policy. |
+
+Default: `0` (disabled). A negative value is also treated as disabled.
+Callers that want richer context (or argument-aware reporting under their
+own retention policy) should register a `QueryObserver`.
+
+The threshold check is a single comparison; a Client with the feature
+disabled pays nothing on the observer hot path.
+
 ## OpenTelemetry
 
 ```go

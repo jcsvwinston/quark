@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Slow query log (F4-3)** — new `quark.WithSlowQueryThreshold(d)`
+  Client option. When set, every operation whose duration exceeds `d`
+  emits a structured WARN through `Client.logger` (`*slog.Logger`)
+  before any registered `QueryObserver` is notified. The line carries
+  `duration_ms`, `threshold_ms`, `operation`, `table`, `rows` and `sql`
+  (parameterised). Bind arguments are NOT included — the same redaction
+  principle as F4-2 spans. Default threshold `0` (disabled); negative
+  values are also treated as disabled. The check is a single comparison
+  on the centralised `notifyObservers` path, so a Client with the
+  feature off pays nothing.
+
 - **OTel metrics (F4-1)** — the `quark/otel` middleware now emits three
   OpenTelemetry instruments alongside spans on the
   `github.com/jcsvwinston/quark` meter:

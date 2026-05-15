@@ -215,6 +215,23 @@ client, err := quark.New("postgres", dsn,
 Observers are a good fit for metrics, structured logging, query sampling, and
 auditing. Redact sensitive arguments before exporting them.
 
+## Slow query logging
+
+A quick way to catch regressions before any external tooling: configure a
+threshold and let Quark log slow operations through the `Client` logger.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithSlowQueryThreshold(100*time.Millisecond),
+)
+```
+
+Every operation that exceeds the threshold emits a structured WARN with
+`duration_ms`, `threshold_ms`, `operation`, `table`, `rows` and `sql` —
+parameterised, bind args never included. Threshold `0` disables. See the
+[Observability reference](/docs/reference/api/observability#slow-query-log)
+for the full field list.
+
 ## OpenTelemetry
 
 ```go
