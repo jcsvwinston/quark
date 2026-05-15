@@ -72,6 +72,12 @@ func TestRowTag_Format(t *testing.T) {
 	}{
 		{"int64", "users", false, int64(42), "users:42"},
 		{"string", "orders", false, "abc-123", "orders:abc-123"},
+		// String PK containing the separator: the tag IS ambiguous if
+		// a consumer naïvely splits on ":", but the contract is that
+		// the tag is OPAQUE — consumers compare equality, they don't
+		// parse. Pin the format so a future change to the formatter
+		// doesn't quietly break round-tripping.
+		{"string pk containing separator is preserved verbatim", "orders", false, "abc:def", "orders:abc:def"},
 		{"empty table is rejected", "", false, int64(1), ""},
 		{"nil pk is rejected", "users", false, nil, ""},
 		{"composite pk yields empty (gap)", "ledger", true, []any{1, 2}, ""},
@@ -146,6 +152,13 @@ func TestInvalidateRowTag_NoopWhenTagEmpty(t *testing.T) {
 // We can't run a real DB here, but executeExec calls back into a
 // QueryFunc-style ExecContext. We swap in a no-op exec via the
 // BaseQuery.exec field of an Executor that returns a fake result.
+//
+// Dialect-independence: the wired-up behaviour under test (building the
+// tag slice before passing it to CacheStore.InvalidateTags) lives in
+// pure-Go logic that does not touch SQL generation. SQLite is fixed as
+// the dialect to keep the fixture simple; the integration suite
+// (testcontainers, CI matrix on 4 motors + SQLite) covers the actual
+// SQL emit paths.
 func TestExecuteExec_PassesRowTagAlongTable(t *testing.T) {
 	rec := newInvalidationRecorder()
 	exec := &noopExec{}
@@ -203,6 +216,13 @@ func TestExecuteExec_PassesRowTagAlongTable(t *testing.T) {
 // fixed-rows fakeExecResult so executeExec's post-success branches
 // (which is where InvalidateTags lives) are reached. Query / QueryRow
 // are unused by this test file.
+//
+// CAUTION: this mock is ONLY valid for paths that go through Exec.
+// QueryRowContext returns a nil *sql.Row — a caller that hits the
+// Query path and tries to .Scan() the result will panic. The tests in
+// this file deliberately stay on Exec; expanding them to cover the
+// Query path requires a real *sql.DB (the database/sql package gives
+// no public constructor for *sql.Row).
 type noopExec struct{}
 
 func (n *noopExec) ExecContext(context.Context, string, ...any) (sql.Result, error) {

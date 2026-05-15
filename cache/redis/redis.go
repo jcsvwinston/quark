@@ -55,16 +55,25 @@ func (s *Store) Set(ctx context.Context, key string, val []byte, ttl time.Durati
 	for _, tag := range tags {
 		tagKey := "quark:tag:" + tag
 		pipe.SAdd(ctx, tagKey, cacheKey)
-		// F4-6: extend the tag-set TTL to the MAX of the current and
-		// the new value — never SHORTEN it. The historical Expire(...)
-		// here shrank the tag-set TTL whenever a key with a shorter
-		// TTL was tagged, leaving keys cached with no surviving tag
-		// entry (so InvalidateTags couldn't reach them). The pair
-		// below covers both states atomically inside the pipeline:
+		// F4-6: extend the tag-set TTL toward the MAX of the current
+		// and the new value — never deliberately SHORTEN it. The
+		// historical Expire(...) here shrank the tag-set TTL whenever
+		// a key with a shorter TTL was tagged, leaving cached keys
+		// with no surviving tag entry (so InvalidateTags couldn't
+		// reach them). The pair below covers both states:
 		//   ExpireNX: set TTL when the tag set has no TTL yet (the
 		//             SADD just created it).
 		//   ExpireGT: extend TTL only when the new value > current,
 		//             so a later short-lived key can't shorten it.
+		//
+		// Atomicity caveat: a Redis pipeline batches the commands but
+		// does NOT wrap them in MULTI/EXEC — between the NX and GT
+		// another client can mutate the tag-set TTL. Under heavy
+		// concurrency on the SAME tag, the resulting TTL is best-
+		// effort MAX, not a strict guarantee. Closing the gap fully
+		// requires a Lua script; deferred until the imperfect
+		// guarantee bites a real workload.
+		//
 		// Both commands require Redis 7.0+; on older servers they are
 		// no-ops and the historical (broken) behaviour returns —
 		// documented as a known gap in docs/playbooks/cache.md.

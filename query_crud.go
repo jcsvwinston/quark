@@ -1964,7 +1964,14 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 			if err != nil {
 				return err
 			}
-			if _, err := bq.executeExec(ctx, sqlStr, args); err != nil {
+			// F4-6: every entity in UpdateBatch carries its own PK in
+			// v — pass the row tag, just like UpdateFields. Composite
+			// PKs return "" and fall back to the table tag.
+			var pkTag string
+			if !bq.meta.HasCompositePK {
+				pkTag = bq.rowTag(getPKValue(v, q.pk))
+			}
+			if _, err := bq.executeExec(ctx, sqlStr, args, pkTag); err != nil {
 				return fmt.Errorf("update batch failed: %w", err)
 			}
 		}
