@@ -148,11 +148,30 @@ BeforeCreate(o1) → INSERT → BeforeCreate(o2) → INSERT → BeforeCreate(o3)
                                           AfterCreate(o1) → AfterCreate(o2) → AfterCreate(o3)
 ```
 
-If you need different ordering — say, run an event emission after
-ALL inserts have committed — register it explicitly. The public
-`Tx.OnCommit(fn)` API in F5-5 (next release) covers this case;
-until it ships, place the cross-cutting work after the `Client.Tx`
-call returns nil:
+If you need different ordering — say, run a single event emission
+after ALL inserts have committed rather than one `AfterCreate` per
+row — register a [`Tx.OnCommit`](transactions#side-effects-on-commitrollback)
+callback. OnCommit callbacks fire once per transaction, FIFO, after
+all the model `After*` hooks:
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    var ids []int64
+    for _, o := range orders {
+        if err := quark.ForTx[Order](ctx, tx).Create(&o); err != nil {
+            return err
+        }
+        ids = append(ids, o.ID)
+    }
+    tx.OnCommit(func(ctx context.Context) error {
+        return bus.PublishBatch(ctx, "orders.created", ids)
+    })
+    return nil
+})
+```
+
+If you don't need the transaction context, the equivalent is to
+place the cross-cutting work after `Client.Tx` returns nil:
 
 ```go
 err := client.Tx(ctx, fn)
@@ -189,8 +208,9 @@ if err == nil {
   hooks remain queued and will fire when the outer `Commit`
   succeeds — even though their underlying SQL was reverted. This
   gap was present before v0.9.0 and is documented here for the
-  first time because F5-4 makes it observable. Track in TASKS.md
-  for F5-5 follow-up; until then, prefer flat `Client.Tx` callbacks
-  without nested savepoint Tx() over hook-heavy code, or call
-  `After*` work explicitly via the (upcoming) `Tx.OnCommit` API
+  first time because F5-4 makes it observable. The same caveat
+  applies to [`Tx.OnCommit`](transactions#side-effects-on-commitrollback)
+  callbacks registered between a `Savepoint` and its `RollbackTo`.
+  Until a future release closes the gap, prefer flat `Client.Tx`
+  callbacks without nested savepoint `Tx()` over hook-heavy code
   when fine-grained savepoint behaviour matters.

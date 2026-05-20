@@ -46,6 +46,79 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 
 Savepoint support depends on the underlying database engine.
 
+## Side-effects on commit/rollback
+
+`Tx.OnCommit` and `Tx.OnRollback` register callbacks that fire only
+once the transaction reaches its terminal state. They are the
+honest place to put work that must not happen until the database has
+durably committed (publish an event, invalidate a cache, send a
+notification) — or work that should happen specifically because the
+transaction was aborted (release a held reservation, emit a
+"cancelled" signal).
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    order := &Order{SKU: "A-1", Qty: 3}
+    if err := quark.ForTx[Order](ctx, tx).Create(order); err != nil {
+        return err // rolls back; OnCommit below never fires
+    }
+
+    tx.OnCommit(func(ctx context.Context) error {
+        return bus.Publish(ctx, OrderCreated{ID: order.ID})
+    })
+    tx.OnRollback(func(ctx context.Context) error {
+        metrics.Inc("orders.create.rolled_back")
+        return nil
+    })
+    return nil
+})
+```
+
+Semantics:
+
+| | On commit | On rollback |
+| --- | --- | --- |
+| Model `After*` hooks (F5-4) | fire (FIFO) | discarded |
+| `OnCommit` callbacks | fire (FIFO, **after** model `After*`) | discarded |
+| `OnRollback` callbacks | discarded | fire (FIFO) |
+
+- Callbacks run in **registration order** (FIFO).
+- A callback returning an error is **logged** (slog events
+  `quark.hook.on_commit_error` / `quark.hook.on_rollback_error`) but
+  does **not** stop the remaining callbacks and does **not** change
+  the value `Client.Tx` returns. Once the database has confirmed the
+  commit, no application-level handler can undo it.
+- Each callback receives the transaction's context (the one passed
+  to `Client.Tx` / `Client.BeginTx`). If you set a tight deadline on
+  it, the callbacks may observe an expired context after the tx
+  closes — derive a fresh one from `context.Background()` inside the
+  callback when that matters.
+- Registering another `OnCommit` from inside an `OnCommit` callback
+  (i.e. during the drain) is a **no-op** for the current commit: the
+  queue was already lifted before the drain began. This bounds
+  re-entrancy. The same holds for `OnRollback`.
+
+### Registering from inside a hook
+
+A lifecycle hook only receives a `context.Context`, not the `*Tx`.
+Use `quark.TxFromContext(ctx)` to reach the active transaction from
+within a hook and register a commit/rollback side-effect there:
+
+```go
+func (o *Order) AfterCreate(ctx context.Context) error {
+    if tx := quark.TxFromContext(ctx); tx != nil {
+        tx.OnCommit(func(ctx context.Context) error {
+            return bus.Publish(ctx, OrderCreated{ID: o.ID})
+        })
+    }
+    return nil
+}
+```
+
+`TxFromContext` returns `nil` outside a transaction (plain `For[T]`
+CRUD), so always nil-check before use. This is the building block
+that the upcoming `EventBus` integration (F5-6) wires automatically.
+
 ## Manual transactions
 
 ```go

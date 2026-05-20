@@ -411,7 +411,41 @@ externo todavía.**
 **Estimación**: 2 sesiones (~8 h). Riesgoso porque toca el path
 crítico.
 
-### F5-5 · `Tx.OnCommit(fn)` / `Tx.OnRollback(fn)` API pública
+### ~~F5-5 · `Tx.OnCommit(fn)` / `Tx.OnRollback(fn)` API pública~~
+
+**Cerrado (2026-05-20, PR #83)** — `tx.go`: `Tx` gana dos colas
+`onCommitHooks` / `onRollbackHooks` (`[]func(context.Context) error`)
+junto a la `afterHooks` de F5-4, más el campo `ctx` capturado en
+`BeginTx`. Métodos públicos `OnCommit(fn)` / `OnRollback(fn)`.
+`Commit()` drena en orden: `afterHooks` (modelo, contrato ORM) →
+`onCommitHooks` (usuario) y descarta `onRollbackHooks`. `Rollback()`
+descarta `afterHooks`+`onCommitHooks`, ejecuta `tx.Rollback()`, y
+drena `onRollbackHooks` después. Commit fallido descarta todas las
+colas (`discardAllHooks`). Errores en callbacks se loguean via
+`Client.logger` (events `quark.hook.on_commit_error` /
+`quark.hook.on_rollback_error`) sin parar la cadena ni cambiar el
+retorno de `Client.Tx`. Helpers `takeOnCommitHooks`/`takeOnRollbackHooks`
+hacen lift-and-clear bajo `hooksMu` para que el drain corra sin
+sostener el lock (callback puede re-entrar a Quark).
+
+`quark.TxFromContext(ctx) *Tx` añadido con context key no exportado
+`txContextKey{}`; `ForTx[T]` inyecta el `*Tx` en `q.ctx` para que
+los hooks de lifecycle (que sólo reciben ctx, ADR-0013 rechazó
+ensanchar las firmas) puedan alcanzar la tx y registrar
+OnCommit/OnRollback propios.
+
+Cobertura: `tx_oncommit_test.go` con 6 tests — OnCommit FIFO
+post-commit, error no para la cadena, OnCommit descartado en
+rollback, OnRollback dispara sólo en rollback, OnCommit dispara
+DESPUÉS de los model After* (orden de drain), TxFromContext resuelve
+dentro de un hook + registra OnCommit que dispara post-commit
+(fixture `txAwareRow`). `-race` limpio. Doc en
+`website/docs/guides/transactions.mdx` § "Side-effects on
+commit/rollback" con tabla de drain-order. CHANGELOG `### Added`.
+
+**Estimación cumplida**: ~3 h (la cola F5-4 ya existía; low risk).
+
+### F5-5 (histórico spec)
 
 **Construye sobre F5-4. API nueva para side-effects arbitrarios
 controlados por commit/rollback.**

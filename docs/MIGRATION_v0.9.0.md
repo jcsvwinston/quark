@@ -95,10 +95,9 @@ error post-commit is logged via the Client's slog logger (event
 of the cascade — once the commit is durable, no application code
 can undo it (ADR-0013 Regla 2).
 
-This same queue is the foundation that F5-5 will expose to
-application code as the public `Tx.OnCommit(fn)` / `Tx.OnRollback(fn)`
-API. F5-4 keeps the queue internal to keep the v0.9.0 surface
-minimal.
+This same queue is the foundation that F5-5 exposes to application
+code as the public `Tx.OnCommit(fn)` / `Tx.OnRollback(fn)` API
+(shipped — see below).
 
 ## New optional features (no migration needed)
 
@@ -128,13 +127,22 @@ Library-style CLI for installing the policies F5-2 needs. See
 [`row-level-native.mdx` — Option A](../website/docs/advanced/row-level-native.mdx#1-install-the-policy-on-each-tenant-scoped-table).
 Opt-in.
 
+### `Tx.OnCommit` / `Tx.OnRollback` / `TxFromContext` (F5-5)
+
+Register side-effect callbacks that fire when a transaction reaches
+its terminal state. `OnCommit` runs FIFO after the model `After*`
+hooks once the commit succeeds; `OnRollback` runs FIFO after a
+rollback. Callback errors are logged, never propagated.
+`quark.TxFromContext(ctx)` resolves the active `*Tx` from a context
+so lifecycle hooks can register their own commit/rollback effects.
+See [`transactions.mdx` — Side-effects on commit/rollback](../website/docs/guides/transactions.mdx).
+Net-new API; opt-in.
+
 ## Items still pending in v0.9.0
 
 The following Phase 5 items will land before the v0.9.0 tag and this
 guide will be updated when they do:
 
-- **F5-5** — Public `Tx.OnCommit(fn)` / `Tx.OnRollback(fn)` API +
-  `quark.TxFromContext` helper.
 - **F5-6** — `EventBus` interface + in-tree `LoggerEventBus` /
   `OTelEventBus` + `Client.UseEventBus` wiring.
 - **F5-7** — Optional audit log (`Client.EnableAuditLog`).
