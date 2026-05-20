@@ -25,6 +25,13 @@ type Executor interface {
 type Tx struct {
 	tx     *sql.Tx
 	client *Client
+	// ctx is the context the transaction was opened with (via
+	// [Client.BeginTx] / [Client.Tx]). It is passed to the
+	// [Tx.OnCommit] / [Tx.OnRollback] callbacks when they fire. If
+	// the caller installed a deadline on it, the callbacks may
+	// observe an expired context — they can derive a fresh one from
+	// [context.Background] if needed.
+	ctx context.Context
 
 	// afterHooks is the FIFO queue of model `After*` hooks
 	// ([AfterCreateHook], [AfterUpdateHook], [AfterDeleteHook]) that
@@ -34,13 +41,24 @@ type Tx struct {
 	// post-commit" semantically true without bleeding the database
 	// state of a partially-applied tx into application code.
 	//
-	// Access goes through queueAfterHook / drainAfterHooks /
-	// discardAfterHooks under hooksMu — Tx is intentionally
+	// onCommitHooks / onRollbackHooks are the F5-5 public side-effect
+	// queues registered via [Tx.OnCommit] / [Tx.OnRollback]. On a
+	// successful commit the drain order is: afterHooks (model-level,
+	// ORM contract) first, then onCommitHooks (user-level
+	// side-effects). On rollback, afterHooks and onCommitHooks are
+	// discarded and onRollbackHooks fire. Unlike afterHooks (which
+	// bake their own captured ctx), the OnCommit/OnRollback callbacks
+	// receive Tx.ctx explicitly.
+	//
+	// Access goes through queueAfterHook / OnCommit / OnRollback and
+	// the drain*/discard* helpers under hooksMu — Tx is intentionally
 	// shareable across goroutines (the wrapped *sql.Tx is, modulo
-	// the database/sql per-statement rules) and the queue must not
+	// the database/sql per-statement rules) and the queues must not
 	// race when concurrent CRUD calls register hooks.
-	afterHooks []func() error
-	hooksMu    sync.Mutex
+	afterHooks      []func() error
+	onCommitHooks   []func(context.Context) error
+	onRollbackHooks []func(context.Context) error
+	hooksMu         sync.Mutex
 }
 
 // BeginTx starts a new database transaction with the given options.
@@ -58,7 +76,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
-	return &Tx{tx: sqlTx, client: c}, nil
+	return &Tx{tx: sqlTx, client: c, ctx: ctx}, nil
 }
 
 // Tx executes fn within a transaction. If fn returns nil, the transaction
@@ -191,23 +209,163 @@ func waitDeadlockBackoff(ctx context.Context, attemptIdx int) error {
 // [context.Background] inside their implementation.
 func (t *Tx) Commit() error {
 	if err := t.tx.Commit(); err != nil {
-		t.discardAfterHooks()
+		t.discardAllHooks()
 		return err
 	}
-	t.drainAfterHooks(context.Background())
+	// Drain order: model After* hooks first (ORM contract), then the
+	// user-registered OnCommit side-effects. OnRollback callbacks are
+	// discarded — this is a commit, not a rollback.
+	t.drainAfterHooks()
+	t.drainCtxHooks(t.takeOnCommitHooks(), "quark.hook.on_commit_error")
+	t.discardOnRollbackHooks()
 	return nil
 }
 
 // Rollback aborts the transaction.
 //
-// All After* hooks queued during the transaction lifetime are
-// discarded without firing. This is the contract that lets callers
-// rely on "After hooks observe committed state": rolled-back work
-// never triggers the side-effects that would have followed it
-// (ADR-0013 Regla 2).
+// All model After* hooks and OnCommit callbacks queued during the
+// transaction lifetime are discarded without firing — rolled-back
+// work never triggers the side-effects that would have followed it
+// (ADR-0013 Regla 2). OnRollback callbacks DO fire, in FIFO order,
+// after the underlying rollback is attempted, so callers can react
+// to the abort (release a reservation, emit a "cancelled" event,
+// etc.). An OnRollback callback returning an error is logged but
+// does not block the rest of the chain.
 func (t *Tx) Rollback() error {
 	t.discardAfterHooks()
-	return t.tx.Rollback()
+	t.discardOnCommitHooks()
+	err := t.tx.Rollback()
+	t.drainCtxHooks(t.takeOnRollbackHooks(), "quark.hook.on_rollback_error")
+	return err
+}
+
+// OnCommit registers a callback to run after the transaction commits
+// successfully. Callbacks fire in FIFO registration order, after the
+// model After* hooks, with the transaction's context. A callback
+// returning an error is logged via the Client's slog logger (event
+// `quark.hook.on_commit_error`) but does NOT block the remaining
+// callbacks — once the database has confirmed the commit, no
+// application-level handler can undo it (ADR-0013 Regla 3).
+//
+// If the transaction rolls back instead, registered OnCommit
+// callbacks are discarded without firing.
+//
+// Registering an OnCommit callback from inside another OnCommit
+// callback (i.e. during the drain) is a no-op for the current
+// commit: the queue was already lifted before the drain began, so
+// the newly-registered fn will not fire. This prevents unbounded
+// re-entrancy.
+//
+// Example:
+//
+//	err := client.Tx(ctx, func(tx *quark.Tx) error {
+//	    if err := quark.ForTx[Order](ctx, tx).Create(o); err != nil {
+//	        return err
+//	    }
+//	    tx.OnCommit(func(ctx context.Context) error {
+//	        return bus.Publish(ctx, OrderCreated{ID: o.ID})
+//	    })
+//	    return nil
+//	})
+func (t *Tx) OnCommit(fn func(context.Context) error) {
+	if t == nil || fn == nil {
+		return
+	}
+	t.hooksMu.Lock()
+	t.onCommitHooks = append(t.onCommitHooks, fn)
+	t.hooksMu.Unlock()
+}
+
+// OnRollback registers a callback to run after the transaction rolls
+// back. Callbacks fire in FIFO registration order with the
+// transaction's context. A callback returning an error is logged via
+// the Client's slog logger (event `quark.hook.on_rollback_error`)
+// but does NOT block the remaining callbacks.
+//
+// If the transaction commits instead, registered OnRollback
+// callbacks are discarded without firing.
+//
+// Example:
+//
+//	tx.OnRollback(func(ctx context.Context) error {
+//	    log.Warn("order create rolled back", "id", o.ID)
+//	    return nil
+//	})
+func (t *Tx) OnRollback(fn func(context.Context) error) {
+	if t == nil || fn == nil {
+		return
+	}
+	t.hooksMu.Lock()
+	t.onRollbackHooks = append(t.onRollbackHooks, fn)
+	t.hooksMu.Unlock()
+}
+
+// txCtx returns the transaction's stored context, falling back to
+// context.Background() when the Tx was constructed without one (e.g.
+// in tests that build a Tx literal). Keeps the drain helpers
+// nil-safe.
+func (t *Tx) txCtx() context.Context {
+	if t.ctx != nil {
+		return t.ctx
+	}
+	return context.Background()
+}
+
+// takeOnCommitHooks / takeOnRollbackHooks atomically lift-and-clear
+// the respective queue under the mutex so the drain runs without
+// holding the lock (a callback may re-enter Quark).
+func (t *Tx) takeOnCommitHooks() []func(context.Context) error {
+	t.hooksMu.Lock()
+	h := t.onCommitHooks
+	t.onCommitHooks = nil
+	t.hooksMu.Unlock()
+	return h
+}
+
+func (t *Tx) takeOnRollbackHooks() []func(context.Context) error {
+	t.hooksMu.Lock()
+	h := t.onRollbackHooks
+	t.onRollbackHooks = nil
+	t.hooksMu.Unlock()
+	return h
+}
+
+// drainCtxHooks runs the ctx-aware callbacks in FIFO order, logging
+// failures via Client.logger with the given event name but never
+// propagating the error or stopping the cascade.
+func (t *Tx) drainCtxHooks(hooks []func(context.Context) error, event string) {
+	ctx := t.txCtx()
+	for _, fn := range hooks {
+		if err := fn(ctx); err != nil && t.client != nil && t.client.logger != nil {
+			t.client.logger.Warn("transaction side-effect callback returned error",
+				"event", event,
+				"err", err)
+		}
+	}
+}
+
+// discardOnCommitHooks / discardOnRollbackHooks drop the respective
+// queue without firing.
+func (t *Tx) discardOnCommitHooks() {
+	t.hooksMu.Lock()
+	t.onCommitHooks = nil
+	t.hooksMu.Unlock()
+}
+
+func (t *Tx) discardOnRollbackHooks() {
+	t.hooksMu.Lock()
+	t.onRollbackHooks = nil
+	t.hooksMu.Unlock()
+}
+
+// discardAllHooks drops every queue. Called on commit failure — no
+// side-effect fires when the commit itself errored.
+func (t *Tx) discardAllHooks() {
+	t.hooksMu.Lock()
+	t.afterHooks = nil
+	t.onCommitHooks = nil
+	t.onRollbackHooks = nil
+	t.hooksMu.Unlock()
 }
 
 // queueAfterHook appends fn to the per-tx After* hook queue. Called
@@ -232,7 +390,11 @@ func (t *Tx) queueAfterHook(fn func() error) {
 // error or stopping the cascade. The slice is cleared so a future
 // Commit (e.g., after savepoint round-trips that re-enter the
 // drain path) is a no-op.
-func (t *Tx) drainAfterHooks(ctx context.Context) {
+// The model After* hook closures capture their own context (the one
+// the originating Query[T] was built with), so this drain takes no
+// ctx argument — unlike drainCtxHooks, which serves the F5-5
+// OnCommit/OnRollback callbacks that receive the tx context.
+func (t *Tx) drainAfterHooks() {
 	t.hooksMu.Lock()
 	hooks := t.afterHooks
 	t.afterHooks = nil
@@ -244,7 +406,6 @@ func (t *Tx) drainAfterHooks(ctx context.Context) {
 				"err", err)
 		}
 	}
-	_ = ctx // reserved for ADR-0013 Regla 3 (OnCommit signatures take ctx); kept on the helper now to avoid signature churn in F5-5
 }
 
 // discardAfterHooks drops the queue without firing any hook. Called
@@ -316,6 +477,15 @@ func (t *Tx) Tx(ctx context.Context, fn func(tx *Tx) error) error {
 func ForTx[T any](ctx context.Context, tx *Tx) *Query[T] {
 	meta := GetModelMeta[T]()
 
+	// F5-5: stash the *Tx in the query context so model hooks
+	// dispatched from this query can retrieve it via
+	// [TxFromContext]. The hook interfaces only receive ctx (ADR-0013
+	// rejected widening their signatures), so the context value is
+	// the channel through which a BeforeCreate/AfterUpdate/etc. hook
+	// reaches the active transaction — e.g. to register an OnCommit
+	// side-effect of its own.
+	ctx = context.WithValue(ctx, txContextKey{}, tx)
+
 	return &Query[T]{
 		BaseQuery: BaseQuery{
 			ctx:     ctx,
@@ -329,4 +499,41 @@ func ForTx[T any](ctx context.Context, tx *Tx) *Query[T] {
 			meta:    meta,
 		},
 	}
+}
+
+// txContextKey is the unexported context key under which [ForTx]
+// stashes the active *Tx. Unexported so no external package can
+// collide with or forge the value.
+type txContextKey struct{}
+
+// TxFromContext returns the *Tx the context is currently scoped to,
+// or nil when the context was not enriched by a [ForTx] call. Note
+// that this includes the [Client.Tx] callback body itself: that
+// callback receives the *Tx as a parameter, and the bare ctx it
+// captures is NOT enriched until it flows through ForTx[T]. The
+// helper is therefore meant for lifecycle hooks (which only get a
+// context), not for the Tx callback body (which already has the tx).
+//
+// The primary use is inside a lifecycle hook: the hook interfaces
+// ([BeforeCreateHook], [AfterUpdateHook], …) receive only a context,
+// so a hook that needs to register a commit/rollback side-effect
+// reaches the transaction through this helper:
+//
+//	func (o *Order) AfterCreate(ctx context.Context) error {
+//	    if tx := quark.TxFromContext(ctx); tx != nil {
+//	        tx.OnCommit(func(ctx context.Context) error {
+//	            return bus.Publish(ctx, OrderCreated{ID: o.ID})
+//	        })
+//	    }
+//	    return nil
+//	}
+//
+// Returning nil is the normal case for non-transactional CRUD; the
+// caller must nil-check before use.
+func TxFromContext(ctx context.Context) *Tx {
+	if ctx == nil {
+		return nil
+	}
+	tx, _ := ctx.Value(txContextKey{}).(*Tx)
+	return tx
 }

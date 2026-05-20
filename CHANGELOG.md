@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### F5-5 — `Tx.OnCommit` / `Tx.OnRollback` + `quark.TxFromContext`
+- tx: `Tx.OnCommit(func(context.Context) error)` and
+  `Tx.OnRollback(func(context.Context) error)` register
+  side-effect callbacks that fire when the transaction reaches its
+  terminal state. `OnCommit` callbacks fire FIFO after the model
+  `After*` hooks once the commit succeeds; `OnRollback` callbacks
+  fire FIFO after the rollback. A callback returning an error is
+  logged (`quark.hook.on_commit_error` / `quark.hook.on_rollback_error`)
+  but never blocks the chain or changes the value `Client.Tx`
+  returns. Commit failures discard every queue.
+- tx: `quark.TxFromContext(ctx) *Tx` resolves the active
+  transaction from a context. `ForTx[T]` injects the `*Tx` into the
+  query context so lifecycle hooks — which only receive `ctx` —
+  can register OnCommit/OnRollback side-effects of their own.
+  Returns nil outside a transaction.
+- docs: `website/docs/guides/transactions.mdx` gains a
+  "Side-effects on commit/rollback" section with the drain-order
+  table and the `TxFromContext`-inside-a-hook pattern.
+
 #### F5-4 — Transactional hooks (`After*` fire post-commit) + `BeforeFind`/`AfterFind`
 - hooks: new `quark.BeforeFindHook` / `quark.AfterFindHook`
   interfaces; implementations are dispatched once per call to
