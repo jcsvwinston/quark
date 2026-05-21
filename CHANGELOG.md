@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### F5-7 — Audit log (`Client.EnableAuditLog`)
+- audit: `Client.EnableAuditLog(ctx, AuditConfig)` records every
+  `Create`/`Update`/`Delete` into a `quark_audit` table. The table is
+  migrated from a model so the DDL is portable across all six
+  dialects (no hand-written `JSONB`/`BIGSERIAL`). Columns: `id`, `ts`,
+  `tenant_id`, `user_id`, `table_name`, `operation`, `pk`, `diff`.
+- audit: the audit row is written **inline on the CRUD
+  connection/transaction**, so under `Client.Tx` it commits (or rolls
+  back) atomically with the data — no committed data without its
+  trail, no trail for rolled-back work (the "junto al commit" contract
+  from ADR-0013, stronger than the post-commit EventBus emission).
+- audit: `diff` payload — full row for `created`/`deleted`; new values
+  for plain `Update`; per-column `{"old":…,"new":…}` delta for
+  `Tracked.Save`. `AuditConfig` carries `UserFromContext`,
+  `TenantFromContext`, `IncludeTables`, `ExcludeTables`
+  (`quark_audit` always excluded — no recursion). Bulk/WHERE-based
+  methods are not audited.
+- docs: new `website/docs/advanced/audit-log.mdx` + sidebar entry.
+
 #### F5-6 — `EventBus` (CRUD lifecycle events)
 - events: public `EventBus` interface (`Publish(ctx, Event) error`)
   and `Event` interface (`Kind`/`Table`/`Payload`). `Client.UseEventBus(bus)`

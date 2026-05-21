@@ -457,6 +457,10 @@ func (q *Query[T]) Create(entity *T) error {
 		}
 	}
 
+	if err := q.recordAudit(q.ctx, eventCreated, entity, rowToMap(entity, q.meta)); err != nil {
+		return err
+	}
+
 	return q.emitEvent(eventCreated, entity)
 }
 
@@ -584,6 +588,9 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 		}
 	}
 
+	if err := q.recordAudit(q.ctx, eventUpdated, entity, rowToMap(entity, q.meta)); err != nil {
+		return rowsAffected, err
+	}
 	if err := q.emitEvent(eventUpdated, entity); err != nil {
 		return rowsAffected, err
 	}
@@ -780,6 +787,9 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		if err := q.queueOrRunAfterHook(func() error { return hook.AfterUpdate(q.ctx) }); err != nil {
 			return rowsAffected, err
 		}
+	}
+	if err := q.recordAudit(q.ctx, eventUpdated, entity, rowToMap(entity, q.meta)); err != nil {
+		return rowsAffected, err
 	}
 	if err := q.emitEvent(eventUpdated, entity); err != nil {
 		return rowsAffected, err
@@ -1106,6 +1116,9 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 				return rows, hErr
 			}
 		}
+		if aErr := q.recordAudit(q.ctx, eventDeleted, entity, rowToMap(entity, q.meta)); aErr != nil {
+			return rows, aErr
+		}
 		if eErr := q.emitEvent(eventDeleted, entity); eErr != nil {
 			return rows, eErr
 		}
@@ -1162,6 +1175,9 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 			if hErr := q.queueOrRunAfterHook(func() error { return hook.AfterDelete(q.ctx) }); hErr != nil {
 				return rows, hErr
 			}
+		}
+		if aErr := q.recordAudit(q.ctx, eventDeleted, entity, rowToMap(entity, q.meta)); aErr != nil {
+			return rows, aErr
 		}
 		if eErr := q.emitEvent(eventDeleted, entity); eErr != nil {
 			return rows, eErr

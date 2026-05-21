@@ -184,12 +184,20 @@ failures surface as `ErrEventEmitFailed` (non-tx) or a logged
 opt-in. (The `EventBus` *name* rename is the breaking part — covered
 above.)
 
-## Items still pending in v0.9.0
+### Audit log — `Client.EnableAuditLog` (F5-7)
 
-The following Phase 5 item will land before the v0.9.0 tag and this
-guide will be updated when it does:
+Opt-in per-row change trail in `quark_audit`. `EnableAuditLog`
+migrates the table (portable DDL across all six dialects) and records
+`created`/`updated`/`deleted` rows with a JSON `diff`, written
+atomically on the CRUD transaction. `AuditConfig` carries
+`UserFromContext` / `TenantFromContext` / `IncludeTables` /
+`ExcludeTables`. See the
+[Audit Log guide](../website/docs/advanced/audit-log.mdx). Net-new
+API; opt-in.
 
-- **F5-7** — Optional audit log (`Client.EnableAuditLog`).
+## Phase 5 complete
 
-No breaking changes are anticipated from F5-7; it is a net-new API
-built on the `Tx.OnCommit` mechanism this guide already covers.
+All seven Phase 5 items (F5-1 … F5-7) have landed. The only breaking
+changes in v0.9.0 are the two **breaking-minor** items in the table
+above (hook timing under `Client.Tx`; the `EventBus`→`ListenerFactory`
+placeholder rename). Everything else is additive and opt-in.

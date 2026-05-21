@@ -560,7 +560,41 @@ type Event interface {
 
 **Estimación**: 1 sesión larga (~5-6 h).
 
-### F5-7 · Audit log opcional — tabla `quark_audit` con diff por `OnCommit`
+### ~~F5-7 · Audit log opcional — tabla `quark_audit`~~
+
+**Cerrado (2026-05-21, PR #85)** — `audit.go` (nuevo): `AuditConfig`
+(`UserFromContext`/`TenantFromContext`/`IncludeTables`/`ExcludeTables`)
++ `Client.EnableAuditLog(ctx, cfg)` que migra `quarkAuditRow`
+(modelo con `TableName()="quark_audit"`, tipos portables vía
+`JSON[map[string]any]` para el diff — el `JSONB`/`BIGSERIAL` del
+sketch original era PG-only). Campo `Client.audit *auditState` con
+filtros include/exclude (quark_audit siempre excluido — anti-recursión).
+
+**Desviación del sketch (documentada)**: el sketch decía escribir vía
+`tx.OnCommit` (post-commit), pero ADR-0013 dice "la audit table
+necesita capturar el diff **junto al commit, no después**". Implementado
+así: `recordAudit` escribe la fila de auditoría **inline vía `q.exec`**,
+de modo que se une a la tx activa cuando la hay (atómico — la fila de
+audit hace commit/rollback junto al dato). Para CRUD sin tx es un INSERT
+separado tras el write (ventana de crash documentada). El INSERT se
+construye a mano (parameterizado, bypassa el pipeline observer) → cero
+recursión, cero ruido en slow-query log.
+
+Diff: `rowToMap` (fila completa) para Create/Delete y new-values para
+`Update`/`UpdateFields`; `Tracked.Save` captura `{col:{old,new}}` desde
+el snapshot antes del refresh. Enganchado en los 5 callsites CRUD +
+`dirty_track.go Save`. user_id/tenant_id desde ctx via config funcs.
+
+Cobertura: `testAuditLog` wired al `SharedSuite` (corre en los 5
+motores CI: created full-row, Tracked.Save {old,new}, deleted, filtro
+ExcludeTables) + `TestF5_7_AuditAtomicWithTxRollback` (SQLite, prueba
+la garantía atómica: rollback descarta dato Y audit row). Doc nueva
+`website/docs/advanced/audit-log.mdx` + sidebar. CHANGELOG `### Added`.
+MIGRATION_v0.9.0 marca Fase 5 completa.
+
+**Estimación cumplida**: ~5 h.
+
+### F5-7 (histórico spec)
 
 **Construye sobre F5-5 (OnCommit) + F5-6 (EventBus) + F1-1 (Tracked
 dirty tracking, ya entregado).**

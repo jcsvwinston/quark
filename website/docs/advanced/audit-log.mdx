@@ -1,0 +1,112 @@
+---
+sidebar_position: 4
+title: Audit Log
+description: Record an immutable per-row change trail in quark_audit, written atomically with each write.
+---
+
+# Audit Log
+
+Quark can record an audit trail of every `Create`, `Update`, and
+`Delete` into a `quark_audit` table. Turn it on with
+`Client.EnableAuditLog`; from then on each write inserts an audit row
+**on the same connection/transaction as the write itself**, so the
+trail is atomic with the data.
+
+```go
+err := client.EnableAuditLog(ctx, quark.AuditConfig{
+    UserFromContext:   func(ctx context.Context) string { return userID(ctx) },
+    TenantFromContext: func(ctx context.Context) string { return tenantID(ctx) },
+})
+```
+
+## What gets recorded
+
+`EnableAuditLog` migrates the `quark_audit` table (idempotent). Its
+columns:
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Audit row PK. |
+| `ts` | UTC timestamp of the write. |
+| `tenant_id` | From `AuditConfig.TenantFromContext` (empty if unset). |
+| `user_id` | From `AuditConfig.UserFromContext` (empty if unset). |
+| `table_name` | The audited table. |
+| `operation` | `created` / `updated` / `deleted`. |
+| `pk` | The affected row's primary key (composite PKs joined with `:`). |
+| `diff` | JSON change payload (see below). |
+
+The table is created from a model, so its DDL is **portable across
+all six dialects** — `diff` lands in the engine's JSON column (or a
+text column where the engine has none). You do not write
+PostgreSQL-specific `JSONB`/`BIGSERIAL` DDL by hand.
+
+## The diff payload
+
+| Operation | `diff` shape |
+| --- | --- |
+| `created` | The full inserted row: `{"id": 1, "name": "foo", "qty": 3}`. |
+| `deleted` | The full row being deleted. |
+| `updated` via `Update` / `UpdateFields` | The new values: `{"name": "bar"}` (no prior value — there is no snapshot). |
+| `updated` via `Tracked.Save` | A per-column delta: `{"name": {"old": "foo", "new": "bar"}}`. |
+
+To get the `{old, new}` delta, load through the dirty-tracking API:
+
+```go
+tracked, _ := quark.For[Order](ctx, client).Track().Find(id)
+tracked.Entity.Status = "shipped"
+tracked.Save(ctx) // audit diff = {"status": {"old": "pending", "new": "shipped"}}
+```
+
+:::note JSON number round-tripping
+
+Numbers in the `diff` come back from the JSON column as `float64`
+when you read them into a `map[string]any`. Compare them accordingly
+(or decode into a typed struct).
+
+:::
+
+## Atomicity — written with the commit, not after
+
+The audit row is inserted **inline on the CRUD connection**, so:
+
+- Inside `Client.Tx`, the audit INSERT joins that transaction. If the
+  transaction commits, the data and its audit row commit together; if
+  it rolls back, **both disappear**. You never get committed data
+  without its trail, nor a trail for work that was undone.
+- Outside a transaction, the audit INSERT is a separate statement
+  immediately after the write. There is a small crash window between
+  the two — wrap your writes in `Client.Tx` when you need the
+  guarantee.
+
+This is intentionally a **stronger** guarantee than the
+[Event Bus](events), whose post-commit emission can be lost on a
+crash. Losing an event is tolerable; losing an audit record is not.
+
+## Filtering which tables are audited
+
+```go
+client.EnableAuditLog(ctx, quark.AuditConfig{
+    IncludeTables: []string{"orders", "payments"}, // only these
+    // or:
+    ExcludeTables: []string{"sessions"},           // everything but these
+})
+```
+
+`ExcludeTables` takes precedence over `IncludeTables`. The
+`quark_audit` table is always excluded — auditing the audit log would
+recurse.
+
+## Limitations
+
+- **Bulk and WHERE-based methods are not audited**: `CreateBatch`,
+  `UpdateBatch`, `DeleteBatch`, `DeleteBy`, and `UpdateMap` have no
+  per-row entity to diff. Loop the single-row methods if you need a
+  trail for them.
+- **Plain `Update` records new values only** — the `{old, new}` delta
+  requires `Tracked.Save`, which carries the snapshot.
+- **No automatic retention/pruning.** `quark_audit` grows unbounded;
+  schedule your own retention job.
+- **The audit row write uses a raw parameterised INSERT** that
+  bypasses the query observer/middleware chain (so it never recurses
+  and never appears in slow-query logs). Identifiers are fixed
+  constants, values are bound — no injection surface.

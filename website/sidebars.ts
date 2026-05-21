@@ -40,6 +40,7 @@ const sidebars: SidebarsConfig = {
         'advanced/multi-tenant',
         'advanced/row-level-native',
         'advanced/events',
+        'advanced/audit-log',
         'advanced/caching-observability',
       ],
     },
