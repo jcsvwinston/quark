@@ -19,7 +19,7 @@
 - [x] L2 query cache (memory + Redis).
 - [x] JSON column queries (now bound, not interpolated — see Phase 0).
 
-## v0.3.0 — Phase 0 + Phase 1 (this release)
+## v0.3.0 — Phase 0 + Phase 1
 
 ### Phase 0 — security & correctness
 
@@ -38,7 +38,7 @@
 - [x] **F1-5** — Soft-delete scopes: `WithTrashed` / `OnlyTrashed` / `Restore`.
 - [x] **F1-6** — Optimistic locking (`quark:"version"` + `ErrStaleEntity`).
 
-## v0.8.0 — Phase 4 (this release)
+## v0.8.0 — Phase 4
 
 Observability, stampede-protected caché, resilience. Closes the F4-1
 through F4-7 backlog (see [ADR-0011](adr/0011-cache-stampede-protection-wrapper.md)

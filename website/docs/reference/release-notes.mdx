@@ -6,15 +6,37 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is documented here as a **v0.x** project (currently v0.3). The public
-surface is useful and broad, but some APIs may still move before v1.0.
+Quark is documented here as a **v0.x** project (currently v0.9.0 —
+late-alpha, not yet v1.0 production-ready). The public surface is broad
+and the core is stable, but some APIs may still move before v1.0.
 
 Per-version release notes live in the main repository under
 [`docs/RELEASE_NOTES_*.md`](https://github.com/jcsvwinston/quark/tree/main/docs).
 The current tag is documented at
-[`docs/RELEASE_NOTES_v0.3.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.3.0.md).
+[`docs/RELEASE_NOTES_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.9.0.md).
 Migration steps for breaking changes are at
-[`docs/MIGRATION_v0.3.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.3.0.md).
+[`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md).
+
+## v0.9.0
+
+Phase 5: PostgreSQL engine-enforced multi-tenancy
+(`RowLevelSecurityNative` + the `quarktenant` policy CLI),
+transactional `After*` hooks that fire post-commit plus
+`BeforeFind`/`AfterFind`, `Tx.OnCommit`/`Tx.OnRollback` +
+`quark.TxFromContext`, a real `EventBus` (`Client.UseEventBus`), and an
+optional audit log (`Client.EnableAuditLog`) written atomically with
+each write. Two breaking-minor changes — see
+[`MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md).
+
+## v0.4.0 – v0.8.0
+
+Phases 2–4: composable query builder (typed AST, subqueries, CTEs,
+window functions, set operators, pessimistic locking); schema-as-code
+migrations (introspection, pure-Go diff, transactional/resumable
+apply, `quarkmigrate` CLI, backfill); observability + production caché
+(OTel metrics, span redaction, slow-query log, stampede protection,
+deadlock retry); per-column timezones and `Array[T]`. Per-version
+notes are in-repo under `docs/RELEASE_NOTES_v0.{4,5,6,7,8}.0.md`.
 
 ## v0.3.0
 
