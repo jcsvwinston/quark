@@ -1,0 +1,717 @@
+---
+sidebar_position: 7
+title: Migrations and Sync
+description: Create tables from models, evolve schemas safely, add indexes and foreign keys, and run versioned Go migrations.
+---
+
+# Migrations and Sync
+
+Quark has two schema paths:
+
+| Path | Best for |
+| --- | --- |
+| `client.Migrate` / `client.Sync` | Development, tests, prototypes, additive schema evolution. |
+| `github.com/jcsvwinston/quark/migrate` | Reviewable, ordered, reversible production migrations written in Go. |
+
+There is no standalone migration CLI in the current module tree. Run migrations
+from a small Go command, your application startup, CI, or an admin job.
+
+## Create Tables with Migrate
+
+`Migrate` creates missing tables from model metadata:
+
+```go
+err := client.Migrate(ctx, &User{}, &Order{}, &Product{})
+```
+
+It reads:
+
+| Metadata | DDL effect |
+| --- | --- |
+| `db:"column"` | Creates a column. |
+| `pk:"true"` | Creates a primary key. Multiple PK tags create a composite PK. |
+| Go field type | Maps to a dialect-specific SQL type. |
+| `quark:"not_null"` / `nullable:"false"` | Adds `NOT NULL`. |
+| `default:"value"` | Adds `DEFAULT value`. |
+| `quark:"unique"` | Adds `UNIQUE`. |
+| `rel:"many_to_many" m2m:"..."` | Creates a join table. |
+
+Example:
+
+```go
+type User struct {
+    ID        int64     `db:"id" pk:"true"`
+    Email     string    `db:"email" quark:"unique,not_null"`
+    Name      string    `db:"name" quark:"not_null"`
+    Active    bool      `db:"active" default:"1"`
+    CreatedAt time.Time `db:"created_at" default:"CURRENT_TIMESTAMP"`
+}
+
+if err := client.Migrate(ctx, &User{}); err != nil {
+    return err
+}
+```
+
+`Migrate` is idempotent for engines that support `CREATE TABLE IF NOT EXISTS`.
+Oracle handles “already exists” errors specially because its syntax differs.
+
+## Type Mapping
+
+Quark maps Go types through the selected dialect:
+
+| Go kind | Typical SQL type |
+| --- | --- |
+| Integer PK | Auto-increment / identity primary key. |
+| String PK | `VARCHAR(36)` / `NVARCHAR(36)` primary key. |
+| `string` | Text or varying character type. |
+| `int`, `int64`, unsigned ints | Integer / number type. |
+| `float32`, `float64` | Real / double / float type. |
+| `bool` | Boolean, bit, or numeric boolean depending on dialect. |
+| `time.Time` | Timestamp / datetime type. |
+| Pointer fields | Unwrapped for type mapping and nullable unless constrained. |
+
+For advanced column types, create them with a versioned migration or raw DDL and
+map the resulting column with a normal `db` tag.
+
+## Evolve Tables with Sync
+
+`Sync` compares the current model to the current database table:
+
+```go
+err := client.Sync(ctx, quark.SyncOptions{}, &User{})
+```
+
+Supported changes in the current implementation:
+
+| Change | Behavior |
+| --- | --- |
+| Missing table | `Sync` calls `Migrate` first unless `DryRun` is true. |
+| New field with `db` tag | Adds a column. |
+| `quark:"rename:old_col"` | Renames an existing column to the current `db` name. |
+| Removed field | Drops the column only when `SafeMigrations` is false. |
+
+`Sync` does not currently perform automatic type changes or constraint rewrites
+after a column already exists. Use a versioned migration for those changes.
+
+## Rename a Column Safely
+
+Use `quark:"rename:old_col"` when a field is renamed in Go and in SQL:
+
+```go
+type User struct {
+    ID       int64  `db:"id" pk:"true"`
+    FullName string `db:"full_name" quark:"rename:name"`
+}
+
+err := client.Sync(ctx, quark.SyncOptions{}, &User{})
+```
+
+If the table has `name` but not `full_name`, Quark emits dialect-specific rename
+DDL. If neither column exists, it adds `full_name`.
+
+## Safe Migrations
+
+`SafeMigrations` defaults to `true`:
+
+```go
+limits := quark.DefaultLimits()
+limits.SafeMigrations = true
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLimits(limits),
+)
+```
+
+With safe mode enabled, `Sync` will not drop columns that exist in the database
+but no longer exist in the model. To allow destructive drops, opt in explicitly:
+
+```go
+limits := quark.DefaultLimits()
+limits.SafeMigrations = false
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLimits(limits),
+)
+
+err = client.Sync(ctx, quark.SyncOptions{}, &User{})
+```
+
+Prefer a versioned migration for destructive changes so the review includes the
+data migration, rollback strategy, and operational plan.
+
+## Dry Runs and Transactions
+
+`SyncOptions` controls execution:
+
+```go
+err := client.Sync(ctx, quark.SyncOptions{
+    DryRun:        true,
+    NoTransaction: false,
+}, &User{})
+```
+
+| Option | Effect |
+| --- | --- |
+| `DryRun` | Logs planned column add/rename/drop SQL without executing it. |
+| `NoTransaction` | Disables transactional DDL wrapping even if the dialect supports it. |
+
+PostgreSQL, SQLite, SQL Server, and Oracle report transactional DDL support.
+MySQL and MariaDB perform implicit commits around many DDL statements, so Quark
+runs their sync steps without a transaction.
+
+## Indexes
+
+Use `CreateIndex` for simple indexes:
+
+```go
+err := client.CreateIndex(
+    ctx,
+    "users",
+    "idx_users_email",
+    []string{"email"},
+    true,
+)
+```
+
+The last argument controls uniqueness. The helper quotes identifiers and ignores
+“already exists” errors for dialects where Quark can recognize them.
+
+For partial indexes, expression indexes, included columns, or engine-specific
+index options, use a versioned migration with explicit SQL.
+
+## Foreign Keys
+
+```go
+err := client.AddForeignKey(
+    ctx,
+    "orders",
+    "fk_orders_user",
+    []string{"user_id"},
+    "users",
+    []string{"id"},
+    "CASCADE",
+    "",
+)
+```
+
+`columns` and `refColumns` are matched by position. `onDelete` and `onUpdate`
+are appended directly, so pass values supported by your engine, such as
+`CASCADE`, `RESTRICT`, `NO ACTION`, or `SET NULL`.
+
+## Versioned Go Migrations
+
+Use the `migrate` package when schema changes must be ordered, reviewed, and
+reversible.
+
+```go
+package migrations
+
+import (
+    "context"
+
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/migrate"
+)
+
+func init() {
+    migrate.Register(&migrate.Migration{
+        ID:   "202605050001_add_users_email_index",
+        Name: "add users email index",
+        Up: func(ctx context.Context, client *quark.Client) error {
+            return client.CreateIndex(ctx, "users", "idx_users_email", []string{"email"}, true)
+        },
+        Down: func(ctx context.Context, client *quark.Client) error {
+            return client.Exec(ctx, `DROP INDEX idx_users_email`)
+        },
+    })
+}
+```
+
+`ID` strings are sorted lexicographically. Use timestamp-like IDs so migration
+order is obvious and stable.
+
+### Running Migrations
+
+Create a small command that imports your migration package for side effects:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/migrate"
+    _ "github.com/lib/pq"
+
+    _ "your/app/migrations"
+)
+
+func main() {
+    ctx := context.Background()
+
+    limits := quark.DefaultLimits()
+    limits.AllowRawQueries = true
+
+    client, err := quark.New("postgres", "postgres://user:pass@localhost/app?sslmode=disable",
+        quark.WithLimits(limits),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Close()
+
+    migrator := migrate.NewMigrator(client)
+    if err := migrator.Up(ctx, 0); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+The migrator stores applied IDs in `quark_migrations`. It uses `client.Exec`
+internally, so configure the migration client with `AllowRawQueries: true`.
+
+### Preview and Rollback
+
+```go
+migrator := migrate.NewMigrator(client)
+
+// Preview all pending migrations.
+err := migrator.UpDryRun(ctx, 0)
+
+// Apply all pending migrations.
+err = migrator.Up(ctx, 0)
+
+// Revert one applied migration.
+err = migrator.Down(ctx, 1)
+```
+
+Pass `steps > 0` to limit how many migrations are applied or reverted. Pass `0`
+to apply or revert every eligible migration.
+
+## Distributed Migration Lock
+
+When multiple processes (CI runs, sidecars, deployment pods) can boot
+against the same database, they may race to run the same migration.
+`Client.AcquireMigrationLock(ctx, name, timeout)` returns a cluster-wide
+advisory lock — the first caller wins; the rest wait up to `timeout`
+or receive `ErrLockTimeout`. The lock is held by a dedicated
+connection for its lifetime; releasing it returns the connection to
+the pool.
+
+```go
+lock, err := client.AcquireMigrationLock(ctx, "schema-migrations", 30*time.Second)
+if err != nil {
+    return err
+}
+defer lock.Release(ctx)
+
+if err := client.Migrate(ctx, &User{}, &Order{}); err != nil {
+    return err
+}
+```
+
+Per-dialect implementation:
+
+| Dialect | Primitive |
+| --- | --- |
+| PostgreSQL | `pg_advisory_lock(hashtext(name))` + `pg_advisory_unlock`. Timeout via `SET lock_timeout`. SQLSTATE `55P03` mapped to `ErrLockTimeout`. |
+| MySQL / MariaDB | `GET_LOCK(name, timeout_seconds)` + `RELEASE_LOCK`. Return value 0 mapped to `ErrLockTimeout`. |
+| SQL Server | `sp_getapplock @LockMode='Exclusive', @LockOwner='Session'` + `sp_releaseapplock`. Status code `-1` mapped to `ErrLockTimeout`. |
+| SQLite | Not supported — single-writer model; use `BEGIN IMMEDIATE` inside the process. Returns `ErrUnsupportedFeature`. |
+| Oracle | Not yet supported — `DBMS_LOCK.REQUEST` needs PL/SQL plumbing; tracked as F3-1 follow-up. Returns `ErrUnsupportedFeature`. |
+
+Implementation notes:
+
+- The lock is **opt-in**: `client.Migrate(ctx, …)` does NOT call
+  `AcquireMigrationLock` automatically. Wrap your migration code
+  explicitly when you need cross-process exclusion.
+- The MySQL/MariaDB resolution is **whole seconds**. A sub-second
+  `timeout` rounds up to 1 s — the next-best approximation given the
+  protocol granularity.
+- The PostgreSQL implementation uses **session-level** advisory locks
+  (`pg_advisory_lock`, not `pg_advisory_xact_lock`), so the lock
+  doesn't tie the lifetime to a single long-running transaction. You
+  can run any number of statements under the lock — including
+  transactions — without conflict.
+
+## Schema Introspection
+
+`Client.IntrospectSchema(ctx)` returns the current state of the
+database as a dialect-neutral `Schema` value. It's the foundation for
+the upcoming `quark schema diff` comparator (F3-3): both the Go-side
+model layout and the live DB layout are reduced to the same
+representation, and the diff engine emits the operations needed to
+align them.
+
+```go
+schema, err := client.IntrospectSchema(ctx)
+if err != nil {
+    return err
+}
+for _, table := range schema.Tables {
+    fmt.Println(table.Name)
+    for _, col := range table.Columns {
+        fmt.Printf("  %s %s nullable=%v\n", col.Name, col.Type, col.Nullable)
+    }
+}
+```
+
+Dialect coverage (F3-2 progress):
+
+| Dialect | Status |
+| --- | --- |
+| PostgreSQL | ✅ supported — `information_schema.tables` / `columns` with `current_schema()` |
+| SQLite | ✅ supported — `sqlite_master` + `PRAGMA table_info` |
+| MySQL | ✅ supported — `INFORMATION_SCHEMA.{TABLES,COLUMNS}` scoped to `DATABASE()`, `COLUMN_TYPE` verbatim |
+| MariaDB | ✅ supported — shares the MySQL implementation |
+| SQL Server | ✅ supported — `sys.tables` / `sys.columns` / `sys.types` + `sys.default_constraints` LEFT JOIN; type reassembly from `max_length` / `precision` / `scale` with nvarchar byte→char halving and `MAX` for `max_length = -1` |
+| Oracle | ⚠️ returns `ErrUnsupportedFeature` — F3-2-oracle deferred (no CI) |
+
+Schema surface currently covers **tables, columns, non-primary-key
+indexes, and foreign keys**:
+
+- **Indexes** (`Index{Name, Columns, Unique}`) — SQLite
+  `PRAGMA index_list` / `PRAGMA index_info` (origin `pk` filtered);
+  PostgreSQL `pg_index` joined with `pg_attribute` via
+  `unnest(indkey) WITH ORDINALITY` for stable column order;
+  MySQL/MariaDB `INFORMATION_SCHEMA.STATISTICS`
+  (`INDEX_NAME != 'PRIMARY'`); MSSQL `sys.indexes` /
+  `sys.index_columns` (`is_primary_key = 0`,
+  `is_included_column = 0`). Expression / functional indexes
+  surface their expression slot as `""` — the diff layer (F3-3)
+  decides whether to treat them as opaque.
+- **Foreign keys** (`ForeignKey{Name, Columns, RefTable,
+  RefColumns, OnDelete, OnUpdate}`) — SQLite
+  `PRAGMA foreign_key_list` (Name is `""` for inline FKs; the diff
+  layer matches on column-tuple); PostgreSQL `pg_constraint`
+  (contype='f') with composite-FK column matching via paired
+  `unnest(conkey/confkey)`; MySQL/MariaDB
+  `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` + `REFERENTIAL_CONSTRAINTS`;
+  MSSQL `sys.foreign_keys` + `sys.foreign_key_columns`. `OnDelete`
+  / `OnUpdate` are normalised to the SQL-standard verbose form
+  (`CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`, `NO ACTION`)
+  regardless of how the catalog encodes them.
+
+**CHECK constraints** (`Check{Name, Expression}`) — PostgreSQL
+`pg_constraint` (contype='c') with `pg_get_constraintdef`;
+MySQL/MariaDB `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` joined with
+`TABLE_CONSTRAINTS` (MySQL 8.0.16+, MariaDB 10.2.1+); MSSQL
+`sys.check_constraints`. The expression text is passed through raw
+per dialect — each engine has its own canonical form (`((age > 0))`
+on PG, `` (`age` > 0) `` on MariaDB, `([age]>(0))` on MSSQL). The
+diff layer (F3-3) handles cross-dialect expression equivalence at
+the AST level, not the introspector.
+
+**SQLite intentionally deferred** for CHECK introspection: SQLite
+has no catalog for CHECK constraints, the only path is parsing
+`sqlite_master.sql` DDL — brittle and out of scope for a
+catalog-reader layer. On SQLite, `Schema.Tables[i].Checks` is `nil`
+(intentionally not surfaced, NOT "no CHECK constraints").
+
+Code that consumes `Schema` should treat unpopulated slices as
+"not yet introspected" (or, for SQLite Checks, "intentionally not
+surfaced"), not "no constraints".
+
+Internal tables (`quark_*` for migration state, plus `sqlite_*` on
+SQLite) are filtered out — the introspection result is the user-facing
+schema, not the system one.
+
+## Schema Diff
+
+`Diff(desired, current Schema) []Operation` returns the ordered list
+of operations needed to bring `current` into alignment with `desired`.
+Both arguments are dialect-neutral [`Schema`](#schema-introspection)
+values typically produced by `IntrospectSchema` (for `current`) and
+by `Client.PlanMigration` (for `desired`, see below).
+
+```go
+ops := quark.Diff(desired, current)
+for _, op := range ops {
+    fmt.Println(op.String())
+}
+```
+
+Operation types are sealed and dialect-neutral — `OpCreateTable`,
+`OpDropTable`, `OpAddColumn`, `OpDropColumn`, `OpAlterColumn`,
+`OpCreateIndex`, `OpDropIndex`, `OpAddForeignKey`,
+`OpDropForeignKey`, `OpAddCheck`, `OpDropCheck`. Each carries the
+neutral shape needed to render DDL via the per-dialect helpers (the
+executor, a follow-up PR, will translate ops to SQL).
+
+The diff is **pure and deterministic** (stable sort, no map iteration
+bleed-through) and **conservatively typed**: columns / indexes /
+checks match by name; FKs match by name OR — when both sides have an
+empty name (SQLite inline FKs) — by composite
+`(columns, ref_table, ref_columns)` key.
+
+Cross-dialect awareness baked into the equality functions:
+
+- **MariaDB `RESTRICT` ≡ MySQL `NO ACTION`** for FK actions. The
+  catalog labelling diverges (see [`ForeignKey`](#schema-introspection))
+  but the semantics are identical in immediate-check mode (the only
+  mode either engine supports), so no spurious DROP+ADD on every plan.
+- **SQLite `Checks=nil`** is respected. When either side has
+  `Checks=nil` for a table, the check comparison for that table is
+  skipped entirely. Empty `[]Check{}` is different (it means
+  "introspected and found none") and compares normally.
+
+**Op ordering** follows dependency rules: CREATE TABLE first; per
+shared table, ADD COLUMN → ALTER COLUMN → DROP CHECK → DROP FK →
+DROP INDEX → DROP COLUMN → CREATE INDEX → ADD FK → ADD CHECK;
+DROP TABLE last. Index shape changes (columns or unique flag) are
+modelled as DROP+CREATE since no engine supports altering an index
+in place. Full algorithm is documented on the `Diff` godoc.
+
+Expression-level equivalence for CHECK constraints (e.g.
+`((age > 0))` PG vs `` (`age` > 0) `` MariaDB) is **not** AST-normalised
+in this PR — `Diff` matches checks by name alone. AST-level
+expression equivalence is out of scope for F3-3-core.
+
+### Plan from models
+
+`Client.PlanMigration(ctx, models...)` is the convenience entrypoint
+that builds the desired Schema from Go model structs, introspects
+the current DB, runs `Diff`, and returns a `Plan{Ops []Operation}`.
+
+```go
+plan, err := client.PlanMigration(ctx, &User{}, &Order{})
+if err != nil {
+    return err
+}
+if plan.IsEmpty() {
+    fmt.Println("schema is in sync")
+    return nil
+}
+fmt.Println("pending changes:")
+fmt.Println(plan.String())
+```
+
+The Plan is **inert** — it doesn't apply itself. Use
+`Client.ApplyPlan(ctx, plan)` to execute the operations against the
+database when you're ready:
+
+```go
+plan, _ := client.PlanMigration(ctx, &User{}, &Order{})
+if !plan.IsEmpty() {
+    if err := client.ApplyPlan(ctx, plan); err != nil {
+        return err
+    }
+}
+```
+
+ApplyPlan walks the ops in order and dispatches each to the
+per-dialect DDL.
+
+**Transactional behaviour** (F3-4-tx):
+
+- **PostgreSQL, MSSQL, SQLite** — DDL is transactional on these
+  engines. `ApplyPlan` opens a `BEGIN`, runs all ops, and `COMMIT`s.
+  A mid-plan failure rolls the whole plan back, leaving the schema
+  in its pre-plan state. This is the safety net for running
+  migrations against live databases on these engines.
+- **MySQL, MariaDB, Oracle** — DDL implicitly commits on every
+  statement, so wrapping is pointless. Instead, `ApplyPlan` uses
+  a **resumable** path backed by a `quark_migration_state`
+  checkpoint table. Each successfully applied op is recorded by
+  `(plan_hash, op_index)`; a re-invocation against the SAME plan
+  picks up from the first un-applied op.
+
+  Workflow when something goes wrong mid-plan on these engines:
+
+  1. `ApplyPlan` runs ops 0..N, op N+1 fails. Ops 0..N are
+     implicitly committed; state recorded.
+  2. You address the underlying issue (missing referenced table,
+     unique-key conflict, etc.).
+  3. You call `ApplyPlan` again with the same plan. The resume
+     path reads the state, sees ops 0..N already applied, starts
+     from op N+1.
+
+  The plan_hash (SHA-256 of the ops' `String()` outputs) is the
+  drift detector: if you modify your models between runs, the new
+  plan has a different hash and starts a fresh sequence — no
+  false resume into a plan whose ops 0..N have different meaning.
+  `Plan.Hash()` is public so you can log it in your CI gates.
+
+**Known limitations**:
+- **OpAlterColumn** today only emits DDL for the Type change;
+  Nullable / Default deltas are silently skipped (TODO
+  F3-3-execute-alter).
+- **OpDropForeignKey** and **OpDropCheck** on SQLite return
+  `ErrUnsupportedFeature` — SQLite has no `ALTER TABLE DROP
+  CONSTRAINT`, the workaround is the 12-step table-rebuild
+  procedure (separate follow-up).
+
+The CLI plan command (F3-5) is the typical consumer; see below.
+In direct user code you can use `IsEmpty()` as a "did anything
+drift?" probe in health checks or CI gates, and `ApplyPlan` to
+close the loop.
+
+### CLI workflow via `quarkmigrate`
+
+The `quarkmigrate` package wraps `PlanMigration` + `ApplyPlan` in a
+three-action CLI workflow. Users write a tiny `migrations/main.go`
+that imports both `quarkmigrate` and their own model types — Go
+has no runtime model registration so the binary has to be the
+user's, but `quarkmigrate.Run` carries all the orchestration.
+
+```go
+// myapp/migrations/main.go
+package main
+import (
+    "context"
+    "fmt"
+    "os"
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/quarkmigrate"
+    "myapp/models"
+)
+func argOrEmpty(args []string, i int) string {
+    if i < len(args) {
+        return args[i]
+    }
+    return ""
+}
+func main() {
+    client, err := quark.New(os.Getenv("QUARK_DIALECT"), os.Getenv("QUARK_DSN"))
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "quark.New: %v\n", err)
+        os.Exit(quarkmigrate.ExitError)
+    }
+    defer client.Close()
+    action, err := quarkmigrate.ParseAction(argOrEmpty(os.Args, 1))
+    if err != nil {
+        fmt.Fprintln(os.Stderr, err)
+        os.Exit(quarkmigrate.ExitError)
+    }
+    os.Exit(quarkmigrate.Run(context.Background(), action, client,
+        &models.User{}, &models.Order{}))
+}
+```
+
+Then from CI / Makefile:
+
+```sh
+go run ./migrations plan      # informational, exit 0
+go run ./migrations verify    # exit 1 if schema has drifted
+go run ./migrations apply     # run the plan
+```
+
+Exit codes (exposed as `quarkmigrate.ExitSuccess` / `ExitDriftDetected`
+/ `ExitError`):
+
+| Code | Meaning |
+| --- | --- |
+| 0 | plan / verify with empty plan, or apply succeeded |
+| 1 | verify with non-empty plan — drift detected (CI gate signal) |
+| 2 | operational error (couldn't plan, couldn't apply, unknown action) |
+
+A complete runnable example lives at `examples/migrations/` —
+SQLite by default, switch dialects via `QUARK_DIALECT` /
+`QUARK_DSN`.
+
+`PlanMigration` carries indexes / FKs / checks from the current
+schema over to the desired one before diffing, because struct tags
+don't yet declare schema-level objects beyond columns. So a plan
+on a stable schema is empty even if indexes / FKs / checks exist
+in the DB but not in the models. F3-3-plan-indexes will lift this
+limitation by letting struct tags drive indexes.
+
+Type-string normalisation (F3-3-types): the diff's column comparison
+applies a case-fold + trim, a PG `character varying` → `varchar`
+alias, and a MySQL display-width strip (`int(11)` → `int`) so the
+migrator's canonical UPPERCASE compares equal to the catalog's
+lowercase. **Round-trip is clean on all 5 supported dialects** —
+`PlanMigration(model)` after `Migrate(model)` returns an empty
+Plan on PG, MySQL, MariaDB, MSSQL, and SQLite.
+
+## Backfill
+
+`Client.Backfill(ctx, BackfillSpec)` orchestrates a row-by-row data
+backfill in batches. Use it after a schema migration adds a column
+that needs to be populated from existing rows — the helper handles
+PK pagination, batching, and resume tokens; you write only the
+per-batch UPDATE.
+
+```go
+// The user owns the SQL inside Process. Backfill just hands you
+// the PK list per batch — write whatever UPDATE / INSERT-SELECT
+// your data work needs, using your dialect's idioms.
+err := client.Backfill(ctx, quark.BackfillSpec{
+    Name:      "fill_user_email_hash",  // resume key
+    Table:     "users",
+    PKColumn:  "id",                    // defaults to "id"
+    BatchSize: 1000,                    // defaults to 1000
+    Process: func(ctx context.Context, batchPKs []int64) error {
+        // Portable across all 6 dialects: build a parameterised
+        // IN clause from the PK list. (PostgreSQL-only users can
+        // simplify to `WHERE id = ANY($1)` with `pq.Array(batchPKs)`.)
+        placeholders := make([]string, len(batchPKs))
+        args := make([]any, len(batchPKs))
+        for i, pk := range batchPKs {
+            placeholders[i] = client.Dialect().Placeholder(i + 1)
+            args[i] = pk
+        }
+        sql := fmt.Sprintf(
+            "UPDATE users SET email_hash = ... WHERE id IN (%s)",
+            strings.Join(placeholders, ","))
+        _, err := client.Raw().ExecContext(ctx, sql, args...)
+        return err
+    },
+})
+```
+
+The helper persists the highest PK from each successful batch in
+`quark_backfill_state(name, last_pk, updated_at)`. A process kill,
+callback error, or deliberate retry resumes from `WHERE pk >
+last_pk` — no re-processing of earlier batches. A subsequent call
+with the same Name after the backfill completes is a fast no-op
+(idempotent).
+
+**Limitations**: integer PKs only (text and composite PKs out of
+scope for F3-6); positive PKs assumed for the fresh-start case.
+**Concurrency**: like `ApplyPlan`'s resumable path, two concurrent
+invocations against the same Name race on the state row — wrap
+with `Client.AcquireMigrationLock` if you need cross-process
+serialisation.
+
+## Per-Client model registry
+
+Instead of passing your model list to every migration call, register
+them once on the Client:
+
+```go
+client, _ := quark.New(dialect, dsn)
+if err := client.RegisterModel(&User{}, &Order{}, &Invoice{}); err != nil {
+    return err
+}
+// Later — no need to repeat the model list:
+if err := client.MigrateRegistered(ctx); err != nil { return err }
+plan, _ := client.PlanMigrationRegistered(ctx)
+```
+
+`RegisterModel` validates every model up-front (must be struct or
+`*struct`, no nil) and refuses partial registration on failure.
+`RegisteredModels()` returns a snapshot in registration order; the
+slice is a copy, so mutating it doesn't touch the internal state.
+Safe for concurrent use.
+
+**Note**: the registry **appends** — calling `RegisterModel` with the
+same type twice gives you two entries. That's a deliberate design
+choice; the registry doesn't try to be clever about identity.
+Multi-tenant deployments (per ADR-0007) where each tenant Client
+manages its own set of models benefit from per-Client state here
+— the registry doesn't leak across Clients.
+
+## Recommended Production Flow
+
+1. Use `Migrate` freely in tests and local prototypes.
+2. Use `Sync` for additive changes while the schema is still young.
+3. Use `quark:"rename:old_col"` for non-destructive renames.
+4. Move production DDL into versioned Go migrations once the table has real data.
+5. Keep `SafeMigrations` enabled for app clients.
+6. Use a separate migration client with `AllowRawQueries: true`.
+7. Make destructive changes explicit and reversible, with a tested `Down`.
+8. Wrap multi-process migrations in `AcquireMigrationLock` so deploys
+   don't race against themselves.

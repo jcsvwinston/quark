@@ -1,5 +1,20 @@
 # Quark — backlog táctico
 
+> **Fase 5 cerrada (2026-05-21, v0.9.0).** Los 7 items F5-1..F5-7
+> entregados: rename `RowLevelSecurityClient` + alias (#78),
+> `RowLevelSecurityNative` motor PG (#80), CLI `quarktenant`
+> install-rls-policies (#81), hooks transaccionales `After*`
+> post-commit + `BeforeFind`/`AfterFind` (#82), `Tx.OnCommit`/
+> `Tx.OnRollback` + `TxFromContext` (#83), `EventBus` real (#84),
+> audit log atómico (#85). Dos breaking-minor (timing de hooks bajo
+> `Client.Tx`; rename placeholder `EventBus`→`ListenerFactory`),
+> documentados en `MIGRATION_v0.9.0.md`. **Próxima fase: Fase 6**
+> (codegen + HA + benchmarks → v1.0); requiere apertura formal con
+> ADR para la convivencia reflect/codegen. Deuda menor heredada:
+> savepoint-rollback gap, warning `client.Raw()` bajo Native, guards
+> `logger != nil` redundantes, MSSQL JSON[T] scan bug, Oracle fuera
+> de CI.
+>
 > **Fase 4 cerrada (2026-05-15, v0.8.0).** Los 7 items F4-1..F4-7
 > entregados: OTel metrics + span redaction (#70), slow query log
 > (#71), cache key determinismo (#69), stampede protection vía

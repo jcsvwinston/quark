@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-05-21
+
+Phase 5 release — engine-enforced multi-tenancy, transactional hooks,
+events, and audit. Closes F5-1 through F5-7: PostgreSQL native RLS
+(`RowLevelSecurityNative` via `set_config` + `CREATE POLICY`) with the
+`quarktenant` policy-installer CLI; transactional `After*` hooks that
+fire post-commit plus new `BeforeFind`/`AfterFind`; public
+`Tx.OnCommit`/`Tx.OnRollback` + `quark.TxFromContext`; a real
+`EventBus`; and an optional audit log written atomically with each
+write. Two **breaking-minor** changes — see
+[`docs/MIGRATION_v0.9.0.md`](docs/MIGRATION_v0.9.0.md). Detailed notes
+in [`docs/RELEASE_NOTES_v0.9.0.md`](docs/RELEASE_NOTES_v0.9.0.md).
+
+PRs included in this release: [#77] (Phase 5 opening, ADR-0012/0013),
+[#78] (F5-1), [#80] (F5-2), [#81] (F5-3), [#82] (F5-4), [#83] (F5-5),
+[#84] (F5-6), [#85] (F5-7).
+
+[#77]: https://github.com/jcsvwinston/quark/pull/77
+[#78]: https://github.com/jcsvwinston/quark/pull/78
+[#80]: https://github.com/jcsvwinston/quark/pull/80
+[#81]: https://github.com/jcsvwinston/quark/pull/81
+[#82]: https://github.com/jcsvwinston/quark/pull/82
+[#83]: https://github.com/jcsvwinston/quark/pull/83
+[#84]: https://github.com/jcsvwinston/quark/pull/84
+[#85]: https://github.com/jcsvwinston/quark/pull/85
+
 ### Added
 
 #### F5-7 — Audit log (`Client.EnableAuditLog`)
