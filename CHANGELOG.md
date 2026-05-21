@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0](https://github.com/jcsvwinston/quark/compare/v0.8.0...v0.9.0) (2026-05-21)
+
+
+### Added
+
+* **audit:** F5-7 audit log via Client.EnableAuditLog ([#85](https://github.com/jcsvwinston/quark/issues/85)) ([549095d](https://github.com/jcsvwinston/quark/commit/549095d13dd60cce4ec50fde78858f57eaf53cde))
+* **events:** F5-6 EventBus — CRUD lifecycle events via UseEventBus ([#84](https://github.com/jcsvwinston/quark/issues/84)) ([380f1f8](https://github.com/jcsvwinston/quark/commit/380f1f816a3c1e384aa011e8a52a8965ef8a09b8))
+* **hooks:** F5-4 transactional After* hooks + BeforeFind/AfterFind ([#82](https://github.com/jcsvwinston/quark/issues/82)) ([4d50d80](https://github.com/jcsvwinston/quark/commit/4d50d808481b82797590bc5e74939d48dd26e930))
+* **tenant:** F5-1 rename RowLevelSecurity → RowLevelSecurityClient + deprecated alias ([#78](https://github.com/jcsvwinston/quark/issues/78)) ([2ded120](https://github.com/jcsvwinston/quark/commit/2ded120d3e9e97ac2f033f1301972fc636a161fb))
+* **tenant:** F5-2 RowLevelSecurityNative — PG engine-enforced RLS via set_config + CREATE POLICY ([#80](https://github.com/jcsvwinston/quark/issues/80)) ([78d3f73](https://github.com/jcsvwinston/quark/commit/78d3f731d12126d374cfca1225bd86480d54fff3))
+* **tenant:** F5-3 quarktenant install-rls-policies CLI ([#81](https://github.com/jcsvwinston/quark/issues/81)) ([3346e20](https://github.com/jcsvwinston/quark/commit/3346e20112c7a78d8671802713b8f540df7be647))
+* **tx:** F5-5 Tx.OnCommit / Tx.OnRollback + quark.TxFromContext ([#83](https://github.com/jcsvwinston/quark/issues/83)) ([05f1fa3](https://github.com/jcsvwinston/quark/commit/05f1fa3625eda1a8606dbed88bc37ebdf782aa10))
+
 ## [Unreleased]
 
 ### Added
