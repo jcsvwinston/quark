@@ -105,6 +105,16 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 	var changedCols []string
 	argIndex := 1
 
+	// F5-7: when audit logging is enabled, accumulate a per-column
+	// {old,new} delta as we discover changed columns. The snapshot
+	// still holds the OLD values at this point (it is refreshed only
+	// after the UPDATE succeeds), so this is the one place the prior
+	// value is available for the audit diff.
+	var auditDiff map[string]any
+	if t.client != nil && t.client.audit != nil {
+		auditDiff = make(map[string]any)
+	}
+
 	// Iterate the meta's field order — deterministic, and matches the order
 	// the dialect would emit columns elsewhere.
 	for _, fm := range t.meta.Fields {
@@ -141,6 +151,9 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 		setClauses = append(setClauses, fmt.Sprintf("%s = %s", t.dialect.Quote(col), t.dialect.Placeholder(argIndex)))
 		args = append(args, cur)
 		changedCols = append(changedCols, col)
+		if auditDiff != nil {
+			auditDiff[col] = map[string]any{"old": snapVal, "new": cur}
+		}
 		argIndex++
 	}
 
@@ -279,6 +292,20 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 	for _, col := range changedCols {
 		if fm, ok := t.meta.FieldByCol[strings.ToLower(col)]; ok {
 			t.snap[col] = v.Field(fm.Index).Interface()
+		}
+	}
+
+	// F5-7: write the audit row with the {old,new} delta captured
+	// above, inline on t.exec so it joins the active transaction when
+	// the Tracked was loaded via ForTx. Skipped when audit is off or
+	// the table is filtered out.
+	if st := t.client.audit; st != nil && st.shouldAudit(t.table) {
+		// pkStringFromMeta honours composite PKs (via t.meta.CompositePK);
+		// getPKValue(v, t.pk) alone would mis-record composite-PK rows
+		// because t.pk carries only the single-PK slot.
+		pk := pkStringFromMeta(t.Entity, t.meta)
+		if err := t.client.writeAuditRow(ctx, t.exec, st, t.table, "updated", pk, auditDiff); err != nil {
+			return rowsAffected, err
 		}
 	}
 

@@ -78,6 +78,12 @@ type Client struct {
 	// only ever assigned at setup time via UseEventBus, not mutated
 	// concurrently with queries.
 	eventBus EventBus
+
+	// audit, when non-nil, drives the optional audit log (F5-7): each
+	// Create/Update/Delete writes a quark_audit row inline on the
+	// CRUD connection/transaction. nil (the default) is zero cost.
+	// Set once at setup via EnableAuditLog.
+	audit *auditState
 }
 
 // UseEventBus wires an [EventBus] to the Client's CRUD pipeline. After
