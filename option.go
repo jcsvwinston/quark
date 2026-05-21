@@ -21,11 +21,16 @@ func WithDialect(d Dialect) Option {
 	}
 }
 
-// WithLogger sets the logger for the client.
-// If not set, a no-op logger will be used.
+// WithLogger sets the logger for the client. Passing nil is a no-op:
+// the client keeps its default ([slog.Default]) rather than dropping
+// to a nil logger. This guarantees the internal log sites (slow-query
+// log, deadlock-retry, post-commit hook errors, event-emit failures)
+// always have a non-nil logger to write to.
 func WithLogger(l *slog.Logger) Option {
 	return func(c *Client) {
-		c.logger = l
+		if l != nil {
+			c.logger = l
+		}
 	}
 }
 

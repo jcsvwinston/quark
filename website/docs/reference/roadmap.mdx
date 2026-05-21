@@ -45,8 +45,10 @@ The main repository roadmap lives at
 - `Sync` handles add, rename, and controlled drop operations; type rewrites and
   complex constraint changes belong in versioned migrations.
 - Routine execution currently bypasses the normal query middleware and observer path.
-- Event listening is experimental; `Notify` supports PostgreSQL notifications,
-  while `EventBus.CreateListener` is not implemented.
+- Outbound CRUD lifecycle events ship via `Client.UseEventBus` (see the
+  [Event Bus](../advanced/events) guide). Inbound `LISTEN/NOTIFY` listening
+  is still experimental: `Notify` supports PostgreSQL notifications, while
+  `ListenerFactory.CreateListener` is not implemented.
 
 ## Near-Term Goals
 

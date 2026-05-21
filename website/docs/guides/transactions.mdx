@@ -117,7 +117,8 @@ func (o *Order) AfterCreate(ctx context.Context) error {
 
 `TxFromContext` returns `nil` outside a transaction (plain `For[T]`
 CRUD), so always nil-check before use. This is the building block
-that the upcoming `EventBus` integration (F5-6) wires automatically.
+that the [`EventBus`](../advanced/events) integration wires
+automatically via `Client.UseEventBus`.
 
 ## Manual transactions
 

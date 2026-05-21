@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'advanced/multi-tenant',
         'advanced/row-level-native',
+        'advanced/events',
         'advanced/caching-observability',
       ],
     },

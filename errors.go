@@ -74,6 +74,18 @@ var (
 
 	// ErrConstraintViolation indicates a database constraint violation.
 	ErrConstraintViolation = errors.New("constraint violation")
+
+	// ErrEventEmitFailed indicates that an EventBus.Publish call failed
+	// AFTER the originating write was already persisted. The data is
+	// committed; only the event emission failed. Callers that see this
+	// wrapped on a non-transactional CRUD return must NOT retry the
+	// write (that would double-write) — they should retry the emit or
+	// rely on the subscriber being idempotent (at-least-once delivery,
+	// no outbox; see ADR-0013). Under an explicit transaction the emit
+	// runs post-commit via Tx.OnCommit and the failure is logged with
+	// the OTel-style event `quark.event.emit_failure` rather than
+	// propagated (the commit already returned success).
+	ErrEventEmitFailed = errors.New("event emit failed after commit")
 )
 
 // wrapDBError maps low-level database/context errors to quark sentinel errors.

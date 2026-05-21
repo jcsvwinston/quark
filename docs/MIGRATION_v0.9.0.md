@@ -10,12 +10,46 @@ each PR merges so the doc is final when the tag is cut.
 | --- | --- | --- | --- |
 | Tenant strategy renamed | `quark.RowLevelSecurity` → `quark.RowLevelSecurityClient` | **None** for callers — deprecated alias keeps value | Optional: replace at your own pace; the alias is removed in v1.0. |
 | Hook timing change | `AfterCreate` / `AfterUpdate` / `AfterDelete` under `Client.Tx` | **Breaking minor** | Audit callers below. |
+| EventBus placeholder renamed | `quark.EventBus` struct → `ListenerFactory`; `quark.NewEventBus` → `NewListenerFactory` | **Breaking, but the type was non-functional** | Rename call sites if you referenced the placeholder. See below. |
 
 Other Phase 5 deliveries (`RowLevelSecurityNative`, `quarktenant`
-CLI, `BeforeFindHook` / `AfterFindHook`, the upcoming
-`Tx.OnCommit` / `Tx.OnRollback` API, `EventBus`, audit log) are
-**purely additive** — no migration is required to keep existing code
-working.
+CLI, `BeforeFindHook` / `AfterFindHook`, `Tx.OnCommit` /
+`Tx.OnRollback`, the `EventBus` interface, audit log) are **purely
+additive** — no migration is required to keep existing code working.
+
+## EventBus placeholder rename (F5-6)
+
+### What changed
+
+v0.8.0 shipped a struct named `EventBus` (constructed via
+`NewEventBus`) whose only method, `CreateListener`, always returned
+`ErrDialectNotSupported` — a placeholder for a never-implemented
+PostgreSQL LISTEN/NOTIFY listener. F5-6 introduces a real
+**`EventBus` interface** for outbound CRUD lifecycle events, so the
+placeholder struct was renamed to **`ListenerFactory`** and its
+constructor to **`NewListenerFactory`**.
+
+### Why this is (technically) breaking but practically safe
+
+The renamed struct never did anything but return an error — there is
+no working code that depends on its behaviour. If you happened to
+reference `quark.EventBus` / `quark.NewEventBus` (e.g. in a type
+assertion or a `_ = quark.NewEventBus(c)` smoke line), update the
+identifiers:
+
+```go
+// Before (v0.8.0)
+f := quark.NewEventBus(client)
+_, err := f.CreateListener() // always ErrDialectNotSupported
+
+// After (v0.9.0)
+f := quark.NewListenerFactory(client)
+_, err := f.CreateListener() // still ErrDialectNotSupported (out of scope, ADR-0013)
+```
+
+The `EventBus` name now refers to the outbound CRUD-event interface
+(`Publish(ctx, Event) error`). See the
+[Event Bus guide](../website/docs/advanced/events.mdx).
 
 ## Hook semantics change (F5-4)
 
@@ -138,15 +172,24 @@ so lifecycle hooks can register their own commit/rollback effects.
 See [`transactions.mdx` — Side-effects on commit/rollback](../website/docs/guides/transactions.mdx).
 Net-new API; opt-in.
 
+### `EventBus` + `Client.UseEventBus` (F5-6)
+
+Outbound CRUD lifecycle events. `Client.UseEventBus(bus)` makes every
+`Create`/`Update`/`Delete` publish a `created`/`updated`/`deleted`
+event after the write commits. In-tree `LoggerEventBus` /
+`OTelEventBus`; implement `EventBus` for an external broker. Emit
+failures surface as `ErrEventEmitFailed` (non-tx) or a logged
+`quark.event.emit_failure` (tx). See the
+[Event Bus guide](../website/docs/advanced/events.mdx). Net-new API;
+opt-in. (The `EventBus` *name* rename is the breaking part — covered
+above.)
+
 ## Items still pending in v0.9.0
 
-The following Phase 5 items will land before the v0.9.0 tag and this
-guide will be updated when they do:
+The following Phase 5 item will land before the v0.9.0 tag and this
+guide will be updated when it does:
 
-- **F5-6** — `EventBus` interface + in-tree `LoggerEventBus` /
-  `OTelEventBus` + `Client.UseEventBus` wiring.
 - **F5-7** — Optional audit log (`Client.EnableAuditLog`).
 
-No breaking changes are anticipated from those items; they are
-either net-new APIs or build on the F5-4 queue this guide already
-covers.
+No breaking changes are anticipated from F5-7; it is a net-new API
+built on the `Tx.OnCommit` mechanism this guide already covers.
