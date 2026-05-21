@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'QUARK ORM',
-  tagline: 'Type-safe, security-first ORM for Go — built on generics, designed for production.',
+  tagline: 'Type-safe, security-first ORM for Go — generics on the surface, six dialects underneath.',
   favicon: 'img/quark-logo.svg',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
