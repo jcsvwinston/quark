@@ -131,12 +131,28 @@ client.UseEventBus(bus)   // wires CRUD → bus.Publish via OnCommit
 ```
 
 que el `Query[T].Create/Update/Delete` engancha automáticamente. La
-emisión es **síncrona** (bloquea el `Tx` returning hasta que el
-`Publish` retorna) y **at-least-once**. Si la tx commitea pero el
-`Publish` falla, el caller recibe el error de `Tx` envuelto con
-`ErrEventEmitFailed` y un span OTel `quark.event.emit_failure` queda
-registrado. **La fila ya está persistida** — el caller tiene que decidir
-si reintentar el emit (idempotencia del subscriber recomendada en doc).
+emisión es **síncrona** y **at-least-once**. Si el `Publish` falla,
+**la fila ya está persistida** — el caller tiene que decidir si
+reintentar el emit (idempotencia del subscriber recomendada en doc).
+
+> **Enmienda F5-6 (2026-05-21):** el texto original decía que en el
+> path transaccional "el caller recibe el error de `Tx` envuelto con
+> `ErrEventEmitFailed`". Al implementar F5-6 sobre el contrato F5-5
+> (ya entregado), el callback registrado vía `Tx.OnCommit` corre en
+> `drainCtxHooks`, que **nunca propaga** errores al caller de
+> `Client.Tx` — el commit ya retornó éxito y no queda canal de
+> retorno. La reconciliación adoptada:
+> - **Path no-transaccional** (`For[T].Create/Update/Delete`): el
+>   `Publish` corre inline tras el statement y su error se devuelve
+>   al caller del CRUD envuelto en `ErrEventEmitFailed`.
+> - **Path transaccional** (`ForTx[T]` dentro de `Client.Tx`): el
+>   `Publish` corre post-commit vía `Tx.OnCommit`; un fallo se
+>   loguea con el evento estructurado `quark.event.emit_failure` y
+>   **no se propaga** (el commit ya devolvió éxito; propagarlo
+>   arriesgaría que el caller reintente y haga doble-write).
+>
+> Ambos paths registran `quark.event.emit_failure`. La implementación
+> vive en `query_crud.go emitEvent()`.
 
 Razón de la elección síncrona vs async fire-and-forget:
 

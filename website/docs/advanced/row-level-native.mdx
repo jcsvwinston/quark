@@ -242,7 +242,9 @@ The legacy `RowLevelSecurity` alias still resolves to
 
 ## Limitations and roadmap
 
-- **No `LISTEN/NOTIFY` integration.** `EventBus` real ships in F5-6.
+- **No `LISTEN/NOTIFY` integration.** Inbound channel listening stays
+  out of scope (ADR-0013). Outbound CRUD events ship via
+  [`Client.UseEventBus`](events).
 - **No automatic `pg_temp` cleanup.** The policy stays on the table
   even after dropping the router; manage the policies in your normal
   schema migrations.

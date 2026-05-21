@@ -70,6 +70,33 @@ type Client struct {
 	// always overrides this. See docs/adr/0010 for the wire-format
 	// contract (UTC on the wire, loc applied in memory on scan).
 	defaultTZ *time.Location
+
+	// eventBus, when non-nil, receives a CRUD lifecycle Event after
+	// each Create/Update/Delete commits (F5-6). Set via UseEventBus.
+	// nil (the default) disables emission entirely — zero cost for
+	// callers that don't opt in. Read on the hot CRUD path, so it is
+	// only ever assigned at setup time via UseEventBus, not mutated
+	// concurrently with queries.
+	eventBus EventBus
+}
+
+// UseEventBus wires an [EventBus] to the Client's CRUD pipeline. After
+// this call, every Create / Update / Delete publishes a lifecycle
+// [Event] once the write is durable: post-commit via [Tx.OnCommit]
+// when the operation runs inside an explicit transaction, or inline
+// after the statement for non-transactional CRUD.
+//
+// Delivery is synchronous and at-least-once with no outbox (ADR-0013).
+// A Publish failure never rolls back the committed write. In the
+// non-transactional path the failure surfaces to the CRUD caller
+// wrapped in [ErrEventEmitFailed]; in the transactional path it is
+// logged with the event `quark.event.emit_failure` (the commit has
+// already returned success, so there is nothing to propagate to).
+//
+// Passing nil disables emission. UseEventBus is intended to be called
+// once at setup, before queries run.
+func (c *Client) UseEventBus(bus EventBus) {
+	c.eventBus = bus
 }
 
 // ClientProvider is an interface that provides a database client.

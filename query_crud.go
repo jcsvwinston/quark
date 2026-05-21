@@ -60,6 +60,67 @@ func (q *BaseQuery) queueOrRunAfterHook(fn func() error) error {
 	return fn()
 }
 
+// emitEvent publishes a CRUD lifecycle [Event] to the Client's
+// EventBus (F5-6), if one is configured. The timing mirrors the
+// After* hook contract:
+//
+//   - Inside an explicit transaction (q.tx != nil) the publish is
+//     registered via [Tx.OnCommit], so it runs after the commit is
+//     durable and is discarded on rollback. A publish error there is
+//     logged (event `quark.event.emit_failure`) but cannot propagate
+//     — the commit already returned success.
+//
+//   - Outside a transaction the publish runs inline after the
+//     statement and a failure is returned to the CRUD caller wrapped
+//     in [ErrEventEmitFailed]. The write is already persisted; the
+//     caller must NOT retry the write, only the emit (delivery is
+//     at-least-once, no outbox — ADR-0013).
+//
+// Returns nil when no bus is configured (zero cost) or in the
+// transactional path (the error, if any, is handled post-commit).
+func (q *BaseQuery) emitEvent(kind string, entity any) error {
+	bus := q.client.eventBus
+	if bus == nil {
+		return nil
+	}
+	ev := modelEvent{kind: kind, table: q.table, payload: entity}
+
+	if q.tx != nil {
+		q.tx.OnCommit(func(ctx context.Context) error {
+			if err := bus.Publish(ctx, ev); err != nil && q.client.logger != nil {
+				// Self-log the domain-specific failure and return nil
+				// so the generic OnCommit drain does NOT also log it
+				// (single quark.event.emit_failure line, not a
+				// duplicate quark.hook.on_commit_error). The commit
+				// already succeeded; per the F5-5 OnCommit contract
+				// the error cannot propagate to the Client.Tx caller
+				// regardless, so swallowing it after logging is the
+				// honest, non-noisy choice.
+				q.client.logger.Warn("event emit failed after commit",
+					"event", "quark.event.emit_failure",
+					"kind", kind, "table", q.table, "err", err)
+			}
+			return nil
+		})
+		return nil
+	}
+
+	// Non-transactional: emit inline. The write already executed; a
+	// failure is surfaced to the caller wrapped in ErrEventEmitFailed
+	// so it can distinguish "write failed" from "write OK, emit
+	// failed".
+	if err := bus.Publish(q.ctx, ev); err != nil {
+		if q.client.logger != nil {
+			q.client.logger.Warn("event emit failed",
+				"event", "quark.event.emit_failure",
+				"kind", kind, "table", q.table, "err", err)
+		}
+		return fmt.Errorf("%w: publish %s event for %s: %v",
+			ErrEventEmitFailed, kind, q.table, err)
+	}
+	return nil
+}
+
 // executeExec runs an ExecContext through the middleware chain.
 // This is used for INSERT, UPDATE, DELETE operations.
 //
@@ -396,7 +457,7 @@ func (q *Query[T]) Create(entity *T) error {
 		}
 	}
 
-	return nil
+	return q.emitEvent(eventCreated, entity)
 }
 
 // buildInsert constructs the INSERT SQL.
@@ -523,6 +584,9 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 		}
 	}
 
+	if err := q.emitEvent(eventUpdated, entity); err != nil {
+		return rowsAffected, err
+	}
 	return rowsAffected, nil
 }
 
@@ -716,6 +780,9 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		if err := q.queueOrRunAfterHook(func() error { return hook.AfterUpdate(q.ctx) }); err != nil {
 			return rowsAffected, err
 		}
+	}
+	if err := q.emitEvent(eventUpdated, entity); err != nil {
+		return rowsAffected, err
 	}
 	return rowsAffected, nil
 }
@@ -1039,6 +1106,9 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 				return rows, hErr
 			}
 		}
+		if eErr := q.emitEvent(eventDeleted, entity); eErr != nil {
+			return rows, eErr
+		}
 	}
 
 	return rows, err
@@ -1092,6 +1162,9 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 			if hErr := q.queueOrRunAfterHook(func() error { return hook.AfterDelete(q.ctx) }); hErr != nil {
 				return rows, hErr
 			}
+		}
+		if eErr := q.emitEvent(eventDeleted, entity); eErr != nil {
+			return rows, eErr
 		}
 	}
 

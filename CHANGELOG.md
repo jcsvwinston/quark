@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### F5-6 — `EventBus` (CRUD lifecycle events)
+- events: public `EventBus` interface (`Publish(ctx, Event) error`)
+  and `Event` interface (`Kind`/`Table`/`Payload`). `Client.UseEventBus(bus)`
+  wires it to the CRUD pipeline — every `Create`/`Update`/`Delete`
+  publishes a `created`/`updated`/`deleted` event once the write is
+  durable. Inside `Client.Tx` the emit registers a `Tx.OnCommit` (fires
+  post-commit, discarded on rollback); non-transactional CRUD emits
+  inline after the statement.
+- events: in-tree `LoggerEventBus` (slog) and `OTelEventBus`
+  (correlation-tagged slog record) implementations as reference sinks.
+- events: emit failures never roll back the committed write. The
+  non-transactional path returns the new `quark.ErrEventEmitFailed`
+  sentinel (wrapped) to the CRUD caller; the transactional path logs
+  `quark.event.emit_failure` (no propagation — the commit already
+  succeeded). Delivery is synchronous, at-least-once, no outbox
+  (ADR-0013).
+- docs: new `website/docs/advanced/events.mdx` (interfaces, in-tree
+  buses, delivery semantics, external-broker skeleton). Sidebar entry
+  added under Advanced.
+
 #### F5-5 — `Tx.OnCommit` / `Tx.OnRollback` + `quark.TxFromContext`
 - tx: `Tx.OnCommit(func(context.Context) error)` and
   `Tx.OnRollback(func(context.Context) error)` register
@@ -130,6 +150,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Client) is unchanged — hooks still fire inline. Callers that
   relied on inline post-INSERT timing inside `Client.Tx` should
   audit the change; see [`docs/MIGRATION_v0.9.0.md`](docs/MIGRATION_v0.9.0.md).
+- events (**breaking minor**, F5-6): the v0.8.0 placeholder struct
+  `EventBus` (a LISTEN/NOTIFY factory whose `CreateListener` only ever
+  returned `ErrDialectNotSupported`) is renamed to `ListenerFactory`,
+  and `NewEventBus` to `NewListenerFactory`, to free the `EventBus`
+  name for the new CRUD-event interface. The struct was non-functional
+  (always errored), so no working code path changes behaviour. See
+  [`docs/MIGRATION_v0.9.0.md`](docs/MIGRATION_v0.9.0.md).
 
 ### Deprecated
 - `quark.RowLevelSecurity` — usa `quark.RowLevelSecurityClient`. El

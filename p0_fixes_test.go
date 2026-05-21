@@ -305,14 +305,16 @@ func TestWrapQueryRowInvoked(t *testing.T) {
 	}
 }
 
-// --- EventBus returns ErrDialectNotSupported ---
+// --- ListenerFactory.CreateListener returns ErrDialectNotSupported ---
+// (Renamed from EventBus in v0.9.0 / F5-6; the LISTEN/NOTIFY listener
+// side stays out of scope per ADR-0013.)
 
-func TestEventBusCreateListenerReturnsError(t *testing.T) {
+func TestListenerFactoryCreateListenerReturnsError(t *testing.T) {
 	client, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	bus := quark.NewEventBus(client)
-	_, err := bus.CreateListener()
+	factory := quark.NewListenerFactory(client)
+	_, err := factory.CreateListener()
 	if err == nil {
 		t.Fatal("expected error from CreateListener, got nil")
 	}

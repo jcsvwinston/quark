@@ -476,7 +476,44 @@ controlados por commit/rollback.**
 
 **Estimación**: 1 sesión (~4 h). Bajo riesgo si F5-4 está sólido.
 
-### F5-6 · `EventBus` real — interfaz pública + `LoggerEventBus`/`OTelEventBus`
+### ~~F5-6 · `EventBus` real — interfaz pública + `LoggerEventBus`/`OTelEventBus`~~
+
+**Cerrado (2026-05-21, PR #84)** — `events.go` reescrito: interfaces
+públicas `Event` (`Kind`/`Table`/`Payload`) y `EventBus`
+(`Publish(ctx, Event) error`); evento concreto interno `modelEvent`;
+constantes `eventCreated`/`eventUpdated`/`eventDeleted`. Dos buses
+in-tree: `LoggerEventBus` (slog) y `OTelEventBus` (slog
+correlation-tagged, sin acoplar el SDK OTel al core). El placeholder
+struct `EventBus` de v0.8.0 (LISTEN/NOTIFY, siempre devolvía error) se
+renombró a `ListenerFactory` + `NewListenerFactory` para liberar el
+nombre `EventBus` — **breaking minor** sobre un tipo no-funcional,
+documentado en MIGRATION. `CreateListener` sigue devolviendo
+`ErrDialectNotSupported` (LISTEN/NOTIFY fuera de scope, ADR-0013).
+
+`client.go`: campo `eventBus EventBus` + `Client.UseEventBus(bus)`.
+`query_crud.go`: helper `emitEvent(kind, entity)` — bajo tx registra
+`Tx.OnCommit` (post-commit, descartado en rollback, self-log
+`quark.event.emit_failure` sin double-log con la cola F5-5); sin tx
+emite inline y devuelve `ErrEventEmitFailed` (nuevo sentinel en
+errors.go) envuelto al caller. Enganchado en los 5 callsites CRUD
+(Create→created, Update + UpdateFields→updated, 2× Delete→deleted).
+`emitEvent` retorna nil si no hay bus (coste cero opt-out).
+
+Cobertura: `events_test.go` (8 tests: Logger/OTel publish no-error,
+Create emite created tras commit + nada tras rollback, Update/Delete
+emiten con kind/table correctos, emit-failure non-tx devuelve
+ErrEventEmitFailed + fila persiste, emit-failure tx no propaga,
+no-bus zero-cost) + `p0_fixes_test.go` actualizado a
+`NewListenerFactory`. `-race` clean. Doc nueva
+`website/docs/advanced/events.mdx` + sidebar; docs stale
+(observability/caching/roadmap/transactions/row-level-native)
+actualizadas al rename. CHANGELOG `### Added` + `### Changed`
+(breaking minor). MIGRATION_v0.9.0.md con sección de rename.
+
+**Estimación cumplida**: ~5 h. Delivery síncrona at-least-once, sin
+outbox (ADR-0013); outbox transaccional explícitamente fuera de scope.
+
+### F5-6 (histórico spec)
 
 **Reemplaza el placeholder de `events.go:50` (CreateListener →
 ErrDialectNotSupported). Emisión síncrona vía `OnCommit`.**

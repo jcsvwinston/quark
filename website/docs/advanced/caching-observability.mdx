@@ -338,9 +338,10 @@ err := quark.Notify(ctx, client, "user_events", `{"type":"signup","id":123}`)
 ```
 
 `Notify` validates the channel name and currently supports PostgreSQL through
-`pg_notify`. `EventBus.CreateListener` is experimental and returns
-`ErrDialectNotSupported` in the current release; use a driver-specific listener
-when you need production `LISTEN/NOTIFY`.
+`pg_notify`. The inbound `ListenerFactory.CreateListener` (renamed from
+`EventBus` in v0.9.0) returns `ErrDialectNotSupported` — LISTEN/NOTIFY is out
+of scope for Fase 5. For **outbound** CRUD lifecycle events, see the
+[Event Bus](events) guide (`Client.UseEventBus`).
 
 ## Production Combination
 

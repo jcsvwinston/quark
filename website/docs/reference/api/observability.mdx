@@ -215,7 +215,10 @@ Current support:
 | SQLite | Returns not supported. |
 | Other dialects | Returns not supported. |
 
-### `NewEventBus(client *Client) *EventBus`
+### `NewListenerFactory(client *Client) *ListenerFactory`
 
-Creates an experimental event bus wrapper. `CreateListener` is not implemented
-in the current release and returns `ErrDialectNotSupported`.
+Creates the inbound LISTEN/NOTIFY listener factory (renamed from
+`NewEventBus` in v0.9.0). `CreateListener` is not implemented and returns
+`ErrDialectNotSupported` — LISTEN/NOTIFY is out of scope for Fase 5
+(ADR-0013). This is unrelated to the outbound CRUD-event
+[`EventBus`](../../advanced/events) interface.
