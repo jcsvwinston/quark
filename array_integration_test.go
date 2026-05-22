@@ -24,19 +24,10 @@ type arrayDoc struct {
 // testArray exercises the Array[T] wrapper through Migrate → Create →
 // Find → Update on every dialect that the SharedSuite covers. The same
 // JSON-shaped column type backs all engines (`jsonColumnType` in
-// internal/migrate); this test pins the round-trip on each one.
-//
-// Skip on MSSQL: the MSSQL JSON+NVARCHAR(MAX) encoding bug (F0-8
-// followup E, bug 8) makes any JSON-shaped column fail Scan on that
-// dialect. Array[T] piggybacks on the same column type, so it inherits
-// the skip. When the JSON Scan path is fixed for MSSQL, this skip
-// disappears for free.
+// internal/migrate); this test pins the round-trip on each one,
+// including MSSQL once Value() binds the payload as NVARCHAR.
 func testArray(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	t.Helper()
-
-	if baseClient.Dialect().Name() == "mssql" {
-		t.Skip("Array[T] inherits the MSSQL JSON NVARCHAR(MAX) scan bug — see F0-8 followup E")
-	}
 
 	dropTable(baseClient, "array_docs")
 	if err := baseClient.Migrate(ctx, &arrayDoc{}); err != nil {

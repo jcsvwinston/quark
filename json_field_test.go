@@ -13,21 +13,6 @@ import (
 func testJSONField(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	t.Helper()
 
-	// MSSQL roundtrip currently breaks the JSON Scan path. The driver
-	// returns the NVARCHAR(MAX)-stored payload as bytes that aren't a
-	// clean UTF-8 JSON document — `JSON.Scan` reports
-	// `invalid character 'â' looking for beginning of value`. This is a
-	// real bug at the boundary between the MSSQL driver, the
-	// NVARCHAR(MAX) → UTF-16 storage, and `JSON[T].Scan`'s assumption
-	// that the source is UTF-8 bytes/string. Tracked in TASKS.md
-	// § F0-8-followup bug 8; the fix probably needs either a different
-	// column type (`VARCHAR(MAX)`) for MSSQL JSON or a UTF-16 detection
-	// path in `JSON[T].Scan`. Skip until reproduced locally with
-	// confirmed bytes on the wire.
-	if baseClient.Dialect().Name() == "mssql" {
-		t.Skip("JSON[T] roundtrip on MSSQL NVARCHAR(MAX) is broken — see F0-8 followup bug 8")
-	}
-
 	type Settings struct {
 		Theme  string   `json:"theme"`
 		Volume int      `json:"volume"`
