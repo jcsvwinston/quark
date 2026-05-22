@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,7 +59,31 @@ type Tx struct {
 	afterHooks      []func() error
 	onCommitHooks   []func(context.Context) error
 	onRollbackHooks []func(context.Context) error
-	hooksMu         sync.Mutex
+	// savepointMarks snapshots the hook-queue lengths captured when
+	// each live savepoint was created. ROLLBACK TO a savepoint undoes
+	// the SQL written since it was set; [Tx.RollbackTo] uses these
+	// marks to symmetrically undo the After*/OnCommit/OnRollback hooks
+	// queued in that same window, so a rolled-back savepoint scope can
+	// never fire the side-effects of work it just discarded on the
+	// eventual outer commit (ADR-0013 Regla 2 extended to savepoints).
+	// Guarded by hooksMu.
+	savepointMarks []savepointMark
+	hooksMu        sync.Mutex
+
+	// savepointSeq supplies unique savepoint names for the [Tx.Tx]
+	// nested-transaction helper, so two nested scopes never collide on
+	// a clock-derived name. Zero value is ready to use.
+	savepointSeq atomic.Uint64
+}
+
+// savepointMark records the FIFO hook-queue lengths at the instant a
+// savepoint was created. RollbackTo(name) truncates each queue back to
+// the lengths stored for the most recent savepoint named `name`.
+type savepointMark struct {
+	name      string
+	afterN    int
+	commitN   int
+	rollbackN int
 }
 
 // BeginTx starts a new database transaction with the given options.
@@ -234,6 +259,7 @@ func (t *Tx) Commit() error {
 func (t *Tx) Rollback() error {
 	t.discardAfterHooks()
 	t.discardOnCommitHooks()
+	t.discardSavepointMarks()
 	err := t.tx.Rollback()
 	t.drainCtxHooks(t.takeOnRollbackHooks(), "quark.hook.on_rollback_error")
 	return err
@@ -365,6 +391,17 @@ func (t *Tx) discardAllHooks() {
 	t.afterHooks = nil
 	t.onCommitHooks = nil
 	t.onRollbackHooks = nil
+	t.savepointMarks = nil
+	t.hooksMu.Unlock()
+}
+
+// discardSavepointMarks forgets all savepoint bookkeeping. Called from
+// the terminal [Tx.Rollback] path; [Tx.discardAllHooks] clears it
+// inline on the commit-failure path. Keeps savepointMarks consistent
+// with the (now-empty) hook queues once the transaction is over.
+func (t *Tx) discardSavepointMarks() {
+	t.hooksMu.Lock()
+	t.savepointMarks = nil
 	t.hooksMu.Unlock()
 }
 
@@ -416,35 +453,131 @@ func (t *Tx) discardAfterHooks() {
 	t.hooksMu.Unlock()
 }
 
-// Savepoint creates a savepoint with the given name.
+// markSavepoint records the current hook-queue lengths against name.
+// Called after a SAVEPOINT statement succeeds.
+func (t *Tx) markSavepoint(name string) {
+	t.hooksMu.Lock()
+	t.savepointMarks = append(t.savepointMarks, savepointMark{
+		name:      name,
+		afterN:    len(t.afterHooks),
+		commitN:   len(t.onCommitHooks),
+		rollbackN: len(t.onRollbackHooks),
+	})
+	t.hooksMu.Unlock()
+}
+
+// rollbackHooksTo discards every After*/OnCommit/OnRollback hook queued
+// since the most recent savepoint named `name`, mirroring the ROLLBACK
+// TO SAVEPOINT that just undid the writes those hooks were about to
+// react to. Savepoints stacked above `name` are forgotten (ROLLBACK TO
+// destroys nested savepoints) while `name` itself survives — a
+// savepoint can be rolled back to repeatedly until released. A name
+// with no recorded mark (e.g. a savepoint issued via raw Exec) is a
+// no-op.
+func (t *Tx) rollbackHooksTo(name string) {
+	t.hooksMu.Lock()
+	defer t.hooksMu.Unlock()
+	idx := t.findSavepointMark(name)
+	if idx < 0 {
+		return
+	}
+	m := t.savepointMarks[idx]
+	t.afterHooks = truncateHooks(t.afterHooks, m.afterN)
+	t.onCommitHooks = truncateHooks(t.onCommitHooks, m.commitN)
+	t.onRollbackHooks = truncateHooks(t.onRollbackHooks, m.rollbackN)
+	t.savepointMarks = t.savepointMarks[:idx+1]
+}
+
+// releaseSavepointMark forgets the most recent savepoint named `name`
+// and any stacked above it without touching the hook queues — a
+// released savepoint's work merges into the surrounding transaction,
+// so its hooks stay queued for the eventual commit or rollback.
+func (t *Tx) releaseSavepointMark(name string) {
+	t.hooksMu.Lock()
+	defer t.hooksMu.Unlock()
+	idx := t.findSavepointMark(name)
+	if idx < 0 {
+		return
+	}
+	t.savepointMarks = t.savepointMarks[:idx]
+}
+
+// findSavepointMark returns the index of the most recent mark with the
+// given name, or -1. Most-recent matches SQL semantics: re-using a
+// savepoint name shadows the earlier one, and ROLLBACK TO / RELEASE
+// target the newest. Caller holds hooksMu.
+func (t *Tx) findSavepointMark(name string) int {
+	for i := len(t.savepointMarks) - 1; i >= 0; i-- {
+		if t.savepointMarks[i].name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// truncateHooks reslices s to length n, zeroing the dropped trailing
+// entries so their captured closures can be garbage-collected before
+// the transaction ends. n >= len(s) is a no-op (defensive against a
+// concurrent drain having already shortened the queue).
+func truncateHooks[F any](s []F, n int) []F {
+	if n >= len(s) {
+		return s
+	}
+	var zero F
+	for i := n; i < len(s); i++ {
+		s[i] = zero
+	}
+	return s[:n]
+}
+
+// Savepoint creates a savepoint with the given name. Hooks queued by
+// CRUD run between this call and a matching [Tx.RollbackTo] are
+// unwound by that rollback (see [Tx.RollbackTo]).
 func (t *Tx) Savepoint(name string) error {
 	if err := t.client.guard.ValidateIdentifier(name); err != nil {
 		return err
 	}
-	_, err := t.tx.Exec("SAVEPOINT " + t.client.dialect.Quote(name))
-	return err
+	if _, err := t.tx.Exec("SAVEPOINT " + t.client.dialect.Quote(name)); err != nil {
+		return err
+	}
+	t.markSavepoint(name)
+	return nil
 }
 
-// RollbackTo rolls back to the named savepoint.
+// RollbackTo rolls back to the named savepoint. Beyond undoing the SQL
+// written since the savepoint, it discards the After*/OnCommit/
+// OnRollback hooks queued in that window so the rolled-back work does
+// not trigger its side-effects on the eventual commit (ADR-0013 Regla
+// 2). Reactions to the partial rollback flow through the error the
+// nested scope returns, not through OnRollback (which fires only on a
+// whole-transaction rollback).
 func (t *Tx) RollbackTo(name string) error {
 	if err := t.client.guard.ValidateIdentifier(name); err != nil {
 		return err
 	}
-	_, err := t.tx.Exec("ROLLBACK TO SAVEPOINT " + t.client.dialect.Quote(name))
-	return err
+	if _, err := t.tx.Exec("ROLLBACK TO SAVEPOINT " + t.client.dialect.Quote(name)); err != nil {
+		return err
+	}
+	t.rollbackHooksTo(name)
+	return nil
 }
 
-// ReleaseSavepoint releases the named savepoint.
+// ReleaseSavepoint releases the named savepoint. Hooks queued since it
+// was set stay on the transaction queues — released work is part of
+// the surrounding transaction and its side-effects fire with it.
 func (t *Tx) ReleaseSavepoint(name string) error {
 	if err := t.client.guard.ValidateIdentifier(name); err != nil {
 		return err
 	}
-	_, err := t.tx.Exec("RELEASE SAVEPOINT " + t.client.dialect.Quote(name))
-	return err
+	if _, err := t.tx.Exec("RELEASE SAVEPOINT " + t.client.dialect.Quote(name)); err != nil {
+		return err
+	}
+	t.releaseSavepointMark(name)
+	return nil
 }
 
 func (t *Tx) Tx(ctx context.Context, fn func(tx *Tx) error) error {
-	spName := fmt.Sprintf("sp_%d", time.Now().UnixNano())
+	spName := fmt.Sprintf("sp_%d", t.savepointSeq.Add(1))
 	if err := t.Savepoint(spName); err != nil {
 		return err
 	}

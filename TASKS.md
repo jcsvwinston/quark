@@ -11,16 +11,27 @@
 > documentados en `MIGRATION_v0.9.0.md`. **Próxima fase: Fase 6**
 > (codegen + HA + benchmarks → v1.0); requiere apertura formal con
 > ADR para la convivencia reflect/codegen. Deuda menor heredada:
-> savepoint-rollback gap, ~~warning `client.Raw()` bajo Native~~
-> (añadido en `[Unreleased]`: `RawQuery`/`Exec` emiten
-> `quark.tenant.raw_under_native_rls` cuando hay tenant en contexto bajo
-> router Native; PG sigue enforcando la policy, el warning es UX —
-> `client.go` + `tenant_router.go` + `raw_under_native_test.go`),
-> ~~guards `logger != nil` redundantes~~ (**descartado**: NO son
-> redundantes — protegen literales de test que pasan logger nil
-> (`newStampedeStore(...,nil)`, `&Client{}`); en producción `c.logger`
-> siempre es no-nil, pero quitarlos rompe tests sin beneficio), MSSQL
-> JSON[T] scan bug, Oracle fuera de CI.
+> ~~savepoint-rollback gap~~ (corregido en `[Unreleased]`: los hooks
+> `After*`/`OnCommit`/`OnRollback` encolados dentro de un scope de
+> savepoint se descartan al hacer `RollbackTo`; `tx.go` +
+> `hooks_tx_test.go` + subtest `SavepointHookUnwind` en SharedSuite),
+> ~~warning `client.Raw()` bajo Native~~ (añadido en `[Unreleased]`:
+> `RawQuery`/`Exec` emiten `quark.tenant.raw_under_native_rls` cuando
+> hay tenant en contexto bajo router Native; PG sigue enforcando la
+> policy, el warning es UX — `client.go` + `tenant_router.go` +
+> `raw_under_native_test.go`), ~~guards `logger != nil` redundantes~~
+> (**descartado**: NO son redundantes — protegen literales de test que
+> pasan logger nil (`newStampedeStore(...,nil)`, `&Client{}`); en
+> producción `c.logger` siempre es no-nil, pero quitarlos rompe tests
+> sin beneficio), ~~MSSQL JSON[T] scan bug~~ (corregido en
+> `[Unreleased]`: `JSON[T].Value()`/`Array[T].Value()` devuelven string
+> en vez de `[]byte`, así go-mssqldb los bindea como NVARCHAR y no como
+> VARBINARY; round-trip limpio en MSSQL para JSON/Array/audit, skips
+> eliminados), Oracle fuera de CI. **Gap nuevo documentado**: los
+> savepoints emiten SQL ANSI (`SAVEPOINT` / `ROLLBACK TO SAVEPOINT`);
+> MSSQL necesita `SAVE TRANSACTION` / `ROLLBACK TRANSACTION`, así que
+> savepoints no funcionan en MSSQL hoy — `SavepointHookUnwind` skipea
+> MSSQL hasta que se añada el soporte de dialecto (follow-up).
 >
 > **Fase 4 cerrada (2026-05-15, v0.8.0).** Los 7 items F4-1..F4-7
 > entregados: OTel metrics + span redaction (#70), slow query log
@@ -98,10 +109,13 @@ Fase 5):
 - Cross-instance stampede protection (ADR-0011 §Cuándo reabrir): sólo
   si surge demanda real de stampede cross-instancia. Sucesor de
   ADR-0011 con un hook `DistributedLock` opcional.
-- F4-7 deadlock real cross-engine integration test (TASKS.md § F4-7
-  TODO): el classifier y el retry loop están unit-tested; falta un
-  test que provoque un deadlock real en PG con dos tx de orden
-  invertido.
+- ~~F4-7 deadlock real cross-engine integration test~~ **Cerrado en
+  `[Unreleased]`** — `tx_deadlock_integration_test.go`
+  (`TestDeadlockRetry{Postgres,MySQL,MariaDB}`): dos tx paralelas toman
+  los mismos dos row-locks en orden invertido tras un barrier, el motor
+  aborta una víctima (40P01 / 1213) y el retry bajo `WithDeadlockRetry`
+  recupera. SQLite excluido (single-writer); MSSQL/Oracle cubiertos por
+  el classifier unit test (`db_errors_test.go`).
 
 **Foco sugerido** del slash command: `fase5` — abrir la próxima fase
 con el mismo rigor que Fase 4. Cada F5-N como su propio PR.
@@ -873,9 +887,10 @@ con orden de lock invertido).
 Diferidos a future work explícitos (no bloquearon el cierre y caen en
 ADRs / issues posteriores cuando aparezca demanda real): negative
 caching, compresión gzip de values, cross-instance stampede
-protection (ADR sucesor de ADR-0011 con `DistributedLock` hook),
-integration test de deadlock cross-engine real con dos tx de lock
-invertido en PG.
+protection (ADR sucesor de ADR-0011 con `DistributedLock` hook). El
+integration test de deadlock cross-engine real (dos tx de lock
+invertido) llegó en `[Unreleased]` —
+`tx_deadlock_integration_test.go`, PG/MySQL/MariaDB.
 
 ---
 
