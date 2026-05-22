@@ -11,9 +11,16 @@
 > documentados en `MIGRATION_v0.9.0.md`. **Próxima fase: Fase 6**
 > (codegen + HA + benchmarks → v1.0); requiere apertura formal con
 > ADR para la convivencia reflect/codegen. Deuda menor heredada:
-> savepoint-rollback gap, warning `client.Raw()` bajo Native, guards
-> `logger != nil` redundantes, MSSQL JSON[T] scan bug, Oracle fuera
-> de CI.
+> savepoint-rollback gap, ~~warning `client.Raw()` bajo Native~~
+> (añadido en `[Unreleased]`: `RawQuery`/`Exec` emiten
+> `quark.tenant.raw_under_native_rls` cuando hay tenant en contexto bajo
+> router Native; PG sigue enforcando la policy, el warning es UX —
+> `client.go` + `tenant_router.go` + `raw_under_native_test.go`),
+> ~~guards `logger != nil` redundantes~~ (**descartado**: NO son
+> redundantes — protegen literales de test que pasan logger nil
+> (`newStampedeStore(...,nil)`, `&Client{}`); en producción `c.logger`
+> siempre es no-nil, pero quitarlos rompe tests sin beneficio), MSSQL
+> JSON[T] scan bug, Oracle fuera de CI.
 >
 > **Fase 4 cerrada (2026-05-15, v0.8.0).** Los 7 items F4-1..F4-7
 > entregados: OTel metrics + span redaction (#70), slow query log
