@@ -134,6 +134,28 @@ placeholder `EventBus` → `ListenerFactory`) — ver
   fila escrito **atómico** con el commit (no post-commit — ADR-0013
   "junto al commit") (#85).
 
+## v0.10.0 — fixes + Phase 6 opening
+
+Maintenance release: correctness fixes plus the formal opening of
+Phase 6. No new public API beyond the Native-RLS warning.
+
+- [x] Savepoint rollback unwinds the `After*`/`OnCommit`/`OnRollback`
+      hooks queued in that scope, so undone work no longer fires its
+      side-effects on the outer commit ([#88]).
+- [x] `JSON[T]` / `Array[T]` round-trip on SQL Server — `Value()` binds
+      as NVARCHAR (string), not VARBINARY (`[]byte`) ([#89]).
+- [x] Real cross-engine deadlock-retry integration test (PG / MySQL /
+      MariaDB) backing `WithDeadlockRetry` ([#90]).
+- [x] `quark.tenant.raw_under_native_rls` warning when `RawQuery`/`Exec`
+      run with a tenant in context under `RowLevelSecurityNative` ([#91]).
+- [x] Phase 6 formally opened — ADR-0014 + F6-1..F6-9 ([#93]).
+
+[#88]: https://github.com/jcsvwinston/quark/pull/88
+[#89]: https://github.com/jcsvwinston/quark/pull/89
+[#90]: https://github.com/jcsvwinston/quark/pull/90
+[#91]: https://github.com/jcsvwinston/quark/pull/91
+[#93]: https://github.com/jcsvwinston/quark/pull/93
+
 ## Phase 6 — codegen + HA (v1.0)
 
 Formally opened 2026-05-22 (full scope). Anchor decision:

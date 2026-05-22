@@ -7,46 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- tenant: under `RowLevelSecurityNative`, `Client.RawQuery` and
-  `Client.Exec` now emit a structured `quark.tenant.raw_under_native_rls`
-  warning when the call's context resolves a tenant — a cue that the raw
-  call sidesteps the tenant-scoped query builder. The PostgreSQL policy
-  still enforces isolation server-side, so this is a developer-experience
-  signal, not a security boundary. The check is stamped onto the router's
-  `BaseClient` at `NewTenantRouter` setup and is a no-op for every other
-  configuration (zero cost on the raw path).
-
-### Changed
-
-- docs: formally open Phase 6 (codegen + HA + sharding + benchmarks →
-  v1.0). Adds [ADR-0014](docs/adr/0014-codegen-coexistence-typed-registry.md)
-  (the codegen↔reflect coexistence mechanism that ADR-0002 left open)
-  and decomposes the phase into F6-1..F6-9 in `TASKS.md`. No code or API
-  change.
-
-### Fixed
-
-- tx: rolling back to a savepoint now discards the model `After*` hooks
-  and `OnCommit`/`OnRollback` callbacks queued by CRUD run since that
-  savepoint. Previously they survived the `RollbackTo` and fired on the
-  outer commit, so a rolled-back nested scope (via `Tx.RollbackTo` or
-  the `Tx.Tx` helper) could trigger the side-effects — published
-  events, audit entries, cache invalidations — of work that never
-  committed. `ReleaseSavepoint` keeps the queued hooks, as released
-  work merges into the surrounding transaction (ADR-0013 Regla 2,
-  extended to savepoints).
-- types: `JSON[T]` and `Array[T]` now round-trip correctly on SQL
-  Server. Their `Value()` returned `[]byte`, which go-mssqldb binds as
-  VARBINARY; written into the `NVARCHAR(MAX)` JSON column that forces an
-  implicit VARBINARY→NVARCHAR conversion reinterpreting the UTF-8 bytes
-  as UTF-16 and corrupting the payload, so `Scan` failed with
-  `invalid character 'â'`. `Value()` now returns a string, which binds
-  as NVARCHAR on SQL Server and as the equivalent text type on every
-  other driver. This also repairs the optional audit log's `diff`
-  read-back on SQL Server; the MSSQL skips are removed from the
-  JSON/Array/audit test suites.
+<!-- release-please manages versioned sections below; entries for the
+     next release are generated from Conventional Commits. v0.10.0
+     entries live in the [0.10.0] section (PR #94) and in
+     docs/RELEASE_NOTES_v0.10.0.md. -->
 
 ## [0.9.0] - 2026-05-21
 
