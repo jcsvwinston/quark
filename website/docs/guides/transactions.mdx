@@ -46,6 +46,17 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 
 Savepoint support depends on the underlying database engine.
 
+Rolling back to a savepoint unwinds more than the SQL: the model
+`After*` hooks and `OnCommit`/`OnRollback` callbacks queued by CRUD run
+**after** that savepoint are discarded along with it. This keeps the
+contract honest — work that was rolled back never fires the
+side-effects that would have followed it. A savepoint rollback is a
+*partial* rollback, not a transaction rollback, so it does **not** fire
+the `OnRollback` callbacks registered in that scope; react to the
+partial rollback through the error your nested code returns instead.
+`ReleaseSavepoint` keeps the queued hooks — released work merges into
+the surrounding transaction and its side-effects fire with it.
+
 ## Side-effects on commit/rollback
 
 `Tx.OnCommit` and `Tx.OnRollback` register callbacks that fire only

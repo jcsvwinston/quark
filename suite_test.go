@@ -41,6 +41,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testTransactions(ctx, t, client)
 	})
 
+	t.Run("SavepointHookUnwind", func(t *testing.T) {
+		testSavepointHookUnwind(ctx, t, client)
+	})
+
 	t.Run("Relationships", func(t *testing.T) {
 		testRelationships(ctx, t, client)
 	})
