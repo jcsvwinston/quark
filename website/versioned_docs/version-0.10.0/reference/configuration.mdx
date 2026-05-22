@@ -1,0 +1,220 @@
+---
+sidebar_position: 3
+title: Configuration Reference
+description: "All quark.New options: dialect, logger, limits, cache, middleware, and observers."
+---
+
+# Configuration Reference
+
+Quark configuration is per client. `quark.New(driverName, dataSource, ...options)`
+does not modify global ORM state.
+
+## Minimal Client
+
+```go
+client, err := quark.New("sqlite", "file:app.db?cache=shared")
+```
+
+`quark.New` opens the connection itself and pings it with a five-second startup
+timeout. The dialect is auto-detected from the driver name.
+
+## Production Shape
+
+```go
+limits := quark.DefaultLimits()
+limits.MaxResults = 10_000
+limits.MaxWhereConditions = 20
+limits.MaxJoins = 5
+limits.QueryTimeout = 30 * time.Second
+limits.AllowRawQueries = false
+limits.SafeMigrations = true
+
+store := memory.New()
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLogger(logger),
+    quark.WithLimits(limits),
+    quark.WithCacheStore(store),
+    quark.WithMiddleware(quarkotel.New()),
+    quark.WithQueryObserver(metricsObserver),
+)
+```
+
+Start from `DefaultLimits()` and override fields selectively. `WithLimits`
+replaces the entire `Limits` struct; a zero `QueryTimeout` creates immediately
+expired query contexts in the current implementation.
+
+## Options
+
+| Option | Purpose |
+| --- | --- |
+| `WithDialect(d Dialect)` | Overrides the dialect that would be auto-detected from the driver name. |
+| `WithLogger(l *slog.Logger)` | Sets the client logger. |
+| `WithLimits(l Limits)` | Sets security and performance limits. |
+| `WithCacheStore(s CacheStore)` | Enables query cache storage. |
+| `WithMiddleware(m Middleware)` | Adds execution middleware. |
+| `WithQueryObserver(o QueryObserver)` | Adds post-execution query observers. |
+| `WithMaxOpenConns(n int)` | Sets `*sql.DB.SetMaxOpenConns`. |
+| `WithMaxIdleConns(n int)` | Sets `*sql.DB.SetMaxIdleConns`. |
+| `WithConnMaxLifetime(d time.Duration)` | Sets `*sql.DB.SetConnMaxLifetime`. |
+
+## Dialect
+
+```go
+quark.WithDialect(quark.PostgreSQL())
+quark.WithDialect(quark.MySQL())
+quark.WithDialect(quark.MariaDB())
+quark.WithDialect(quark.SQLite())
+quark.WithDialect(quark.MSSQL())
+quark.WithDialect(quark.Oracle())
+```
+
+The dialect controls placeholders, identifier quoting, `RETURNING`, last-insert
+ID behavior, upsert SQL, JSON extraction, pagination, routines, and schema DDL.
+
+`quark.New` auto-detects the dialect from the driver name. Pass `WithDialect`
+only when the driver name is ambiguous (e.g. `pgx` shared between PostgreSQL
+and CockroachDB) or when registering a custom dialect.
+
+## Logger
+
+```go
+logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLogger(logger),
+)
+```
+
+The logger is used for client initialization, safe default limit warnings,
+schema sync messages, cache hits, and migration diagnostics.
+
+## Limits
+
+```go
+type Limits struct {
+    MaxQueryLength     int
+    MaxResults         int
+    MaxJoins           int
+    MaxWhereConditions int
+    QueryTimeout       time.Duration
+    AllowRawQueries    bool
+    SafeMigrations     bool
+}
+```
+
+Defaults:
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `MaxQueryLength` | `10 * 1024` | Rejects generated SELECT SQL above this byte length. |
+| `MaxResults` | `10000` | Intended cap for list-style reads. Prefer explicit `Limit`. |
+| `MaxJoins` | `5` | Rejects SELECT queries with too many joins. |
+| `MaxWhereConditions` | `20` | Rejects excessive predicate chains. |
+| `QueryTimeout` | `30 * time.Second` | Applied to ORM query contexts. |
+| `AllowRawQueries` | `false` | Required for `RawQuery`, `Exec`, and `WhereSubquery`. |
+| `SafeMigrations` | `true` | Prevents `Sync` from dropping columns. |
+
+Recommended pattern:
+
+```go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true // only for migration/admin clients
+limits.MaxWhereConditions = 30
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLimits(limits),
+)
+```
+
+Use separate app and migration clients when possible: app clients can keep
+`AllowRawQueries` disabled, while migration commands can opt in explicitly.
+
+## Cache Store
+
+Memory:
+
+```go
+import "github.com/jcsvwinston/quark/cache/memory"
+
+store := memory.New()
+defer store.Close()
+
+client, err := quark.New("sqlite", "file:app.db?cache=shared",
+    quark.WithCacheStore(store),
+)
+```
+
+Redis:
+
+```go
+import rediscache "github.com/jcsvwinston/quark/cache/redis"
+
+store := rediscache.New(rediscache.Options{
+    Addr:     "localhost:6379",
+    Password: "",
+    DB:       0,
+})
+
+client, err := quark.New("postgres", dsn,
+    quark.WithCacheStore(store),
+)
+```
+
+Queries are cached only when `.Cache(ttl, tags...)` is present.
+
+## Middleware
+
+```go
+type AuditMiddleware struct {
+    quark.BaseMiddleware
+}
+
+func (m *AuditMiddleware) WrapQuery(next quark.QueryFunc) quark.QueryFunc {
+    return func(ctx context.Context, exec quark.Executor, sqlStr string, args []any) (*sql.Rows, error) {
+        rows, err := next(ctx, exec, sqlStr, args)
+        auditQuery(ctx, sqlStr, err)
+        return rows, err
+    }
+}
+
+client, err := quark.New("postgres", dsn,
+    quark.WithMiddleware(&AuditMiddleware{}),
+)
+```
+
+Middleware can wrap:
+
+| Method | Path |
+| --- | --- |
+| `WrapQuery` | `QueryContext`, used by list and streaming reads. |
+| `WrapQueryRow` | `QueryRowContext`, used by counts, inserts with returning, aggregates. |
+| `WrapExec` | `ExecContext`, used by writes and DDL helpers. |
+
+Multiple middleware are executed in registration order.
+
+## Query Observers
+
+```go
+type MetricsObserver struct{}
+
+func (m *MetricsObserver) ObserveQuery(event quark.QueryEvent) {
+    metrics.Record(event.Table, event.Operation, event.Duration, event.Rows, event.Error)
+}
+
+client, err := quark.New("postgres", dsn,
+    quark.WithQueryObserver(&MetricsObserver{}),
+)
+```
+
+`QueryEvent` fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `SQL` | `string` | SQL sent to the driver. |
+| `Args` | `[]any` | Bound arguments. |
+| `Duration` | `time.Duration` | Execution duration measured by Quark. |
+| `Rows` | `int64` | Rows returned or affected when known. |
+| `Error` | `error` | Nil on success. |
+| `Table` | `string` | Model table when known. |
+| `Operation` | `string` | `SELECT`, `EXEC`, `QUERY_ROW`, `RAW_QUERY`, `RAW_EXEC`, etc. |
