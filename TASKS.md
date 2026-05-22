@@ -11,9 +11,27 @@
 > documentados en `MIGRATION_v0.9.0.md`. **Próxima fase: Fase 6**
 > (codegen + HA + benchmarks → v1.0); requiere apertura formal con
 > ADR para la convivencia reflect/codegen. Deuda menor heredada:
-> savepoint-rollback gap, warning `client.Raw()` bajo Native, guards
-> `logger != nil` redundantes, MSSQL JSON[T] scan bug, Oracle fuera
-> de CI.
+> ~~savepoint-rollback gap~~ (corregido en `[Unreleased]`: los hooks
+> `After*`/`OnCommit`/`OnRollback` encolados dentro de un scope de
+> savepoint se descartan al hacer `RollbackTo`; `tx.go` +
+> `hooks_tx_test.go` + subtest `SavepointHookUnwind` en SharedSuite),
+> ~~warning `client.Raw()` bajo Native~~ (añadido en `[Unreleased]`:
+> `RawQuery`/`Exec` emiten `quark.tenant.raw_under_native_rls` cuando
+> hay tenant en contexto bajo router Native; PG sigue enforcando la
+> policy, el warning es UX — `client.go` + `tenant_router.go` +
+> `raw_under_native_test.go`), ~~guards `logger != nil` redundantes~~
+> (**descartado**: NO son redundantes — protegen literales de test que
+> pasan logger nil (`newStampedeStore(...,nil)`, `&Client{}`); en
+> producción `c.logger` siempre es no-nil, pero quitarlos rompe tests
+> sin beneficio), ~~MSSQL JSON[T] scan bug~~ (corregido en
+> `[Unreleased]`: `JSON[T].Value()`/`Array[T].Value()` devuelven string
+> en vez de `[]byte`, así go-mssqldb los bindea como NVARCHAR y no como
+> VARBINARY; round-trip limpio en MSSQL para JSON/Array/audit, skips
+> eliminados), Oracle fuera de CI. **Gap nuevo documentado**: los
+> savepoints emiten SQL ANSI (`SAVEPOINT` / `ROLLBACK TO SAVEPOINT`);
+> MSSQL necesita `SAVE TRANSACTION` / `ROLLBACK TRANSACTION`, así que
+> savepoints no funcionan en MSSQL hoy — `SavepointHookUnwind` skipea
+> MSSQL hasta que se añada el soporte de dialecto (follow-up).
 >
 > **Fase 4 cerrada (2026-05-15, v0.8.0).** Los 7 items F4-1..F4-7
 > entregados: OTel metrics + span redaction (#70), slow query log
@@ -86,13 +104,16 @@ post-v0.9.0 en vuelo, ver abajo):
    `website/docs/` + CHANGELOG; F6-5/F6-7 escriben su ADR (ADR-0015/0016)
    en el mismo PR.
 
-**Deuda menor post-v0.9.0** (en vuelo / cerrada en `[Unreleased]`, no
-bloquea Fase 6): savepoint-rollback gap (PR #88), MSSQL JSON[T] scan
-bug (PR #89), F4-7 deadlock real cross-engine test (PR #90),
-Raw-under-Native warning (PR #91). Guards `logger != nil`: **descartado**
-(no son redundantes — protegen literales de test con logger nil).
-Cross-instance stampede protection sigue diferido (ADR-0011 §Cuándo
-reabrir; sólo si surge demanda real).
+**Deuda menor post-v0.9.0** (cerrada en `[Unreleased]`, no bloquea
+Fase 6): savepoint-rollback gap (PR #88), MSSQL JSON[T] scan bug
+(PR #89), F4-7 deadlock real cross-engine test (PR #90 —
+`tx_deadlock_integration_test.go`, dos tx con lock invertido tras un
+barrier; SQLite excluido, MSSQL/Oracle cubiertos por el classifier
+unit test), Raw-under-Native warning (PR #91). Guards `logger != nil`:
+**descartado** (no son redundantes — protegen literales de test con
+logger nil). Cross-instance stampede protection sigue diferido
+(ADR-0011 §Cuándo reabrir; sólo si surge demanda real, con un hook
+`DistributedLock` opcional).
 
 **Foco sugerido** del slash command: `fase6` — abrir el camino a v1.0
 con el mismo rigor que Fases 3/4/5. Cada F6-N como su propio PR.
@@ -996,9 +1017,10 @@ con orden de lock invertido).
 Diferidos a future work explícitos (no bloquearon el cierre y caen en
 ADRs / issues posteriores cuando aparezca demanda real): negative
 caching, compresión gzip de values, cross-instance stampede
-protection (ADR sucesor de ADR-0011 con `DistributedLock` hook),
-integration test de deadlock cross-engine real con dos tx de lock
-invertido en PG.
+protection (ADR sucesor de ADR-0011 con `DistributedLock` hook). El
+integration test de deadlock cross-engine real (dos tx de lock
+invertido) llegó en `[Unreleased]` —
+`tx_deadlock_integration_test.go`, PG/MySQL/MariaDB.
 
 ---
 

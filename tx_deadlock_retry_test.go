@@ -203,12 +203,11 @@ func TestTx_PanicInClosureStillRollsBackAndRePanics(t *testing.T) {
 	}
 }
 
-// TODO(F4-7-followup): a real cross-engine deadlock integration test.
-// The classifier (db_errors_test.go) and the retry loop
-// (tx_deadlock_retry_test.go) are covered, but provoking a *real*
-// deadlock deterministically — typically two transactions with
-// inverted lock order — needs a multi-writer engine running in CI.
-// Postgres is the easiest target; the test would open two parallel
-// txs from the same process, take row locks in opposite order, and
-// assert that one of them retries successfully under
-// WithDeadlockRetry. Tracked as a Phase 4 follow-up in TASKS.md.
+// The real cross-engine deadlock integration test the F4-7 follow-up
+// called for now lives in tx_deadlock_integration_test.go
+// (TestDeadlockRetry{Postgres,MySQL,MariaDB}): two parallel txs take row
+// locks in opposite order, the engine aborts a victim, and the retry
+// recovers. The unit tests above keep fabricating the SQLSTATE on
+// purpose — they assert the retry loop's accounting (attempt counts,
+// backoff cancellation, panic re-raise) deterministically and without a
+// container.

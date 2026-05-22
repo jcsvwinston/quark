@@ -40,14 +40,21 @@ type JSON[T any] struct {
 	V T
 }
 
-// Value implements driver.Valuer by JSON-marshalling V. Drivers receive the
-// resulting []byte (treated as a JSON string) and store it in the column.
+// Value implements driver.Valuer by JSON-marshalling V into the column.
+//
+// The marshalled JSON is returned as a string, not []byte: go-mssqldb
+// binds a []byte parameter as VARBINARY, and storing that into the
+// NVARCHAR(MAX) JSON column triggers an implicit VARBINARY→NVARCHAR
+// conversion that reinterprets the UTF-8 bytes as UTF-16 and corrupts
+// the payload. Returning a string binds as NVARCHAR (and as the
+// equivalent text type on every other driver), so the round-trip is
+// clean across all dialects.
 func (j JSON[T]) Value() (driver.Value, error) {
 	b, err := json.Marshal(j.V)
 	if err != nil {
 		return nil, fmt.Errorf("JSON.Value: marshal %T: %w", j.V, err)
 	}
-	return b, nil
+	return string(b), nil
 }
 
 // Scan implements sql.Scanner. Accepts []byte and string sources (the two

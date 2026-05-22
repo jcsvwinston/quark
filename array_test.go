@@ -48,12 +48,12 @@ func TestArray_ValueScanRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Value(nil V): %v", err)
 		}
-		bytes, ok := v.([]byte)
+		s, ok := v.(string)
 		if !ok {
-			t.Fatalf("Value should return []byte, got %T", v)
+			t.Fatalf("Value should return string, got %T", v)
 		}
-		if string(bytes) != "[]" {
-			t.Errorf("Value(nil V) = %q, want %q", string(bytes), "[]")
+		if s != "[]" {
+			t.Errorf("Value(nil V) = %q, want %q", s, "[]")
 		}
 	})
 
