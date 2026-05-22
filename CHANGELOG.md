@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- tx: rolling back to a savepoint now discards the model `After*` hooks
+  and `OnCommit`/`OnRollback` callbacks queued by CRUD run since that
+  savepoint. Previously they survived the `RollbackTo` and fired on the
+  outer commit, so a rolled-back nested scope (via `Tx.RollbackTo` or
+  the `Tx.Tx` helper) could trigger the side-effects — published
+  events, audit entries, cache invalidations — of work that never
+  committed. `ReleaseSavepoint` keeps the queued hooks, as released
+  work merges into the surrounding transaction (ADR-0013 Regla 2,
+  extended to savepoints).
+
 ## [0.9.0] - 2026-05-21
 
 Phase 5 release — engine-enforced multi-tenancy, transactional hooks,
