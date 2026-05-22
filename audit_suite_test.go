@@ -48,17 +48,6 @@ const (
 // is affected), then verifies created/updated/deleted rows land in
 // quark_audit with the right operation, attribution, and diff shape.
 func testAuditLog(ctx context.Context, t *testing.T, client *quark.Client) {
-	// The audit WRITE path is dialect-agnostic and works on MSSQL
-	// (a raw parameterised INSERT). This test, however, reads the
-	// `diff` column back through JSON[map[string]any], which hits the
-	// known MSSQL NVARCHAR(MAX) JSON-scan bug (F0-8 followup bug 8) —
-	// the same reason testJSONField and testArray skip on MSSQL. The
-	// other four CI engines (PG/MySQL/MariaDB/SQLite) fully cover the
-	// read-back assertions.
-	if client.Dialect().Name() == "mssql" {
-		t.Skip("audit diff read-back uses JSON[T], broken on MSSQL NVARCHAR(MAX) — see F0-8 followup bug 8")
-	}
-
 	cfg := quark.AuditConfig{
 		UserFromContext: func(c context.Context) string {
 			if v, ok := c.Value(auditUserKey).(string); ok {

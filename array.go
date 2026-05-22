@@ -52,16 +52,20 @@ type Array[T any] struct {
 // useful default when the column is also used in SQL operations.
 // Pair with quark.Nullable[Array[T]] when you need to distinguish
 // NULL from empty.
+//
+// The result is a string, not []byte, for the same reason as
+// [JSON.Value]: a []byte binds as VARBINARY on go-mssqldb and corrupts
+// the NVARCHAR(MAX) column via an implicit UTF-16 reinterpretation.
 func (a Array[T]) Value() (driver.Value, error) {
 	if a.V == nil {
-		return []byte("[]"), nil
+		return "[]", nil
 	}
 	b, err := json.Marshal(a.V)
 	if err != nil {
 		var zero T
 		return nil, fmt.Errorf("Array.Value: marshal []%T: %w", zero, err)
 	}
-	return b, nil
+	return string(b), nil
 }
 
 // Scan implements sql.Scanner. Accepts []byte and string sources (the

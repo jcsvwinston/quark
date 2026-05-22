@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committed. `ReleaseSavepoint` keeps the queued hooks, as released
   work merges into the surrounding transaction (ADR-0013 Regla 2,
   extended to savepoints).
+- types: `JSON[T]` and `Array[T]` now round-trip correctly on SQL
+  Server. Their `Value()` returned `[]byte`, which go-mssqldb binds as
+  VARBINARY; written into the `NVARCHAR(MAX)` JSON column that forces an
+  implicit VARBINARY→NVARCHAR conversion reinterpreting the UTF-8 bytes
+  as UTF-16 and corrupting the payload, so `Scan` failed with
+  `invalid character 'â'`. `Value()` now returns a string, which binds
+  as NVARCHAR on SQL Server and as the equivalent text type on every
+  other driver. This also repairs the optional audit log's `diff`
+  read-back on SQL Server; the MSSQL skips are removed from the
+  JSON/Array/audit test suites.
 
 ## [0.9.0] - 2026-05-21
 
