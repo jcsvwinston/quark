@@ -136,9 +136,18 @@ placeholder `EventBus` → `ListenerFactory`) — ver
 
 ## Phase 6 — codegen + HA (v1.0)
 
-- [ ] Codegen path (typed scanners, no reflect).
-- [ ] Read replicas / pool routing / failover.
-- [ ] Sharding pluggable.
-- [ ] Real benchmarks vs `database/sql` / GORM / ent / sqlc.
+Formally opened 2026-05-22 (full scope). Anchor decision:
+[ADR-0014](adr/0014-codegen-coexistence-typed-registry.md) (codegen ↔
+reflect coexistence). Decomposed into F6-1..F6-9 in
+[`TASKS.md`](../TASKS.md) § "Fase 6".
+
+- [ ] **Codegen** (F6-1 skeleton, F6-2 typed scanners, F6-3 typed
+      binders, F6-4 typed query field accessors) — opt-in, no reflect.
+- [ ] **HA**: read replicas / pool routing (F6-5), primary failover
+      (F6-6). Each opens its own ADR at design time.
+- [ ] **Sharding** pluggable (F6-7, `ShardRouter`).
+- [ ] **Benchmarks** vs `database/sql` / GORM / ent / sqlc (F6-8) +
+      stress/load testing (F6-9).
 
 The v1.0 honest checklist is in [`docs/ANALISIS_MADUREZ.md`](ANALISIS_MADUREZ.md) §3 (gaps).
+v1.0 ships only when F6-8 proves the ≥3× p99 codegen gate from ADR-0002.

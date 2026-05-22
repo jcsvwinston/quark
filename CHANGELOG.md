@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BaseClient` at `NewTenantRouter` setup and is a no-op for every other
   configuration (zero cost on the raw path).
 
+### Changed
+
+- docs: formally open Phase 6 (codegen + HA + sharding + benchmarks →
+  v1.0). Adds [ADR-0014](docs/adr/0014-codegen-coexistence-typed-registry.md)
+  (the codegen↔reflect coexistence mechanism that ADR-0002 left open)
+  and decomposes the phase into F6-1..F6-9 in `TASKS.md`. No code or API
+  change.
+
 ### Fixed
 
 - tx: rolling back to a savepoint now discards the model `After*` hooks
