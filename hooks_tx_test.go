@@ -301,6 +301,272 @@ func TestF5_4_TrackedSave_AfterUpdate_FiresAfterCommit(t *testing.T) {
 	}
 }
 
+// TestSavepointRollback_DiscardsScopedAfterHooks covers the
+// savepoint-rollback hook gap: an After* hook queued by a CRUD call
+// made between Savepoint and RollbackTo must NOT fire on the outer
+// commit, because the row it would react to was rolled back. The
+// "kept" row (created before the savepoint) keeps its AfterCreate; the
+// "undone" row (created inside the rolled-back scope) loses it.
+// BeforeCreate fired in-tx for both rows and cannot be unfired.
+func TestSavepointRollback_DiscardsScopedAfterHooks(t *testing.T) {
+	c := newSpyClient(t)
+
+	rec := &hookRecorder{}
+	defer setHookRecorder(rec)()
+
+	ctx := context.Background()
+	err := c.Tx(ctx, func(tx *quark.Tx) error {
+		if err := quark.ForTx[spyOrder](ctx, tx).Create(&spyOrder{Name: "kept"}); err != nil {
+			return err
+		}
+		if err := tx.Savepoint("sp"); err != nil {
+			return err
+		}
+		if err := quark.ForTx[spyOrder](ctx, tx).Create(&spyOrder{Name: "undone"}); err != nil {
+			return err
+		}
+		return tx.RollbackTo("sp")
+	})
+	if err != nil {
+		t.Fatalf("Tx: %v", err)
+	}
+
+	got := joinEvents(rec.snapshot())
+	want := "BeforeCreate,BeforeCreate,AfterCreate"
+	if got != want {
+		t.Errorf("events = %q, want %q (savepoint-scoped AfterCreate must be discarded)", got, want)
+	}
+
+	all, err := quark.For[spyOrder](ctx, c).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].Name != "kept" {
+		t.Errorf("rows = %+v, want exactly [kept]", all)
+	}
+}
+
+// TestSavepointRollback_DiscardsScopedCommitCallbacks asserts the same
+// unwinding for the F5-5 OnCommit/OnRollback callbacks. A callback
+// registered inside a rolled-back savepoint scope is dropped: the
+// OnCommit never fires (its work is gone) and the OnRollback does not
+// fire either (a savepoint rollback is not a transaction rollback —
+// the outer tx still commits). Only the callback registered before the
+// savepoint survives.
+func TestSavepointRollback_DiscardsScopedCommitCallbacks(t *testing.T) {
+	c := newSpyClient(t)
+
+	var mu sync.Mutex
+	var fired []string
+	add := func(label string) func(context.Context) error {
+		return func(context.Context) error {
+			mu.Lock()
+			fired = append(fired, label)
+			mu.Unlock()
+			return nil
+		}
+	}
+
+	ctx := context.Background()
+	err := c.Tx(ctx, func(tx *quark.Tx) error {
+		if err := quark.ForTx[spyOrder](ctx, tx).Create(&spyOrder{Name: "kept"}); err != nil {
+			return err
+		}
+		tx.OnCommit(add("commit-kept"))
+		if err := tx.Savepoint("sp"); err != nil {
+			return err
+		}
+		if err := quark.ForTx[spyOrder](ctx, tx).Create(&spyOrder{Name: "undone"}); err != nil {
+			return err
+		}
+		tx.OnCommit(add("commit-undone"))
+		tx.OnRollback(add("rollback-undone"))
+		return tx.RollbackTo("sp")
+	})
+	if err != nil {
+		t.Fatalf("Tx: %v", err)
+	}
+
+	mu.Lock()
+	got := joinEvents(fired)
+	mu.Unlock()
+	if got != "commit-kept" {
+		t.Errorf("callbacks fired = %q, want %q", got, "commit-kept")
+	}
+
+	all, err := quark.For[spyOrder](ctx, c).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].Name != "kept" {
+		t.Errorf("rows = %+v, want exactly [kept]", all)
+	}
+}
+
+// TestSavepointRollback_NameReuseTargetsMostRecent confirms SQL
+// shadowing semantics: re-using a savepoint name stacks a second
+// savepoint over the first, and RollbackTo unwinds only the hooks
+// queued since the MOST RECENT savepoint of that name. The earlier
+// scope's row and its AfterCreate survive.
+func TestSavepointRollback_NameReuseTargetsMostRecent(t *testing.T) {
+	c := newSpyClient(t)
+
+	rec := &hookRecorder{}
+	defer setHookRecorder(rec)()
+
+	ctx := context.Background()
+	err := c.Tx(ctx, func(tx *quark.Tx) error {
+		if err := tx.Savepoint("sp"); err != nil {
+			return err
+		}
+		if err := quark.ForTx[spyOrder](ctx, tx).Create(&spyOrder{Name: "first"}); err != nil {
+			return err
+		}
+		if err := tx.Savepoint("sp"); err != nil { // shadows the first
+			return err
+		}
+		if err := quark.ForTx[spyOrder](ctx, tx).Create(&spyOrder{Name: "second"}); err != nil {
+			return err
+		}
+		return tx.RollbackTo("sp") // undoes "second" only
+	})
+	if err != nil {
+		t.Fatalf("Tx: %v", err)
+	}
+
+	got := joinEvents(rec.snapshot())
+	want := "BeforeCreate,BeforeCreate,AfterCreate"
+	if got != want {
+		t.Errorf("events = %q, want %q (first scope's AfterCreate must survive)", got, want)
+	}
+
+	all, err := quark.For[spyOrder](ctx, c).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].Name != "first" {
+		t.Errorf("rows = %+v, want exactly [first]", all)
+	}
+}
+
+// TestNestedTx_RollbackDiscardsScopedAfterHooks proves the fix flows
+// through the Tx.Tx nested-transaction helper, which drives a savepoint
+// under the hood. The inner scope returns an error, so its savepoint
+// rolls back; its AfterCreate must be discarded while the outer row's
+// fires on commit.
+func TestNestedTx_RollbackDiscardsScopedAfterHooks(t *testing.T) {
+	c := newSpyClient(t)
+
+	rec := &hookRecorder{}
+	defer setHookRecorder(rec)()
+
+	ctx := context.Background()
+	sentinel := errors.New("inner-fail")
+	err := c.Tx(ctx, func(tx *quark.Tx) error {
+		if err := quark.ForTx[spyOrder](ctx, tx).Create(&spyOrder{Name: "outer"}); err != nil {
+			return err
+		}
+		inner := tx.Tx(ctx, func(tx *quark.Tx) error {
+			if err := quark.ForTx[spyOrder](ctx, tx).Create(&spyOrder{Name: "inner"}); err != nil {
+				return err
+			}
+			return sentinel
+		})
+		if !errors.Is(inner, sentinel) {
+			t.Fatalf("inner Tx = %v, want sentinel", inner)
+		}
+		return nil // outer commits
+	})
+	if err != nil {
+		t.Fatalf("outer Tx: %v", err)
+	}
+
+	got := joinEvents(rec.snapshot())
+	want := "BeforeCreate,BeforeCreate,AfterCreate"
+	if got != want {
+		t.Errorf("events = %q, want %q (inner AfterCreate must be discarded)", got, want)
+	}
+
+	all, err := quark.For[spyOrder](ctx, c).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].Name != "outer" {
+		t.Errorf("rows = %+v, want exactly [outer]", all)
+	}
+}
+
+// testSavepointHookUnwind is the cross-engine (SharedSuite) check that
+// rolling back to a savepoint discards the side-effect callbacks queued
+// in that scope while preserving those from before it. It uses
+// Tx.OnCommit + a local counter (not the global hookRecorder) so it is
+// self-contained and dialect-portable.
+//
+// MSSQL is skipped: it uses SAVE TRANSACTION / ROLLBACK TRANSACTION
+// rather than the ANSI SAVEPOINT / ROLLBACK TO SAVEPOINT this code
+// emits, so savepoints don't work there today — a pre-existing gap not
+// addressed by this fix. Oracle runs only in local verification (it is
+// out of CI).
+func testSavepointHookUnwind(ctx context.Context, t *testing.T, client *quark.Client) {
+	t.Helper()
+	if client.Dialect().Name() == "mssql" {
+		t.Skip("savepoints emit ANSI SAVEPOINT SQL; MSSQL needs SAVE TRANSACTION (pre-existing gap)")
+	}
+
+	dropTable(client, "sp_hook_rows")
+	type spHookRow struct {
+		ID   int64  `db:"id" pk:"true"`
+		Name string `db:"name"`
+	}
+	if err := client.Migrate(ctx, &spHookRow{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	var mu sync.Mutex
+	var committed []string
+	track := func(label string) func(context.Context) error {
+		return func(context.Context) error {
+			mu.Lock()
+			committed = append(committed, label)
+			mu.Unlock()
+			return nil
+		}
+	}
+
+	err := client.Tx(ctx, func(tx *quark.Tx) error {
+		if err := quark.ForTx[spHookRow](ctx, tx).Create(&spHookRow{Name: "kept"}); err != nil {
+			return err
+		}
+		tx.OnCommit(track("kept"))
+		if err := tx.Savepoint("sp"); err != nil {
+			return err
+		}
+		if err := quark.ForTx[spHookRow](ctx, tx).Create(&spHookRow{Name: "undone"}); err != nil {
+			return err
+		}
+		tx.OnCommit(track("undone"))
+		return tx.RollbackTo("sp")
+	})
+	if err != nil {
+		t.Fatalf("Tx: %v", err)
+	}
+
+	mu.Lock()
+	got := append([]string(nil), committed...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != "kept" {
+		t.Errorf("OnCommit fired = %v, want [kept] (rolled-back scope's callback must be discarded)", got)
+	}
+
+	rows, err := quark.For[spHookRow](ctx, client).Limit(100).List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Name != "kept" {
+		t.Errorf("rows = %+v, want exactly [kept]", rows)
+	}
+}
+
 func joinEvents(events []string) string {
 	switch len(events) {
 	case 0:
