@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- tenant: under `RowLevelSecurityNative`, `Client.RawQuery` and
+  `Client.Exec` now emit a structured `quark.tenant.raw_under_native_rls`
+  warning when the call's context resolves a tenant — a cue that the raw
+  call sidesteps the tenant-scoped query builder. The PostgreSQL policy
+  still enforces isolation server-side, so this is a developer-experience
+  signal, not a security boundary. The check is stamped onto the router's
+  `BaseClient` at `NewTenantRouter` setup and is a no-op for every other
+  configuration (zero cost on the raw path).
+
 ### Fixed
 
 - tx: rolling back to a savepoint now discards the model `After*` hooks

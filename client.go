@@ -84,6 +84,36 @@ type Client struct {
 	// CRUD connection/transaction. nil (the default) is zero cost.
 	// Set once at setup via EnableAuditLog.
 	audit *auditState
+
+	// nativeTenantResolver is set by [NewTenantRouter] when this Client
+	// is the BaseClient of a RowLevelSecurityNative router. When
+	// non-nil, RawQuery/Exec emit a quark.tenant.raw_under_native_rls
+	// warning if it resolves a non-empty tenant from the call's context
+	// — a cue that the raw call sidesteps the tenant-scoped query
+	// builder. The PostgreSQL policy still enforces isolation
+	// server-side, so this is a developer-experience signal, not a
+	// security boundary (ADR-0012). nil (the default) makes the check a
+	// no-op. Assigned once at router setup, before queries run.
+	nativeTenantResolver func(context.Context) string
+}
+
+// warnRawUnderNativeRLS emits a developer-experience warning when a raw
+// query/exec runs under a RowLevelSecurityNative router with a tenant
+// resolvable from ctx. Raw SQL bypasses the tenant-scoped query builder;
+// under Native RLS the PostgreSQL policy still filters rows server-side
+// (this is not a security bypass), but the call forgoes the builder's
+// conveniences, so the warning flags the pattern. No-op unless the
+// Client was stamped by a Native TenantRouter.
+func (c *Client) warnRawUnderNativeRLS(ctx context.Context, op string) {
+	if c.nativeTenantResolver == nil || c.logger == nil {
+		return
+	}
+	if tenant := c.nativeTenantResolver(ctx); tenant != "" {
+		c.logger.Warn("raw SQL under RowLevelSecurityNative sidesteps the tenant-scoped query builder (the PostgreSQL policy still enforces isolation)",
+			"event", "quark.tenant.raw_under_native_rls",
+			"op", op,
+			"tenant", tenant)
+	}
 }
 
 // UseEventBus wires an [EventBus] to the Client's CRUD pipeline. After
@@ -303,6 +333,8 @@ func (c *Client) RawQuery(ctx context.Context, query string, args ...any) (*sql.
 		return nil, err
 	}
 
+	c.warnRawUnderNativeRLS(ctx, "RawQuery")
+
 	start := time.Now()
 	rows, err := c.db.QueryContext(ctx, query, args...)
 	duration := time.Since(start)
@@ -333,6 +365,8 @@ func (c *Client) Exec(ctx context.Context, query string, args ...any) error {
 	if err := c.guard.ValidateRawQuery(query, false); err != nil {
 		return err
 	}
+
+	c.warnRawUnderNativeRLS(ctx, "Exec")
 
 	start := time.Now()
 	res, err := c.db.ExecContext(ctx, query, args...)

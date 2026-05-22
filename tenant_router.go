@@ -132,6 +132,16 @@ func NewTenantRouter(
 	resolver func(ctx context.Context) string,
 	factory func(tenantID string) (*Client, error),
 ) *TenantRouter {
+	// Stamp the shared BaseClient so its RawQuery/Exec can warn when a
+	// raw call runs with a tenant in context under Native RLS. Done once
+	// at setup; the field is read on the raw path, never mutated by
+	// queries. If the same BaseClient backs multiple Native routers
+	// (unusual — strategies are exclusive per router), the last
+	// NewTenantRouter call wins for this warning. See
+	// Client.warnRawUnderNativeRLS.
+	if config.Strategy == RowLevelSecurityNative && config.BaseClient != nil {
+		config.BaseClient.nativeTenantResolver = resolver
+	}
 	return &TenantRouter{
 		config:   config,
 		resolver: resolver,

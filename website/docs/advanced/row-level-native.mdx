@@ -191,6 +191,47 @@ The recommended pattern is therefore: **`router.Tx` for everything
 non-trivial**. The implicit-`For[T]` path is the ergonomic path for
 short reads in request-scoped contexts.
 
+## Raw queries under Native RLS
+
+`client.RawQuery` and `client.Exec` run straight against the connection
+pool — they do **not** go through `For[T]`, so they never open the
+implicit transaction that issues `set_config('app.tenant_id', …)`.
+Unlike `RowLevelSecurityClient` (where raw SQL silently escapes the
+client-side `WHERE tenant_id = ?` predicate), this is **not a security
+hole under Native**: a `SELECT` with no `app.tenant_id` set returns zero
+rows because the policy's `USING` clause evaluates against an empty
+variable, and an `INSERT` fails the policy's `WITH CHECK`. The engine
+stays in control either way.
+
+It is, however, almost never what you want: you lose the tenant scope
+*and* the query builder. To flag the pattern, a Client that is the
+`BaseClient` of a Native router emits a structured warning whenever
+`RawQuery`/`Exec` runs with a tenant resolvable from the call's context:
+
+```
+level=WARN msg="raw SQL under RowLevelSecurityNative sidesteps the
+tenant-scoped query builder (the PostgreSQL policy still enforces
+isolation)" event=quark.tenant.raw_under_native_rls op=RawQuery tenant=acme
+```
+
+For tenant-scoped access, use the builder against the router instead —
+`For[T](ctx, router)` for a single statement, or `router.Tx` with
+`ForTx[T]` for multi-statement work. Both open the implicit transaction
+that sets `app.tenant_id`, so the policy sees the tenant:
+
+```go
+err := router.Tx(ctx, func(tx *quark.Tx) error {
+    return quark.ForTx[Order](ctx, tx).Create(&Order{SKU: "A-1", Qty: 3})
+})
+```
+
+`client.Raw()` (the bare `*sql.DB` accessor) takes no context, so it is
+never routed through the `set_config` path and cannot be guarded by the
+warning. The PostgreSQL policy still applies — those connections share
+the same role — but with `app.tenant_id` unset the `USING` clause
+returns zero rows. Reserve it for schema/maintenance work, not tenant
+data.
+
 ## Failure modes
 
 ### Query returns zero rows when it should return data

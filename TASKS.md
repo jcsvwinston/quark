@@ -15,16 +15,23 @@
 > `After*`/`OnCommit`/`OnRollback` encolados dentro de un scope de
 > savepoint se descartan al hacer `RollbackTo`; `tx.go` +
 > `hooks_tx_test.go` + subtest `SavepointHookUnwind` en SharedSuite),
-> warning `client.Raw()` bajo Native, guards `logger != nil`
-> redundantes, ~~MSSQL JSON[T] scan bug~~ (corregido en `[Unreleased]`:
-> `JSON[T].Value()`/`Array[T].Value()` devuelven string en vez de
-> `[]byte`, así go-mssqldb los bindea como NVARCHAR y no como VARBINARY;
-> round-trip limpio en MSSQL para JSON/Array/audit, skips eliminados),
-> Oracle fuera de CI. **Gap nuevo documentado**: los savepoints emiten
-> SQL ANSI (`SAVEPOINT` / `ROLLBACK TO SAVEPOINT`); MSSQL necesita
-> `SAVE TRANSACTION` / `ROLLBACK TRANSACTION`, así que savepoints no
-> funcionan en MSSQL hoy — `SavepointHookUnwind` skipea MSSQL hasta que
-> se añada el soporte de dialecto (follow-up).
+> ~~warning `client.Raw()` bajo Native~~ (añadido en `[Unreleased]`:
+> `RawQuery`/`Exec` emiten `quark.tenant.raw_under_native_rls` cuando
+> hay tenant en contexto bajo router Native; PG sigue enforcando la
+> policy, el warning es UX — `client.go` + `tenant_router.go` +
+> `raw_under_native_test.go`), ~~guards `logger != nil` redundantes~~
+> (**descartado**: NO son redundantes — protegen literales de test que
+> pasan logger nil (`newStampedeStore(...,nil)`, `&Client{}`); en
+> producción `c.logger` siempre es no-nil, pero quitarlos rompe tests
+> sin beneficio), ~~MSSQL JSON[T] scan bug~~ (corregido en
+> `[Unreleased]`: `JSON[T].Value()`/`Array[T].Value()` devuelven string
+> en vez de `[]byte`, así go-mssqldb los bindea como NVARCHAR y no como
+> VARBINARY; round-trip limpio en MSSQL para JSON/Array/audit, skips
+> eliminados), Oracle fuera de CI. **Gap nuevo documentado**: los
+> savepoints emiten SQL ANSI (`SAVEPOINT` / `ROLLBACK TO SAVEPOINT`);
+> MSSQL necesita `SAVE TRANSACTION` / `ROLLBACK TRANSACTION`, así que
+> savepoints no funcionan en MSSQL hoy — `SavepointHookUnwind` skipea
+> MSSQL hasta que se añada el soporte de dialecto (follow-up).
 >
 > **Fase 4 cerrada (2026-05-15, v0.8.0).** Los 7 items F4-1..F4-7
 > entregados: OTel metrics + span redaction (#70), slow query log
