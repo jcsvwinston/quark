@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0](https://github.com/jcsvwinston/quark/compare/v0.9.0...v0.10.0) (2026-05-22)
+
+
+### Added
+
+* **tenant:** warn on raw SQL under RowLevelSecurityNative ([#91](https://github.com/jcsvwinston/quark/issues/91)) ([2ab4cb2](https://github.com/jcsvwinston/quark/commit/2ab4cb2a5d839729358ebe88cb398b544c9be300))
+
+
+### Fixed
+
+* **tx:** unwind queued hooks on savepoint rollback ([#88](https://github.com/jcsvwinston/quark/issues/88)) ([3889707](https://github.com/jcsvwinston/quark/commit/3889707d52d911cf42be0a89d00b28ed24dc0f30))
+* **types:** round-trip JSON[T]/Array[T] on SQL Server ([#89](https://github.com/jcsvwinston/quark/issues/89)) ([bb99242](https://github.com/jcsvwinston/quark/commit/bb99242c3fb9456a59b241b05a9821de0e7bb57a))
+
+
+### Tests
+
+* **tx:** real cross-engine deadlock retry integration test ([#90](https://github.com/jcsvwinston/quark/issues/90)) ([81f0167](https://github.com/jcsvwinston/quark/commit/81f016786f9f9dddef277777d8b6885ea6b6e57a))
+
 ## [Unreleased]
 
 <!-- release-please manages versioned sections below; entries for the
