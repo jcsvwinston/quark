@@ -91,10 +91,13 @@ Fase 5):
 - Cross-instance stampede protection (ADR-0011 §Cuándo reabrir): sólo
   si surge demanda real de stampede cross-instancia. Sucesor de
   ADR-0011 con un hook `DistributedLock` opcional.
-- F4-7 deadlock real cross-engine integration test (TASKS.md § F4-7
-  TODO): el classifier y el retry loop están unit-tested; falta un
-  test que provoque un deadlock real en PG con dos tx de orden
-  invertido.
+- ~~F4-7 deadlock real cross-engine integration test~~ **Cerrado en
+  `[Unreleased]`** — `tx_deadlock_integration_test.go`
+  (`TestDeadlockRetry{Postgres,MySQL,MariaDB}`): dos tx paralelas toman
+  los mismos dos row-locks en orden invertido tras un barrier, el motor
+  aborta una víctima (40P01 / 1213) y el retry bajo `WithDeadlockRetry`
+  recupera. SQLite excluido (single-writer); MSSQL/Oracle cubiertos por
+  el classifier unit test (`db_errors_test.go`).
 
 **Foco sugerido** del slash command: `fase5` — abrir la próxima fase
 con el mismo rigor que Fase 4. Cada F5-N como su propio PR.
@@ -866,9 +869,10 @@ con orden de lock invertido).
 Diferidos a future work explícitos (no bloquearon el cierre y caen en
 ADRs / issues posteriores cuando aparezca demanda real): negative
 caching, compresión gzip de values, cross-instance stampede
-protection (ADR sucesor de ADR-0011 con `DistributedLock` hook),
-integration test de deadlock cross-engine real con dos tx de lock
-invertido en PG.
+protection (ADR sucesor de ADR-0011 con `DistributedLock` hook). El
+integration test de deadlock cross-engine real (dos tx de lock
+invertido) llegó en `[Unreleased]` —
+`tx_deadlock_integration_test.go`, PG/MySQL/MariaDB.
 
 ---
 
