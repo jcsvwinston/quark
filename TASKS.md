@@ -161,16 +161,28 @@ sharding en paralelo (independientes del codegen), benchmarks al final
 
 ### F6-1 · Codegen tooling skeleton (`quark gen`)
 
-Generador que parsea los modelos registrados (reusa
-`internal/schema` meta) y emite `*_quark_gen.go` por package con un
-`func init()` que registra las implementaciones tipadas. Establece el
-pipeline + el contrato de registro interno (`registerTypedScanner` /
-`registerTypedBinder`) + un header de versión de contrato
-(`//quark:gen vN`) + un hash del modelo para detectar codegen stale
-(ADR-0014 §Consecuencias). Sin fast-path todavía — sólo el andamiaje y
-el opt-in. **Done**: `quark gen` emite código que compila y registra
-no-ops; el reflect path sigue intacto; test que verifica registro +
-fallback. Doc: `website/docs/guides/codegen.mdx` (nuevo) + sidebar.
+> **Enfoque decidido (2026-05-22, enmienda ADR-0014):** `quark gen` es
+> subcomando de `cmd/quark` y parsea el **AST** del paquete del usuario
+> (`go/packages` + `go/types`), no reflexión — para soportar la UX de
+> `go install` + `//go:generate`. Prerequisito: **arreglar `cmd/quark`**
+> (hoy no compila — faltan `cobra`/`viper`/`fatih/color`/
+> `olekukonko/tablewriter`/`gopkg.in/yaml.v3` en `go.mod`, y no está en
+> CI). Se hace como PR previo (chore) o como primer paso de F6-1.
+
+Subcomando `quark gen ./pkg` que carga el paquete con `go/packages`,
+encuentra structs con tags `db:`/`pk:`, resuelve tipos con `go/types`
+(incl. genéricos `JSON[T]`/`Array[T]`/`Nullable[T]`), y emite
+`*_quark_gen.go` por package con un `func init()` que registra las
+implementaciones tipadas. Establece el pipeline + el contrato de
+registro interno (`registerTypedScanner` / `registerTypedBinder`) + un
+header de versión de contrato (`//quark:gen vN`) + un hash del modelo
+para detectar codegen stale + un **test de conformidad** AST-vs-reflexión
+(ADR-0014 §Consecuencias, mitigación del drift de dos intérpretes de
+tags). Sin fast-path todavía — sólo el andamiaje y el opt-in. **Done**:
+`cmd/quark` compila y está en CI; `quark gen` emite código que compila y
+registra no-ops; el reflect path sigue intacto; test de registro +
+fallback + conformidad. Doc: `website/docs/guides/codegen.mdx` (nuevo) +
+sidebar.
 
 ### F6-2 · Generated typed scanners (read path sin reflect)
 

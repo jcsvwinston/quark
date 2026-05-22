@@ -31,6 +31,17 @@ sin bifurcar `Query[T]`.
 
 ## Decisión
 
+> **Enmienda 2026-05-22 (pre-implementación, ADR aún `proposed`):** el
+> generador se entrega como **subcomando `quark gen` del binario
+> `cmd/quark`** y obtiene la metadata del modelo **parseando el código
+> fuente del usuario con `go/packages` + `go/types` (AST)**, no por
+> reflexión. Un binario standalone instalado vía `go install` no puede
+> reflejar tipos que no compiló; el AST es la única vía para un
+> `quark gen` instalable. Se prioriza la UX (`//go:generate quark gen`,
+> sin `main.go` thin) sobre la reutilización de `internal/schema`. Esto
+> reemplaza la asunción previa (reflexión / "reusa internal/schema
+> meta") que arrastraban TASKS.md e issue #92.
+
 El código generado se registra en **registries package-level keyed por
 `reflect.Type`**, uno por capability:
 
@@ -44,9 +55,13 @@ El código generado se registra en **registries package-level keyed por
 
 Mecánica:
 
-1. `quark gen` emite un fichero `*_quark_gen.go` por package del usuario
-   con un `func init()` que llama a un registrador interno
-   (`quark.registerTypedScanner` / `registerTypedBinder`).
+1. `quark gen ./pkg` (subcomando de `cmd/quark`) carga el paquete del
+   usuario con `go/packages` (`NeedTypes|NeedSyntax`), encuentra los
+   structs con tags `db:`/`pk:`, resuelve sus tipos con `go/types`
+   (incluidos los genéricos `quark.JSON[T]`/`Array[T]`/`Nullable[T]`), y
+   emite un fichero `*_quark_gen.go` por package con un `func init()`
+   que llama a un registrador interno (`quark.registerTypedScanner` /
+   `registerTypedBinder`).
 2. En runtime, `scanRow` / `buildInsert` consultan el registry por
    `reflect.Type` **antes** de caer al path reflect. Hit → fast-path sin
    reflect. Miss → reflect (comportamiento actual, sin cambio).
@@ -82,6 +97,16 @@ Decisiones derivadas:
   `quark gen`, el runtime usa reflect sin avisar. Se detecta por
   benchmark/CI, no por crash. F6-1 debe emitir un hash del modelo para
   que un check opcional avise de drift.
+- **Dos intérpretes de tags `db:` (consecuencia del enfoque AST)**: el
+  runtime parsea los tags por reflexión (`internal/schema`); el
+  generador los parsea por AST. Pueden divergir en silencio (se añade
+  una opción de tag al runtime y se olvida el generador → código
+  generado que no coincide con el runtime). **Mitigación**: un test de
+  conformidad que, para un modelo de muestra, compare la metadata que
+  deriva el generador (AST) contra la que deriva `internal/schema`
+  (reflexión) y falle si difieren. Es deuda inherente al binario
+  standalone; la alternativa (reflexión) no la tendría pero pierde la
+  UX de `go install`.
 - Generador y runtime hay que mantenerlos en sync.
 
 ## Alternativas consideradas
