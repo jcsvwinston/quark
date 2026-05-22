@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- docs: formally open Phase 6 (codegen + HA + sharding + benchmarks →
+  v1.0). Adds [ADR-0014](docs/adr/0014-codegen-coexistence-typed-registry.md)
+  (the codegen↔reflect coexistence mechanism that ADR-0002 left open)
+  and decomposes the phase into F6-1..F6-9 in `TASKS.md`. No code or API
+  change.
+
 ## [0.9.0] - 2026-05-21
 
 Phase 5 release — engine-enforced multi-tenancy, transactional hooks,

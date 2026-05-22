@@ -53,12 +53,12 @@
 > **No empieces "explorando".** Invoca `/next-session [foco]` (definido en
 > `.claude/commands/next-session.md`) y trabaja el bloque que indique.
 >
-> Foco admitido: `fase5` | `auto`. Si dudas, usa `auto`. Los focos
-> `f0`, `fase3`, `tipos` y `fase4` ya no aplican — los cuatro cerrados.
+> Foco admitido: `fase6` | `auto`. Si dudas, usa `auto`. Los focos
+> `f0`, `fase3`, `tipos`, `fase4` y `fase5` ya no aplican — cerrados.
 
-Estado real del backlog post-v0.8.0 (releases v0.5.0 / v0.6.0 / v0.7.0
-/ v0.8.0 hechos; **Fases 0, 1, 2, 3 y 4 cerradas**; `[Unreleased]`
-limpio):
+Estado real del backlog post-v0.9.0 (releases v0.5.0 → v0.9.0 hechos;
+**Fases 0, 1, 2, 3, 4 y 5 cerradas**; `[Unreleased]` con la deuda menor
+post-v0.9.0 en vuelo, ver abajo):
 
 1. ~~**Bloque A — Cerrar Fase 0**~~. Cerrado en v0.5.0.
 2. ~~**Bloque B — Tipos diferidos de Fase 1**~~. Cerrado en v0.7.0
@@ -67,41 +67,171 @@ limpio):
    F3-1..F3-7 entregados; ADR-0009 archivado.
 4. ~~**Fase 4 — observability + cache + deadlock retry**~~. Cerrado en
    v0.8.0. F4-1..F4-7 entregados; ADR-0011 archivado.
-5. **Fase 5 — RLS real + hooks transaccionales + EventBus** (apertura
-   formal hecha 2026-05-15). `docs/ROADMAP.md` § "Phase 5";
-   `docs/ANALISIS_MADUREZ.md` §4 Fase 5. ADRs archivados:
-   [ADR-0012](docs/adr/0012-rls-real-postgres-set-local-plus-policies.md)
-   (RLS real PG vía `SET LOCAL` + `CREATE POLICY`, supersede ADR-0003)
-   y [ADR-0013](docs/adr/0013-transactional-hooks-and-sync-eventbus.md)
-   (hooks transaccionales + EventBus síncrono en commit-phase).
-   Descomposición en F5-1..F5-7 más abajo. Entrega esperada en v0.9.0.
+5. ~~**Fase 5 — RLS real + hooks transaccionales + EventBus**~~. Cerrado
+   en v0.9.0 (F5-1..F5-7; ADR-0012/0013 archivados).
+6. **Fase 6 — Codegen, performance y HA** (apertura formal hecha
+   2026-05-22, scope completo del ROADMAP). `docs/ROADMAP.md` §
+   "Phase 6"; `docs/ANALISIS_MADUREZ.md` §4 Fase 6. ADR de apertura:
+   [ADR-0014](docs/adr/0014-codegen-coexistence-typed-registry.md)
+   (mecanismo de coexistencia codegen/reflect; detalla ADR-0002).
+   Descomposición en F6-1..F6-9 más abajo. Salida esperada: **v1.0.0**.
 
 **Próxima acción concreta** (al arrancar sesión nueva):
-1. `/next-session fase5` — sesión de **entrega**: arrancar por **F5-1**
-   (renombrado de constante + alias deprecado) por ser foundation-only
-   sin riesgo arquitectónico, luego F5-2 (skeleton `RowLevelSecurityNative`
-   en PG), F5-3 (generador de policies), y desde ahí en paralelo F5-4..F5-7.
-   Cada F5-N es 1 PR independiente con `code-reviewer` + docs en
-   `website/docs/` + entrada en CHANGELOG `### Added` / `### Changed` /
-   `### Deprecated`. **Regla de break**: si tocas hooks (F5-4..F5-6),
-   escribe `docs/MIGRATION_v0.9.0.md` en el mismo PR.
+1. `/next-session fase6` — sesión de **entrega**: arrancar por **F6-1**
+   (skeleton del generador + contrato de registro) por ser foundation
+   que desbloquea F6-2..F6-4, luego los typed scanners/binders. HA
+   (F6-5/F6-6) y sharding (F6-7) son independientes del codegen y pueden
+   ir en paralelo; benchmarks (F6-8/F6-9) al final porque miden todo lo
+   anterior. Cada F6-N es 1 PR con `code-reviewer` + docs en
+   `website/docs/` + CHANGELOG; F6-5/F6-7 escriben su ADR (ADR-0015/0016)
+   en el mismo PR.
 
-**Items abiertos heredados de Fase 4** (deuda menor, no bloquea
-Fase 5):
-- Cross-instance stampede protection (ADR-0011 §Cuándo reabrir): sólo
-  si surge demanda real de stampede cross-instancia. Sucesor de
-  ADR-0011 con un hook `DistributedLock` opcional.
-- F4-7 deadlock real cross-engine integration test (TASKS.md § F4-7
-  TODO): el classifier y el retry loop están unit-tested; falta un
-  test que provoque un deadlock real en PG con dos tx de orden
-  invertido.
+**Deuda menor post-v0.9.0** (en vuelo / cerrada en `[Unreleased]`, no
+bloquea Fase 6): savepoint-rollback gap (PR #88), MSSQL JSON[T] scan
+bug (PR #89), F4-7 deadlock real cross-engine test (PR #90),
+Raw-under-Native warning (PR #91). Guards `logger != nil`: **descartado**
+(no son redundantes — protegen literales de test con logger nil).
+Cross-instance stampede protection sigue diferido (ADR-0011 §Cuándo
+reabrir; sólo si surge demanda real).
 
-**Foco sugerido** del slash command: `fase5` — abrir la próxima fase
-con el mismo rigor que Fase 4. Cada F5-N como su propio PR.
+**Foco sugerido** del slash command: `fase6` — abrir el camino a v1.0
+con el mismo rigor que Fases 3/4/5. Cada F6-N como su propio PR.
 
 **Disciplina recordada**: `code-reviewer` subagent obligatorio antes
 de cada PR (regla CLAUDE.md #6); `/next-session` plantilla de cierre
 al final de cada sesión.
+
+---
+
+## Fase 6 — Codegen, performance y HA (apertura formal)
+
+> Spec narrativo: `docs/ANALISIS_MADUREZ.md` §4 Fase 6;
+> `docs/ROADMAP.md` § "Phase 6". Decisión arquitectónica de apertura:
+> [ADR-0014](docs/adr/0014-codegen-coexistence-typed-registry.md)
+> (codegen coexiste vía registry de funciones tipadas por tipo con
+> fallback a reflect; detalla el mecanismo que ADR-0002 dejó abierto).
+> Objetivo de fase: cerrar la brecha de performance vs sqlc/ent y
+> entrar en territorio enterprise (HA + sharding). **Salida: v1.0.0
+> honesto.**
+
+Apertura formal hecha 2026-05-22 con scope completo del ROADMAP (los
+cuatro pilares: codegen, HA, sharding, benchmarks). Decisiones de scope:
+
+- **Codegen es opt-in y NO bifurca la API** (ADR-0002 + ADR-0014). El
+  reflect path se queda como default permanente; el código generado se
+  auto-registra en un registry por `reflect.Type` y el runtime lo
+  consulta antes de caer a reflect.
+- **HA y sharding son aditivos y opt-in.** `WithReplicas`,
+  `ShardRouter` — un Client sin configurarlos se comporta exactamente
+  como hoy. Cada uno abre su propio ADR cuando se diseñe el item
+  (ADR-0015+; no se anticipan aquí porque el diseño depende de la
+  implementación).
+- **Benchmarks honestos o nada.** F6-8 reemplaza cualquier número
+  hardcoded de perf/coverage; el harness debe ser reproducible y
+  apples-to-apples documentado (no marketing).
+- **El gate de v1.0** es ADR-0002 §Restricciones: los benchmarks de
+  F6-8 deben demostrar ≥3× mejora p99 con codegen para justificar el
+  esfuerzo. Si no se alcanza, codegen se reabre antes de taggear v1.0.
+
+Descomposición en 9 items entregables independientemente. Orden de
+ataque sugerido: codegen primero (F6-1 desbloquea F6-2..F6-4), HA y
+sharding en paralelo (independientes del codegen), benchmarks al final
+(miden todo lo anterior).
+
+### F6-1 · Codegen tooling skeleton (`quark gen`)
+
+Generador que parsea los modelos registrados (reusa
+`internal/schema` meta) y emite `*_quark_gen.go` por package con un
+`func init()` que registra las implementaciones tipadas. Establece el
+pipeline + el contrato de registro interno (`registerTypedScanner` /
+`registerTypedBinder`) + un header de versión de contrato
+(`//quark:gen vN`) + un hash del modelo para detectar codegen stale
+(ADR-0014 §Consecuencias). Sin fast-path todavía — sólo el andamiaje y
+el opt-in. **Done**: `quark gen` emite código que compila y registra
+no-ops; el reflect path sigue intacto; test que verifica registro +
+fallback. Doc: `website/docs/guides/codegen.mdx` (nuevo) + sidebar.
+
+### F6-2 · Generated typed scanners (read path sin reflect)
+
+`scanRow` consulta `typedScanners[reflect.Type]` antes del reflect.
+El generado escanea `*sql.Rows → *T` con índices de columna fijos, sin
+`reflect.Value.Field`. Cubre `List`/`First`/`Find`. **Done**:
+round-trip idéntico con y sin codegen en los 5 motores CI; benchmark
+micro que muestra la mejora; fallback verificado cuando no hay generado.
+
+### F6-3 · Generated typed binders (write path sin reflect)
+
+`buildInsert`/`buildUpdate`/`buildUpdateMap`/`saveAny` consultan
+`typedBinders` antes del reflect. El generado devuelve `(cols, args)`
+sin reflect, incluido el batch y el partial-update de `UpdateFields`
+(`buildUpdateMap` — no sólo el UPDATE completo). Respeta tags (`pk`,
+`version`, `tz`, soft-delete) leídos en gen-time. **Done**:
+Create/Update/UpdateFields/CreateBatch round-trip idéntico con y sin
+codegen en CI; optimistic locking + soft delete + dirty tracking siguen
+funcionando bajo el path generado.
+
+### F6-4 · Typed query field accessors (`Where().Name().Eq("x")`)
+
+API generada **compile-time** (no reemplaza runtime): por cada modelo,
+accesores tipados de columna que producen condiciones sin strings
+mágicos, dando type-safety de columnas. **Done**: ejemplo compila;
+un typo de columna no compila; coexiste con la API string actual
+(`Where("name","=",...)` sigue válida). Doc en codegen.mdx.
+
+### F6-5 · Read replicas / pool routing
+
+`WithReplicas(replicaDSNs...)`: SELECT enruta a réplicas
+(round-robin/random/least-conn configurable), mutaciones al primary.
+`Sticky(ctx)` fuerza primary para coherencia post-write. Healthcheck
+pasivo (saca de rotación una réplica que devuelve `driver.ErrBadConn`).
+**Abre ADR-0015** (modelo de consistencia + estrategia de routing).
+**Done**: integration test que verifica split read/write y sticky en
+PG (réplica vía testcontainers o DSN); skip documentado donde no
+aplique.
+
+### F6-6 · Failover de primary
+
+Detección de errores transitorios (`errors.Is(err, driver.ErrBadConn)`
++ códigos por dialecto, reusando el classifier de F4-7) y reintento
+contra un primary sano. **Done**: unit test del classifier extendido +
+integration test que mata el primary y verifica recuperación. Comparte
+diseño con ADR-0015.
+
+### F6-7 · Sharding pluggable (`ShardRouter`)
+
+Interface `ShardRouter` que, dada una entidad + operación, elige el
+Client del shard. Fan-out de reads con scatter-gather opcional.
+**Abre ADR-0016** (interface de shard key + semántica de queries
+cross-shard). **Done**: ejemplo con 2 shards en SQLite/PG; test de
+routing por shard key; doc de límites (no cross-shard joins, no
+cross-shard tx).
+
+### F6-8 · Benchmarks proper
+
+`func Benchmark*(b *testing.B)` reales contra `database/sql` puro,
+GORM, ent y sqlc, en matriz por dialecto. Publicar en
+`docs/benchmarks/` con harness reproducible y metodología documentada
+(apples-to-apples honesto, sin marketing). **Reemplaza cualquier número
+de perf/coverage hardcoded** (auditar README/docs). Es el gate de v1.0
+para ADR-0002 (≥3× p99 con codegen). **Done**: harness corre en CI
+(o doc de cómo correrlo); números publicados; claims viejos eliminados.
+
+### F6-9 · Stress / load testing
+
+Workload generator (patrones estilo `vegeta`/`hey`): latencias
+p50/p95/p99 bajo concurrencia, contención de pool, deadlock rate real.
+**Done**: harness reproducible en `docs/benchmarks/stress/`; un run
+documentado con números; identifica el primer cuello de botella real
+(dato que prioriza optimizaciones post-1.0).
+
+### Cierre de Fase 6 → v1.0.0
+
+Cuando F6-1..F6-9 estén ✅ **y** F6-8 demuestre el gate de performance
+de ADR-0002, taggear **v1.0.0** vía `/release v1.0.0` — el primer
+release "production-ready" honesto. Issue de planning con los 9 items:
+ver GitHub. Cada F6-N es 1 PR con `code-reviewer` + docs +
+CHANGELOG; los items que abren ADR (F6-5/F6-7) escriben el ADR en el
+mismo PR.
 
 ---
 
