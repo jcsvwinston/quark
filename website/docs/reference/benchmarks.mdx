@@ -1,54 +1,80 @@
 ---
 sidebar_position: 2
 title: Benchmarks
-description: Local benchmark results across SQLite, PostgreSQL, MySQL, MSSQL, and Oracle.
+description: Reproducible go test -bench comparison of Quark, raw database/sql, and GORM on in-memory SQLite.
 ---
 
 # Benchmarks
 
-:::note Local benchmarks only
-These results were generated against local Docker containers and in-memory SQLite — **not a substitute for production profiling**. Results will vary significantly with real network latency, connection pool sizing, and concurrent load. Reproduce locally with:
+These numbers come from a reproducible `go test -bench` harness that lives
+in [`benchmarks/`](https://github.com/jcsvwinston/quark/tree/main/benchmarks)
+in the repository. It measures Quark's per-operation overhead against a
+hand-written `database/sql` baseline and against GORM, on the same model,
+schema, data, and operations.
 
-```bash
-go test -bench=. -benchmem ./...
-```
-
-See [`benchmark_test.go`](https://github.com/jcsvwinston/quark/blob/main/benchmark_test.go) in the main repository for the full benchmark suite.
+:::note Microbenchmarks, not production timings
+The harness runs against **in-memory SQLite** so it isolates ORM and driver
+CPU/allocation overhead, not disk or network I/O. Against a networked
+database, that overhead is a small fraction of round-trip latency — do not
+read these microseconds as production request times. Numbers are also
+machine- and run-specific: treat the **relative ratios** as the signal and
+reproduce locally before drawing conclusions.
 :::
 
-The current benchmark report was generated on 2026-05-02 using local Docker
-instances for server databases and in-memory SQLite.
+## What is measured
 
-## Average operation time
+Five operations, chosen because they exercise the reflect-based hot paths
+(row scanning, insert/update building) that Quark's planned code generation
+will replace:
 
-| Engine | Operation | Average time | Total run |
-| --- | --- | ---: | ---: |
-| SQLite in-memory | Insert | 6.12 microseconds | 61.19 ms |
-| SQLite in-memory | Update | 3.24 microseconds | 16.18 ms |
-| SQLite in-memory | Delete | 1.92 microseconds | 9.59 ms |
-| PostgreSQL | Insert | 198.55 microseconds | 1.99 s |
-| PostgreSQL | Update | 129.76 microseconds | 648.82 ms |
-| PostgreSQL | Delete | 128.53 microseconds | 642.63 ms |
-| MySQL | Insert | 979.43 microseconds | 9.79 s |
-| MySQL | Update | 275.57 microseconds | 1.38 s |
-| MySQL | Delete | 266.18 microseconds | 1.33 s |
-| MSSQL | Insert | 651.50 microseconds | 6.52 s |
-| MSSQL | Update | 266.88 microseconds | 1.33 s |
-| MSSQL | Delete | 265.41 microseconds | 1.33 s |
-| Oracle | Insert | 431.73 microseconds | 4.32 s |
-| Oracle | Update | 271.94 microseconds | 1.36 s |
-| Oracle | Delete | 269.34 microseconds | 1.35 s |
+| Benchmark     | Operation                                           |
+| ------------- | --------------------------------------------------- |
+| `InsertOne`   | Insert a single row                                 |
+| `InsertBatch` | Insert 100 rows in one batch                        |
+| `FindByPK`    | Select one row by primary key                       |
+| `ListWhere`   | Select up to 50 rows with a `WHERE age >= ?` filter |
+| `Update`      | Update one row (all non-PK columns) by primary key  |
 
-## Benchmark notes
+Each is implemented three ways against the same `bench_users` table:
+hand-written `database/sql` (the floor), Quark's `quark.For[T]` API, and
+GORM (the reflect-ORM peer).
 
-- SQLite used in-memory mode.
-- PostgreSQL, MySQL, MSSQL, and Oracle ran against local Docker services.
-- Insert tests used 10,000 operations.
-- Update and delete tests used 5,000 operations each.
-- Progress logs were emitted every 1,000 operations to verify sustained progress.
+## How to reproduce
 
-## Design takeaway
+```bash
+cd benchmarks
+go test -run=^$ -bench=. -benchmem ./...
+```
 
-QUARK's reflection cache keeps the ORM overhead low after model metadata is
-parsed. The query builder keeps application ergonomics close to dynamic ORMs
-while using generics for typed results.
+See the [harness README](https://github.com/jcsvwinston/quark/blob/main/benchmarks/README.md)
+for the full methodology, its limits, and how to add another ORM.
+
+## A representative run
+
+Apple M4 Pro, macOS, go1.26.0 toolchain, `modernc.org/sqlite v1.23.1`,
+`gorm.io/gorm v1.31.0`, in-memory SQLite. One `-bench=. -benchmem` run:
+
+| Operation     | Raw ns/op | Quark ns/op | GORM ns/op | Raw allocs | Quark allocs | GORM allocs |
+| ------------- | --------: | ----------: | ---------: | ---------: | -----------: | ----------: |
+| InsertOne     |     6,038 |      12,293 |     21,212 |         20 |           62 |          78 |
+| InsertBatch   |   170,776 |     258,973 |    270,601 |        622 |        1,277 |       1,287 |
+| FindByPK      |     7,311 |      15,541 |     11,002 |         24 |           65 |          66 |
+| ListWhere(50) |    38,604 |      71,172 |     50,134 |        365 |          474 |         705 |
+| Update        |     3,059 |       4,963 |      9,132 |         15 |           62 |          84 |
+
+## Reading the numbers
+
+- Quark's reflect path runs about **1.5–2.1× the hand-written `database/sql`
+  floor** on these operations. That gap is the overhead the planned
+  generated path is meant to recover — and it bounds it, since generated
+  code cannot beat hand-written SQL.
+- **Quark and GORM are in the same performance class.** Neither dominates:
+  in this run Quark is faster on inserts and updates, GORM is faster on the
+  single-row read and the filtered list.
+- The reflection cache means model metadata is parsed once per type and
+  reused; the remaining per-row cost is field-level reflection on scan and
+  bind, which is what generated code removes.
+
+Quark is **not yet a v1.0 release** and these results are not a claim of
+fastest-in-class. They exist to give an honest baseline that the code
+generation work will be measured against.

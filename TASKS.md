@@ -332,13 +332,48 @@ cross-shard tx).
 
 ### F6-8 · Benchmarks proper
 
-`func Benchmark*(b *testing.B)` reales contra `database/sql` puro,
-GORM, ent y sqlc, en matriz por dialecto. Publicar en
-`docs/benchmarks/` con harness reproducible y metodología documentada
-(apples-to-apples honesto, sin marketing). **Reemplaza cualquier número
-de perf/coverage hardcoded** (auditar README/docs). Es el gate de v1.0
-para ADR-0002 (≥3× p99 con codegen). **Done**: harness corre en CI
-(o doc de cómo correrlo); números publicados; claims viejos eliminados.
+> **Dividido en 8a (baseline, entregado esta sesión) y 8b (codegen-tier,
+> diferido).** Razón: el objetivo declarado del foco "benchmarks first" es
+> el **baseline pre-codegen** (Quark vs `database/sql` puro), que es lo que
+> mide el overhead que el codegen quita y contra lo que se mide el gate de
+> ADR-0002. ent y sqlc son codegen-tier (necesitan código generado
+> commiteado) y sólo aportan señal cuando Quark+codegen exista para
+> compararse — son la comparación relevante en el gate de v1.0, no en el
+> baseline.
+
+#### F6-8a · Harness + baseline (Quark vs database/sql vs GORM) — entregado esta sesión
+
+Módulo independiente `benchmarks/` (su propio `go.mod` con `replace =>
+../`, para que GORM no contamine el `go.mod` de la librería). Cinco
+operaciones (`InsertOne`/`InsertBatch`/`FindByPK`/`ListWhere`/`Update`)
+que ejercen los hot paths reflect (`scanRow`/`buildInsert`/`buildUpdate`)
+que el codegen reemplazará, medidas en tres implementaciones: raw
+`database/sql` (el suelo), Quark (path reflect actual = baseline
+pre-codegen), GORM (par reflect). SQLite in-memory para aislar el overhead
+de ORM/driver del I/O. Quark/raw y GORM corren en **binarios de test
+separados** (`benchmarks/` y `benchmarks/gorm/`) porque `modernc.org/sqlite`
+y el driver de glebarez registran ambos el driver `sqlite`; el modelo
+compartido vive en `benchmarks/internal/model` (sin imports de ORM).
+**Auditadas y reemplazadas** las cifras hardcoded v0.1.0 + la tabla
+cross-ORM estimada en `docs/benchmarks.md` y `website/docs/reference/benchmarks.mdx`
+(este último además enlazaba a un `benchmark_test.go` inexistente). Job CI
+`benchmarks` smoke (`go vet` + `-benchtime=1x`) evita el bit-rot.
+**Hallazgo honesto**: el path reflect de Quark va ~1.5–2.1× sobre el suelo
+de `database/sql` en estas ops; ese margen acota lo que el codegen puede
+recuperar — input directo al gate ≥3× p99 de ADR-0002 (en single-row
+in-memory el margen al suelo es ~2×, así que el gate, de cumplirse, será en
+paths más pesados o bajo la concurrencia de F6-9). **Pendiente**:
+`code-reviewer` + PR + merge (entonces tachar y anotar PR #).
+
+#### F6-8b · Comparación codegen-tier (ent + sqlc) — diferido
+
+Añadir ent y sqlc como subpaquetes (`benchmarks/ent/`, `benchmarks/sqlc/`)
+con su código generado commiteado, espejando `benchmarks/gorm/` (mismo
+aislamiento de driver, import de `internal/model`). Es la comparación que
+importa en el gate de v1.0 (ADR-0002, ≥3× p99 con codegen), cuando Quark
+tenga su propio path generado (F6-2/F6-3) para compararse contra los ORMs
+codegen-tier. **Done**: ent y sqlc en la matriz; números publicados junto a
+los de 8a; metodología actualizada.
 
 ### F6-9 · Stress / load testing
 
@@ -350,9 +385,10 @@ documentado con números; identifica el primer cuello de botella real
 
 ### Cierre de Fase 6 → v1.0.0
 
-Cuando F6-1..F6-9 estén ✅ **y** F6-8 demuestre el gate de performance
-de ADR-0002, taggear **v1.0.0** vía `/release v1.0.0` — el primer
-release "production-ready" honesto. Issue de planning con los 9 items:
+Cuando F6-1..F6-9 estén ✅ **y** los benchmarks (F6-8a baseline + F6-8b
+codegen-tier, contra el path generado de F6-2/F6-3) demuestren el gate de
+performance de ADR-0002, taggear **v1.0.0** vía `/release v1.0.0` — el
+primer release "production-ready" honesto. Issue de planning con los 9 items:
 ver GitHub. Cada F6-N es 1 PR con `code-reviewer` + docs +
 CHANGELOG; los items que abren ADR (F6-5/F6-7) escriben el ADR en el
 mismo PR.
