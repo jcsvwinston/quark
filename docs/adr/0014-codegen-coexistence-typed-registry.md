@@ -1,8 +1,9 @@
 ---
 id: 0014
 title: Codegen coexiste vía registry de funciones tipadas por tipo con fallback a reflect
-status: proposed
+status: accepted
 date: 2026-05-22
+implemented: F6-1
 deciders: jcsvwinston
 related: [0001, 0002]
 supersedes: null
@@ -60,8 +61,12 @@ Mecánica:
    structs con tags `db:`/`pk:`, resuelve sus tipos con `go/types`
    (incluidos los genéricos `quark.JSON[T]`/`Array[T]`/`Nullable[T]`), y
    emite un fichero `*_quark_gen.go` por package con un `func init()`
-   que llama a un registrador interno (`quark.registerTypedScanner` /
-   `registerTypedBinder`).
+   que llama a los registradores exportados (`quark.RegisterTypedScanner` /
+   `RegisterTypedBinder` / `RegisterGeneratedMeta`). Son exportados —y no
+   `registerTyped*` como decía el primer sketch— porque el `init()` generado
+   vive en el paquete del usuario (externo a `quark`); coincide con la
+   etiqueta "superficie semi-pública" de §Restricciones. (Implementado en
+   F6-1.)
 2. En runtime, `scanRow` / `buildInsert` consultan el registry por
    `reflect.Type` **antes** de caer al path reflect. Hit → fast-path sin
    reflect. Miss → reflect (comportamiento actual, sin cambio).
@@ -123,7 +128,7 @@ Decisiones derivadas:
 
 - Toda hot path reflect nueva debe exponer un punto de extensión obvio
   (lookup en el registry antes del reflect) — ya exigido por ADR-0002.
-- Los registradores (`registerTypedScanner`, etc.) son superficie
+- Los registradores (`RegisterTypedScanner`, etc.) son superficie
   semi-pública: cambiarlos rompe el código generado de versiones
   previas. Versionar el contrato del generador (un `//quark:gen vN`
   header) desde F6-1.

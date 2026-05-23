@@ -6,9 +6,11 @@ description: Run Quark migrations, schema checks, and tenant jobs from Go comman
 
 # Operational Workflows
 
-The current Quark module does not include a standalone `cmd/quark` binary. Until
-that package exists, operational tasks are best expressed as small Go commands
-that call the same public APIs your application uses.
+Quark now ships a `cmd/quark` binary, whose first generally-available
+subcommand is `quark gen` (see [Code Generation](codegen)). The operational
+tasks below — migrations, schema checks, tenant jobs — are still best
+expressed as small Go commands that call the same public APIs your
+application uses, and that is what this page documents.
 
 This page replaces the usual CLI command table with concrete command patterns
 you can place under `./cmd`.
