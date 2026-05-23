@@ -84,6 +84,14 @@ type BaseQuery struct {
 	selectExprs []selectExprEntry // AST projections rendered in the SELECT list (window funcs, scalar subqueries, aliased computations)
 	setOps      []setOpEntry      // UNION / INTERSECT / EXCEPT operands appended after the base SELECT
 	err         error             // stores initialization error from ClientProvider
+
+	// typedScanResolved memoizes the F6-2 generated-scanner lookup so the
+	// reflect.Type lookup + registry read happen once per query rather than
+	// once per row. typedScan is the resolved generated scanner, or nil when
+	// codegen is absent for the model or the per-column timezone feature is
+	// active for this query (both fall through to the reflection scan path).
+	typedScanResolved bool
+	typedScan         TypedScanner
 }
 
 // selectExprEntry holds one AST-rendered projection in the SELECT list.
