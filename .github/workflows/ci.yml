@@ -54,6 +54,32 @@ jobs:
       - name: Run tests
         run: go test ./... -timeout 5m -v -count=1
 
+  # F6-8: the benchmark harness is its own module (separate go.mod with a
+  # local `replace` directive), so the root `go test ./...` above does not
+  # build it. This job compiles and smoke-runs it to keep it from rotting.
+  # `-benchtime=1x` runs each benchmark exactly once — the goal is compile
+  # + execute coverage, not stable numbers (those are produced on demand,
+  # see benchmarks/README.md).
+  benchmarks:
+    name: Benchmarks (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # The benchmark module declares its own minimum Go version; pin
+          # the toolchain to it so the module stays self-contained even if
+          # its go.mod diverges from the root.
+          go-version-file: benchmarks/go.mod
+          cache: true
+
+      - name: Build and smoke-run benchmarks
+        working-directory: benchmarks
+        run: |
+          go vet ./...
+          go test -run=^$ -bench=. -benchtime=1x -count=1 ./...
+
   # F0-8: per-engine integration matrix.
   # Spins up each engine via testcontainers-go and runs the SharedSuite
   # against it. Docker is pre-installed on ubuntu-latest runners.
