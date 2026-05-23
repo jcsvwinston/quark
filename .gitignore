@@ -1,7 +1,9 @@
 # Binaries
 *.exe
 *.out
-quark
+# Anchored to the repo root so the compiled `./quark` binary is ignored
+# without also matching the cmd/quark/ source tree.
+/quark
 blog-api
 /migrations
 

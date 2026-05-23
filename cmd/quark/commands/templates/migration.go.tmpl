@@ -1,0 +1,25 @@
+package migrations
+
+import (
+	"context"
+	"github.com/jcsvwinston/quark"
+	"github.com/jcsvwinston/quark/migrate"
+)
+
+func init() {
+	migrate.Register(&migrate.Migration{
+		ID:      "{{.ID}}",
+		Name:    "{{.Name}}",
+		Message: "{{.Message}}",
+		Up: func(ctx context.Context, client *quark.Client) error {
+			// Write your Up migration logic here
+			// Example: return client.Exec(ctx, "CREATE TABLE users (...)")
+			return nil
+		},
+		Down: func(ctx context.Context, client *quark.Client) error {
+			// Write your Down migration logic here
+			// Example: return client.Exec(ctx, "DROP TABLE users")
+			return nil
+		},
+	})
+}
