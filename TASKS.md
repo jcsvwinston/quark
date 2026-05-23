@@ -211,6 +211,33 @@ sidebar.
 
 ### F6-2 · Generated typed scanners (read path sin reflect)
 
+> **Entregado esta sesión (rama `feat/f6-2-typed-scanners`, apilada sobre
+> F6-1; pendiente code-reviewer + PR + merge).** `scanRow` (query_exec.go)
+> consulta `lookupTypedScanner(reflect.TypeOf(dest))` antes del reflect,
+> gateado por `!q.tzActive()` (el scanner generado no lleva estado de
+> timezone runtime → tz activa cae a reflect). Helper exportado
+> `quark.ScanTarget(ptr)` = `makeScanDest` para punteros tipados con loc nil
+> (mantiene el parsing string/[]byte de `timeScanner` que SQLite necesita);
+> `makeScanDest` refactorizado para delegar en `scanDestForPtr`. Generador
+> (`emit.go`) emite un scanner real por modelo: lee `rows.Columns()`, switch
+> `lower(col)` → `quark.ScanTarget(&m.Field)`, desconocidas → discard,
+> `rows.Scan`. `GenContractVersion` 1→2 (ficheros v1 con stubs caen a reflect
+> por el gate de versión). `RegisterTypedBinder` sigue con `StubBinder`
+> (F6-3). Cobertura: `sample/roundtrip_test.go` prueba el scanner GENERADO
+> real contra un gemelo reflect (`reflectAccount`) — round-trip idéntico en
+> Find/List para escalares + `JSON[T]`/`Nullable[T]`/`time.Time`/`*time.Time`;
+> fallback verificado (el gemelo sin codegen usa reflect). **Hallazgo honesto
+> (relevante para el gate ADR-0002 ≥3×)**: la mejora del scan-path codegen es
+> **pequeña** — Find ~2%, List(200) ~4-5%, mismos allocs — porque el scan es
+> fracción menor del coste de query (driver + database/sql dominan) y el
+> scanner generado sigue alocando el slice `[]any` + boxing por campo. El
+> mecanismo y la corrección quedan validados; el win grande del read-path
+> requeriría eliminar el `[]any`/boxing (optimización futura). **Cobertura
+> 5-motores**: el scanner usa `rows.Scan` + `ScanTarget` (mismo helper que
+> reflect) → equivalencia por construcción independiente del motor; SQLite es
+> la prueba CI. Doc `codegen.mdx` actualizada (read path real, binder stub,
+> nota de mejora modesta). **Pendiente**: code-reviewer + PR.
+
 `scanRow` consulta `typedScanners[reflect.Type]` antes del reflect.
 El generado escanea `*sql.Rows → *T` con índices de columna fijos, sin
 `reflect.Value.Field`. Cubre `List`/`First`/`Find`. **Done**:

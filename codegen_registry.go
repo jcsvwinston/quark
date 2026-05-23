@@ -40,7 +40,10 @@ import (
 // registrar signatures. Generated code that registers a different version
 // is ignored at lookup time (the operation falls back to reflection), so a
 // stale binary never calls into incompatible generated code.
-const GenContractVersion = 1
+//
+// v2 (F6-2): generated files emit a real typed scanner (read path) instead
+// of the F6-1 stub; v1 files are ignored and fall back to reflection.
+const GenContractVersion = 2
 
 // BindMode selects which column set a TypedBinder produces. Insert binds
 // every persisted column; Update binds the non-PK columns of a full-row

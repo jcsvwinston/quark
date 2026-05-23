@@ -124,7 +124,13 @@ func (ns nullableTimeScanner) Scan(src any) error {
 // timezone conversion — for *sql.Null[time.Time] that also means the field
 // keeps its native Scanner rather than being wrapped at all.
 func makeScanDest(field reflect.Value, loc *time.Location) any {
-	iface := field.Addr().Interface()
+	return scanDestForPtr(field.Addr().Interface(), loc)
+}
+
+// scanDestForPtr is the reflection-free core of makeScanDest: given a typed
+// field pointer it returns the rows.Scan target, wrapping time.Time variants
+// so the same string/[]byte parsing and optional timezone conversion apply.
+func scanDestForPtr(iface any, loc *time.Location) any {
 	switch dst := iface.(type) {
 	case *time.Time:
 		return timeScanner{dest: dst, loc: loc}
@@ -137,6 +143,15 @@ func makeScanDest(field reflect.Value, loc *time.Location) any {
 		return nullableTimeScanner{dest: dst, loc: loc}
 	}
 	return iface
+}
+
+// ScanTarget returns the rows.Scan target for a model field pointer, matching
+// the no-timezone scan behavior of the reflection path (including the
+// string/[]byte time parsing that drivers like SQLite require). It is called
+// by generated scanners — which run only when the per-column timezone feature
+// is inactive, so a nil location is always correct. Not intended for hand use.
+func ScanTarget(ptr any) any {
+	return scanDestForPtr(ptr, nil)
 }
 
 // executeQuery runs a QueryContext through the middleware chain.
@@ -1058,6 +1073,22 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 // scanRow scans a single row into the entity.
 // Uses cached ModelMeta for O(1) field lookups when available.
 func (q *Query[T]) scanRow(rows *sql.Rows, dest *T) error {
+	// Fast path: a generated typed scanner registered for this model (F6-2),
+	// resolved once per query and memoized so the reflect.Type lookup and
+	// registry read are not repeated per row. It is skipped when the
+	// per-column timezone feature is active for this query (the generated
+	// scanner carries no runtime timezone state, so those queries stay on the
+	// reflection path) and when no compatible generated code is registered.
+	if !q.typedScanResolved {
+		if !q.tzActive() {
+			q.typedScan, _ = lookupTypedScanner(reflect.TypeOf(dest))
+		}
+		q.typedScanResolved = true
+	}
+	if q.typedScan != nil {
+		return q.typedScan(rows, dest)
+	}
+
 	v := reflect.ValueOf(dest)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
 		return fmt.Errorf("dest must be a non-nil pointer")
