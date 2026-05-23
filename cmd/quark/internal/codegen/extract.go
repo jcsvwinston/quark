@@ -129,9 +129,17 @@ func extractFields(st *types.Struct) []quark.ModelField {
 		if !ok {
 			continue
 		}
+		// Match buildInsert/scanRow: a field tagged db:"-" (or db:"") is not
+		// persisted, so it must not appear in the generated scanner/binder or
+		// the hash. Skipping it here keeps the generated code and ModelHash in
+		// step with the runtime.
+		col := schema.ColumnFromDBTag(dbTag)
+		if col == "" || col == "-" {
+			continue
+		}
 		fields = append(fields, quark.ModelField{
 			Name:   f.Name(),
-			Column: schema.ColumnFromDBTag(dbTag),
+			Column: col,
 			// Unalias so an alias type (e.g. quark.Nullable[T], an alias of
 			// sql.Null[T]) renders as its target, matching reflect.Type.String,
 			// which resolves aliases. Resolves the outermost alias; a type

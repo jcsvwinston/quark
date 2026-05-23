@@ -79,6 +79,11 @@ func TestF6_2_GeneratedScannerRoundTrip(t *testing.T) {
 		Nickname:  quark.Nullable[string]{V: "nick", Valid: true},
 		CreatedAt: now, UpdatedAt: &updated,
 	}
+	// Guard: the generated binder must be registered too, so Create exercises
+	// the generated write path and not reflection on both sides.
+	if !quark.GeneratedBinderRegistered(reflect.TypeOf(sample.Account{})) {
+		t.Fatal("sample.Account has no generated binder registered; the v3 codegen did not run")
+	}
 	if err := quark.For[sample.Account](ctx, c).Create(&g); err != nil {
 		t.Fatalf("create generated: %v", err)
 	}
@@ -211,6 +216,43 @@ func benchSeedN(b *testing.B, c *quark.Client, model any, n int) {
 			if err := quark.For[reflectAccount](ctx, c).Create(&a); err != nil {
 				b.Fatal(err)
 			}
+		}
+	}
+}
+
+// The Create benchmarks measure the write path: the generated INSERT binder
+// (Account) vs the reflection bind loop (reflectAccount), same columns and
+// data. This is the F6-3a write-path data point for the ADR-0002 gate. Both
+// insert into a growing table, so absolute latency drifts up over b.N; the
+// gen-vs-reflect comparison stays valid because both grow identically.
+func BenchmarkCreateGenerated(b *testing.B) {
+	ctx := context.Background()
+	c := benchClient(b, "file:f6_3_bench_gen?mode=memory&cache=shared")
+	if err := c.Migrate(ctx, &sample.Account{}); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		a := sample.Account{Email: "x", Age: i, Balance: 1, Active: true, CreatedAt: time.Now()}
+		if err := quark.For[sample.Account](ctx, c).Create(&a); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCreateReflect(b *testing.B) {
+	ctx := context.Background()
+	c := benchClient(b, "file:f6_3_bench_ref?mode=memory&cache=shared")
+	if err := c.Migrate(ctx, &reflectAccount{}); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		a := reflectAccount{Email: "x", Age: i, Balance: 1, Active: true, CreatedAt: time.Now()}
+		if err := quark.For[reflectAccount](ctx, c).Create(&a); err != nil {
+			b.Fatal(err)
 		}
 	}
 }

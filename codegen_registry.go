@@ -42,8 +42,9 @@ import (
 // stale binary never calls into incompatible generated code.
 //
 // v2 (F6-2): generated files emit a real typed scanner (read path) instead
-// of the F6-1 stub; v1 files are ignored and fall back to reflection.
-const GenContractVersion = 2
+// of the F6-1 stub. v3 (F6-3a): integer-PK models also emit a real INSERT
+// binder. Older files are ignored and fall back to reflection.
+const GenContractVersion = 3
 
 // BindMode selects which column set a TypedBinder produces. Insert binds
 // every persisted column; Update binds the non-PK columns of a full-row
@@ -182,6 +183,19 @@ func StubScanner(*sql.Rows, any) error { return ErrGeneratedStub }
 // ErrGeneratedStub.
 func StubBinder(any, BindMode) ([]string, []any, error) { return nil, nil, ErrGeneratedStub }
 
+// GeneratedBinderRegistered reports whether a compatible generated binder is
+// registered for t that actually handles inserts — i.e. a real binder, not
+// the stub (which returns ErrGeneratedStub). Intended for tests that want to
+// assert the generated write path is exercised rather than reflection.
+func GeneratedBinderRegistered(t reflect.Type) bool {
+	bind, ok := lookupTypedBinder(t)
+	if !ok {
+		return false
+	}
+	_, _, err := bind(reflect.New(modelKey(t)).Interface(), BindInsert)
+	return err == nil
+}
+
 // CheckGeneratedDrift reports whether model t has generated code whose
 // recorded ModelHash no longer matches the model's current shape — i.e. the
 // struct changed but `quark gen` was not re-run. It returns (drifted,
@@ -274,9 +288,15 @@ func ModelHash(t reflect.Type) string {
 		if !ok {
 			continue
 		}
+		// db:"-" / db:"" fields are not persisted (buildInsert/scanRow skip
+		// them); exclude them from the hash so it matches the generator.
+		col := columnFromDBTag(dbTag)
+		if col == "" || col == "-" {
+			continue
+		}
 		fields = append(fields, ModelField{
 			Name:   f.Name,
-			Column: columnFromDBTag(dbTag),
+			Column: col,
 			GoType: f.Type.String(),
 			IsPK:   strings.EqualFold(f.Tag.Get("pk"), "true"),
 		})
