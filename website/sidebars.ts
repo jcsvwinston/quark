@@ -30,6 +30,7 @@ const sidebars: SidebarsConfig = {
         'guides/transactions',
         'guides/hooks',
         'guides/cli',
+        'guides/codegen',
       ],
     },
     {

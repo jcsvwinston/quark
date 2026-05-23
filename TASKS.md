@@ -161,6 +161,31 @@ sharding en paralelo (independientes del codegen), benchmarks al final
 
 ### F6-1 · Codegen tooling skeleton (`quark gen`)
 
+> **Entregado esta sesión (pendiente code-reviewer + PR + merge → tachar y
+> anotar PR #).** Foundation en `codegen_registry.go` (package quark):
+> `GenContractVersion`, tipos `TypedScanner`/`TypedBinder`/`GeneratedMeta`,
+> registries keyed por `reflect.Type`, registradores **exportados**
+> `RegisterTypedScanner`/`RegisterTypedBinder`/`RegisterGeneratedMeta`
+> (llamados desde el `init()` del código generado en el paquete del
+> usuario — por eso exportados, no `registerTyped*` como decía el sketch
+> de ADR-0014; consistente con su "superficie semi-pública"), lookups
+> unexported gateados por versión (miss en versión incompatible → reflect),
+> `ModelHash`/`HashModelFields`/`CanonicalType` (algoritmo de hash único
+> compartido por generador y runtime), `CheckGeneratedDrift`. `cmd/quark/main.go`
+> nuevo → binario instalable (`go install .../cmd/quark`). `quark gen` en
+> `cmd/quark/commands/gen.go` + `cmd/quark/internal/codegen/` (`extract.go`
+> go/packages+go/types con `types.Unalias` para alias como `Nullable[T]`;
+> `emit.go` render gofmt'd + `format.Source`; reusa `schema.ColumnFromDBTag`
+> para que las columnas no puedan divergir). Genera `*_quark_gen.go` con
+> `//quark:gen v1` + hash + `init()` que registra `StubScanner`/`StubBinder`
+> (no-ops, F6-2/F6-3 emiten los reales). **Test de conformidad** real
+> (`cmd/quark/internal/codegen/codegen_test.go`): paquete `sample/` con
+> golden `quark_gen.go` commiteado; compara hash AST vs reflexión, golden
+> estabilidad, registración runtime sin drift. Reflect path intacto (lookups
+> NO cableados en hot paths — eso es F6-2/F6-3). cmd/quark compila en CI vía
+> `go test ./...`. Doc `website/docs/guides/codegen.mdx` + sidebar; nota de
+> corrección en `cli.mdx`. **Pendiente**: code-reviewer + PR.
+
 > **Enfoque decidido (2026-05-22, enmienda ADR-0014):** `quark gen` es
 > subcomando de `cmd/quark` y parsea el **AST** del paquete del usuario
 > (`go/packages` + `go/types`), no reflexión — para soportar la UX de
