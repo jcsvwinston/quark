@@ -246,14 +246,53 @@ micro que muestra la mejora; fallback verificado cuando no hay generado.
 
 ### F6-3 · Generated typed binders (write path sin reflect)
 
-`buildInsert`/`buildUpdate`/`buildUpdateMap`/`saveAny` consultan
-`typedBinders` antes del reflect. El generado devuelve `(cols, args)`
-sin reflect, incluido el batch y el partial-update de `UpdateFields`
-(`buildUpdateMap` — no sólo el UPDATE completo). Respeta tags (`pk`,
-`version`, `tz`, soft-delete) leídos en gen-time. **Done**:
-Create/Update/UpdateFields/CreateBatch round-trip idéntico con y sin
-codegen en CI; optimistic locking + soft delete + dirty tracking siguen
-funcionando bajo el path generado.
+> **Dividido en 3a (INSERT, entregado esta sesión) y 3b (UPDATE/partial/
+> batch, diferido).** El UPDATE completo lleyendo `version`/soft-delete +
+> el partial de `buildUpdateMap` + el batch son sustancialmente más
+> arriesgados (corrupción de escritura) y, a la luz del hallazgo de abajo,
+> de payoff dudoso; se difieren a 3b con gating conservador por-modelo.
+
+#### F6-3a · INSERT binder — entregado esta sesión (rama `feat/f6-3a-insert-binder`, apilada sobre F6-2; pendiente code-reviewer + PR)
+
+`buildInsert` (query_crud.go) consulta `lookupTypedBinder` antes del
+reflect, gateado por `!q.tzActive() && v.CanAddr()` y por que el binder
+devuelva sin error (StubBinder y `BindUpdate` devuelven `ErrGeneratedStub`
+→ reflect). El generador (`emit.go`) emite un binder INSERT real **sólo
+para modelos con un único PK entero** (`insertBinderPK`): skip del PK
+cuando es cero (auto-increment), resto de campos db siempre, columnas
+sin-quote + args raw (buildInsert hace quote/placeholder/tenant/assembly).
+Modelos con PK compuesto/string/no-entero → `StubBinder` (reflect).
+`GenContractVersion` 2→3 (cambio de shape del binder; ficheros v2 caen a
+reflect por el gate de versión). Round-trip: el test F6-2 ya crea vía el
+binder generado y compara contra el gemelo reflect → binder fiel. Benchmark
+`Create` generado vs reflect añadido. **tenant injection y SQL assembly
+intactos**; el reflect loop es byte-idéntico cuando el fast path no aplica.
+Doc `codegen.mdx` + nota; suite completa verde (buildInsert es hot path de
+escritura). **Pendiente**: code-reviewer + PR.
+
+> **Hallazgo honesto — SEGUNDO punto de datos para el gate ADR-0002 ≥3×.**
+> El binder INSERT generado da mejora **~1%** (Create ~15.4µs gen vs
+> ~15.6µs reflect; -6 allocs/op: 89 vs 95). Sumado al scan de F6-2 (~2-5%)
+> y al baseline de F6-8a (~2× sobre `database/sql`), los datos confirman
+> que **reflect NO es el cuello de botella** de Quark por-operación: el
+> coste lo domina el round-trip driver/`database/sql`, no la reflexión en
+> scan/bind. **Esto cumple la condición de reapertura de ADR-0002**
+> ("Si... los benchmarks muestran que reflect ya no es el cuello de botella
+> ... reevaluar prioridad de Fase 6"). Recomendación para el mantenedor:
+> antes de invertir en 3b/F6-4-por-perf, decidir si codegen se justifica
+> por **type-safety** (F6-4, valor independiente del gate) en lugar de
+> velocidad, o perfilar dónde vive realmente el coste. El mecanismo y la
+> corrección quedan validados; el gate de perf, con el diseño actual, no se
+> alcanza por scan+bind.
+
+#### F6-3b · UPDATE / partial / batch binder — diferido
+
+`buildUpdate`/`buildUpdateMap`/`CreateBatch` consultan `typedBinders`. El
+generado respeta `version` (optimistic lock), soft-delete y el partial de
+`UpdateFields`. **Done**: Update/UpdateFields/CreateBatch round-trip
+idéntico con y sin codegen; optimistic locking + soft delete + dirty
+tracking siguen funcionando. **Reconsiderar el alcance** a la luz del
+hallazgo de 3a (payoff ~1%): quizá sólo si F6-4/type-safety lo motiva.
 
 ### F6-4 · Typed query field accessors (`Where().Name().Eq("x")`)
 

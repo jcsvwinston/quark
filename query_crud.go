@@ -474,27 +474,55 @@ func (q *BaseQuery) buildInsert(v reflect.Value) (string, []any, error) {
 	var args []any
 	argIndex := 1
 
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		dbTag := columnFromDBTag(field.Tag.Get("db"))
-		if dbTag == "" || dbTag == "-" {
-			continue // Skip fields without db tag
+	// Fast path: a generated INSERT binder (F6-3a) produces the (columns,
+	// args) without reflection. Used only when the per-column timezone
+	// feature is inactive (the binder emits raw values, matching
+	// bindColumnArg's pass-through), the value is addressable (so we can hand
+	// the binder the *T), and a compatible binder handles BindInsert. The
+	// stub binder and the not-yet-generated BindUpdate return ErrGeneratedStub,
+	// so the reflection loop below runs unchanged in every other case.
+	// tenant injection and SQL assembly happen the same way afterwards.
+	gathered := false
+	if !q.tzActive() && v.CanAddr() {
+		if bind, ok := lookupTypedBinder(t); ok {
+			if rawCols, rawArgs, berr := bind(v.Addr().Interface(), BindInsert); berr == nil {
+				for i, col := range rawCols {
+					if err := q.guard.ValidateIdentifier(col); err != nil {
+						return "", nil, err
+					}
+					columns = append(columns, q.dialect.Quote(col))
+					placeholders = append(placeholders, q.dialect.Placeholder(argIndex))
+					args = append(args, rawArgs[i])
+					argIndex++
+				}
+				gathered = true
+			}
 		}
+	}
 
-		// Skip PK columns that are zero (let DB assign auto-increment).
-		// For composite PKs all columns must be included since they are not auto-generated.
-		if !q.meta.HasCompositePK && i == q.pk.Index && isZeroPKValue(v.Field(i)) {
-			continue
+	if !gathered {
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			dbTag := columnFromDBTag(field.Tag.Get("db"))
+			if dbTag == "" || dbTag == "-" {
+				continue // Skip fields without db tag
+			}
+
+			// Skip PK columns that are zero (let DB assign auto-increment).
+			// For composite PKs all columns must be included since they are not auto-generated.
+			if !q.meta.HasCompositePK && i == q.pk.Index && isZeroPKValue(v.Field(i)) {
+				continue
+			}
+
+			if err := q.guard.ValidateIdentifier(dbTag); err != nil {
+				return "", nil, err
+			}
+
+			columns = append(columns, q.dialect.Quote(dbTag))
+			placeholders = append(placeholders, q.dialect.Placeholder(argIndex))
+			args = append(args, q.bindColumnArg(dbTag, v.Field(i).Interface()))
+			argIndex++
 		}
-
-		if err := q.guard.ValidateIdentifier(dbTag); err != nil {
-			return "", nil, err
-		}
-
-		columns = append(columns, q.dialect.Quote(dbTag))
-		placeholders = append(placeholders, q.dialect.Placeholder(argIndex))
-		args = append(args, q.bindColumnArg(dbTag, v.Field(i).Interface()))
-		argIndex++
 	}
 
 	// Auto-inject tenant ID if needed (only if not already in columns)
