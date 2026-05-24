@@ -328,13 +328,36 @@ idéntico con y sin codegen; optimistic locking + soft delete + dirty
 tracking siguen funcionando. **Reconsiderar el alcance** a la luz del
 hallazgo de 3a (payoff ~1%): quizá sólo si F6-4/type-safety lo motiva.
 
-### F6-4 · Typed query field accessors (`Where().Name().Eq("x")`)
+### F6-4 · Typed query field accessors ✅ (pendiente PR/merge)
 
 API generada **compile-time** (no reemplaza runtime): por cada modelo,
 accesores tipados de columna que producen condiciones sin strings
 mágicos, dando type-safety de columnas. **Done**: ejemplo compila;
 un typo de columna no compila; coexiste con la API string actual
 (`Where("name","=",...)` sigue válida). Doc en codegen.mdx.
+
+> **Entregado esta sesión (pendiente code-reviewer + PR).** Runtime en
+> `typed_columns.go` (package quark): `TypedColumn[T]` genérico (Eq/Neq/Gt/
+> Gte/Lt/Lte/In/NotIn/Between/IsNull/IsNotNull), `TypedStringColumn` (embebe
+> `TypedColumn[string]` + Like/NotLike), `Predicate` opaco, y método aditivo
+> `Query[T].WhereP(...Predicate)` que baja cada predicado a la MISMA
+> `condition` interna que `Where(col,op,val)` (intercambiables y mezclables;
+> la API string sigue válida). **Type-safety de valor además de columna**: el
+> nombre se eligió `TypedColumn` (no `Column`/`Col`, ya ocupados por la
+> introspección F3 y el `Col()` de `expr.go`). Generador
+> (`cmd/quark/internal/codegen/`): `extract.go` calcula un `ColType` por campo
+> (tipo renderizado para el paquete local, qualifier propio stripeado) y
+> recolecta los imports de los tipos de campo en `PackageModels.Imports`,
+> dejando intacto `GoType` (qualificado, lo usa el hash de conformidad);
+> `emit.go` emite imports dinámicos (stdlib + terceros, ordenados) y un
+> `var <Model>Columns` con `quark.TypedColumn[T]` / `TypedStringColumn` por
+> columna. **No** cambia `GenContractVersion` (los accesores no registran nada
+> en runtime — azúcar pura, ADR-0014 §53). Golden `sample/quark_gen.go`
+> regenerado; tests: `typed_columns_test.go` (lowering vs API string +
+> shapes de predicado) y `sample/accessors_test.go` (accesores GENERADOS
+> end-to-end en sqlite: Eq/Gte/Like/In/Between/IsNotNull, mezcla con `Where`,
+> equivalencia typed↔string). `go test -short ./...` verde. Doc:
+> sección "Typed column accessors" en `website/docs/guides/codegen.mdx`.
 
 ### F6-5 · Read replicas / pool routing
 

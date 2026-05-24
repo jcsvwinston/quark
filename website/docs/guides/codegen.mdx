@@ -148,6 +148,58 @@ register `quark.StubBinder` instead and bind via reflection.
 - The file is generated; never edit it by hand. Re-run `quark gen` after
   changing a model.
 
+## Typed column accessors
+
+The generated file also emits, per model, a `<Model>Columns` value with one
+typed handle per `db`-tagged column. They let you build `WHERE` conditions
+without magic column strings and with **compile-time** checking of both the
+column name and the bound value:
+
+```go
+// Generated in quark_gen.go:
+var AccountColumns = struct {
+    ID    quark.TypedColumn[int64]
+    Email quark.TypedStringColumn
+    Age   quark.TypedColumn[int]
+}{
+    ID:    quark.NewTypedColumn[int64]("id"),
+    Email: quark.NewTypedStringColumn("email"),
+    Age:   quark.NewTypedColumn[int]("age"),
+}
+```
+
+Use them through `WhereP`:
+
+```go
+adults, err := quark.For[Account](ctx, c).
+    WhereP(
+        AccountColumns.Email.Like("%@example.com"),
+        AccountColumns.Age.Gte(18),
+    ).
+    List()
+```
+
+What the compiler now catches that the string API cannot:
+
+```go
+AccountColumns.Emial.Eq("x")  // compile error: no field Emial
+AccountColumns.Age.Eq("x")    // compile error: Age wants an int, got string
+```
+
+- Each handle offers `Eq` / `Neq` / `Gt` / `Gte` / `Lt` / `Lte` / `In` /
+  `NotIn` / `Between` / `IsNull` / `IsNotNull`, all typed to the field. String
+  columns use `TypedStringColumn`, which adds `Like` / `NotLike`.
+- `WhereP` is **pure compile-time sugar**: each predicate lowers to exactly
+  the condition `Where("email", "=", v)` produces (ADR-0014), so the two APIs
+  are interchangeable and mix on one query
+  (`.WhereP(AccountColumns.Age.Gte(18)).Where("active", "=", true)`). The
+  string `Where` form stays fully valid.
+- The accessors register nothing with the runtime — they neither speed up nor
+  change query execution. Their only benefit is compile-time safety. Without
+  codegen they simply do not exist.
+- `OR` and grouping are not offered on the typed API; use the string `Or` /
+  group helpers for those.
+
 ## How it works
 
 `quark gen` reads your model package's **source** with `go/packages` and

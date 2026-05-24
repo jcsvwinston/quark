@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/jcsvwinston/quark"
 )
@@ -83,4 +84,27 @@ func quarkgenBindAccount(entity any, mode quark.BindMode) (cols []string, args [
 	cols = append(cols, "updated_at")
 	args = append(args, m.UpdatedAt)
 	return cols, args, nil
+}
+
+// AccountColumns provides typed, compile-time-checked column accessors for Account.
+var AccountColumns = struct {
+	ID        quark.TypedColumn[int64]
+	Email     quark.TypedStringColumn
+	Age       quark.TypedColumn[int]
+	Balance   quark.TypedColumn[float64]
+	Active    quark.TypedColumn[bool]
+	Settings  quark.TypedColumn[quark.JSON[string]]
+	Nickname  quark.TypedColumn[sql.Null[string]]
+	CreatedAt quark.TypedColumn[time.Time]
+	UpdatedAt quark.TypedColumn[*time.Time]
+}{
+	ID:        quark.NewTypedColumn[int64]("id"),
+	Email:     quark.NewTypedStringColumn("email"),
+	Age:       quark.NewTypedColumn[int]("age"),
+	Balance:   quark.NewTypedColumn[float64]("balance"),
+	Active:    quark.NewTypedColumn[bool]("active"),
+	Settings:  quark.NewTypedColumn[quark.JSON[string]]("settings"),
+	Nickname:  quark.NewTypedColumn[sql.Null[string]]("nickname"),
+	CreatedAt: quark.NewTypedColumn[time.Time]("created_at"),
+	UpdatedAt: quark.NewTypedColumn[*time.Time]("updated_at"),
 }

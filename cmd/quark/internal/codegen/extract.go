@@ -36,6 +36,13 @@ type ModelDef struct {
 	Name   string
 	Fields []quark.ModelField
 	Hash   string
+	// ColTypes holds, parallel to Fields, the Go type of each field rendered
+	// for use *inside the model's own package* — i.e. with the local package
+	// qualifier stripped ("Status", not "sample.Status"). This is what the
+	// generated typed-column accessors (F6-4) parameterise over. It is kept
+	// separate from quark.ModelField.GoType, which stays qualified for every
+	// package so it matches reflect.Type.String() in the conformance hash.
+	ColTypes []string
 }
 
 // PackageModels groups the models found in one package, with the on-disk
@@ -45,6 +52,11 @@ type PackageModels struct {
 	PkgName string
 	Dir     string
 	Models  []ModelDef
+	// Imports maps import path -> package name for every non-local package
+	// referenced by a field's ColType (e.g. "time" -> "time"). The emitter
+	// merges these with the always-needed imports so the generated
+	// typed-column declarations compile.
+	Imports map[string]string
 }
 
 // qualifier renders types with the package's name (e.g. "quark.JSON[string]",
@@ -81,7 +93,7 @@ func Load(patterns ...string) ([]PackageModels, error) {
 }
 
 func extractPackage(p *packages.Package) PackageModels {
-	pm := PackageModels{PkgPath: p.PkgPath, PkgName: p.Name}
+	pm := PackageModels{PkgPath: p.PkgPath, PkgName: p.Name, Imports: map[string]string{}}
 	if len(p.GoFiles) > 0 {
 		pm.Dir = filepath.Dir(p.GoFiles[0])
 	}
@@ -99,11 +111,12 @@ func extractPackage(p *packages.Package) PackageModels {
 		if !ok {
 			continue
 		}
-		if fields := extractFields(st); len(fields) > 0 {
+		if fields, colTypes := extractFields(st, p.Types, pm.Imports); len(fields) > 0 {
 			pm.Models = append(pm.Models, ModelDef{
-				Name:   name,
-				Fields: fields,
-				Hash:   quark.HashModelFields(fields),
+				Name:     name,
+				Fields:   fields,
+				Hash:     quark.HashModelFields(fields),
+				ColTypes: colTypes,
 			})
 		}
 	}
@@ -112,13 +125,35 @@ func extractPackage(p *packages.Package) PackageModels {
 	return pm
 }
 
+// colTypeQualifier renders a field type for use inside local's own package:
+// the local package qualifier is dropped (so a locally-defined type prints
+// unqualified, as it must to compile in the generated file), and every other
+// referenced package is recorded in imports (path -> name) so the emitter can
+// import it. It is deliberately distinct from the GoType qualifier, which
+// qualifies the local package too in order to match reflect.Type.String().
+func colTypeQualifier(local *types.Package, imports map[string]string) types.Qualifier {
+	return func(p *types.Package) string {
+		if p == nil || p == local {
+			return ""
+		}
+		imports[p.Path()] = p.Name()
+		return p.Name()
+	}
+}
+
 // extractFields returns the persisted fields of st: exported fields with a
 // `db` tag. Column parsing reuses internal/schema (the same code the runtime
 // uses), so column names cannot drift between generator and runtime; the
 // only independently-derived attribute is GoType, which the conformance test
 // validates against reflection.
-func extractFields(st *types.Struct) []quark.ModelField {
+//
+// It returns, parallel to the fields, each field's ColType (the same Go type
+// rendered for use inside local's own package) and records any packages those
+// types reference into imports. local is the package being generated for.
+func extractFields(st *types.Struct, local *types.Package, imports map[string]string) ([]quark.ModelField, []string) {
+	colQual := colTypeQualifier(local, imports)
 	var fields []quark.ModelField
+	var colTypes []string
 	for i := 0; i < st.NumFields(); i++ {
 		f := st.Field(i)
 		if !f.Exported() {
@@ -137,17 +172,22 @@ func extractFields(st *types.Struct) []quark.ModelField {
 		if col == "" || col == "-" {
 			continue
 		}
+		// Unalias so an alias type (e.g. quark.Nullable[T], an alias of
+		// sql.Null[T]) renders as its target, matching reflect.Type.String,
+		// which resolves aliases. Resolves the outermost alias; a type
+		// alias nested under a pointer/slice is a known gap the
+		// conformance test would surface as drift.
+		unaliased := types.Unalias(f.Type())
 		fields = append(fields, quark.ModelField{
 			Name:   f.Name(),
 			Column: col,
-			// Unalias so an alias type (e.g. quark.Nullable[T], an alias of
-			// sql.Null[T]) renders as its target, matching reflect.Type.String,
-			// which resolves aliases. Resolves the outermost alias; a type
-			// alias nested under a pointer/slice is a known gap the
-			// conformance test would surface as drift.
-			GoType: types.TypeString(types.Unalias(f.Type()), qualifier),
+			GoType: types.TypeString(unaliased, qualifier),
 			IsPK:   strings.EqualFold(tag.Get("pk"), "true"),
 		})
+		// ColType: same type, but rendered for the local package (its own
+		// qualifier stripped) and recording every other referenced package
+		// into imports, so the generated Column[ColType] declarations compile.
+		colTypes = append(colTypes, types.TypeString(unaliased, colQual))
 	}
-	return fields
+	return fields, colTypes
 }
