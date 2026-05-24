@@ -6,16 +6,60 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is documented here as a **v0.x** project (currently v0.9.0 —
-late-alpha, not yet v1.0 production-ready). The public surface is broad
-and the core is stable, but some APIs may still move before v1.0.
+Quark is documented here as a **v0.x** project (currently **v0.12.0** —
+late-alpha, not yet v1.0 production-ready). **Phase 6** (codegen + HA +
+sharding + benchmarks → v1.0) is open and actively delivering; v0.11
+and v0.12 are the first cuts.
 
 Per-version release notes live in the main repository under
 [`docs/RELEASE_NOTES_*.md`](https://github.com/jcsvwinston/quark/tree/main/docs).
 The current tag is documented at
-[`docs/RELEASE_NOTES_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.9.0.md).
-Migration steps for breaking changes are at
-[`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md).
+[`docs/RELEASE_NOTES_v0.12.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.12.0.md).
+Migration steps for the most recent breaking changes are at
+[`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
+v0.10, v0.11 and v0.12 introduced **no breaking changes**.
+
+## v0.12.0
+
+Phase 6 sliver: opt-in **compile-time column type-safety** on top of the
+code generator (F6-4). `quark gen` emits, per model, a `<Model>Columns`
+value of typed column handles, and the query builder gains `Query.WhereP`
+— `WHERE` conditions without magic column strings, with compile-time
+checking of both the column and the bound value. Pure compile-time sugar
+(ADR-0014); the string `Where(...)` API stays valid and interchangeable.
+Performance: the audit row diff is now built only when an audit sink is
+configured (~9% allocation drop on `InsertOne`). No breaking changes.
+See [`RELEASE_NOTES_v0.12.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.12.0.md).
+
+## v0.11.0
+
+Phase 6 first cut: **opt-in code generation**. A new `quark gen`
+subcommand of `cmd/quark` parses your model package (`go/packages` +
+`go/types`) and emits a `quark_gen.go` per package that registers typed
+implementations into a runtime registry — read path (F6-2 typed
+scanners) and INSERT for single-integer-PK models (F6-3a typed
+binder). The reflection path stays the permanent default (ADR-0002);
+codegen is fully opt-in (ADR-0014).
+
+Comes with a reproducible `benchmarks/` module (F6-8a) — Quark vs
+hand-written `database/sql` vs GORM — and an **honest profiling
+finding** in `benchmarks/PROFILING.md`: codegen ~2–5% on scan, ~1% on
+INSERT. Quark's per-op CPU is dominated by `database/sql` and the
+engine, not reflection. **Generate for correctness and forward
+compatibility, not for speed.** No breaking changes.
+See [`RELEASE_NOTES_v0.11.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.11.0.md).
+
+## v0.10.0
+
+Correctness and resilience: `JSON[T]` / `Array[T]` now round-trip on
+SQL Server (a `[]byte`→VARBINARY→NVARCHAR conversion corrupted them);
+rolling back to a savepoint discards the `After*`/`OnCommit`/`OnRollback`
+hooks queued in that scope, so undone work no longer fires its
+side-effects on the outer commit; a real cross-engine deadlock-retry
+integration test (PG/MySQL/MariaDB) backs `WithDeadlockRetry`; raw SQL
+under `RowLevelSecurityNative` emits a `quark.tenant.raw_under_native_rls`
+warning. No breaking changes.
+See [`RELEASE_NOTES_v0.10.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.10.0.md).
 
 ## v0.9.0
 
