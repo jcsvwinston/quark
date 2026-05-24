@@ -19,26 +19,52 @@ type allocWidget struct {
 }
 
 // TestRecordAuditNoAllocWhenDisabled locks in the lazy-diff optimisation:
-// when the Client has no audit sink, recordAudit must return before
-// computing rowToMap / pkStringFromMeta, so the write path allocates no
+// recordAudit must return before computing rowToMap / pkStringFromMeta
+// whenever the write will not be audited, so the write path allocates no
 // diff map. Regression guard against re-introducing eager
-// rowToMap(entity, q.meta) at the call sites.
+// rowToMap(entity, q.meta) at the call sites — or against moving the diff
+// computation ahead of the shouldAudit gate.
+//
+// Both gated paths must be allocation-free:
+//   - no sink configured at all (client.audit == nil)
+//   - a sink configured but this table filtered out (shouldAudit == false)
+//
+// Not parallel: AllocsPerRun is sensitive to GC pressure from concurrent
+// goroutines, so these subtests run serially.
 func TestRecordAuditNoAllocWhenDisabled(t *testing.T) {
-	q := &BaseQuery{
-		client: &Client{}, // audit == nil
-		table:  "alloc_widgets",
-		meta:   GetModelMetaByType(reflect.TypeOf(allocWidget{})),
-	}
+	meta := GetModelMetaByType(reflect.TypeOf(allocWidget{}))
 	entity := &allocWidget{ID: 7, Name: "foo", Qty: 3}
 	ctx := context.Background()
 
-	allocs := testing.AllocsPerRun(1000, func() {
-		if err := q.recordAudit(ctx, eventCreated, entity); err != nil {
-			t.Fatalf("recordAudit: %v", err)
+	assertNoAlloc := func(t *testing.T, q *BaseQuery) {
+		t.Helper()
+		allocs := testing.AllocsPerRun(1000, func() {
+			if err := q.recordAudit(ctx, eventCreated, entity); err != nil {
+				t.Fatalf("recordAudit: %v", err)
+			}
+		})
+		if allocs != 0 {
+			t.Errorf("recordAudit allocated %.0f times, want 0 "+
+				"(row diff must be built only when the write is audited)", allocs)
 		}
-	})
-	if allocs != 0 {
-		t.Errorf("recordAudit allocated %.0f times with audit disabled, want 0 "+
-			"(row diff must be built only when a sink is configured)", allocs)
 	}
+
+	t.Run("no sink configured", func(t *testing.T) {
+		assertNoAlloc(t, &BaseQuery{
+			client: &Client{}, // audit == nil
+			table:  "alloc_widgets",
+			meta:   meta,
+		})
+	})
+
+	t.Run("sink configured but table excluded", func(t *testing.T) {
+		// st != nil, but shouldAudit("alloc_widgets") == false, so the
+		// gate still short-circuits ahead of rowToMap / pkStringFromMeta.
+		st := &auditState{exclude: map[string]struct{}{"alloc_widgets": {}}}
+		assertNoAlloc(t, &BaseQuery{
+			client: &Client{audit: st},
+			table:  "alloc_widgets",
+			meta:   meta,
+		})
+	})
 }
