@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0](https://github.com/jcsvwinston/quark/compare/v0.10.0...v0.11.0) (2026-05-24)
+
+
+### Added
+
+* **codegen:** generated INSERT binder on the write path (F6-3a) ([550c13f](https://github.com/jcsvwinston/quark/commit/550c13f875d529227d2f364d590d7f931a1b8319))
+* **codegen:** generated typed scanners on the read path (F6-2) ([9fcc3db](https://github.com/jcsvwinston/quark/commit/9fcc3dbd681ec4ff9e98a361a64c1b9b9e7c1302))
+* **codegen:** quark gen + typed-registry contract (F6-1) ([#99](https://github.com/jcsvwinston/quark/issues/99)) ([ce85abc](https://github.com/jcsvwinston/quark/commit/ce85abc94fc68f61d9661f80d724f6815e8a19f0))
+
+
+### Documentation
+
+* **benchmarks:** profile per-op cost + ADR-0002 gate analysis ([#102](https://github.com/jcsvwinston/quark/issues/102)) ([d5ba67a](https://github.com/jcsvwinston/quark/commit/d5ba67ac82d0c54a18a70776dcb4e75e7a18ab4c))
+* **codegen:** amend ADR-0014 for AST gen + restore cmd/quark build ([#96](https://github.com/jcsvwinston/quark/issues/96)) ([c278d3d](https://github.com/jcsvwinston/quark/commit/c278d3dfb05718cb2c68cc9fca5a2e3a129d7887))
+
 ## [0.10.0](https://github.com/jcsvwinston/quark/compare/v0.9.0...v0.10.0) (2026-05-22)
 
 
