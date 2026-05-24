@@ -1,0 +1,64 @@
+---
+sidebar_position: 1
+title: Dialects
+description: Supported engines and dialect-specific behavior.
+---
+
+# Dialects
+
+QUARK routes SQL generation through a dialect abstraction. Dialects are
+responsible for placeholders, identifier quoting, insert ID behavior, upsert
+syntax, and DDL operations.
+
+| Dialect | Constructor | Notes |
+| --- | --- | --- |
+| PostgreSQL | `quark.PostgreSQL()` | `$N` placeholders, `RETURNING`, `ON CONFLICT`. |
+| MySQL | `quark.MySQL()` | `AUTO_INCREMENT`, `LAST_INSERT_ID`, `ON DUPLICATE KEY UPDATE`. |
+| MariaDB | `quark.MariaDB()` | MySQL-compatible upsert behavior (`ON DUPLICATE KEY UPDATE`). Treated as a distinct dialect for DDL edge cases. |
+| SQLite | `quark.SQLite()` | In-memory friendly, `RETURNING` where supported. |
+| MSSQL | `quark.MSSQL()` | `IDENTITY`, `OFFSET/FETCH`, `MERGE` upserts. |
+| Oracle | `quark.Oracle()` | `GENERATED AS IDENTITY`, `MERGE` upserts. |
+
+## Upsert mapping
+
+```go
+user := User{Email: "alice@example.com", Name: "Alice Updated"}
+
+err := quark.For[User](ctx, client).Upsert(
+    &user,
+    []string{"email"},
+    []string{"name", "active"},
+)
+```
+
+| Dialect | Generated shape |
+| --- | --- |
+| PostgreSQL | `ON CONFLICT (email) DO UPDATE SET ...` |
+| MySQL | `ON DUPLICATE KEY UPDATE ...` |
+| MariaDB | `ON DUPLICATE KEY UPDATE ...` |
+| SQLite | `ON CONFLICT (email) DO UPDATE SET col = excluded.col` |
+| MSSQL | `MERGE INTO ... USING ... WHEN MATCHED ...` |
+| Oracle | `MERGE INTO ... USING ... WHEN MATCHED ...` |
+
+## Custom dialects
+
+Custom or proprietary engines can be registered:
+
+```go
+myDialect := &MyCustomDialect{}
+
+quark.RegisterDialect("customdb", myDialect)
+
+dialect, err := quark.DetectDialectByName("customdb")
+if err != nil {
+    return err
+}
+
+client, err := quark.New("customdb", dsn, quark.WithDialect(dialect))
+```
+
+`DetectDialectByName` looks up a registered dialect by name and returns
+`(Dialect, error)`. Use `RegisterDialect` once at init time.
+
+The dialect interface covers SQL generation, placeholder formatting, identifier
+quoting, and schema DDL.

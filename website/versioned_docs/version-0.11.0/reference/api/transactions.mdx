@@ -1,0 +1,237 @@
+# Transactions API Reference
+
+Complete reference for ACID transactions, savepoints, and nested transactions.
+
+## Automatic Transaction Management
+
+### `Tx(ctx context.Context, fn func(tx *Tx) error) error`
+
+Executes a function within a transaction. Commits on nil return, rolls back on error or panic.
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    // All operations use the same transaction
+    if err := quark.ForTx[User](ctx, tx).Create(&user); err != nil {
+        return err // Triggers rollback
+    }
+    if err := quark.ForTx[Order](ctx, tx).Create(&order); err != nil {
+        return err // Triggers rollback
+    }
+    return nil // Triggers commit
+})
+```
+
+**Guarantees:**
+- Automatic rollback on error return
+- Automatic rollback on panic (re-panics after rollback)
+- Uses default isolation level (driver-specific)
+
+---
+
+## Manual Transaction Control
+
+### `BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error)`
+
+Starts a new transaction with explicit options.
+
+```go
+tx, err := client.BeginTx(ctx, &sql.TxOptions{
+    Isolation: sql.LevelSerializable,
+    ReadOnly:  false,
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer tx.Rollback() // Safe cleanup
+
+// Perform operations
+quark.ForTx[User](ctx, tx).Create(&user)
+quark.ForTx[Account](ctx, tx).Update(&account)
+
+// Commit manually
+if err := tx.Commit(); err != nil {
+    log.Fatal(err)
+}
+```
+
+**Isolation Levels:**
+| Level | Description |
+|-------|-------------|
+| `sql.LevelDefault` | Driver default |
+| `sql.LevelReadUncommitted` | Dirty reads possible |
+| `sql.LevelReadCommitted` | No dirty reads |
+| `sql.LevelWriteCommitted` | PostgreSQL-specific |
+| `sql.LevelRepeatableRead` | Consistent snapshot |
+| `sql.LevelSerializable` | Full isolation |
+
+---
+
+## Transaction Methods
+
+### `Commit() error`
+
+Commits the transaction.
+
+```go
+if err := tx.Commit(); err != nil {
+    return fmt.Errorf("commit failed: %w", err)
+}
+```
+
+### `Rollback() error`
+
+Rolls back the transaction.
+
+```go
+if err := tx.Rollback(); err != nil {
+    return fmt.Errorf("rollback failed: %w", err)
+}
+```
+
+---
+
+## Savepoints (Nested Transactions)
+
+### `Savepoint(name string) error`
+
+Creates a named savepoint.
+
+```go
+if err := tx.Savepoint("before_payment"); err != nil {
+    return err
+}
+```
+
+### `RollbackTo(name string) error`
+
+Rolls back to a named savepoint. In addition to undoing the SQL, it
+discards the model `After*` hooks and `OnCommit`/`OnRollback` callbacks
+queued by CRUD run since that savepoint, so rolled-back work cannot
+trigger its side-effects on the eventual commit. The savepoint itself
+survives and can be rolled back to again until released.
+
+```go
+if err := processPayment(); err != nil {
+    _ = tx.RollbackTo("before_payment")
+    return fmt.Errorf("payment failed, rolled back: %w", err)
+}
+```
+
+### `ReleaseSavepoint(name string) error`
+
+Releases a named savepoint. Hooks queued since it was set stay on the
+transaction queues — released work is part of the surrounding
+transaction and its side-effects fire with it.
+
+```go
+if err := tx.ReleaseSavepoint("before_payment"); err != nil {
+    return err
+}
+```
+
+---
+
+## Nested Transaction Helper
+
+### `Tx.Tx(ctx context.Context, fn func(tx *Tx) error) error`
+
+Nested transaction using savepoints.
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    // Create order
+    if err := quark.ForTx[Order](ctx, tx).Create(&order); err != nil {
+        return err
+    }
+    
+    // Nested: payment processing
+    if err := tx.Tx(ctx, func(nested *quark.Tx) error {
+        return processPayment(nested, order)
+    }); err != nil {
+        // Payment failed but order creation is preserved
+        // Can implement retry logic here
+        log.Printf("Payment failed: %v", err)
+    }
+    
+    return nil
+})
+```
+
+---
+
+## Complete Example
+
+```go
+func TransferFunds(ctx context.Context, client *quark.Client, fromID, toID int64, amount float64) error {
+    return client.Tx(ctx, func(tx *quark.Tx) error {
+        // Verify sender has sufficient funds
+        fromAccount, err := quark.ForTx[Account](ctx, tx).Find(fromID)
+        if err != nil {
+            return fmt.Errorf("sender account not found: %w", err)
+        }
+        if fromAccount.Balance < amount {
+            return fmt.Errorf("insufficient funds")
+        }
+        
+        // Create savepoint before critical operations
+        if err := tx.Savepoint("funds_check_passed"); err != nil {
+            return err
+        }
+        
+        // Deduct from sender
+        fromAccount.Balance -= amount
+        if _, err := quark.ForTx[Account](ctx, tx).Update(&fromAccount); err != nil {
+            _ = tx.RollbackTo("funds_check_passed")
+            return fmt.Errorf("failed to deduct from sender: %w", err)
+        }
+        
+        // Add to recipient
+        toAccount, err := quark.ForTx[Account](ctx, tx).Find(toID)
+        if err != nil {
+            _ = tx.RollbackTo("funds_check_passed")
+            return fmt.Errorf("recipient account not found: %w", err)
+        }
+        
+        toAccount.Balance += amount
+        if _, err := quark.ForTx[Account](ctx, tx).Update(&toAccount); err != nil {
+            _ = tx.RollbackTo("funds_check_passed")
+            return fmt.Errorf("failed to add to recipient: %w", err)
+        }
+        
+        // Release savepoint on success
+        if err := tx.ReleaseSavepoint("funds_check_passed"); err != nil {
+            return err
+        }
+        
+        // Record transaction
+        txn := &Transaction{
+            FromAccountID: fromID,
+            ToAccountID:   toID,
+            Amount:        amount,
+            Status:        "completed",
+        }
+        return quark.ForTx[Transaction](ctx, tx).Create(txn)
+    })
+}
+```
+
+---
+
+## ForTx Helper
+
+### `ForTx[T any](ctx context.Context, tx *Tx) *Query[T]`
+
+Creates a Query bound to a transaction.
+
+```go
+tx, _ := client.BeginTx(ctx, nil)
+defer tx.Rollback()
+
+users, _ := quark.ForTx[User](ctx, tx).
+    Where("active", "=", true).
+    List()
+
+// ... more operations ...
+
+tx.Commit()
+```
