@@ -193,10 +193,10 @@ sharding en paralelo (independientes del codegen), benchmarks al final
 >   con el diseño actual; o se revisa el número o se acepta que codegen es
 >   para type-safety, no velocidad. (Posible ADR sucesor de 0002/0014.)
 
-### F6-1 · Codegen tooling skeleton (`quark gen`)
+### F6-1 · Codegen tooling skeleton (`quark gen`) ✅ v0.11.0 (PR #99)
 
-> **Entregado esta sesión (pendiente code-reviewer + PR + merge → tachar y
-> anotar PR #).** Foundation en `codegen_registry.go` (package quark):
+> **Mergeado en v0.11.0 (PR #99, `ce85abc`; prereq ADR-0014 amend +
+> cmd/quark build en PR #96).** Foundation en `codegen_registry.go` (package quark):
 > `GenContractVersion`, tipos `TypedScanner`/`TypedBinder`/`GeneratedMeta`,
 > registries keyed por `reflect.Type`, registradores **exportados**
 > `RegisterTypedScanner`/`RegisterTypedBinder`/`RegisterGeneratedMeta`
@@ -218,7 +218,7 @@ sharding en paralelo (independientes del codegen), benchmarks al final
 > estabilidad, registración runtime sin drift. Reflect path intacto (lookups
 > NO cableados en hot paths — eso es F6-2/F6-3). cmd/quark compila en CI vía
 > `go test ./...`. Doc `website/docs/guides/codegen.mdx` + sidebar; nota de
-> corrección en `cli.mdx`. **Pendiente**: code-reviewer + PR.
+> corrección en `cli.mdx`. **Mergeado**: PR #99 (`ce85abc`).
 
 > **Enfoque decidido (2026-05-22, enmienda ADR-0014):** `quark gen` es
 > subcomando de `cmd/quark` y parsea el **AST** del paquete del usuario
@@ -243,10 +243,10 @@ registra no-ops; el reflect path sigue intacto; test de registro +
 fallback + conformidad. Doc: `website/docs/guides/codegen.mdx` (nuevo) +
 sidebar.
 
-### F6-2 · Generated typed scanners (read path sin reflect)
+### F6-2 · Generated typed scanners (read path sin reflect) ✅ v0.11.0 (commit `9fcc3db`)
 
-> **Entregado esta sesión (rama `feat/f6-2-typed-scanners`, apilada sobre
-> F6-1; pendiente code-reviewer + PR + merge).** `scanRow` (query_exec.go)
+> **Mergeado en v0.11.0 (commit `9fcc3db`, directo a main, sin PR
+> propio).** `scanRow` (query_exec.go)
 > consulta `lookupTypedScanner(reflect.TypeOf(dest))` antes del reflect,
 > gateado por `!q.tzActive()` (el scanner generado no lleva estado de
 > timezone runtime → tz activa cae a reflect). Helper exportado
@@ -270,7 +270,7 @@ sidebar.
 > 5-motores**: el scanner usa `rows.Scan` + `ScanTarget` (mismo helper que
 > reflect) → equivalencia por construcción independiente del motor; SQLite es
 > la prueba CI. Doc `codegen.mdx` actualizada (read path real, binder stub,
-> nota de mejora modesta). **Pendiente**: code-reviewer + PR.
+> nota de mejora modesta). **Mergeado**: commit `9fcc3db` (v0.11.0).
 
 `scanRow` consulta `typedScanners[reflect.Type]` antes del reflect.
 El generado escanea `*sql.Rows → *T` con índices de columna fijos, sin
@@ -280,13 +280,13 @@ micro que muestra la mejora; fallback verificado cuando no hay generado.
 
 ### F6-3 · Generated typed binders (write path sin reflect)
 
-> **Dividido en 3a (INSERT, entregado esta sesión) y 3b (UPDATE/partial/
+> **Dividido en 3a (INSERT, mergeado en v0.11.0) y 3b (UPDATE/partial/
 > batch, diferido).** El UPDATE completo lleyendo `version`/soft-delete +
 > el partial de `buildUpdateMap` + el batch son sustancialmente más
 > arriesgados (corrupción de escritura) y, a la luz del hallazgo de abajo,
 > de payoff dudoso; se difieren a 3b con gating conservador por-modelo.
 
-#### F6-3a · INSERT binder — entregado esta sesión (rama `feat/f6-3a-insert-binder`, apilada sobre F6-2; pendiente code-reviewer + PR)
+#### F6-3a · INSERT binder ✅ v0.11.0 (commit `550c13f`, directo a main, sin PR propio)
 
 `buildInsert` (query_crud.go) consulta `lookupTypedBinder` antes del
 reflect, gateado por `!q.tzActive() && v.CanAddr()` y por que el binder
@@ -302,7 +302,7 @@ binder generado y compara contra el gemelo reflect → binder fiel. Benchmark
 `Create` generado vs reflect añadido. **tenant injection y SQL assembly
 intactos**; el reflect loop es byte-idéntico cuando el fast path no aplica.
 Doc `codegen.mdx` + nota; suite completa verde (buildInsert es hot path de
-escritura). **Pendiente**: code-reviewer + PR.
+escritura). **Mergeado**: commit `550c13f` (v0.11.0).
 
 > **Hallazgo honesto — SEGUNDO punto de datos para el gate ADR-0002 ≥3×.**
 > El binder INSERT generado da mejora **~1%** (Create ~15.4µs gen vs
@@ -366,7 +366,7 @@ cross-shard tx).
 
 ### F6-8 · Benchmarks proper
 
-> **Dividido en 8a (baseline, entregado esta sesión) y 8b (codegen-tier,
+> **Dividido en 8a (baseline, mergeado en v0.11.0) y 8b (codegen-tier,
 > diferido).** Razón: el objetivo declarado del foco "benchmarks first" es
 > el **baseline pre-codegen** (Quark vs `database/sql` puro), que es lo que
 > mide el overhead que el codegen quita y contra lo que se mide el gate de
@@ -375,7 +375,7 @@ cross-shard tx).
 > compararse — son la comparación relevante en el gate de v1.0, no en el
 > baseline.
 
-#### F6-8a · Harness + baseline (Quark vs database/sql vs GORM) — entregado esta sesión
+#### F6-8a · Harness + baseline (Quark vs database/sql vs GORM) ✅ v0.11.0 (PR #98)
 
 Módulo independiente `benchmarks/` (su propio `go.mod` con `replace =>
 ../`, para que GORM no contamine el `go.mod` de la librería). Cinco
@@ -396,8 +396,8 @@ cross-ORM estimada en `docs/benchmarks.md` y `website/docs/reference/benchmarks.
 de `database/sql` en estas ops; ese margen acota lo que el codegen puede
 recuperar — input directo al gate ≥3× p99 de ADR-0002 (en single-row
 in-memory el margen al suelo es ~2×, así que el gate, de cumplirse, será en
-paths más pesados o bajo la concurrencia de F6-9). **Pendiente**:
-`code-reviewer` + PR + merge (entonces tachar y anotar PR #).
+paths más pesados o bajo la concurrencia de F6-9). **Mergeado**:
+PR #98 (`c16de24f`); profiling de seguimiento en PR #102.
 
 #### F6-8b · Comparación codegen-tier (ent + sqlc) — diferido
 
