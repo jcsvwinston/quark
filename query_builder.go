@@ -118,34 +118,45 @@ func (q *BaseQuery) fullTableName() string {
 	return q.dialect.Quote(q.table)
 }
 
-// clone creates a shallow copy of the Query with deep-copied slices.
-// This ensures builder methods are safe for concurrent use from a shared base.
+// clone returns a copy of the Query for a builder method to mutate, leaving
+// the receiver untouched. The struct copy carries every scalar and isolation
+// field (tenantID, tenantCol, schema, cache, lock, limit, …) — propagating
+// tenant state here is mandatory (ADR-0007 / P0-1).
+//
+// The slice fields (where, orderBy, joins, …) are shared with the receiver,
+// NOT deep-copied: builder methods append to them through [ownedAppend],
+// whose capacity-bounded append allocates a fresh backing array on the first
+// growth, so a shared base query and the queries derived from it never see
+// each other's appends (copy-on-write). This keeps clone allocation-free.
+// The previous implementation deep-copied all ten slices on every builder
+// call — even slices the method never touched — which measured ~7% of the
+// read-path allocations (benchmarks/PROFILING.md). The immutability contract
+// is unchanged; only the point at which the copy happens moved (to the first
+// append, and only for the slice actually mutated).
 func (q *Query[T]) clone() *Query[T] {
-	c := *q // shallow copy (copies all scalar fields)
-	c.where = append([]condition(nil), q.where...)
-	c.orderBy = append([]order(nil), q.orderBy...)
-	c.selectCols = append([]string(nil), q.selectCols...)
-	c.joins = append([]join(nil), q.joins...)
-	c.preloads = append([]string(nil), q.preloads...)
-	c.groupBy = append([]string(nil), q.groupBy...)
-	c.having = append([]condition(nil), q.having...)
-	c.unscoped = q.unscoped
-	c.onlyTrashed = q.onlyTrashed
-	c.distinct = q.distinct
-	c.tenantID = q.tenantID
-	c.tenantCol = q.tenantCol
-	c.cache = q.cache
-	c.lock = q.lock
-	c.ctes = append([]cteEntry(nil), q.ctes...)
-	c.selectExprs = append([]selectExprEntry(nil), q.selectExprs...)
-	c.setOps = append([]setOpEntry(nil), q.setOps...)
+	c := *q
 	return &c
+}
+
+// ownedAppend appends v to s and guarantees the result does not share s's
+// backing array. The three-index slice `s[:len(s):len(s)]` caps capacity at
+// the current length, forcing append to allocate a new array when it grows.
+//
+// This is the copy-on-write primitive that lets [Query.clone] share slices
+// cheaply: a builder appending to a slice it shares with a sibling query can
+// never overwrite the sibling's elements, because the append reallocates
+// instead of writing into spare capacity of the shared array. It is safe
+// (never corrupts) whether or not s is actually shared; when s is uniquely
+// owned the only cost is one copy on grow — the same copy clone() used to do
+// unconditionally, now deferred to the mutation and scoped to one slice.
+func ownedAppend[E any](s []E, v ...E) []E {
+	return append(s[:len(s):len(s)], v...)
 }
 
 // Preload specifies relations to load automatically.
 func (q *Query[T]) Preload(relations ...string) *Query[T] {
 	c := q.clone()
-	c.preloads = append(c.preloads, relations...)
+	c.preloads = ownedAppend(c.preloads, relations...)
 	return c
 }
 
@@ -190,7 +201,7 @@ func (q *Query[T]) Select(columns ...string) *Query[T] {
 // Where adds a WHERE condition with AND logic.
 func (q *Query[T]) Where(column string, operator string, value any) *Query[T] {
 	c := q.clone()
-	c.where = append(c.where, condition{
+	c.where = ownedAppend(c.where, condition{
 		column:   column,
 		operator: operator,
 		value:    value,
@@ -202,7 +213,7 @@ func (q *Query[T]) Where(column string, operator string, value any) *Query[T] {
 // WhereIn adds a WHERE ... IN condition.
 func (q *Query[T]) WhereIn(column string, values []any) *Query[T] {
 	c := q.clone()
-	c.where = append(c.where, condition{
+	c.where = ownedAppend(c.where, condition{
 		column:   column,
 		operator: "IN",
 		value:    values,
@@ -214,7 +225,7 @@ func (q *Query[T]) WhereIn(column string, values []any) *Query[T] {
 // WhereBetween adds a WHERE ... BETWEEN condition.
 func (q *Query[T]) WhereBetween(column string, start, end any) *Query[T] {
 	c := q.clone()
-	c.where = append(c.where, condition{
+	c.where = ownedAppend(c.where, condition{
 		column:   column,
 		operator: "BETWEEN",
 		value:    []any{start, end},
@@ -297,7 +308,7 @@ func (q *Query[T]) Or(fn func(*Query[T]) *Query[T]) *Query[T] {
 	result := fn(blank)
 
 	c := q.clone()
-	c.where = append(c.where, condition{
+	c.where = ownedAppend(c.where, condition{
 		logic: "OR",
 		group: result.where,
 	})
@@ -307,7 +318,7 @@ func (q *Query[T]) Or(fn func(*Query[T]) *Query[T]) *Query[T] {
 // OrderBy adds an ORDER BY clause.
 func (q *Query[T]) OrderBy(column string, direction string) *Query[T] {
 	c := q.clone()
-	c.orderBy = append(c.orderBy, order{
+	c.orderBy = ownedAppend(c.orderBy, order{
 		column: column,
 		desc:   direction == "DESC" || direction == "desc",
 	})
@@ -368,7 +379,7 @@ type JoinBuilder[T any] struct {
 func (b *JoinBuilder[T]) On(left, op, right string) *Query[T] {
 	c := b.q.clone()
 	onClause := left + " " + op + " " + right
-	c.joins = append(c.joins, join{
+	c.joins = ownedAppend(c.joins, join{
 		joinType: b.joinType,
 		table:    b.table,
 		onClause: onClause,
@@ -389,7 +400,7 @@ func (b *JoinBuilder[T]) On(left, op, right string) *Query[T] {
 // `Join(table).OnRaw(onClause)`.
 func (b *JoinBuilder[T]) OnRaw(onClause string) *Query[T] {
 	c := b.q.clone()
-	c.joins = append(c.joins, join{
+	c.joins = ownedAppend(c.joins, join{
 		joinType: b.joinType,
 		table:    b.table,
 		onClause: onClause,
@@ -442,7 +453,7 @@ func (q *Query[T]) Cache(ttl time.Duration, tags ...string) *Query[T] {
 // Generates: WHERE NOT ("active" = $1)
 func (q *Query[T]) WhereNot(column string, operator string, value any) *Query[T] {
 	c := q.clone()
-	c.where = append(c.where, condition{
+	c.where = ownedAppend(c.where, condition{
 		column:   column,
 		operator: operator,
 		value:    value,
@@ -461,7 +472,7 @@ func (q *Query[T]) Distinct() *Query[T] {
 // GroupBy adds a GROUP BY clause.
 func (q *Query[T]) GroupBy(columns ...string) *Query[T] {
 	c := q.clone()
-	c.groupBy = append(c.groupBy, columns...)
+	c.groupBy = ownedAppend(c.groupBy, columns...)
 	return c
 }
 
@@ -472,7 +483,7 @@ func (q *Query[T]) GroupBy(columns ...string) *Query[T] {
 // COUNT(*) or SUM(col), use HavingAggregate instead.
 func (q *Query[T]) Having(column string, operator string, value any) *Query[T] {
 	c := q.clone()
-	c.having = append(c.having, condition{
+	c.having = ownedAppend(c.having, condition{
 		column:   column,
 		operator: operator,
 		value:    value,
@@ -539,7 +550,7 @@ func (q *Query[T]) HavingAggregate(fn, column, operator string, value any) *Quer
 
 	// Reuse the condition raw-fragment slot. buildWhereClause renders
 	// isRaw conditions verbatim and validates the operator separately.
-	c.having = append(c.having, condition{
+	c.having = ownedAppend(c.having, condition{
 		column:   expr,
 		operator: operator,
 		value:    value,
@@ -606,7 +617,7 @@ func (q *Query[T]) SelectExpr(alias string, e Expr) *Query[T] {
 		c.err = err
 		return c
 	}
-	c.selectExprs = append(c.selectExprs, selectExprEntry{alias: alias, sql: sql, args: args})
+	c.selectExprs = ownedAppend(c.selectExprs, selectExprEntry{alias: alias, sql: sql, args: args})
 	return c
 }
 
@@ -647,7 +658,7 @@ func (q *Query[T]) WhereExpr(e Expr) *Query[T] {
 	if frag == "" {
 		return c
 	}
-	c.where = append(c.where, condition{
+	c.where = ownedAppend(c.where, condition{
 		column:    frag,
 		operator:  "",
 		logic:     "AND",
@@ -673,7 +684,7 @@ func (q *Query[T]) HavingExpr(e Expr) *Query[T] {
 	if frag == "" {
 		return c
 	}
-	c.having = append(c.having, condition{
+	c.having = ownedAppend(c.having, condition{
 		column:    frag,
 		operator:  "",
 		logic:     "AND",
@@ -701,7 +712,7 @@ func (q *Query[T]) WhereJSON(column, path, operator string, value any) *Query[T]
 		c.err = fmt.Errorf("%w: %v", ErrInvalidJSONPath, err)
 		return c
 	}
-	c.where = append(c.where, condition{
+	c.where = ownedAppend(c.where, condition{
 		column:    frag,
 		operator:  operator,
 		value:     value,

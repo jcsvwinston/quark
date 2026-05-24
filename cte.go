@@ -47,7 +47,7 @@ func (q *Query[T]) With(name string, sub *Subquery) *Query[T] {
 		c.err = err
 		return c
 	}
-	c.ctes = append(c.ctes, cteEntry{
+	c.ctes = ownedAppend(c.ctes, cteEntry{
 		name:      name,
 		sql:       sub.sql,
 		args:      append([]any(nil), sub.args...),

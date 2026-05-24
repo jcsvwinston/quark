@@ -145,6 +145,6 @@ func (q *Query[T]) attachSetOp(kind string, all bool, other *Query[T]) *Query[T]
 		c.err = err
 		return c
 	}
-	c.setOps = append(c.setOps, setOpEntry{kind: kind, all: all, sql: sql, args: args})
+	c.setOps = ownedAppend(c.setOps, setOpEntry{kind: kind, all: all, sql: sql, args: args})
 	return c
 }
