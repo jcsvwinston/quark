@@ -182,8 +182,12 @@ sharding en paralelo (independientes del codegen), benchmarks al final
 > - **Reencuadrar el valor del codegen como type-safety** → **F6-4** (accesores
 >   de columna compile-time). Valor real e independiente del gate de perf.
 > - **Si la perf importa, las palancas son reducción de allocs, no codegen**, y
->   son independientes: `rowToMap` lazy (sólo con sink configurado, ~9% write
->   allocs, quick win); clone lazy/pooled; buffers reusados en scan/bind. Aun
+>   son independientes: ~~`rowToMap` lazy (sólo con sink configurado, ~9% write
+>   allocs, quick win)~~ **hecho** (commit `02ec8543` `perf(crud): compute audit
+>   row diff only when a sink is configured` — `rowToMap`/`pkStringFromMeta` se
+>   computan dentro de `recordAudit`, tras el gate `audit==nil || !shouldAudit`;
+>   guard `TestRecordAuditNoAllocWhenDisabled` en `audit_internal_test.go`);
+>   clone lazy/pooled; buffers reusados en scan/bind. Aun
 >   así acotadas — el motor/driver domina.
 > - **Revisar el gate de ADR-0002**: el ≥3× p99 "con codegen" no es alcanzable
 >   con el diseño actual; o se revisa el número o se acepta que codegen es
