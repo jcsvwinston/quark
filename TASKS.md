@@ -159,6 +159,36 @@ ataque sugerido: codegen primero (F6-1 desbloquea F6-2..F6-4), HA y
 sharding en paralelo (independientes del codegen), benchmarks al final
 (miden todo lo anterior).
 
+### ⚠ Decisión de gate ADR-0002 (profiling, 2026-05-23) — LEER ANTES DE SEGUIR CON CODEGEN-POR-PERF
+
+> **Tres data points + profiling dicen que el gate ≥3× NO se alcanza por
+> codegen de scan/bind.** F6-8a: Quark ~1.5-2.1× sobre `database/sql`. F6-2:
+> scan codegen ~2-5%. F6-3a: insert binder ~1%. El profiling (`benchmarks/PROFILING.md`)
+> lo explica: **(1) la CPU está dominada por el motor SQLite + `database/sql`
+> (syscalls ~67%, `Rows.Next/Close` ~52% cum); el reflect de Quark NO aparece
+> en el top-25 de CPU. (2) El sobrecoste de Quark vs raw es de ALLOCATIONS,
+> y son arquitectónicas, no de reflexión**: read → `List.func1` recolección
+> 36% + `scanRow` []any/boxing 14% + `clone` (builder inmutable) 7% + query
+> building ~10%; write → `saveAny` 19% + `For[T]` 19% + `buildInsert` 12% +
+> `rowToMap` 9% (diff de audit calculado SIEMPRE, aun sin audit/bus) +
+> dialect. El codegen toca una fracción menor y ni siquiera elimina esos
+> allocs (sigue alocando []any/strings). **Cumple la condición de reapertura
+> de ADR-0002.**
+>
+> **Recomendación al mantenedor** (decisión pendiente):
+> - **No perseguir codegen por velocidad.** F6-3b (UPDATE/partial/batch binder)
+>   queda diferido/descartado por payoff (~1%) y riesgo (corrección de
+>   escritura). El mecanismo F6-1/F6-2/F6-3a queda como foundation correcta.
+> - **Reencuadrar el valor del codegen como type-safety** → **F6-4** (accesores
+>   de columna compile-time). Valor real e independiente del gate de perf.
+> - **Si la perf importa, las palancas son reducción de allocs, no codegen**, y
+>   son independientes: `rowToMap` lazy (sólo con sink configurado, ~9% write
+>   allocs, quick win); clone lazy/pooled; buffers reusados en scan/bind. Aun
+>   así acotadas — el motor/driver domina.
+> - **Revisar el gate de ADR-0002**: el ≥3× p99 "con codegen" no es alcanzable
+>   con el diseño actual; o se revisa el número o se acepta que codegen es
+>   para type-safety, no velocidad. (Posible ADR sucesor de 0002/0014.)
+
 ### F6-1 · Codegen tooling skeleton (`quark gen`)
 
 > **Entregado esta sesión (pendiente code-reviewer + PR + merge → tachar y
