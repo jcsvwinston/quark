@@ -6,7 +6,7 @@ description: "Type-safe, security-first ORM for Go — generics on the surface, 
 
 # QUARK ORM
 
-Quark is **v0.x — late-alpha**. The API may still evolve before v1.0, and the project is **not yet v1.0 production-ready** — see [`docs/ANALISIS_MADUREZ.md`](https://github.com/jcsvwinston/quark/blob/main/docs/ANALISIS_MADUREZ.md) for the honest gap analysis. The core query builder, CRUD operations, and migration engine are considered stable. Breaking changes will be documented in the [changelog](reference/release-notes) with a migration path.
+Quark is **v0.12 — late-alpha**. **Phase 6** (codegen + HA + sharding + benchmarks → v1.0) is open and actively delivering; the project is **not yet v1.0 production-ready** — see [`docs/ANALISIS_MADUREZ.md`](https://github.com/jcsvwinston/quark/blob/main/docs/ANALISIS_MADUREZ.md) for the honest gap analysis. The core query builder, CRUD, schema-as-code migrations, multi-tenancy, caché, hooks/eventos/audit log, and observability are considered stable. **Oracle is excluded from CI** while a testcontainers image issue is open — Oracle-specific SQL is validated manually. Breaking changes are documented per version under [`docs/MIGRATION_vX.Y.Z.md`](https://github.com/jcsvwinston/quark/tree/main/docs) with a migration path.
 
 QUARK is a modern ORM for Go built around generics,
 immutable query builders, multi-dialect SQL, and production extension points.
@@ -36,13 +36,19 @@ err = quark.For[Product](ctx, client).UpsertBatch(
 | Capability | What it gives you |
 | --- | --- |
 | **Type-safe API** | `quark.For[T]` returns a `*Query[T]` — reads map directly back into model structs. |
+| **Compile-time column accessors** | Opt-in: `quark gen` emits `<Model>Columns` so `WhereP(UserColumns.Email.Eq(...))` catches column typos and wrong-typed values at build time. |
+| **Composable query builder** | Typed expression AST, subqueries, **CTEs**, **window functions**, **set operators** (`UNION`/`INTERSECT`/`EXCEPT`), pessimistic locking (`FOR UPDATE`/`SKIP LOCKED`), optimistic locking (`quark:"version"`). |
 | **Immutable builders** | Query methods clone builder state, making shared base queries safe to reuse across goroutines. |
-| **SQLGuard** | Identifiers, operators, and keywords are validated before SQL generation. |
-| **Reflection cache** | Struct metadata is analyzed once per model and reused for fast mapping. |
-| **Six dialects** | PostgreSQL, MySQL, MariaDB, SQLite, MSSQL, and Oracle with dialect-specific DDL, upserts, and pagination. |
+| **SQLGuard** | Identifiers, operators, keywords, JSON paths, and JOIN-ON clauses are validated before SQL generation. |
+| **Six dialects** | PostgreSQL, MySQL, MariaDB, SQLite, MSSQL, and Oracle with dialect-specific DDL, upserts (`ON CONFLICT` / `ON DUPLICATE KEY` / `MERGE`), and pagination. |
 | **Full batch suite** | `CreateBatch`, `UpsertBatch`, `UpdateBatch`, `DeleteBatch` — dialect-dispatched and chunked automatically. |
-| **Production hooks** | Middleware, lifecycle hooks, observers, L2 cache stores, and OpenTelemetry — all built in. |
-| **Multi-tenancy** | `TenantRouter` with RLS, schema-per-tenant, and database-per-tenant strategies. |
+| **Schema-as-code migrations** | Neutral introspection, pure-Go `Diff`, `PlanMigration`/`ApplyPlan` round-trip, transactional + resumable execution, distributed migration lock, orchestrated `Backfill`. |
+| **Multi-tenancy (4 strategies)** | `DatabasePerTenant`, `SchemaPerTenant`, `RowLevelSecurityClient` (WHERE injection, all dialects), and **`RowLevelSecurityNative`** (PG-only, engine-enforced via `set_config` + `CREATE POLICY` with the `quarktenant` CLI). |
+| **Transactional hooks** | `Before*`/`After*` (with `After*` firing **post-commit** under `Client.Tx`), `BeforeFind`/`AfterFind`, public `Tx.OnCommit`/`Tx.OnRollback` + `quark.TxFromContext`. |
+| **Event bus + audit log** | `Client.UseEventBus` publishes `created`/`updated`/`deleted` synchronously post-commit; `Client.EnableAuditLog` writes `quark_audit` **atomically with the CRUD transaction**. |
+| **Dirty tracking** | `Tracked[T]` snapshots at load; `Save()` emits UPDATE limited to changed fields — closes the "can't set `false`/`0`/`""`" trap. |
+| **Production caché** | L2 store (memory / Redis) with **stampede protection** (singleflight + ±jitter + XFetch, ADR-0011), per-row + table tag invalidation. |
+| **Observability** | OpenTelemetry **traces and metrics** (counter + duration/rows histograms), `WithSpanRedaction` (default-on), `WithSlowQueryThreshold`, `WithDeadlockRetry`. |
 
 ## Why I built this
 
@@ -50,26 +56,45 @@ After running production services on GORM, three patterns kept causing incidents
 
 ## Documentation map
 
+### Guides
+
 | Section | Contents |
 |---|---|
 | [Installation](guides/installation) | Requirements, drivers, optional packages, env vars |
 | [Getting Started](guides/getting-started) | Connect, model, migrate, CRUD |
-| [Modeling](guides/modeling) | Tags, composite PKs, soft delete, validation |
-| [Query Builder](guides/querying) | Filters, scopes, joins, aggregates, streaming |
+| [Modeling](guides/modeling) | Tags, composite PKs, soft delete, validation, rich types (`Nullable`/`JSON`/`Array`), per-column timezones |
+| [Query Builder](guides/querying) | Filters, scopes, joins, aggregates, streaming, CTEs, window functions, set operators, locking |
 | [Batch Operations](guides/batch-operations) | CreateBatch, UpsertBatch, UpdateBatch, DeleteBatch |
 | [Relations](guides/relations) | has_many, belongs_to, many_to_many, polymorphic |
-| [Migrations](guides/migrations) | Migrate, Sync, AddForeignKey, CreateIndex |
-| [Transactions](guides/transactions) | Callback, manual, savepoints, isolation levels |
-| [Operational Workflows](guides/cli) | Go commands for migrations, sync previews, tenant jobs |
-| [Multi-Tenant](advanced/multi-tenant) | RLS, schema, database-per-tenant |
-| [Caching & Observability](advanced/caching-observability) | L2 cache, middleware, hooks, OTel |
-| [SQLGuard](reference/sqlguard) | Identifier validation, injection prevention, AllowRawQueries |
+| [Migrations](guides/migrations) | Migrate, Sync, schema diff (`PlanMigration`/`ApplyPlan`), `Backfill`, distributed lock |
+| [Transactions](guides/transactions) | Callback, manual, savepoints, isolation levels, `WithDeadlockRetry` |
+| [Lifecycle Hooks](guides/hooks) | Before/After Create/Update/Delete/Find, post-commit semantics, `Tx.OnCommit`/`Tx.OnRollback` |
+| [Operational Workflows](guides/cli) | `cmd/quark` binary, migrations and tenant Go commands |
+| [Code Generation](guides/codegen) | Opt-in `quark gen` — typed scanners, INSERT binder, compile-time column accessors |
+
+### Advanced
+
+| Section | Contents |
+|---|---|
+| [Multi-Tenant](advanced/multi-tenant) | `DatabasePerTenant`, `SchemaPerTenant`, `RowLevelSecurityClient` |
+| [PostgreSQL Native RLS](advanced/row-level-native) | `RowLevelSecurityNative` engine-enforced + `quarktenant` CLI |
+| [Event Bus](advanced/events) | `Client.UseEventBus`, synchronous post-commit, at-least-once |
+| [Audit Log](advanced/audit-log) | `Client.EnableAuditLog`, atomic with CRUD transaction |
+| [Caching & Observability](advanced/caching-observability) | L2 cache, stampede protection, OTel traces + metrics, slow-query log |
+| [Read Replicas](advanced/read-replicas) | `WithReplicas` (experimental), `Sticky(ctx)` |
+
+### Reference
+
+| Section | Contents |
+|---|---|
+| [SQLGuard](reference/sqlguard) | Identifier validation, JSON path, JOIN-ON, AllowRawQueries |
 | [Comparison](reference/comparison) | Cell-by-cell vs GORM, sqlx, Ent |
-| [Configuration](reference/configuration) | Limits, WithDialect, WithCacheStore, WithMiddleware |
+| [Configuration](reference/configuration) | Limits, `WithDialect`, `WithCacheStore`, middleware, observability options |
 | [Dialects](reference/dialects) | Dialect table, upsert mapping, custom dialects |
+| [Benchmarks](reference/benchmarks) | Reproducible `database/sql` baseline + GORM comparison |
 | [Architecture](reference/architecture) | Request lifecycle, SQLGuard, schema evolution |
-| [Roadmap](reference/roadmap) | v0.1 → v0.2 milestones, long-term goals |
-| [Release Notes](reference/release-notes) | v0.x changelog |
+| [Roadmap](reference/roadmap) | Implemented today vs Phase 6 in progress vs long-term |
+| [Release Notes](reference/release-notes) | Per-version changelog |
 
 ## Install
 

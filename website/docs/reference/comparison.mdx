@@ -19,19 +19,28 @@ in the main repository.
 | | Quark | GORM | sqlx | Ent |
 |---|:---:|:---:|:---:|:---:|
 | Native Generics (no `interface{}`) | ✅ | partial¹ | ❌ | ✅ |
+| Compile-time column accessors | ✅ (opt-in codegen) | ❌ | ❌ | ✅ (required codegen) |
 | SQL Injection Guard | identifier + value | value only² | manual | value only² |
 | 6 Dialects, zero config switch | ✅ | ✅ | ❌ | partial |
-| Native Multi-Tenant (DB/Schema/RLS) | ✅ | manual/plugin | manual | manual/interceptor |
+| Composable query AST (CTEs, window, set ops, locking) | ✅ | partial (raw) | ❌ | partial |
+| Multi-Tenant RLS — **client-side WHERE injection** | ✅ all 6 dialects | manual/plugin | manual | manual/interceptor |
+| Multi-Tenant RLS — **engine-enforced** | ✅ PostgreSQL (`SET LOCAL` + `CREATE POLICY`) | ❌ | ❌ | ❌ |
+| Multi-Tenant — schema-per-tenant / DB-per-tenant | ✅ | manual | manual | manual |
 | Immutable Query Builder | ✅ | mutable³ | N/A | ✅ |
-| Integrated L2 Cache | ✅ | plugin | ❌ | ❌ |
+| Integrated L2 Cache | ✅ + stampede protection⁵ | plugin | ❌ | ❌ |
+| Schema-as-code migrations (diff + lock + backfill) | ✅ | ❌ (AutoMigrate only) | ❌ | ✅ (with Atlas) |
+| Transactional hooks (`OnCommit`/`OnRollback`) | ✅ | ✅ | ❌ | ✅ |
+| Event bus of CRUD (post-commit) | ✅ synchronous, at-least-once | ❌ | ❌ | partial |
+| Audit log built-in | ✅ atomic with CRUD tx | ❌ | ❌ | partial |
 | `stdlib` `*sql.DB` — no magic pool | ✅ | ✅ | ✅ | ❌ |
-| OpenTelemetry built-in | ✅ | plugin | ❌ | plugin |
+| OpenTelemetry — traces **and metrics** | ✅ | plugin (traces only) | ❌ | plugin |
 | Batch Ops (Delete/Upsert/Update) | ✅ | partial⁴ | ❌ | partial⁴ |
 
 > ¹ GORM v2 core API uses `interface{}`; generic wrappers exist but are not part of the primary API.
-> ² GORM and ent use parameterized queries that protect *values* against injection. Quark additionally validates *identifiers* (column/table names) at the API layer. See [SQLGuard](sqlguard) for a detailed breakdown.
+> ² GORM and ent use parameterized queries that protect *values* against injection. Quark additionally validates *identifiers* (column/table names, operators, JSON paths, JOIN-ON clauses) at the API layer. See [SQLGuard](sqlguard) for a detailed breakdown.
 > ³ GORM queries can mutate shared state when chained; `Session(&gorm.Session{NewDB: true})` mitigates this but is opt-in.
 > ⁴ GORM supports `CreateInBatches`; batch DELETE and batch UPDATE require custom loops. Ent supports batch create; batch UPDATE/DELETE require raw queries or custom extensions.
+> ⁵ Quark wraps the cache backing with `stampedeStore` (singleflight + ±jitter + Vattani XFetch — [ADR-0011](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0011-cache-stampede-protection-wrapper.md)), so a hot key never produces a database stampede on miss. No competitor in this matrix ships stampede protection out of the box.
 
 ---
 

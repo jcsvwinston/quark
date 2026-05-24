@@ -41,18 +41,32 @@ arguments. A cached query returns the decoded `[]T` without hitting the database
 
 ## Tags and Invalidation
 
-`Cache(ttl)` automatically tags the entry with the model table name. Writes
-invalidate the table tag after successful `Exec` operations.
+`Cache(ttl)` automatically tags the entry with the model table name **and**
+the per-row tag `<table>:<pk>` for any rows the query touches. Writes
+invalidate **both** tags after successful `Exec` operations: `Create` /
+`Update` / `UpdateFields` / `Tracked.Save` / `Delete` register the
+affected PK on top of the table tag.
 
 ```go
-// Tagged as "users" automatically.
-users, err := quark.For[User](ctx, client).
+// Tagged as "users" and (after the read) "users:42" automatically.
+user, err := quark.For[User](ctx, client).
     Cache(5*time.Minute).
-    List()
+    First(42)
 
-// Invalidates "users".
-err = quark.For[User](ctx, client).Create(&newUser)
+// Invalidates the table tag "users" AND the row tag "users:42".
+err = quark.For[User](ctx, client).
+    UpdateFields(&User{ID: 42, Name: "Alice"}, "name")
 ```
+
+The per-row tag (`<table>:<pk>`) was added in v0.8 (F4-6) so a single-row
+write does not blow away every cached query on the table. Composite PKs
+join with `:`. Bulk and WHERE-based methods (`UpdateBatch`,
+`DeleteBatch`, `DeleteBy`) invalidate the table tag because the affected
+PKs are not enumerable.
+
+On Redis, the tag-set TTL takes the **MAX** across writes via
+`ExpireNX + ExpireGT` (Redis 7+) — older entries can't shorten the
+window that a newer entry needs.
 
 When you pass custom tags, include the table tag yourself if you still want
 automatic write invalidation to catch the entry:

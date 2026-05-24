@@ -9,8 +9,9 @@ current tag for security updates.
 | Version | Supported |
 |---------|-----------|
 | `main` | ✅ |
-| `v0.10.x` | ✅ |
-| `v0.9.x` and earlier | ❌ — please upgrade |
+| `v0.12.x` | ✅ |
+| `v0.11.x` | ✅ |
+| `v0.10.x` and earlier | ❌ — please upgrade |
 
 ---
 
@@ -24,7 +25,7 @@ Privately report a vulnerability using one of the following methods:
    Navigate to [Security → Report a vulnerability](https://github.com/jcsvwinston/quark/security/advisories/new) in this repository and fill in the form.
 
 2. **E-mail:**  
-   Send a description to **security@[maintainer-domain]** (replace with the maintainer's actual address).  
+   Send a description to **serrano.juan.carlos@gmail.com**.  
    Encrypt your message with the maintainer's GPG key if the content is sensitive.
 
 Please include:

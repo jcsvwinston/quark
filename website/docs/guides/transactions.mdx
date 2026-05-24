@@ -192,7 +192,27 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 ## Error handling and retry
 
 Callback transactions automatically rollback on any non-nil error return.
-For transient failures (e.g. deadlocks), wrap in a retry loop:
+
+For deadlocks specifically, use the built-in **`WithDeadlockRetry`** option
+on the Client. It re-runs the `Client.Tx` callback when the engine reports
+a deadlock — PG `40P01`, MySQL `1213`, MSSQL `1205`, Oracle `ORA-00060` —
+with exponential backoff + jitter. Opt-in, ctx-aware, off by default:
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithDeadlockRetry(3),  // up to 3 attempts on a deadlock victim
+)
+
+// The closure is run again automatically if the engine picks this tx
+// as the deadlock victim.
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    // ...operations that may deadlock with a concurrent transaction...
+    return nil
+})
+```
+
+For non-deadlock transient failures (or for retries that ignore the engine's
+own classifier), wrap manually:
 
 ```go
 var err error
