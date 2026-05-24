@@ -197,9 +197,10 @@ func WithDefaultTZ(loc *time.Location) Option {
 // unchanged. Reads inside [Client.Tx] and under RowLevelSecurityNative always
 // use the primary regardless (see ADR-0015).
 //
-// EXPERIMENTAL until F6-6: there is no health-checking or failover yet, so a
-// replica that goes down will fail the reads routed to it. Until then, use it
-// only where you can tolerate that, or not at all.
+// Failover (F6-6): if a replica fails a read with a transient connection error,
+// the read fails over to the primary and the replica is taken out of rotation
+// for a cooldown (default 5s), then retried — a downed replica degrades
+// performance, not correctness.
 //
 //	client, err := quark.New("pgx", primaryDSN,
 //	    quark.WithReplicas(replica1DSN, replica2DSN),
@@ -208,6 +209,19 @@ func WithDefaultTZ(loc *time.Location) Option {
 func WithReplicas(dsns ...string) Option {
 	return func(c *Client) {
 		c.replicaDSNs = append(c.replicaDSNs, dsns...)
+	}
+}
+
+// WithReplicaDownCooldown sets how long a read replica stays out of rotation
+// after a transient connection failure before it is retried (F6-6, ADR-0015).
+// The default is 5s. Tune it to your topology: shorter for same-AZ replicas,
+// longer for cross-region ones where a flap is costlier to re-probe. Only
+// meaningful alongside [WithReplicas]; a non-positive value keeps the default.
+func WithReplicaDownCooldown(d time.Duration) Option {
+	return func(c *Client) {
+		if d > 0 {
+			c.replicaDownCooldown = d
+		}
 	}
 }
 

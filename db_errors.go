@@ -4,7 +4,12 @@
 package quark
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"net"
+	"strings"
 
 	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -121,6 +126,82 @@ func isDeadlock(err error) bool {
 	var oraErr *goora.OracleError
 	if errors.As(err, &oraErr) {
 		return oraErr.ErrCode == 60
+	}
+
+	return false
+}
+
+// isTransientConnErr reports whether err looks like a transient connection
+// failure — the server went away, the pooled connection is stale, the host is
+// unreachable, or the database handle is closed — as opposed to a query/logic
+// error (which a retry would not fix). F6-6 uses it to fail a read over from a
+// downed read replica to the primary and mark the replica unhealthy. It mirrors
+// isDeadlock's driver-shape detection (errors.As walks the wrap chain).
+func isTransientConnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Context cancellation / deadline is NOT a connection failure — it is the
+	// caller's timeout or cancel, and failing over + marking a healthy replica
+	// down for it would be wrong. Filter it BEFORE the net.Error branch:
+	// context.DeadlineExceeded implements net.Error (Timeout/Temporary), so it
+	// would otherwise be misclassified as transient.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+
+	// database/sql sentinels: stale pooled connection, or a connection/DB
+	// already closed.
+	if errors.Is(err, driver.ErrBadConn) || errors.Is(err, sql.ErrConnDone) {
+		return true
+	}
+
+	// Network-level failure (connection refused, reset, host unreachable,
+	// dial/i-o timeout) — the replica is unreachable. net.OpError and friends
+	// implement net.Error.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	// PostgreSQL (pgx): SQLSTATE class 08 (connection exception) plus the
+	// shutdown / cannot-connect-now codes.
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if strings.HasPrefix(pgErr.Code, "08") {
+			return true
+		}
+		switch pgErr.Code {
+		case "57P01", "57P02", "57P03": // admin_shutdown, crash_shutdown, cannot_connect_now
+			return true
+		}
+	}
+
+	// MySQL / MariaDB: 2002 can't-connect, 2003 can't-connect, 2006
+	// server-gone-away, 2013 lost-connection-during-query.
+	var mysqlErr *gomysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		switch mysqlErr.Number {
+		case 2002, 2003, 2006, 2013:
+			return true
+		}
+	}
+
+	// SQL Server: transport-level connection errors.
+	var mssqlErr mssql.Error
+	if errors.As(err, &mssqlErr) {
+		switch mssqlErr.Number {
+		case 233, 10053, 10054, 10060:
+			return true
+		}
+	}
+
+	// SQLite (modernc / mattn) has no network layer, so a "down" replica is a
+	// closed *sql.DB handle. database/sql surfaces that as this message; the
+	// sentinel (errDBClosed) is unexported, hence the string match.
+	if strings.Contains(err.Error(), "database is closed") {
+		return true
 	}
 
 	return false

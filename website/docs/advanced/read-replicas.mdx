@@ -6,15 +6,14 @@ description: Route reads to replica databases for read scaling, with sticky read
 
 # Read replicas
 
-:::warning Experimental
-Read-replica routing is experimental. There is **no health-checking or
-failover yet** (planned in a follow-up): if a configured replica goes down,
-the reads routed to it will fail. Use it only where you can tolerate that.
-:::
-
 For read-heavy workloads you can spread reads across one or more replica
 databases while writes continue to go to the primary. It is opt-in — without
 `WithReplicas`, every operation uses the single primary connection, unchanged.
+
+If a replica goes down, a read routed to it **fails over to the primary**
+automatically and the replica is taken out of rotation for a cooldown
+(default 5s, tunable with `WithReplicaDownCooldown`), after which it is retried
+— so a downed replica degrades performance, not correctness.
 
 ```go
 client, err := quark.New("pgx", primaryDSN,
