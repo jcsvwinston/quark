@@ -162,7 +162,21 @@ func ScanTarget(ptr any) any {
 // with a multi-row shape — INSERT ... RETURNING in CreateBatch — must NOT route
 // to a replica; it calls executeQueryPrimary instead.
 func (q *BaseQuery) executeQuery(ctx context.Context, sqlStr string, args []any) (*sql.Rows, error) {
-	return q.executeQueryOn(ctx, q.readExec(ctx), sqlStr, args)
+	exec := q.readExec(ctx)
+	rows, err := q.executeQueryOn(ctx, exec, sqlStr, args)
+	// Replica failover (F6-6): if the read was routed to a replica (exec is a
+	// *sql.DB other than the primary) and it failed with a transient connection
+	// error, take that replica out of rotation and retry once on the primary.
+	// exec == q.exec for the non-routed cases (no replicas, Sticky, a *sql.Tx,
+	// or the nativeRLSExecutor — readExec already returned q.exec for those), so
+	// this branch only fires for an actually-routed replica read.
+	if err != nil && q.client != nil && exec != Executor(q.exec) {
+		if rdb, ok := exec.(*sql.DB); ok && isTransientConnErr(err) {
+			q.client.markReplicaDown(rdb)
+			return q.executeQueryOn(ctx, q.exec, sqlStr, args)
+		}
+	}
+	return rows, err
 }
 
 // executeQueryPrimary runs a multi-row query on the primary connection (q.exec)

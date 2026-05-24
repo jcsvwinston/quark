@@ -35,11 +35,21 @@ type Client struct {
 	// query is not bound to a tx / native-RLS executor / Sticky context;
 	// writes always use the primary db. Empty replicas = single-DB behaviour,
 	// zero cost. replicas is read-only after New(); never mutated concurrently
-	// with queries. EXPERIMENTAL until F6-6 adds health-checking and failover
-	// (a downed replica currently fails its reads).
+	// with queries. A read to a replica that fails transiently fails over to
+	// the primary and the replica is taken out of rotation for a cooldown
+	// (F6-6, see replicaUnhealthyUntil / markReplicaDown).
 	replicaDSNs []string
 	replicas    []*sql.DB
 	replicaRR   atomic.Uint64
+	// replicaUnhealthyUntil[i] is a unix-nano deadline (F6-6): reads skip
+	// replica i until now passes it. Set when a read to that replica fails
+	// with a transient connection error (see markReplicaDown); 0 = healthy.
+	// Parallel to replicas, fixed-size after New() — never appended, so the
+	// non-copyable atomics are safe to index in place.
+	replicaUnhealthyUntil []atomic.Int64
+	// replicaDownCooldown is how long a replica stays out of rotation after a
+	// transient failure. Defaulted in New().
+	replicaDownCooldown time.Duration
 
 	// registeredModels holds the list of models the user has
 	// pre-registered with this Client via [Client.RegisterModel].
@@ -260,6 +270,13 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 			return nil, fmt.Errorf("%w: ping replica: %v", ErrConnection, err)
 		}
 		c.replicas = append(c.replicas, rdb)
+	}
+	// Health state parallel to replicas (F6-6). Fixed-size, indexed in place.
+	if len(c.replicas) > 0 {
+		c.replicaUnhealthyUntil = make([]atomic.Int64, len(c.replicas))
+		if c.replicaDownCooldown == 0 {
+			c.replicaDownCooldown = 5 * time.Second
+		}
 	}
 
 	// Install the stampede protection wrapper around any caller-supplied

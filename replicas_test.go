@@ -5,10 +5,17 @@ package quark
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "modernc.org/sqlite"
 )
 
@@ -162,6 +169,127 @@ func TestCreateBatchWritesToPrimary(t *testing.T) {
 	}
 	if len(repRows) != 1 || repRows[0].Name != "replica-sentinel" {
 		t.Fatalf("replica has %d rows (%v), want 1 sentinel — CreateBatch leaked a write to the replica", len(repRows), repRows)
+	}
+}
+
+// TestReplicaFailoverToPrimary proves F6-6: a read routed to a replica that has
+// gone down (its pool is closed → a transient connection error) fails over to
+// the primary transparently, and the replica is taken out of rotation so later
+// reads skip it.
+func TestReplicaFailoverToPrimary(t *testing.T) {
+	ctx := context.Background()
+	primaryDSN := "file:rr_fo_primary?mode=memory&cache=shared"
+	repDSN := "file:rr_fo_rep?mode=memory&cache=shared"
+
+	c, err := New("sqlite", primaryDSN, WithReplicas(repDSN),
+		WithMaxOpenConns(1), WithLogger(rrQuiet))
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	seedReplicaDB(t, repDSN, "replica") // replica answers reads while healthy
+	if err := c.Migrate(ctx, &rrUser{}); err != nil {
+		t.Fatalf("migrate primary: %v", err)
+	}
+	if err := For[rrUser](ctx, c).Create(&rrUser{Name: "primary"}); err != nil {
+		t.Fatalf("seed primary: %v", err)
+	}
+
+	// Healthy: the read is served by the replica.
+	if rows, _ := For[rrUser](ctx, c).List(); len(rows) != 1 || rows[0].Name != "replica" {
+		t.Fatalf("pre-failover read = %v, want [replica]", rows)
+	}
+
+	// Simulate the replica going down by closing its pool.
+	if err := c.replicas[0].Close(); err != nil {
+		t.Fatalf("close replica: %v", err)
+	}
+
+	// The next read routes to the (down) replica, fails transiently, and fails
+	// over to the primary — returning the primary's row, not an error.
+	rows, err := For[rrUser](ctx, c).List()
+	if err != nil {
+		t.Fatalf("read after replica down should have failed over, got error: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Name != "primary" {
+		t.Fatalf("failover read = %v, want [primary]", rows)
+	}
+
+	// The replica is now out of rotation: pickReplica skips it (only one
+	// replica, so it returns nil → reads use the primary).
+	if c.pickReplica() != nil {
+		t.Error("downed replica was not taken out of rotation")
+	}
+}
+
+// TestReplicaHealthRecovery checks the passive-recovery side of F6-6: a replica
+// marked down is skipped until its cooldown expires, then becomes eligible
+// again. Uses a tiny cooldown to keep the test fast.
+func TestReplicaHealthRecovery(t *testing.T) {
+	repDSN := "file:rr_rec_rep?mode=memory&cache=shared"
+	seedReplicaDB(t, repDSN, "rep")
+	c, err := New("sqlite", "file:rr_rec_primary?mode=memory&cache=shared",
+		WithReplicas(repDSN), WithReplicaDownCooldown(50*time.Millisecond),
+		WithMaxOpenConns(1), WithLogger(rrQuiet))
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	if c.pickReplica() == nil {
+		t.Fatal("healthy replica should be pickable")
+	}
+	c.markReplicaDown(c.replicas[0])
+	if c.pickReplica() != nil {
+		t.Fatal("replica should be skipped while in cooldown")
+	}
+	time.Sleep(70 * time.Millisecond)
+	if c.pickReplica() == nil {
+		t.Error("replica should be eligible again after cooldown expired")
+	}
+}
+
+// TestIsTransientConnErr pins the classifier that drives failover: connection
+// failures are transient (retry/failover), query/logic errors are not.
+func TestIsTransientConnErr(t *testing.T) {
+	transient := []struct {
+		name string
+		err  error
+	}{
+		{"ErrBadConn", driver.ErrBadConn},
+		{"wrapped ErrBadConn", fmt.Errorf("query failed: %w", driver.ErrBadConn)},
+		{"ErrConnDone", sql.ErrConnDone},
+		{"net error", &net.OpError{Op: "dial", Err: errors.New("connection refused")}},
+		{"pg class 08", &pgconn.PgError{Code: "08006"}},
+		{"pg admin shutdown", &pgconn.PgError{Code: "57P01"}},
+		{"sqlite closed", errors.New("sql: database is closed")},
+	}
+	for _, tc := range transient {
+		if !isTransientConnErr(tc.err) {
+			t.Errorf("%s: isTransientConnErr = false, want true", tc.name)
+		}
+	}
+
+	notTransient := []struct {
+		name string
+		err  error
+	}{
+		{"nil", nil},
+		{"ErrNoRows", sql.ErrNoRows},
+		{"plain error", errors.New("syntax error near FROM")},
+		{"pg unique violation", &pgconn.PgError{Code: "23505"}},
+		// context.DeadlineExceeded implements net.Error — must NOT be treated
+		// as a transient connection failure (it is the caller's timeout, not a
+		// downed replica), or a slow query would wrongly evict a healthy replica.
+		{"context deadline", context.DeadlineExceeded},
+		{"context canceled", context.Canceled},
+		{"wrapped context deadline", fmt.Errorf("query failed: %w", context.DeadlineExceeded)},
+	}
+	for _, tc := range notTransient {
+		if isTransientConnErr(tc.err) {
+			t.Errorf("%s: isTransientConnErr = true, want false", tc.name)
+		}
 	}
 }
 

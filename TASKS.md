@@ -363,7 +363,7 @@ un typo de columna no compila; coexiste con la API string actual
 > equivalencia typed↔string). `go test -short ./...` verde. Doc:
 > sección "Typed column accessors" en `website/docs/guides/codegen.mdx`.
 
-### F6-5 · Read replicas / pool routing 🟡 skeleton hecho (pendiente PR/merge; resto → follow-up)
+### F6-5 · Read replicas / pool routing ✅ v0.13.0 (#110); follow-up: random/least-conn, First/Find/Count, PG integration
 
 `WithReplicas(replicaDSNs...)`: SELECT enruta a réplicas
 (round-robin/random/least-conn configurable), mutaciones al primary.
@@ -392,13 +392,29 @@ aplique.
 > integration test PG con réplica real. **Estrategia única** (round-robin) por
 > ahora. **EXPERIMENTAL hasta F6-6** (sin healthcheck/failover).
 
-### F6-6 · Failover de primary
+### F6-6 · Failover de primary ✅ (replica failover; pendiente PR/merge)
 
 Detección de errores transitorios (`errors.Is(err, driver.ErrBadConn)`
 + códigos por dialecto, reusando el classifier de F4-7) y reintento
 contra un primary sano. **Done**: unit test del classifier extendido +
 integration test que mata el primary y verifica recuperación. Comparte
 diseño con ADR-0015.
+
+> **Entregado esta sesión (pendiente code-reviewer + PR).** Reencuadrado como
+> **replica failover** (no "primary failover" multi-primary: el modelo tiene un
+> único primary, que es el destino del fallback; promoción de réplica→primary
+> es otro modelo, fuera de alcance — documentado en ADR-0015). Clasificador
+> `isTransientConnErr` en `db_errors.go` (estilo F4-7 `errors.As`):
+> `driver.ErrBadConn`/`sql.ErrConnDone`/`net.Error`/clase 08 + shutdown PG/
+> 2002·2003·2006·2013 MySQL/233·10053·10054·10060 MSSQL/"database is closed"
+> SQLite. Health por réplica (`replicaUnhealthyUntil []atomic.Int64`,
+> `replicaDownCooldown` default 5s): `pickReplica` salta réplicas en cooldown
+> (nil si todas → primary); `markReplicaDown` las saca. `executeQuery` hace
+> failover: read a réplica con error transitorio → marca down + reintenta en
+> primary. Recuperación pasiva. **Gradúa `WithReplicas` de experimental**
+> (ADR-0015 + docs actualizadas). Tests `replicas_test.go`:
+> `TestReplicaFailoverToPrimary`, `TestReplicaHealthRecovery`,
+> `TestIsTransientConnErr`. Verde. Cierra el pillar HA F6-5+F6-6.
 
 ### F6-7 · Sharding pluggable (`ShardRouter`)
 
@@ -454,7 +470,7 @@ tenga su propio path generado (F6-2/F6-3) para compararse contra los ORMs
 codegen-tier. **Done**: ent y sqlc en la matriz; números publicados junto a
 los de 8a; metodología actualizada.
 
-### F6-9 · Stress / load testing ✅ (pendiente PR/merge)
+### F6-9 · Stress / load testing ✅ v0.13.0 (#109)
 
 Workload generator (patrones estilo `vegeta`/`hey`): latencias
 p50/p95/p99 bajo concurrencia, contención de pool, deadlock rate real.

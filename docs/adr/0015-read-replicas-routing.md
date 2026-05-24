@@ -76,11 +76,20 @@ la misma conexión donde se puso la session var).
   Mecánicamente esto cae solo: `readExec` sólo desvía cuando `q.exec` **es** el
   `*sql.DB` primary del Client; cualquier otro `Executor` (tx, RLS) pasa intacto.
 
-- **Healthcheck + failover → F6-6.** El skeleton enruta a todas las réplicas
-  configuradas sin rastrear salud: una réplica caída hará fallar sus lecturas.
-  La detección de `driver.ErrBadConn` + sacar de rotación + failover de primary
-  es F6-6, que comparte este ADR. **Hasta F6-6, `WithReplicas` es
-  experimental** y debe documentarse como tal.
+- **Healthcheck + failover (F6-6, implementado).** Una lectura enrutada a una
+  réplica que falla con un error de conexión transitorio (`isTransientConnErr`:
+  `driver.ErrBadConn` / `sql.ErrConnDone` / error de red / códigos de
+  conexión por dialecto / handle SQLite cerrado) **hace failover al primary**
+  (reintento de la lectura allí) y la réplica se **saca de rotación** durante
+  `replicaDownCooldown` (default 5s). `pickReplica` salta las réplicas en
+  cooldown; si todas están caídas devuelve nil y la lectura va al primary.
+  Recuperación **pasiva**: pasado el cooldown la réplica se reintenta (sin
+  goroutine de health-check activo). Con esto `WithReplicas` deja de ser
+  experimental: una réplica caída ya no rompe las lecturas.
+  
+  **No hay "failover de primary" multi-primary** en este modelo: hay un único
+  primary (el destino del fallback). Promoción de una réplica a primary es otro
+  modelo (replicación gestionada por el operador / el motor), fuera de alcance.
 
 ## Consecuencias
 
@@ -95,8 +104,11 @@ la misma conexión donde se puso la session var).
 - **Lecturas potencialmente stale**: sorpresa clásica de read-replicas. Mitigado
   por `Sticky` + documentación explícita; no se puede eliminar (es la naturaleza
   de la replicación asíncrona).
-- **Sin failover hasta F6-6**: una réplica caída rompe sus lecturas. Por eso
-  `WithReplicas` se marca experimental hasta entonces.
+- **Ventana de staleness en failover**: tras sacar una réplica de rotación las
+  lecturas van al primary (consistentes) hasta que el cooldown expira; si la
+  réplica sigue caída al reintentarse, vuelve a hacer failover. La recuperación
+  pasiva (sin health-check activo) significa que una réplica que vuelve no se
+  reincorpora hasta el primer reintento tras el cooldown.
 - Carga operativa: el usuario gestiona las réplicas y su replicación; Quark sólo
   enruta.
 
