@@ -153,17 +153,19 @@ func (c *Client) DisableAuditLog() {
 }
 
 // recordAudit writes an audit row for the given operation when audit
-// logging is enabled and the table is in scope. The diff is built by
-// the caller (full-row map for Create/Delete, new-values map for
-// plain Update; Tracked.Save passes its own old/new delta). The row
-// is written through q.exec, so it joins the active transaction when
-// the query is bound to one.
-func (q *BaseQuery) recordAudit(ctx context.Context, operation string, entity any, diff map[string]any) error {
+// logging is enabled and the table is in scope. The full-row diff
+// (used for Create/Delete and the new-values side of plain Update) is
+// built here, after the enabled/in-scope gate, so no map is allocated
+// on the common path where no audit sink is configured. Tracked.Save
+// builds its own old/new delta and calls writeAuditRow directly. The
+// row is written through q.exec, so it joins the active transaction
+// when the query is bound to one.
+func (q *BaseQuery) recordAudit(ctx context.Context, operation string, entity any) error {
 	st := q.client.audit
 	if st == nil || !st.shouldAudit(q.table) {
 		return nil
 	}
-	return q.client.writeAuditRow(ctx, q.exec, st, q.table, operation, pkStringFromMeta(entity, q.meta), diff)
+	return q.client.writeAuditRow(ctx, q.exec, st, q.table, operation, pkStringFromMeta(entity, q.meta), rowToMap(entity, q.meta))
 }
 
 // pkStringFromMeta renders the entity's primary key as a string for
