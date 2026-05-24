@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0](https://github.com/jcsvwinston/quark/compare/v0.11.0...v0.12.0) (2026-05-24)
+
+
+### Added
+
+* **codegen:** typed compile-time column accessors (F6-4) ([#105](https://github.com/jcsvwinston/quark/issues/105)) ([34ea945](https://github.com/jcsvwinston/quark/commit/34ea945e70a0be5f417bf247e08e73fca2f2bd40))
+
+
+### Performance
+
+* **crud:** compute audit row diff only when a sink is configured ([02ec854](https://github.com/jcsvwinston/quark/commit/02ec85439b108220b58c2f3a64de569b4d66f3e5))
+
+
+### Documentation
+
+* **release:** v0.11.0 DoD backfill — docs versioning + release notes ([#103](https://github.com/jcsvwinston/quark/issues/103)) ([d5dc9ce](https://github.com/jcsvwinston/quark/commit/d5dc9cec3f40c561453342bcc0a0c2a17335f89c))
+* **release:** v0.12.0 DoD — docs versioning + release notes ([#106](https://github.com/jcsvwinston/quark/issues/106)) ([cab5828](https://github.com/jcsvwinston/quark/commit/cab5828ae6464acb38c56375d4e62cb9490f2973))
+* **tasks:** mark F6-1/F6-2/F6-3a/F6-8a as merged in v0.11.0 ([844ad04](https://github.com/jcsvwinston/quark/commit/844ad04e5b7c40b27619d90f9fded616fa6c34fa))
+* **tasks:** mark F6-4 merged ([#105](https://github.com/jcsvwinston/quark/issues/105)), release v0.12.0 pending ([e72b0c2](https://github.com/jcsvwinston/quark/commit/e72b0c2c38304061d3550a2ab66cabb8165c12fa))
+* **tasks:** record rowToMap lazy perf lever as shipped ([4131d52](https://github.com/jcsvwinston/quark/commit/4131d52619a71917280cb367fede51431c2f8356))
+
+
+### Tests
+
+* **audit:** cover excluded-table gate in recordAudit no-alloc guard ([5c9d555](https://github.com/jcsvwinston/quark/commit/5c9d555252437496d08d08e0d3bb45f963405bb9))
+
 ## [0.11.0](https://github.com/jcsvwinston/quark/compare/v0.10.0...v0.11.0) (2026-05-24)
 
 
