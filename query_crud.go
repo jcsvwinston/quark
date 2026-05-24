@@ -1742,7 +1742,9 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 	defer cancel()
 
 	if q.dialect.SupportsReturning() && q.pk.Column != "" {
-		rows, err := q.executeQuery(ctx, sqlBuf.String(), args)
+		// INSERT ... RETURNING is a write: pin to the primary, never a replica
+		// (F6-5, ADR-0015), even though it reads rows back.
+		rows, err := q.executeQueryPrimary(ctx, sqlBuf.String(), args)
 		if err != nil {
 			return err
 		}

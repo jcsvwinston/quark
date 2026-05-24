@@ -6,10 +6,12 @@ package quark
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +28,18 @@ type Client struct {
 	cacheStore CacheStore
 	driverName string
 	dataSource string
+
+	// Read replicas (F6-5, ADR-0015). replicaDSNs is set by WithReplicas;
+	// New() opens one read-only *sql.DB per DSN into replicas. Reads route
+	// to a replica (round-robin via replicaRR) when one is configured and the
+	// query is not bound to a tx / native-RLS executor / Sticky context;
+	// writes always use the primary db. Empty replicas = single-DB behaviour,
+	// zero cost. replicas is read-only after New(); never mutated concurrently
+	// with queries. EXPERIMENTAL until F6-6 adds health-checking and failover
+	// (a downed replica currently fails its reads).
+	replicaDSNs []string
+	replicas    []*sql.DB
+	replicaRR   atomic.Uint64
 
 	// registeredModels holds the list of models the user has
 	// pre-registered with this Client via [Client.RegisterModel].
@@ -221,6 +235,33 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 		}
 	}
 
+	// Open read replicas (F6-5, ADR-0015) after options, since WithReplicas
+	// records the DSNs as a client option. Each replica gets the same pool
+	// options as the primary and is pinged; any failure closes everything
+	// opened so far (primary + earlier replicas) and aborts construction.
+	for _, rdsn := range c.replicaDSNs {
+		rdb, err := sql.Open(driverName, rdsn)
+		if err != nil {
+			_ = c.Close()
+			return nil, fmt.Errorf("%w: open replica: %v", ErrConnection, err)
+		}
+		for _, opt := range opts {
+			if poolOpt, ok := opt.(PoolOption); ok {
+				poolOpt.apply(rdb)
+			}
+		}
+		if err := rdb.PingContext(ctx); err != nil {
+			// rdb is not yet in c.replicas (the append is below, on purpose),
+			// so close it explicitly; c.Close then closes the primary + any
+			// earlier replicas. Keep the append AFTER the ping to avoid a
+			// double-close if this ordering is ever refactored.
+			_ = rdb.Close()
+			_ = c.Close()
+			return nil, fmt.Errorf("%w: ping replica: %v", ErrConnection, err)
+		}
+		c.replicas = append(c.replicas, rdb)
+	}
+
 	// Install the stampede protection wrapper around any caller-supplied
 	// CacheStore (F4-5, ADR-0011). This is "todo o nada" per the cache
 	// playbook: singleflight + jitter + (optionally) XFetch are layered
@@ -399,9 +440,17 @@ func (c *Client) Raw() *sql.DB {
 	return c.db
 }
 
-// Close closes the underlying database connection.
+// Close closes the underlying database connection and any read-replica
+// pools (F6-5). The primary's error is returned; replica close errors are
+// joined so none is silently dropped.
 func (c *Client) Close() error {
-	return c.db.Close()
+	err := c.db.Close()
+	for _, r := range c.replicas {
+		if cerr := r.Close(); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+	}
+	return err
 }
 
 // Dialect returns the dialect being used.

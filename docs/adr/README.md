@@ -21,6 +21,7 @@
 | [0012](0012-rls-real-postgres-set-local-plus-policies.md) | RLS real Postgres vía `SET LOCAL app.tenant_id` + `CREATE POLICY` | Accepted | Fase 5 |
 | [0013](0013-transactional-hooks-and-sync-eventbus.md) | Hooks transaccionales + EventBus síncrono en commit-phase | Accepted | Fase 5 |
 | [0014](0014-codegen-coexistence-typed-registry.md) | Codegen coexiste vía registry de funciones tipadas por tipo con fallback a reflect | Proposed | Fase 6 |
+| [0015](0015-read-replicas-routing.md) | Read replicas: routing en ejecución, opt-in, sticky read-your-writes | Accepted | Fase 6 |
 
 ## Cómo añadir un ADR nuevo
 

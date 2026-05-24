@@ -363,7 +363,7 @@ un typo de columna no compila; coexiste con la API string actual
 > equivalencia typed↔string). `go test -short ./...` verde. Doc:
 > sección "Typed column accessors" en `website/docs/guides/codegen.mdx`.
 
-### F6-5 · Read replicas / pool routing
+### F6-5 · Read replicas / pool routing 🟡 skeleton hecho (pendiente PR/merge; resto → follow-up)
 
 `WithReplicas(replicaDSNs...)`: SELECT enruta a réplicas
 (round-robin/random/least-conn configurable), mutaciones al primary.
@@ -373,6 +373,24 @@ pasivo (saca de rotación una réplica que devuelve `driver.ErrBadConn`).
 **Done**: integration test que verifica split read/write y sticky en
 PG (réplica vía testcontainers o DSN); skip documentado donde no
 aplique.
+
+> **Entregado esta sesión (design-first; pendiente code-reviewer + PR).**
+> **ADR-0015 escrito y aceptado** (`docs/adr/0015-read-replicas-routing.md`):
+> routing en ejecución (no construcción), modelo de consistencia (eventual +
+> `Sticky` read-your-writes; reads en tx siempre primary), exclusiones
+> (tx/RLS-nativa/Sticky), failover → F6-6. API skeleton funcional en
+> `replicas.go` + `client.go` + `option.go`: `WithReplicas(dsns...)` (abre un
+> `*sql.DB` por DSN en `New()`, mismas pool opts, ping; `Close()` los cierra),
+> `Sticky(ctx)`, `pickReplica()` round-robin atómico, `BaseQuery.readExec(ctx)`.
+> Wired en `executeQuery` (multi-fila). Tests `replicas_test.go` (routing
+> read→réplica round-robin, write→primary, Sticky→primary, no-réplica
+> regression). **Hallazgo de diseño**: `executeQueryRow` es primitivo
+> compartido reads (First/Find/Count) + escritura (`INSERT...RETURNING`,
+> SCOPE_IDENTITY MSSQL) → NO se enruta (mandaría writes a réplica); el skeleton
+> enruta sólo `executeQuery`. **Follow-up** (no en este slice): round-robin
+> random/least-conn, enrutar First/Find/Count (separar del RETURNING),
+> integration test PG con réplica real. **Estrategia única** (round-robin) por
+> ahora. **EXPERIMENTAL hasta F6-6** (sin healthcheck/failover).
 
 ### F6-6 · Failover de primary
 

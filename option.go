@@ -182,6 +182,35 @@ func WithDefaultTZ(loc *time.Location) Option {
 	}
 }
 
+// WithReplicas registers read-replica DSNs (F6-5, ADR-0015). [New] opens one
+// read-only connection pool per DSN (same pool options and dialect as the
+// primary) and routes multi-row reads (List / Iter / eager-loading) to them
+// round-robin, while writes always go to the primary. Pass the same engine's
+// replica endpoints; a read-your-writes path uses [Sticky].
+//
+// Skeleton scope: single-row reads (First/Find/Count) currently stay on the
+// primary — they share an execution primitive with the INSERT...RETURNING
+// write path, so routing them is a follow-up (ADR-0015). Multi-row reads, the
+// common scaling case, do route.
+//
+// Opt-in: without it, every operation uses the single primary connection,
+// unchanged. Reads inside [Client.Tx] and under RowLevelSecurityNative always
+// use the primary regardless (see ADR-0015).
+//
+// EXPERIMENTAL until F6-6: there is no health-checking or failover yet, so a
+// replica that goes down will fail the reads routed to it. Until then, use it
+// only where you can tolerate that, or not at all.
+//
+//	client, err := quark.New("pgx", primaryDSN,
+//	    quark.WithReplicas(replica1DSN, replica2DSN),
+//	    quark.WithMaxOpenConns(16),
+//	)
+func WithReplicas(dsns ...string) Option {
+	return func(c *Client) {
+		c.replicaDSNs = append(c.replicaDSNs, dsns...)
+	}
+}
+
 // PoolOption is a configuration option for the database connection pool.
 // These are applied to the *sql.DB before creating the Client.
 type PoolOption interface {

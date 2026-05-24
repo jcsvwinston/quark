@@ -154,9 +154,26 @@ func ScanTarget(ptr any) any {
 	return scanDestForPtr(ptr, nil)
 }
 
-// executeQuery runs a QueryContext through the middleware chain.
-// This is used for SELECT operations returning multiple rows.
+// executeQuery runs a multi-row SELECT through the middleware chain, routing to
+// a read replica when one is configured (F6-5, ADR-0015). readExec returns the
+// primary/tx exec unchanged when routing does not apply.
+//
+// IMPORTANT: this is for genuine reads only. A write path that reads rows back
+// with a multi-row shape — INSERT ... RETURNING in CreateBatch — must NOT route
+// to a replica; it calls executeQueryPrimary instead.
 func (q *BaseQuery) executeQuery(ctx context.Context, sqlStr string, args []any) (*sql.Rows, error) {
+	return q.executeQueryOn(ctx, q.readExec(ctx), sqlStr, args)
+}
+
+// executeQueryPrimary runs a multi-row query on the primary connection (q.exec)
+// without replica routing. Used by write paths that read rows back (RETURNING).
+func (q *BaseQuery) executeQueryPrimary(ctx context.Context, sqlStr string, args []any) (*sql.Rows, error) {
+	return q.executeQueryOn(ctx, q.exec, sqlStr, args)
+}
+
+// executeQueryOn runs a QueryContext on the given exec through the middleware
+// chain. The exec selection (replica vs primary) is the caller's decision.
+func (q *BaseQuery) executeQueryOn(ctx context.Context, exec Executor, sqlStr string, args []any) (*sql.Rows, error) {
 	if q.err != nil {
 		return nil, q.err
 	}
@@ -170,7 +187,7 @@ func (q *BaseQuery) executeQuery(ctx context.Context, sqlStr string, args []any)
 		handler = q.client.middleware[i].WrapQuery(handler)
 	}
 
-	return handler(ctx, q.exec, sqlStr, args)
+	return handler(ctx, exec, sqlStr, args)
 }
 
 // executeQueryRow runs a QueryRowContext through the middleware chain.
@@ -205,6 +222,13 @@ func (q *BaseQuery) executeQueryRow(ctx context.Context, sqlStr string, args []a
 		handler = q.client.middleware[i].WrapQueryRow(handler)
 	}
 
+	// NOTE: executeQueryRow is intentionally NOT replica-routed. It is the
+	// shared single-row primitive used by both reads (First/Find/Count) AND
+	// the write path (INSERT ... RETURNING, MSSQL SCOPE_IDENTITY()), so routing
+	// it to a replica would send writes to a read replica. The skeleton routes
+	// only executeQuery (multi-row SELECT, read-only); routing single-row reads
+	// requires separating this primitive from the RETURNING write path — a
+	// follow-up (see ADR-0015).
 	return handler(ctx, q.exec, sqlStr, args)
 }
 
