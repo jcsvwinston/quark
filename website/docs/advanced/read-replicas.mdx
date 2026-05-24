@@ -1,0 +1,63 @@
+---
+sidebar_position: 6
+title: Read replicas
+description: Route reads to replica databases for read scaling, with sticky read-your-writes.
+---
+
+# Read replicas
+
+:::warning Experimental
+Read-replica routing is experimental. There is **no health-checking or
+failover yet** (planned in a follow-up): if a configured replica goes down,
+the reads routed to it will fail. Use it only where you can tolerate that.
+:::
+
+For read-heavy workloads you can spread reads across one or more replica
+databases while writes continue to go to the primary. It is opt-in — without
+`WithReplicas`, every operation uses the single primary connection, unchanged.
+
+```go
+client, err := quark.New("pgx", primaryDSN,
+    quark.WithReplicas(replica1DSN, replica2DSN),
+    quark.WithMaxOpenConns(16),
+)
+```
+
+`New` opens one connection pool per replica DSN (same pool options and dialect
+as the primary) and pings each. `Close` closes them all.
+
+## What routes where
+
+- **Multi-row reads** (`List`, `Iter`, eager-loading) round-robin across the
+  replicas.
+- **Writes** (`Create`, `Update`, `UpdateFields`, `Delete`) always go to the
+  primary.
+- **Reads inside `Client.Tx`** use the transaction's connection (the primary),
+  so they always see the transaction's own writes.
+
+Single-row reads (`First`/`Find`/`Count`) currently stay on the primary — they
+share an execution path with `INSERT ... RETURNING`, so routing them is a
+follow-up. Multi-row reads, the common scaling case, do route.
+
+## Consistency: stale reads and `Sticky`
+
+Replicas are typically replicated asynchronously, so a read from a replica may
+return slightly **stale** data — it may not yet reflect a write you just made
+on the primary. When a read must observe a recent write (read-your-writes), pin
+it to the primary with `quark.Sticky`:
+
+```go
+// Write goes to the primary.
+_ = quark.For[User](ctx, client).Create(&u)
+
+// A normal read may hit a replica that hasn't caught up yet.
+// Sticky pins this read to the primary so it sees the write.
+fresh, _ := quark.For[User](quark.Sticky(ctx), client).
+    Where("id", "=", u.ID).
+    List()
+```
+
+`Sticky` is a no-op when no replicas are configured.
+
+See [ADR-0015](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0015-read-replicas-routing.md)
+for the routing model and its rationale.

@@ -43,6 +43,7 @@ const sidebars: SidebarsConfig = {
         'advanced/events',
         'advanced/audit-log',
         'advanced/caching-observability',
+        'advanced/read-replicas',
       ],
     },
     {
