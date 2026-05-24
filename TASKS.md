@@ -328,7 +328,7 @@ idéntico con y sin codegen; optimistic locking + soft delete + dirty
 tracking siguen funcionando. **Reconsiderar el alcance** a la luz del
 hallazgo de 3a (payoff ~1%): quizá sólo si F6-4/type-safety lo motiva.
 
-### F6-4 · Typed query field accessors ✅ (pendiente PR/merge)
+### F6-4 · Typed query field accessors ✅ merged #105 (→ v0.12.0)
 
 API generada **compile-time** (no reemplaza runtime): por cada modelo,
 accesores tipados de columna que producen condiciones sin strings
@@ -336,7 +336,8 @@ mágicos, dando type-safety de columnas. **Done**: ejemplo compila;
 un typo de columna no compila; coexiste con la API string actual
 (`Where("name","=",...)` sigue válida). Doc en codegen.mdx.
 
-> **Entregado esta sesión (pendiente code-reviewer + PR).** Runtime en
+> **Mergeado en PR #105 (`34ea945e`); release v0.12.0 pendiente vía
+> release-please PR #104.** Runtime en
 > `typed_columns.go` (package quark): `TypedColumn[T]` genérico (Eq/Neq/Gt/
 > Gte/Lt/Lte/In/NotIn/Between/IsNull/IsNotNull), `TypedStringColumn` (embebe
 > `TypedColumn[string]` + Like/NotLike), `Predicate` opaco, y método aditivo
