@@ -1,0 +1,49 @@
+# Multi-Tenancy API Reference
+
+## Tenant Strategies
+
+| Strategy | Description | Use Case |
+|----------|-------------|----------|
+| `DatabasePerTenant` | Separate DB per tenant | Strong isolation, regulatory |
+| `SchemaPerTenant` | Schema per tenant | Medium isolation, shared pool |
+| `RowLevelSecurityClient` | Client-side `WHERE tenant_id = ?` injection on every Quark-built query (raw SQL bypasses it). Renamed from `RowLevelSecurity` in v0.9.0; legacy name kept as deprecated alias until v1.0. | Shared table, simple scaling. On PG, [`RowLevelSecurityNative`](../../advanced/row-level-native) offers engine-enforced policies as the alternative. |
+| `RowLevelSecurityNative` | PostgreSQL-only. Engine-enforced via `set_config('app.tenant_id', ...)` per implicit transaction + `CREATE POLICY` clauses on each tenant-scoped table. `client.Raw()` is also filtered server-side. | Production PG deployments where bypass risk matters; mutually exclusive with `RowLevelSecurityClient` per router. |
+
+## TenantRouter
+
+### `NewTenantRouter(config, resolver, factory) *TenantRouter`
+
+```go
+router := quark.NewTenantRouter(
+    quark.TenantConfig{
+        Strategy:       quark.SchemaPerTenant,
+        BaseClient:     baseClient,
+        MaxCachedPools: 100, // For DatabasePerTenant
+    },
+    func(ctx context.Context) string {
+        return ctx.Value("tenant_id").(string) // Extract from context
+    },
+    func(tenantID string) (*quark.Client, error) {
+        // Create tenant-specific client
+        return quark.New("postgres", fmt.Sprintf(".../tenant_%s", tenantID))
+    },
+)
+```
+
+## Usage with Queries
+
+```go
+// RowLevelSecurityClient: WHERE tenant_id = 'acme' is auto-injected
+users, _ := quark.For[User](ctx, router).List()
+
+// SchemaPerTenant: queries "acme.users"
+orders, _ := quark.For[Order](ctx, router).List()
+```
+
+## Tenant Router Methods
+
+| Method | Description |
+|--------|-------------|
+| `ResolveTenant(ctx) (string, error)` | Extract tenant ID from context |
+| `GetClient(ctx) (*Client, error)` | Get tenant-specific client |
+| `ActiveTenants() []string` | List cached tenant connections |

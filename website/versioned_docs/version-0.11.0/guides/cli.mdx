@@ -1,0 +1,189 @@
+---
+sidebar_position: 9
+title: Operational Workflows
+description: Run Quark migrations, schema checks, and tenant jobs from Go commands in the current release.
+---
+
+# Operational Workflows
+
+Quark now ships a `cmd/quark` binary, whose first generally-available
+subcommand is `quark gen` (see [Code Generation](codegen)). The operational
+tasks below — migrations, schema checks, tenant jobs — are still best
+expressed as small Go commands that call the same public APIs your
+application uses, and that is what this page documents.
+
+This page replaces the usual CLI command table with concrete command patterns
+you can place under `./cmd`.
+
+## Migration Runner
+
+Create a command that imports your migration package for side effects and runs
+the versioned migrator:
+
+```go
+// cmd/migrate/main.go
+package main
+
+import (
+    "context"
+    "flag"
+    "log"
+
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/migrate"
+    _ "github.com/lib/pq"
+
+    _ "your/app/migrations"
+)
+
+func main() {
+    var dsn string
+    var down int
+    var dryRun bool
+
+    flag.StringVar(&dsn, "dsn", "", "database DSN")
+    flag.IntVar(&down, "down", 0, "number of migrations to roll back")
+    flag.BoolVar(&dryRun, "dry-run", false, "preview pending migrations")
+    flag.Parse()
+
+    limits := quark.DefaultLimits()
+    limits.AllowRawQueries = true
+
+    client, err := quark.New("postgres", dsn,
+        quark.WithLimits(limits),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Close()
+
+    ctx := context.Background()
+    migrator := migrate.NewMigrator(client)
+
+    switch {
+    case dryRun:
+        err = migrator.UpDryRun(ctx, 0)
+    case down > 0:
+        err = migrator.Down(ctx, down)
+    default:
+        err = migrator.Up(ctx, 0)
+    }
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+Run it with:
+
+```bash
+go run ./cmd/migrate -dsn "$DATABASE_URL" -dry-run
+go run ./cmd/migrate -dsn "$DATABASE_URL"
+go run ./cmd/migrate -dsn "$DATABASE_URL" -down 1
+```
+
+## Schema Bootstrap Command
+
+For local development or tests, a bootstrap command can call `Migrate` directly:
+
+```go
+// cmd/schema-bootstrap/main.go
+package main
+
+func main() {
+    ctx := context.Background()
+    client := mustClient()
+
+    if err := client.Migrate(ctx, &User{}, &Order{}, &Product{}); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+This is intentionally different from production migrations. `Migrate` reflects
+the current model shape and creates missing tables; versioned migrations record
+exactly which DDL ran and in what order.
+
+## Schema Sync Preview
+
+Use `Sync` dry runs to see additive/rename/drop operations against an existing
+table:
+
+```go
+err := client.Sync(ctx, quark.SyncOptions{DryRun: true}, &User{})
+```
+
+Because dry runs introspect the live table, the table must already exist. Use a
+logger on the client to capture the planned SQL:
+
+```go
+logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLogger(logger),
+)
+```
+
+## Tenant Migration Loop
+
+For database-per-tenant routing, keep tenant migration explicit. Resolve tenant
+DSNs from your control plane, create a client per tenant, and run the same
+migrator.
+
+```go
+for _, tenant := range tenants {
+    client, err := clientForTenant(tenant)
+    if err != nil {
+        return err
+    }
+
+    migrator := migrate.NewMigrator(client)
+    if err := migrator.Up(ctx, 0); err != nil {
+        _ = client.Close()
+        return fmt.Errorf("tenant %s: %w", tenant.ID, err)
+    }
+
+    _ = client.Close()
+}
+```
+
+For schema-per-tenant, run schema creation and DDL with a connection configured
+for the target schema, or issue explicit schema-qualified SQL from a versioned
+migration. The current `TenantRouter` uses tenant IDs as schema names during
+queries, but it does not orchestrate schema provisioning.
+
+## Model Generation and Introspection
+
+There is no built-in model generator in the current public tree. For existing
+databases, use a small introspection command around `database/sql` or your
+database's information schema, then hand-review generated structs.
+
+Quark's internal tests use metadata inspection heavily; application tooling can
+also inspect Quark's interpretation of a model:
+
+```go
+meta := quark.GetModelMeta[User]()
+fmt.Println(meta.Table)
+for _, field := range meta.Fields {
+    fmt.Println(field.Column, field.IsPK)
+}
+```
+
+## Recommended Layout
+
+```text
+your-app/
+  cmd/
+    migrate/
+      main.go
+    schema-bootstrap/
+      main.go
+  internal/
+    db/
+      client.go
+  migrations/
+    202605050001_create_users.go
+```
+
+Use Go commands for operational repeatability, commit them with your app, and
+run them from CI or deployment jobs.
