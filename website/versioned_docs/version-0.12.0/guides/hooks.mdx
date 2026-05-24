@@ -1,0 +1,216 @@
+---
+sidebar_position: 10
+title: Lifecycle Hooks
+description: Before/After hooks for Create/Update/Delete/Find, and how they interact with transactions.
+---
+
+# Lifecycle Hooks
+
+Quark dispatches lifecycle hooks around every CRUD and read
+operation. Implement the corresponding interface on `*Model` and
+Quark picks it up automatically — no registration.
+
+```go
+type Order struct {
+    ID     int64  `db:"id" pk:"true"`
+    Status string `db:"status"`
+}
+
+// Implements quark.BeforeCreateHook.
+func (o *Order) BeforeCreate(ctx context.Context) error {
+    if o.Status == "" {
+        o.Status = "pending"
+    }
+    return nil
+}
+
+// Implements quark.AfterCreateHook.
+func (o *Order) AfterCreate(ctx context.Context) error {
+    return audit.Log(ctx, "order.created", o.ID)
+}
+```
+
+## When each hook fires
+
+| Hook | Phase | Fires from |
+| --- | --- | --- |
+| `BeforeCreateHook` | Before INSERT | `Create` |
+| `AfterCreateHook` | After commit (in tx) / after INSERT (no tx) | `Create` |
+| `BeforeUpdateHook` | Before UPDATE | `Update`, `UpdateFields`, `Tracked.Save` |
+| `AfterUpdateHook` | After commit (in tx) / after UPDATE (no tx) | `Update`, `UpdateFields`, `Tracked.Save` |
+| `BeforeDeleteHook` | Before DELETE | `Delete` |
+| `AfterDeleteHook` | After commit (in tx) / after DELETE (no tx) | `Delete` |
+| `BeforeFindHook` | Before SELECT is built | `List`, `First`, `Find`, `Iter`, `Cursor` |
+| `AfterFindHook` | After scan + Preload | `List`, `First`, `Find`, `Iter`, `Cursor` |
+
+Bulk and WHERE-based variants — `CreateBatch`, `UpdateBatch`,
+`DeleteBatch`, `DeleteBy` — currently **bypass hooks entirely**.
+See [Limitations](#limitations) below for the reasoning.
+
+## Before* vs After*: what changed in v0.9.0
+
+Starting in v0.9.0 (Fase 5, F5-4), the **timing of `After*` hooks**
+inside an explicit transaction shifted from "immediately after the
+SQL" to **"after the transaction commits"**. The change closes a
+race in v0.8.0 and earlier where an `After*` hook could fire while
+the surrounding transaction had not yet committed — and could still
+roll back, leaving the side-effect orphaned.
+
+|  | v0.8.0 and earlier | v0.9.0 |
+| --- | --- | --- |
+| `BeforeX` inside `Client.Tx` | Inline before SQL, returning err rolls back | Same |
+| `BeforeX` outside tx | Inline before SQL, returning err aborts the op | Same |
+| `AfterX` inside `Client.Tx` | **Inline after SQL** (before commit — racy) | **After commit succeeds** (queued; rolled-back tx drops them) |
+| `AfterX` outside tx | Inline after SQL | Same — non-tx CRUD does NOT wrap in implicit tx |
+
+The non-transactional path is intentionally unchanged. Wrapping
+every single-statement CRUD in an implicit transaction would add two
+round-trips (`BeginTx` + `Commit`) per call and a connection pin —
+the safety it would buy is exactly zero because there is no
+transaction to roll back. `For[T].Create` stays a "fire and forget"
+shape; the breaking change is scoped to callers who used
+`Client.Tx` (which is the path that actually had the race).
+
+See [`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md)
+for the audit checklist.
+
+## How post-commit `After*` hooks are implemented
+
+Each `*quark.Tx` carries a FIFO queue of queued `After*` hooks.
+When the CRUD path detects that a `Query[T]` is bound to a tx
+(`ForTx[T](ctx, tx)` populates the back-reference), the hook
+closure is appended to the queue instead of being invoked inline.
+`Tx.Commit()` drains the queue after the underlying
+`*sql.Tx.Commit()` succeeds; `Tx.Rollback()` discards it.
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    for _, o := range orders {
+        if err := quark.ForTx[Order](ctx, tx).Create(&o); err != nil {
+            return err   // BeforeCreate already ran; AfterCreate is discarded.
+        }
+    }
+    return nil           // BeforeCreate ran for each; AfterCreate fires
+                          // for each once Commit succeeds, in FIFO order.
+})
+```
+
+A hook returning an error **post-commit** is logged via the
+Client's `*slog.Logger` (event
+`quark.hook.after_post_commit_error`) and the cascade continues —
+once the database has confirmed the commit, no application-level
+handler can undo it.
+
+## Read hooks (`BeforeFind` / `AfterFind`)
+
+The Find hooks are new in v0.9.0. Their signatures match the rest
+of the hook family — only `ctx`, no result slice. Implementations
+that need to inspect the scanned data should either propagate state
+through `ctx` or implement enrichment as a `Scope` helper around
+the query rather than as a hook.
+
+```go
+type Document struct {
+    ID       int64  `db:"id" pk:"true"`
+    TenantID string `db:"tenant_id"`
+}
+
+// BeforeFind runs once per query call (List, Find, First, Iter, Cursor),
+// before any SQL is built. Use it for audit / telemetry.
+func (d *Document) BeforeFind(ctx context.Context) error {
+    return audit.LogRead(ctx, "documents.read")
+}
+
+// AfterFind runs once per query call after the result is hydrated
+// (including Preload). Use it for cross-cutting enrichment or
+// read-side instrumentation.
+func (d *Document) AfterFind(ctx context.Context) error {
+    return audit.LogReadComplete(ctx, "documents.read")
+}
+```
+
+`AfterFind` for `Iter` fires only when the streaming loop completes
+without error. `AfterFind` for `Cursor` fires from `Cursor.Close()`
+when `rows.Err()` is nil.
+
+## Hook ordering inside a transaction
+
+Multiple CRUD operations inside the same `Client.Tx` queue their
+`After*` hooks in **FIFO order**. If you create three orders inside
+one tx, the three `AfterCreate` hooks fire in the same order at
+commit time.
+
+```
+BeforeCreate(o1) → INSERT → BeforeCreate(o2) → INSERT → BeforeCreate(o3) → INSERT
+                                                                                  ↓
+                                                                       Tx.Commit succeeds
+                                                                                  ↓
+                                          AfterCreate(o1) → AfterCreate(o2) → AfterCreate(o3)
+```
+
+If you need different ordering — say, run a single event emission
+after ALL inserts have committed rather than one `AfterCreate` per
+row — register a [`Tx.OnCommit`](transactions#side-effects-on-commitrollback)
+callback. OnCommit callbacks fire once per transaction, FIFO, after
+all the model `After*` hooks:
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    var ids []int64
+    for _, o := range orders {
+        if err := quark.ForTx[Order](ctx, tx).Create(&o); err != nil {
+            return err
+        }
+        ids = append(ids, o.ID)
+    }
+    tx.OnCommit(func(ctx context.Context) error {
+        return bus.PublishBatch(ctx, "orders.created", ids)
+    })
+    return nil
+})
+```
+
+If you don't need the transaction context, the equivalent is to
+place the cross-cutting work after `Client.Tx` returns nil:
+
+```go
+err := client.Tx(ctx, fn)
+if err == nil {
+    bus.PublishBatch(ctx, "orders.created", ids)
+}
+```
+
+## Limitations
+
+- **Hooks dispatch on the entity value for Create/Update/Delete and
+  on a zero `*T` for Find.** The CRUD hooks see the actual struct
+  the caller passed in (with all its fields). The Find hooks see a
+  zero-value `*T` because there is no entity instance at query
+  time; they can read context but not entity state.
+- **Hooks cannot mutate the `Query[T]`.** They receive `ctx`, not
+  the builder. Use scope helpers if you need conditional WHERE /
+  ORDER injection.
+- **`Tracked.Save` runs both `BeforeUpdate` and `AfterUpdate`** —
+  treats the save as an update from the recorded snapshot, so the
+  hook contract matches plain `Update`.
+- **Batch and WHERE-based operations** (`CreateBatch`,
+  `UpdateBatch`, `DeleteBatch`, `DeleteBy`) currently bypass hooks.
+  Bulk paths skip the per-row dispatch by design; `DeleteBy` issues
+  a single WHERE-based DELETE without loading the affected rows, so
+  there is no entity instance to call the hook on. If you need
+  hooks for those paths, load the rows first and loop through the
+  single-row CRUD methods.
+
+- **Savepoints inside `Tx.Tx(nestedFn)`** roll back the SQL but do
+  NOT remove already-queued `After*` hooks from the outer
+  transaction's queue. If the nested callback issues CRUD, queues
+  hooks, then returns an error that triggers `RollbackTo`, those
+  hooks remain queued and will fire when the outer `Commit`
+  succeeds — even though their underlying SQL was reverted. This
+  gap was present before v0.9.0 and is documented here for the
+  first time because F5-4 makes it observable. The same caveat
+  applies to [`Tx.OnCommit`](transactions#side-effects-on-commitrollback)
+  callbacks registered between a `Savepoint` and its `RollbackTo`.
+  Until a future release closes the gap, prefer flat `Client.Tx`
+  callbacks without nested savepoint `Tx()` over hook-heavy code
+  when fine-grained savepoint behaviour matters.
