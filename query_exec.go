@@ -1323,7 +1323,7 @@ func (q *Query[T]) WhereSubquery(column, operator, subquery string) *Query[T] {
 		c.err = fmt.Errorf("%w: WhereSubquery requires AllowRawQueries to be enabled", ErrInvalidQuery)
 		return c
 	}
-	c.where = append(c.where, condition{
+	c.where = ownedAppend(c.where, condition{
 		column:   q.dialect.Quote(column) + " " + operator + " (" + subquery + ")",
 		operator: "IS NOT NULL", // sentinel — overridden by isRaw rendering below
 		logic:    "AND",

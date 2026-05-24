@@ -297,7 +297,7 @@ func For[T any](ctx context.Context, provider ClientProvider) *Query[T] {
 			q.tenantID = tenantID
 			q.tenantCol = router.config.TenantColumn
 			// Pre-inject the RLS WHERE condition
-			q.where = append(q.where, condition{
+			q.where = ownedAppend(q.where, condition{
 				column:   router.config.TenantColumn,
 				operator: "=",
 				value:    tenantID,

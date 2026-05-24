@@ -143,8 +143,13 @@ func (c TypedStringColumn) NotLike(pattern string) Predicate {
 // query. Returns a clone, like every other builder method.
 func (q *Query[T]) WhereP(preds ...Predicate) *Query[T] {
 	c := q.clone()
-	for _, p := range preds {
-		c.where = append(c.where, p.toCondition("AND"))
+	// Lower all predicates first, then append once: a single ownedAppend
+	// reallocates the (possibly shared) where slice exactly once, rather than
+	// re-clamping and reallocating per predicate.
+	conds := make([]condition, len(preds))
+	for i, p := range preds {
+		conds[i] = p.toCondition("AND")
 	}
+	c.where = ownedAppend(c.where, conds...)
 	return c
 }

@@ -187,8 +187,12 @@ sharding en paralelo (independientes del codegen), benchmarks al final
 >   row diff only when a sink is configured` — `rowToMap`/`pkStringFromMeta` se
 >   computan dentro de `recordAudit`, tras el gate `audit==nil || !shouldAudit`;
 >   guard `TestRecordAuditNoAllocWhenDisabled` en `audit_internal_test.go`);
->   clone lazy/pooled; buffers reusados en scan/bind. Aun
->   así acotadas — el motor/driver domina.
+>   ~~clone lazy/pooled~~ **hecho** (copy-on-write: `clone()` comparte slices
+>   en vez de deep-copy; los builder methods appendan vía `ownedAppend`
+>   (`append(s[:len:len], …)`) que realoca on-grow → aislamiento preservado.
+>   ~7%→1 alloc/op en derive sobre base "gorda". Guards `TestOwnedAppend*` +
+>   `TestCloneCOWIsolation` en `clone_cow_test.go`); buffers reusados en
+>   scan/bind. Aun así acotadas — el motor/driver domina.
 > - **Revisar el gate de ADR-0002**: el ≥3× p99 "con codegen" no es alcanzable
 >   con el diseño actual; o se revisa el número o se acepta que codegen es
 >   para type-safety, no velocidad. (Posible ADR sucesor de 0002/0014.)
