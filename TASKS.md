@@ -436,13 +436,34 @@ tenga su propio path generado (F6-2/F6-3) para compararse contra los ORMs
 codegen-tier. **Done**: ent y sqlc en la matriz; números publicados junto a
 los de 8a; metodología actualizada.
 
-### F6-9 · Stress / load testing
+### F6-9 · Stress / load testing ✅ (pendiente PR/merge)
 
 Workload generator (patrones estilo `vegeta`/`hey`): latencias
 p50/p95/p99 bajo concurrencia, contención de pool, deadlock rate real.
 **Done**: harness reproducible en `docs/benchmarks/stress/`; un run
 documentado con números; identifica el primer cuello de botella real
 (dato que prioriza optimizaciones post-1.0).
+
+> **Entregado esta sesión (pendiente code-reviewer + PR).** Harness runnable
+> en `benchmarks/stress/main.go` (`package main` en el módulo `quarkbench`,
+> reusa `internal/model`): N workers concurrentes, mezcla read/write
+> configurable, durante una duración fija; reporta throughput, latencias
+> p50/p95/p99/max (read y write por separado), errores + bucket de
+> contención, y stats del pool (`client.Raw().Stats()`: waitCount/waitDuration/
+> inUse/idle). Flags: `-driver -dsn -conns -workers -duration -write-pct -seed`.
+> DSN SQLite por defecto con `busy_timeout` para que la contención de escritura
+> aparezca como latencia y no como `SQLITE_BUSY`. Run documentado +
+> metodología + hallazgo en `docs/benchmarks/stress/README.md`. **Primer cuello
+> de botella identificado** (data, no asunción): (1) *sizing del pool* —
+> con `MaxOpenConns < workers` casi toda op bloquea esperando conexión
+> (waitCount ≈ total ops, ~250-530µs, domina la latencia de read); igualar
+> pool a workers baja read p50 286µs→64µs y waitCount→0. (2) *serialización de
+> escritura del motor* — con pool igualado, SQLite serializa writes
+> (p99 10ms) mientras reads siguen rápidos; propiedad del motor, no del mapping
+> de Quark. Coherente con `benchmarks/PROFILING.md` y el gate ADR-0002:
+> el driver/pool/motor dominan, no el reflect. Acción post-1.0: documentar
+> guía de pool-sizing; micro-opt del mapping tiene valor acotado hasta
+> direccionar pool+motor.
 
 ### Cierre de Fase 6 → v1.0.0
 

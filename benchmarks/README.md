@@ -103,6 +103,21 @@ go test -run=^$ -bench=. -benchmem -count=10 ./... | tee bench.txt
 go run golang.org/x/perf/cmd/benchstat@latest bench.txt
 ```
 
+## Concurrency / stress (F6-9)
+
+The micro-benchmarks above are single-connection, one operation at a time.
+For behaviour under concurrent load — latency percentiles, connection-pool
+contention, write serialization — use the stress harness:
+
+```bash
+go run ./stress                  # in-memory SQLite, 16 workers, 8-conn pool
+go run ./stress -conns 16 -workers 16 -write-pct 30 -duration 30s
+```
+
+Methodology and a documented run (including the first bottleneck it surfaces —
+pool sizing, then engine write serialization) live in
+[`docs/benchmarks/stress/README.md`](../docs/benchmarks/stress/README.md).
+
 ## A representative run
 
 Apple M4 Pro, macOS, in-memory SQLite, `modernc.org/sqlite v1.23.1`,
