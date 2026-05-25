@@ -32,6 +32,12 @@ _ = quark.For[User](shardCtx, router).Create(&user)     // → the shard owning 
 got, _ := quark.For[User](shardCtx, router).Where("id", "=", user.ID).List()
 ```
 
+A complete, self-contained runnable example (two SQLite shards, no Docker) lives
+in [`examples/sharding/`](https://github.com/jcsvwinston/quark/tree/main/examples/sharding) —
+run it with `go run ./examples/sharding/main.go`. It routes accounts by shard
+key, proves the data is disjoint per shard, and shows the keyless-query
+rejection.
+
 ## How routing works
 
 1. `DefaultShardResolver` reads the shard key from the context

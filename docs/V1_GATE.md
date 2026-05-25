@@ -2,9 +2,10 @@
 
 > **Fecha:** 2026-05-25
 > **Estado actual:** `v0.13.0` taggeada; F6-5 / F6-6 / F6-7 / F6-9 entregados.
-> **Progreso §A:** **2/5 cerrados** (Items 3 y 4 vía *Salida B*, 2026-05-25).
-> Abiertos: Item 1 (Oracle en CI — decisión estratégica), Item 2 (ejemplo
-> sharding runnable), Item 5 (`RELEASE_NOTES_v1.0.0.md` — DRAFT en curso).
+> **Progreso §A:** **3/5 cerrados** (Items 3, 4 vía *Salida B*; Item 2
+> alcance mínimo, 2026-05-25). Abiertos: **Item 1** (Oracle en CI —
+> decisión estratégica) y **Item 5** (`RELEASE_NOTES_v1.0.0.md` — DRAFT,
+> se finaliza al cerrar Item 1).
 > **Origen:** [ADR-0017](adr/0017-codegen-type-safety-not-perf-gate.md) §3 retira el gate
 > ≥3× p99 de ADR-0002 y delega el nuevo gate a *"el checklist honesto de
 > `docs/ANALISIS_MADUREZ.md` §3 (cobertura cross-engine, gaps estructurales)"*.
@@ -74,7 +75,18 @@ A = 1-2 sesiones; B = 1 sesión (sólo docs); C = 1 sesión.
 
 ---
 
-### Item 2 — F6-7 (sharding) follow-ups
+### ~~Item 2 — F6-7 (sharding) follow-ups~~ ✅ Cerrado (alcance mínimo)
+
+> **Cerrado 2026-05-25 — alcance mínimo (recomendado).** Ejemplo runnable
+> `examples/sharding/main.go` (dos shards **SQLite** self-contained — más
+> runnable que PG/testcontainers y el sharding es engine-agnostic; el doc
+> nota cómo cambiar a PG/MySQL) + `website/docs/advanced/sharding.mdx`
+> ampliado con el puntero al ejemplo + `examples/README.md`. **Verificado:
+> compila y corre** (4 cuentas repartidas 2/2 entre shards, rechazo sin
+> shard key). **Diferidos a v1.1** (declarados en
+> `RELEASE_NOTES_v1.0.0.md` §Known limitations): scatter-gather y
+> `shard-key-from-entity`. El routing explícito por shard key ya cubre el
+> caso principal.
 
 **Por qué bloqueante:** `ShardRouter` está mergeado en `main`
 (commit `039f7ef9`, PR #115) pero el roadmap reconoce follow-ups vivos:
@@ -87,9 +99,10 @@ básico ✅, sharding avanzado v1.1"*.
 **Estado hoy:**
 
 - Routing por shard key explícito: ✅ entregado.
-- **Scatter-gather (fan-out de reads cross-shard):** pendiente.
-- **`shard-key-from-entity` (derivar key del modelo):** pendiente.
-- **Ejemplo PG runnable en `examples/sharding/`:** pendiente.
+- **Ejemplo runnable en `examples/sharding/`:** ✅ entregado (SQLite
+  self-contained; `go run ./examples/sharding/main.go`).
+- **Scatter-gather (fan-out de reads cross-shard):** ⏳ diferido a v1.1.
+- **`shard-key-from-entity` (derivar key del modelo):** ⏳ diferido a v1.1.
 
 **Cómo cerrar:**
 
@@ -116,7 +129,8 @@ ls examples/sharding/main.go && cd examples/sharding && go build -o /dev/null ./
 grep -q "advanced/sharding" website/sidebars.ts
 ```
 
-**Decisión pendiente:** ¿alcance mínimo o completo?
+**Decisión tomada (2026-05-25):** **alcance mínimo** (ver banner ✅ arriba).
+Scatter-gather y `shard-key-from-entity` diferidos a v1.1.
 
 ---
 
@@ -328,9 +342,9 @@ diferir (camino más rápido a un v1.0 honesto):
 1. **Sesión 1** — Item 1 Salida C: workflow `oracle-nightly.yml`. Es la
    decisión más cara competitivamente; resolverla primero quita peso.
    Si no funciona, fallback a Salida B (degradar posicionamiento).
-2. **Sesión 2** — Item 2 mínimo: `examples/sharding/main.go` + doc
-   `advanced/sharding.mdx`. Cierra el follow-up F6-7 sin compromiso a
-   scatter-gather.
+2. ~~**Sesión 2** — Item 2 mínimo: `examples/sharding/main.go` + doc
+   `advanced/sharding.mdx`~~ ✅ **Hecho (2026-05-25)**: ejemplo runnable
+   (SQLite) + doc ampliada; scatter-gather y shard-key-from-entity a v1.1.
 3. ~~**Sesión 3** — Items 3 y 4 Salida B~~ ✅ **Hecho (2026-05-25)**: las
    asimetrías de EventBus (inbound) y stampede (cross-instance) están
    documentadas en sitio visible (ver §A Items 3 y 4, cerrados).

@@ -48,6 +48,15 @@ Demonstrates Godror setup. Note that the Godror driver requires CGO enabled for 
 go run ./examples/oracle/main.go
 ```
 
+### 6. Sharding (ShardRouter)
+Self-contained (no Docker): partitions data across two SQLite shards by shard
+key via `ShardRouter`, proving per-shard disjoint storage and the keyless-query
+rejection. See the [Sharding guide](https://jcsvwinston.github.io/quark-docs/docs/advanced/sharding).
+
+```bash
+go run ./examples/sharding/main.go
+```
+
 ## Cleaning Up
 
 ```bash

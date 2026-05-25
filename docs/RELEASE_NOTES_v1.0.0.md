@@ -1,10 +1,10 @@
 # Quark v1.0.0 — Release Notes (DRAFT)
 
 > **⚠ DRAFT — v1.0.0 is NOT tagged yet.** This document is being assembled
-> as the [v1.0 gate](V1_GATE.md) closes. Two §A blocking items remain open
-> before v1.0 can be tagged: **Item 1 (Oracle in CI)** and **Item 2 (sharding
-> runnable example)**. Do **not** run `/release v1.0.0` until `V1_GATE.md §A`
-> is fully closed and this banner is removed.
+> as the [v1.0 gate](V1_GATE.md) closes. **One** §A blocking item remains open
+> before v1.0 can be tagged: **Item 1 (Oracle in CI)**. Do **not** run
+> `/release v1.0.0` until `V1_GATE.md §A` is fully closed and this banner is
+> removed.
 >
 > The **Known limitations** section below is authoritative as items close via
 > *Salida B* (document-the-waiver): each waiver lands here in the same PR that
@@ -57,6 +57,12 @@ adopters see the boundary before they build on it.
 - **Read-replica failover recovery is passive.** A downed replica is taken out
   of rotation for a cooldown and rejoins on the first retry after it; there is
   no active health-check goroutine. Active health checks are a post-v1.0 item.
+- **Sharding routes per shard key; advanced features are post-v1.0.**
+  `ShardRouter` routes each query to the owning shard by a shard key supplied
+  per operation via context (see the runnable `examples/sharding/`). **Cross-shard
+  scatter-gather** (read fan-out with merge) and **shard-key-from-entity**
+  (deriving the key from the model on writes) are deferred to v1.1; there are no
+  cross-shard joins or transactions. *(V1_GATE §A Item 2.)*
 - **Oracle CI coverage:** _PENDING — V1_GATE §A Item 1 decision (Salida A/B/C).
   This bullet will state the final stance (Oracle in blocking CI, nightly job,
   or manual-validation-only positioning) when Item 1 closes._
