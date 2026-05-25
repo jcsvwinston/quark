@@ -24,8 +24,8 @@ reproduce locally before drawing conclusions.
 ## What is measured
 
 Five operations, chosen because they exercise the reflect-based hot paths
-(row scanning, insert/update building) that Quark's planned code generation
-will replace:
+(row scanning, insert/update building) that the optional code generator
+targets:
 
 | Benchmark     | Operation                                           |
 | ------------- | --------------------------------------------------- |
@@ -65,16 +65,21 @@ Apple M4 Pro, macOS, go1.26.0 toolchain, `modernc.org/sqlite v1.23.1`,
 ## Reading the numbers
 
 - Quark's reflect path runs about **1.5–2.1× the hand-written `database/sql`
-  floor** on these operations. That gap is the overhead the planned
-  generated path is meant to recover — and it bounds it, since generated
-  code cannot beat hand-written SQL.
+  floor** on these operations. Code generation shipped in v0.11.0 and was
+  profiled against this gap: it recovers only ~1–5% (`benchmarks/PROFILING.md`),
+  because the gap is dominated by `database/sql` and the engine, not
+  reflection — the overhead is mostly architectural, not something codegen
+  removes.
 - **Quark and GORM are in the same performance class.** Neither dominates:
   in this run Quark is faster on inserts and updates, GORM is faster on the
   single-row read and the filtered list.
 - The reflection cache means model metadata is parsed once per type and
   reused; the remaining per-row cost is field-level reflection on scan and
-  bind, which is what generated code removes.
+  bind. Generated code removes that reflection, but profiling showed the win
+  is small — the driver round-trip and architectural allocations dominate.
 
 Quark is **not yet a v1.0 release** and these results are not a claim of
-fastest-in-class. They exist to give an honest baseline that the code
-generation work will be measured against.
+fastest-in-class. They are the honest baseline code generation was measured
+against: that measurement reframed codegen as a **type-safety** feature, not
+a speedup, and retired the ADR-0002 ≥3× performance gate
+([ADR-0017](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0017-codegen-type-safety-not-perf-gate.md)).

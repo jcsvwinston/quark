@@ -20,7 +20,9 @@
 
 ## 📌 Status
 
-Quark is in **v0.12** — late-alpha. **Phase 6** (codegen + HA + sharding + benchmarks → v1.0) is open and actively delivering ([ADR-0014](docs/adr/0014-codegen-coexistence-typed-registry.md)); v0.11 and v0.12 are the first cuts. **It is not yet v1.0 production-ready** — see [`docs/ANALISIS_MADUREZ.md`](docs/ANALISIS_MADUREZ.md) for the honest gap analysis and the path to a real v1.0.
+Quark is in **v0.13** — late-alpha. **Phase 6** (codegen + HA + sharding + benchmarks → v1.0) has substantially delivered all four pillars ([ADR-0014](docs/adr/0014-codegen-coexistence-typed-registry.md)); [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so the path to a real v1.0 is now the honest checklist in [`docs/ANALISIS_MADUREZ.md`](docs/ANALISIS_MADUREZ.md) §3, not a speedup target. **It is not yet v1.0 production-ready** — see the gap analysis.
+
+**v0.13** (Phase 6 HA cut): opt-in **read replicas** (`WithReplicas`) with read/write split, read-your-writes (`Sticky`), and automatic **failover** to the primary on transient replica errors (with a configurable replica cooldown, ADR-0015); a copy-on-write query-builder clone that drops a "fat base" derive to 1 alloc/op; and a runnable stress/load harness in `benchmarks/stress`. No breaking changes.
 
 **v0.12** (Phase 6 sliver): opt-in **compile-time column type-safety** on top of the code generator — `quark gen` emits per-model `<Model>Columns` accessors and the query builder gains `WhereP`, so typos and wrong-typed values fail at build time. Pure compile-time sugar (ADR-0014): the string `Where(...)` API stays valid and interchangeable. Performance fix: audit row diff is now built only when an audit sink is configured (~9% allocation drop on `InsertOne`). No breaking changes.
 
@@ -42,7 +44,7 @@ Quark is in **v0.12** — late-alpha. **Phase 6** (codegen + HA + sharding + ben
 
 **v0.3** (Phase 1 — rich types + dirty tracking): `Nullable[T]`, `JSON[T]`, `RegisterTypeMapper`, optimistic locking, soft-delete scopes.
 
-Breaking changes are documented in `docs/MIGRATION_vX.Y.Z.md` per version ([`MIGRATION_v0.9.0.md`](docs/MIGRATION_v0.9.0.md) covers the two breaking-minor changes in v0.9; none for v0.12, v0.11, v0.10, v0.8, v0.7, v0.6 or v0.5; [`MIGRATION_v0.4.0.md`](docs/MIGRATION_v0.4.0.md) covers the Join builder rename from v0.3.x). Release notes per version live under [`docs/RELEASE_NOTES_*.md`](docs/).
+Breaking changes are documented in `docs/MIGRATION_vX.Y.Z.md` per version ([`MIGRATION_v0.9.0.md`](docs/MIGRATION_v0.9.0.md) covers the two breaking-minor changes in v0.9; none for v0.13, v0.12, v0.11, v0.10, v0.8, v0.7, v0.6 or v0.5; [`MIGRATION_v0.4.0.md`](docs/MIGRATION_v0.4.0.md) covers the Join builder rename from v0.3.x). Release notes per version live under [`docs/RELEASE_NOTES_*.md`](docs/).
 
 ---
 
