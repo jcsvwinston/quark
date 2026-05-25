@@ -44,6 +44,7 @@ const sidebars: SidebarsConfig = {
         'advanced/audit-log',
         'advanced/caching-observability',
         'advanced/read-replicas',
+        'advanced/sharding',
       ],
     },
     {
