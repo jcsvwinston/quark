@@ -63,7 +63,7 @@ serialization — not Quark's mapping). See
   still use the primary (they share an execution path with `INSERT … RETURNING`).
 - Replica failover recovery is passive (no active health-check goroutine): a
   recovered replica rejoins on the first retry after its cooldown.
-- Still late-alpha — not production-ready until a v1.0 honest release.
+- Still late-alpha — not yet v1.0; treat as pre-production until the honest v1.0.
 
 [#107]: https://github.com/jcsvwinston/quark/pull/107
 [#109]: https://github.com/jcsvwinston/quark/pull/109
