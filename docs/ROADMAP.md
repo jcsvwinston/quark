@@ -163,13 +163,18 @@ Formally opened 2026-05-22 (full scope). Anchor decision:
 reflect coexistence). Decomposed into F6-1..F6-9 in
 [`TASKS.md`](../TASKS.md) § "Fase 6".
 
-- [ ] **Codegen** (F6-1 skeleton, F6-2 typed scanners, F6-3 typed
-      binders, F6-4 typed query field accessors) — opt-in, no reflect.
-- [ ] **HA**: read replicas / pool routing (F6-5), primary failover
-      (F6-6). Each opens its own ADR at design time.
-- [ ] **Sharding** pluggable (F6-7, `ShardRouter`).
-- [ ] **Benchmarks** vs `database/sql` / GORM / ent / sqlc (F6-8) +
-      stress/load testing (F6-9).
+- [x] **Codegen** (F6-1 skeleton, F6-2 typed scanners, F6-3a INSERT
+      binder, F6-4 typed query field accessors) — opt-in, no reflect.
+      Delivered v0.11.0–v0.12.0. F6-3b (UPDATE/partial/batch binder)
+      deferred (ADR-0017: ~1% payoff; reopen only for type-safety).
+- [x] **HA**: read replicas / pool routing (F6-5) + primary failover
+      (F6-6) — delivered v0.13.0 (ADR-0015).
+- [x] **Sharding** pluggable (F6-7, `ShardRouter`) — merged to `main`
+      (ADR-0016); follow-ups (scatter-gather, shard-key-from-entity,
+      runnable PG example) pending.
+- [x] **Benchmarks** vs `database/sql` / GORM (F6-8a, v0.11.0) +
+      stress/load testing (F6-9, v0.13.0). F6-8b (ent + sqlc
+      codegen-tier) deferred — informational, not a gate (ADR-0017).
 
 The v1.0 honest checklist is in [`docs/ANALISIS_MADUREZ.md`](ANALISIS_MADUREZ.md) §3 (gaps).
 The ADR-0002 ≥3× p99 codegen gate has been **retired** by

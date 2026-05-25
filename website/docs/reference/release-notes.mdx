@@ -6,18 +6,33 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is documented here as a **v0.x** project (currently **v0.12.0** —
+Quark is documented here as a **v0.x** project (currently **v0.13.0** —
 late-alpha, not yet v1.0 production-ready). **Phase 6** (codegen + HA +
-sharding + benchmarks → v1.0) is open and actively delivering; v0.11
-and v0.12 are the first cuts.
+sharding + benchmarks → v1.0) has substantially delivered all four
+pillars; v0.11–v0.13 are the cuts so far.
 
 Per-version release notes live in the main repository under
 [`docs/RELEASE_NOTES_*.md`](https://github.com/jcsvwinston/quark/tree/main/docs).
 The current tag is documented at
-[`docs/RELEASE_NOTES_v0.12.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.12.0.md).
+[`docs/RELEASE_NOTES_v0.13.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.13.0.md).
 Migration steps for the most recent breaking changes are at
 [`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
-v0.10, v0.11 and v0.12 introduced **no breaking changes**.
+v0.10 through v0.13 introduced **no breaking changes**.
+
+## v0.13.0
+
+Phase 6 HA cut: opt-in **read replicas** (F6-5/F6-6). `WithReplicas(dsns...)`
+opens read-only pools and routes multi-row reads across them round-robin while
+writes stay on the primary (ADR-0015); `Sticky(ctx)` pins a read to the primary
+for read-your-writes. A read to a replica that hits a transient connection error
+**fails over to the primary**, and the replica is taken out of rotation for a
+cooldown (`WithReplicaDownCooldown`, default 5s). Performance: a copy-on-write
+query-builder clone shares slices and appends through a capacity-bounded
+`ownedAppend`, dropping a "fat base" derive to 1 alloc/op. Tooling: a runnable
+stress/load harness in `benchmarks/stress` (latency percentiles, throughput,
+pool contention). Reads inside `Client.Tx` and under `RowLevelSecurityNative`
+always use the primary. No breaking changes.
+See [`RELEASE_NOTES_v0.13.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.13.0.md).
 
 ## v0.12.0
 
@@ -131,7 +146,7 @@ Public release baseline.
 
 ## Compatibility Notes
 
-- The current module tree does not include a standalone `cmd/quark` CLI.
+- The `cmd/quark` CLI ships and is installable via `go install` — it provides migration, tenant, and `quark gen` codegen subcommands ([Operational Workflows](../guides/cli)).
 - `DeleteBy` and `DeleteBatch` perform hard deletes.
 - `Select` accepts simple identifiers rather than arbitrary SQL expressions.
 - Raw SQL APIs require `AllowRawQueries: true`.

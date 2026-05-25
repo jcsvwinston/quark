@@ -6,7 +6,7 @@ description: "Type-safe, security-first ORM for Go — generics on the surface, 
 
 # QUARK ORM
 
-Quark is **v0.12 — late-alpha**. **Phase 6** (codegen + HA + sharding + benchmarks → v1.0) is open and actively delivering; the project is **not yet v1.0 production-ready** — see [`docs/ANALISIS_MADUREZ.md`](https://github.com/jcsvwinston/quark/blob/main/docs/ANALISIS_MADUREZ.md) for the honest gap analysis. The core query builder, CRUD, schema-as-code migrations, multi-tenancy, caché, hooks/eventos/audit log, and observability are considered stable. **Oracle is excluded from CI** while a testcontainers image issue is open — Oracle-specific SQL is validated manually. Breaking changes are documented per version under [`docs/MIGRATION_vX.Y.Z.md`](https://github.com/jcsvwinston/quark/tree/main/docs) with a migration path.
+Quark is **v0.13 — late-alpha**. **Phase 6** (codegen + HA + sharding + benchmarks → v1.0) has substantially delivered all four pillars; the project is **not yet v1.0 production-ready** — the path to a real v1.0 is the honest checklist in [`docs/ANALISIS_MADUREZ.md`](https://github.com/jcsvwinston/quark/blob/main/docs/ANALISIS_MADUREZ.md) §3 (the ≥3× codegen performance gate was retired — codegen is a type-safety feature, not a speedup). The core query builder, CRUD, schema-as-code migrations, multi-tenancy, caché, hooks/eventos/audit log, and observability are considered stable. **Oracle is excluded from CI** while a testcontainers image issue is open — Oracle-specific SQL is validated manually. Breaking changes are documented per version under [`docs/MIGRATION_vX.Y.Z.md`](https://github.com/jcsvwinston/quark/tree/main/docs) with a migration path.
 
 QUARK is a modern ORM for Go built around generics,
 immutable query builders, multi-dialect SQL, and production extension points.
@@ -81,7 +81,8 @@ After running production services on GORM, three patterns kept causing incidents
 | [Event Bus](advanced/events) | `Client.UseEventBus`, synchronous post-commit, at-least-once |
 | [Audit Log](advanced/audit-log) | `Client.EnableAuditLog`, atomic with CRUD transaction |
 | [Caching & Observability](advanced/caching-observability) | L2 cache, stampede protection, OTel traces + metrics, slow-query log |
-| [Read Replicas](advanced/read-replicas) | `WithReplicas` (experimental), `Sticky(ctx)` |
+| [Read Replicas](advanced/read-replicas) | `WithReplicas` read/write split, `Sticky(ctx)` read-your-writes, automatic failover |
+| [Sharding](advanced/sharding) | `ShardRouter`, shard-key context routing, `HashShardFunc`, cross-shard limits |
 
 ### Reference
 
