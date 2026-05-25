@@ -392,7 +392,7 @@ aplique.
 > integration test PG con réplica real. **Estrategia única** (round-robin) por
 > ahora. **EXPERIMENTAL hasta F6-6** (sin healthcheck/failover).
 
-### F6-6 · Failover de primary ✅ (replica failover; pendiente PR/merge)
+### F6-6 · Failover de primary ✅ v0.13.0 (#113) — replica failover
 
 Detección de errores transitorios (`errors.Is(err, driver.ErrBadConn)`
 + códigos por dialecto, reusando el classifier de F4-7) y reintento
