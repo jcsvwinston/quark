@@ -6,8 +6,11 @@
 > taggear v1.0.0 o de elegir trabajo destinado a v1.0.** Estado del §A
 > (los 5 items que bloquean el tag) — **3/5 cerrados (2026-05-25)**:
 >
-> 1. **Oracle en CI** — ⏳ ABIERTO. Elige Salida A (resolver image issue),
->    B (degradar posicionamiento) o C (nightly job). _Decisión estratégica._
+> 1. **Oracle en CI** — 🚧 **Salida A (Full) elegida, EN PROGRESO** (2026-05-25).
+>    Diagnóstico local: SharedSuite 187/24 (la imagen NO es el bloqueante; lo es
+>    la completitud de dialecto). Programa multi-sesión: introspección F3-2 +
+>    lock distribuido + fixes JSON-path/`''`→NULL + flip de CI. Detalle y reparto
+>    en [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
 > 2. ~~**F6-7 follow-ups**~~ — ✅ CERRADO (alcance mínimo): ejemplo runnable
 >    `examples/sharding/main.go` (SQLite, self-contained) + `advanced/sharding.mdx`;
 >    scatter-gather y `shard-key-from-entity` diferidos a v1.1.
