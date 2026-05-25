@@ -1,5 +1,35 @@
 # Quark — backlog táctico
 
+> **🚦 Gate v1.0 — bloqueante actual.** ADR-0017 retiró el gate ≥3× p99
+> de ADR-0002 y delegó el nuevo checklist a
+> [`docs/V1_GATE.md`](docs/V1_GATE.md). **Lee ese documento antes de
+> taggear v1.0.0 o de elegir trabajo destinado a v1.0.** Resumen del §A
+> (los 5 items que bloquean el tag):
+>
+> 1. **Oracle en CI** — elige Salida A (resolver image issue),
+>    B (degradar posicionamiento) o C (nightly job).
+> 2. **F6-7 follow-ups** — al menos `examples/sharding/` runnable y
+>    doc; scatter-gather y `shard-key-from-entity` diferibles a v1.1.
+> 3. **`LISTEN/NOTIFY` listener side** — entregar (Salida A,
+>    2-3 sesiones) o explicitar la asimetría outbound/inbound
+>    (Salida B, 1 sesión).
+> 4. **Cross-instance stampede protection** — entregar hook
+>    `DistributedLock` (Salida A) o promover el warning "in-process
+>    only" a sitio visible (Salida B).
+> 5. **`RELEASE_NOTES_v1.0.0.md` con Known limitations** — recopila
+>    los waivers (Salida B) de los items 1-4 + diferidos F6-3b y
+>    versioned migration registry global.
+>
+> **Items recomendados pero no bloqueantes**: bug-bash externo
+> (`v0.x-rc1` con ventana de feedback), F6-3b (UPDATE/partial binder),
+> versioned migration registry per-Client.
+>
+> **Orden de ataque sugerido** (§C de V1_GATE.md): Item 1 → Item 2 →
+> Items 3+4 en pasada conjunta → Item 5 → opcional RC. 4-5 sesiones
+> efectivas con Salidas B donde corresponde.
+
+---
+
 > **Fase 5 cerrada (2026-05-21, v0.9.0).** Los 7 items F5-1..F5-7
 > entregados: rename `RowLevelSecurityClient` + alias (#78),
 > `RowLevelSecurityNative` motor PG (#80), CLI `quarktenant`
