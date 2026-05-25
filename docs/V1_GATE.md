@@ -2,7 +2,7 @@
 
 > **Fecha:** 2026-05-25
 > **Estado actual:** `v0.13.0` taggeada; F6-5 / F6-6 / F6-7 / F6-9 entregados.
-> **Origen:** [ADR-0017](adr/0017-retire-codegen-perf-gate.md) §3 retira el gate
+> **Origen:** [ADR-0017](adr/0017-codegen-type-safety-not-perf-gate.md) §3 retira el gate
 > ≥3× p99 de ADR-0002 y delega el nuevo gate a *"el checklist honesto de
 > `docs/ANALISIS_MADUREZ.md` §3 (cobertura cross-engine, gaps estructurales)"*.
 > **Este documento es ese checklist.** Vive aquí porque ANALISIS_MADUREZ es
