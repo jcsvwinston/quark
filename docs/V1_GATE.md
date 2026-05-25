@@ -331,9 +331,9 @@ diferir (camino más rápido a un v1.0 honesto):
 2. **Sesión 2** — Item 2 mínimo: `examples/sharding/main.go` + doc
    `advanced/sharding.mdx`. Cierra el follow-up F6-7 sin compromiso a
    scatter-gather.
-3. **Sesión 3** — Items 3 y 4 Salida B: una pasada documental que
-   explicita las asimetrías de EventBus (inbound) y stampede
-   (cross-instance) en sitio que el lector vea antes de adoptar.
+3. ~~**Sesión 3** — Items 3 y 4 Salida B~~ ✅ **Hecho (2026-05-25)**: las
+   asimetrías de EventBus (inbound) y stampede (cross-instance) están
+   documentadas en sitio visible (ver §A Items 3 y 4, cerrados).
 4. **Sesión 4** — Item 5: redactar `RELEASE_NOTES_v1.0.0.md` con todos
    los Known limitations decididos en sesiones 1-3, más items 7-8.
 5. **Sesión 5 (opcional)** — Item 6: taggear `v0.14.0-rc1`, abrir
