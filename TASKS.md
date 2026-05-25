@@ -363,7 +363,30 @@ un typo de columna no compila; coexiste con la API string actual
 > equivalencia typed↔string). `go test -short ./...` verde. Doc:
 > sección "Typed column accessors" en `website/docs/guides/codegen.mdx`.
 
-### F6-5 · Read replicas / pool routing ✅ v0.13.0 (#110); follow-up: random/least-conn, First/Find/Count, PG integration
+### F6-5 · Read replicas / pool routing ✅ v0.13.0 (#110); follow-up ✅ (random/least-conn, single-row read routing, PG integration)
+
+> **Follow-up cerrado (esta sesión; pendiente code-reviewer + PR).** Tres
+> piezas que el skeleton dejó abiertas:
+> - **Estrategias de selección**: `ReplicaStrategy` (`ReplicaRoundRobin` default
+>   / `ReplicaRandom` / `ReplicaLeastConn`) + `WithReplicaStrategy`. `pickReplica`
+>   despacha sobre `replicaStrategy` en `replicas.go`; las tres respetan el
+>   cooldown F6-6. Least-conn usa `sql.DB.Stats().InUse`.
+> - **Lecturas de una-fila enrutadas**: `First`/`Find` ya enrutaban (bajan a
+>   `List`→`executeQuery`); el follow-up partió el primitivo de una-fila en
+>   `executeReadRow` (lectura, `readExec`+failover) vs `executeQueryRow`
+>   (escritura RETURNING/LastInsertID, primary-only). `Count` y los agregados
+>   (`Sum`/`Avg`/`Min`/`Max`) ahora usan `executeReadRow`.
+> - **Integration test PG**: `replicas_postgres_test.go` (`//go:build
+>   integration`, package `quark_test`) provisiona una 2ª base como réplica con
+>   datos divergentes (no es replicación streaming — Quark enruta, no replica) y
+>   verifica read→réplica / Sticky→primary / Count→réplica contra el driver pgx
+>   real. Cableado en la matriz CI postgres (`ci.yml`). Skip si no se puede crear
+>   la 2ª base (DSN restringido).
+>
+> Tests unitarios SQLite: `TestReplicaStrategyRandom`,
+> `TestReplicaStrategyLeastConn`, `TestSingleRowReadsRouteToReplica`. Docs:
+> `read-replicas.mdx` (estrategias + todas las lecturas enrutan) + ADR-0015
+> actualizado. Pendiente: scatter-gather no aplica (eso es F6-7).
 
 `WithReplicas(replicaDSNs...)`: SELECT enruta a réplicas
 (round-robin/random/least-conn configurable), mutaciones al primary.
@@ -416,7 +439,7 @@ diseño con ADR-0015.
 > `TestReplicaFailoverToPrimary`, `TestReplicaHealthRecovery`,
 > `TestIsTransientConnErr`. Verde. Cierra el pillar HA F6-5+F6-6.
 
-### F6-7 · Sharding pluggable (`ShardRouter`) ✅ skeleton (pendiente PR/merge; scatter-gather → follow-up)
+### F6-7 · Sharding pluggable (`ShardRouter`) ✅ mergeado (#115, post-v0.13.0); follow-up: scatter-gather, shard-key-from-entity, runnable PG example
 
 Interface `ShardRouter` que, dada una entidad + operación, elige el
 Client del shard. Fan-out de reads con scatter-gather opcional.

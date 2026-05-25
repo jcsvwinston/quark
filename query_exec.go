@@ -204,14 +204,43 @@ func (q *BaseQuery) executeQueryOn(ctx context.Context, exec Executor, sqlStr st
 	return handler(ctx, exec, sqlStr, args)
 }
 
-// executeQueryRow runs a QueryRowContext through the middleware chain.
-// This is used for SELECT operations returning a single row (like Count).
+// executeQueryRow runs a single-row QueryRowContext on the primary (q.exec)
+// through the middleware chain. It is the WRITE-path single-row primitive:
+// INSERT ... RETURNING and MSSQL SCOPE_IDENTITY() read one row back but must
+// never touch a read replica. Genuine single-row reads (Count / aggregates)
+// use [BaseQuery.executeReadRow] instead, which is replica-routed (ADR-0015).
 func (q *BaseQuery) executeQueryRow(ctx context.Context, sqlStr string, args []any) *sql.Row {
-	// Note: We cannot return an error here directly since sql.Row doesn't expose error until Scan.
-	// But executing a bad query will cause an error on Scan anyway.
-	if q.err != nil {
-		// Fall through
+	return q.queryRowOn(ctx, q.exec, sqlStr, args)
+}
+
+// executeReadRow runs a single-row read, routing to a read replica when one is
+// available (F6-5, ADR-0015) with the same transient-error failover as
+// executeQuery (F6-6). It performs the Scan internally because *sql.Row defers
+// its error until Scan, so observing a transient failure to fail over requires
+// materializing the error here. Used by Count and the aggregates — never by a
+// write path (those use [BaseQuery.executeQueryRow], primary-only).
+func (q *BaseQuery) executeReadRow(ctx context.Context, sqlStr string, args []any, dest ...any) error {
+	exec := q.readExec(ctx)
+	err := q.queryRowOn(ctx, exec, sqlStr, args).Scan(dest...)
+	// Failover (F6-6): mirror executeQuery. exec != q.exec only when readExec
+	// actually routed to a replica (not Sticky / tx / native-RLS / no replicas),
+	// so this fires only for an actually-routed replica read that failed
+	// transiently. The retry re-runs on the primary; for an idempotent read,
+	// re-Scanning into dest is safe.
+	if err != nil && q.client != nil && exec != Executor(q.exec) {
+		if rdb, ok := exec.(*sql.DB); ok && isTransientConnErr(err) {
+			q.client.markReplicaDown(rdb)
+			return q.queryRowOn(ctx, q.exec, sqlStr, args).Scan(dest...)
+		}
 	}
+	return err
+}
+
+// queryRowOn runs a QueryRowContext on the given exec through the middleware
+// chain. The exec selection (replica vs primary) is the caller's decision.
+func (q *BaseQuery) queryRowOn(ctx context.Context, exec Executor, sqlStr string, args []any) *sql.Row {
+	// A build error (q.err) surfaces naturally through Scan: *sql.Row defers its
+	// error until Scan, so there is nothing to return early here.
 	// Base handler: direct execution
 	handler := QueryRowFunc(func(ctx context.Context, exec Executor, s string, a []any) *sql.Row {
 		start := time.Now()
@@ -236,14 +265,7 @@ func (q *BaseQuery) executeQueryRow(ctx context.Context, sqlStr string, args []a
 		handler = q.client.middleware[i].WrapQueryRow(handler)
 	}
 
-	// NOTE: executeQueryRow is intentionally NOT replica-routed. It is the
-	// shared single-row primitive used by both reads (First/Find/Count) AND
-	// the write path (INSERT ... RETURNING, MSSQL SCOPE_IDENTITY()), so routing
-	// it to a replica would send writes to a read replica. The skeleton routes
-	// only executeQuery (multi-row SELECT, read-only); routing single-row reads
-	// requires separating this primitive from the RETURNING write path — a
-	// follow-up (see ADR-0015).
-	return handler(ctx, q.exec, sqlStr, args)
+	return handler(ctx, exec, sqlStr, args)
 }
 
 // List executes the query and returns all matching rows.
@@ -640,7 +662,8 @@ func (q *Query[T]) Count() (int64, error) {
 	defer cancel()
 
 	var count int64
-	err := q.executeQueryRow(ctx, sqlBuf.String(), args).Scan(&count)
+	// Count is a genuine read → replica-routed (ADR-0015 follow-up).
+	err := q.executeReadRow(ctx, sqlBuf.String(), args, &count)
 	if err != nil {
 		return 0, fmt.Errorf("count failed: %w", wrapDBError(err))
 	}
@@ -1317,9 +1340,9 @@ func (q *Query[T]) aggregate(fn, column string) (float64, error) {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	row := q.executeQueryRow(ctx, sqlBuf.String(), args)
+	// Aggregates are genuine reads → replica-routed (ADR-0015 follow-up).
 	var result sql.NullFloat64
-	if err := row.Scan(&result); err != nil {
+	if err := q.executeReadRow(ctx, sqlBuf.String(), args, &result); err != nil {
 		return 0, wrapDBError(err)
 	}
 	if !result.Valid {

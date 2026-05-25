@@ -101,7 +101,7 @@ jobs:
       matrix:
         include:
           - engine: postgres
-            run: TestSuitePostgres
+            run: 'TestSuitePostgres|TestPostgresReplicaRouting'
           - engine: mysql
             run: TestSuiteMySQL
           - engine: mariadb

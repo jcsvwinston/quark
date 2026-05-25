@@ -293,6 +293,127 @@ func TestIsTransientConnErr(t *testing.T) {
 	}
 }
 
+// TestReplicaStrategyRandom checks ReplicaRandom spreads picks across all
+// healthy replicas and never returns one that is in cooldown.
+func TestReplicaStrategyRandom(t *testing.T) {
+	rep0 := "file:rr_rnd_rep0?mode=memory&cache=shared"
+	rep1 := "file:rr_rnd_rep1?mode=memory&cache=shared"
+	seedReplicaDB(t, rep0, "rep0")
+	seedReplicaDB(t, rep1, "rep1")
+	c, err := New("sqlite", "file:rr_rnd_primary?mode=memory&cache=shared",
+		WithReplicas(rep0, rep1), WithReplicaStrategy(ReplicaRandom),
+		WithMaxOpenConns(1), WithLogger(rrQuiet))
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	// Over many picks, a uniform-random strategy hits both replicas.
+	seen := map[*sql.DB]int{}
+	for i := 0; i < 200; i++ {
+		r := c.pickReplica()
+		if r == nil {
+			t.Fatal("random returned nil with two healthy replicas")
+		}
+		seen[r]++
+	}
+	if len(seen) != 2 {
+		t.Fatalf("random picked %d distinct replicas over 200 tries, want 2", len(seen))
+	}
+
+	// A replica in cooldown is never chosen.
+	c.markReplicaDown(c.replicas[0])
+	for i := 0; i < 100; i++ {
+		if c.pickReplica() == c.replicas[0] {
+			t.Fatal("random picked a replica that is in cooldown")
+		}
+	}
+}
+
+// TestReplicaStrategyLeastConn checks ReplicaLeastConn steers a read to the
+// replica with the fewest in-use connections, and falls back to the only
+// healthy replica when the idle one is in cooldown.
+func TestReplicaStrategyLeastConn(t *testing.T) {
+	rep0 := "file:rr_lc_rep0?mode=memory&cache=shared"
+	rep1 := "file:rr_lc_rep1?mode=memory&cache=shared"
+	seedReplicaDB(t, rep0, "rep0")
+	seedReplicaDB(t, rep1, "rep1")
+	c, err := New("sqlite", "file:rr_lc_primary?mode=memory&cache=shared",
+		WithReplicas(rep0, rep1), WithReplicaStrategy(ReplicaLeastConn),
+		WithMaxOpenConns(2), WithLogger(rrQuiet))
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	// Hold a connection on replica 0 so its InUse count is higher than replica 1's.
+	conn, err := c.replicas[0].Conn(context.Background())
+	if err != nil {
+		t.Fatalf("grab conn on replica 0: %v", err)
+	}
+	defer conn.Close()
+
+	if got := c.pickReplica(); got != c.replicas[1] {
+		t.Fatalf("least-conn picked the busier replica; want the idle replica[1]")
+	}
+
+	// With the idle replica in cooldown, least-conn falls back to the only
+	// healthy replica even though it is busier.
+	c.markReplicaDown(c.replicas[1])
+	if got := c.pickReplica(); got != c.replicas[0] {
+		t.Fatalf("least-conn did not fall back to the only healthy replica")
+	}
+}
+
+// TestSingleRowReadsRouteToReplica proves the ADR-0015 follow-up: single-row
+// reads (Count and the aggregates) now route to a replica like multi-row reads,
+// while Sticky still pins them to the primary. The replica is seeded with more
+// rows than the primary so the value a read returns identifies which database
+// served it.
+func TestSingleRowReadsRouteToReplica(t *testing.T) {
+	ctx := context.Background()
+	primaryDSN := "file:rr_srr_primary?mode=memory&cache=shared"
+	repDSN := "file:rr_srr_rep?mode=memory&cache=shared"
+
+	c, err := New("sqlite", primaryDSN, WithReplicas(repDSN),
+		WithMaxOpenConns(1), WithLogger(rrQuiet))
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	// Replica: 3 rows (ids 1..3). Primary: 1 row (id 1).
+	rc := seedReplicaDB(t, repDSN, "rep1")
+	if err := For[rrUser](ctx, rc).Create(&rrUser{Name: "rep2"}); err != nil {
+		t.Fatalf("seed replica row 2: %v", err)
+	}
+	if err := For[rrUser](ctx, rc).Create(&rrUser{Name: "rep3"}); err != nil {
+		t.Fatalf("seed replica row 3: %v", err)
+	}
+	if err := c.Migrate(ctx, &rrUser{}); err != nil {
+		t.Fatalf("migrate primary: %v", err)
+	}
+	if err := For[rrUser](ctx, c).Create(&rrUser{Name: "primary"}); err != nil {
+		t.Fatalf("seed primary: %v", err)
+	}
+
+	// Count routes to the replica (3), Sticky pins it to the primary (1).
+	if n, err := For[rrUser](ctx, c).Count(); err != nil || n != 3 {
+		t.Fatalf("Count = %d (err %v), want 3 (routed to replica)", n, err)
+	}
+	if n, err := For[rrUser](Sticky(ctx), c).Count(); err != nil || n != 1 {
+		t.Fatalf("Sticky Count = %d (err %v), want 1 (primary)", n, err)
+	}
+
+	// Aggregates route too: MAX(id) is 3 on the replica, 1 on the primary.
+	if m, err := For[rrUser](ctx, c).Max("id"); err != nil || m != 3 {
+		t.Fatalf("Max(id) = %v (err %v), want 3 (routed to replica)", m, err)
+	}
+	if m, err := For[rrUser](Sticky(ctx), c).Max("id"); err != nil || m != 1 {
+		t.Fatalf("Sticky Max(id) = %v (err %v), want 1 (primary)", m, err)
+	}
+}
+
 // TestReadReplicaRoutingNoReplicas is the regression guard: with no replicas
 // configured, reads use the primary exactly as before (single-DB behaviour).
 func TestReadReplicaRoutingNoReplicas(t *testing.T) {
