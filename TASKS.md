@@ -150,16 +150,31 @@ cuatro pilares: codegen, HA, sharding, benchmarks). Decisiones de scope:
 - **Benchmarks honestos o nada.** F6-8 reemplaza cualquier número
   hardcoded de perf/coverage; el harness debe ser reproducible y
   apples-to-apples documentado (no marketing).
-- **El gate de v1.0** es ADR-0002 §Restricciones: los benchmarks de
+- ~~**El gate de v1.0** es ADR-0002 §Restricciones: los benchmarks de
   F6-8 deben demostrar ≥3× mejora p99 con codegen para justificar el
-  esfuerzo. Si no se alcanza, codegen se reabre antes de taggear v1.0.
+  esfuerzo. Si no se alcanza, codegen se reabre antes de taggear v1.0.~~
+  **Retirado por [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md)
+  (2026-05-25):** el gate ≥3× no es alcanzable por codegen de scan/bind
+  (reflect no es el cuello); v1.0 se mide contra el checklist honesto de
+  `ANALISIS_MADUREZ.md` §3. Ver bloque "✅ Decisión de gate ADR-0002 —
+  RESUELTA" abajo.
 
 Descomposición en 9 items entregables independientemente. Orden de
 ataque sugerido: codegen primero (F6-1 desbloquea F6-2..F6-4), HA y
 sharding en paralelo (independientes del codegen), benchmarks al final
 (miden todo lo anterior).
 
-### ⚠ Decisión de gate ADR-0002 (profiling, 2026-05-23) — LEER ANTES DE SEGUIR CON CODEGEN-POR-PERF
+### ✅ Decisión de gate ADR-0002 — RESUELTA (2026-05-25, [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md))
+
+> **RESUELTO.** El mantenedor decidió **retirar el gate ≥3× p99**:
+> [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) supersede esa
+> cláusula de ADR-0002 §Restricciones y reencuadra codegen como **type-safety**
+> (F6-4), no velocidad. **El gate ya NO bloquea v1.0** — v1.0 se mide contra el
+> checklist honesto de `ANALISIS_MADUREZ.md` §3, no contra un speedup.
+> Dispositions finales: **F6-3b** sigue diferido (reabrir sólo por
+> type-safety/corrección, nunca por velocidad); **F6-8b** pasa a informativo/
+> opcional (no gate). `docs/ROADMAP.md` actualizado. La evidencia que motivó la
+> decisión se conserva abajo.
 
 > **Tres data points + profiling dicen que el gate ≥3× NO se alcanza por
 > codegen de scan/bind.** F6-8a: Quark ~1.5-2.1× sobre `database/sql`. F6-2:
@@ -323,14 +338,16 @@ escritura). **Mergeado**: commit `550c13f` (v0.11.0).
 > corrección quedan validados; el gate de perf, con el diseño actual, no se
 > alcanza por scan+bind.
 
-#### F6-3b · UPDATE / partial / batch binder — diferido
+#### F6-3b · UPDATE / partial / batch binder — diferido (no bloquea v1.0)
 
 `buildUpdate`/`buildUpdateMap`/`CreateBatch` consultan `typedBinders`. El
 generado respeta `version` (optimistic lock), soft-delete y el partial de
 `UpdateFields`. **Done**: Update/UpdateFields/CreateBatch round-trip
 idéntico con y sin codegen; optimistic locking + soft delete + dirty
-tracking siguen funcionando. **Reconsiderar el alcance** a la luz del
-hallazgo de 3a (payoff ~1%): quizá sólo si F6-4/type-safety lo motiva.
+tracking siguen funcionando. **Disposición final
+([ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md), 2026-05-25):**
+diferido; reabrir **sólo por type-safety/corrección, nunca por velocidad**
+(payoff ~1% medido en 3a, riesgo de corrupción de escritura mayor).
 
 ### F6-4 · Typed query field accessors ✅ v0.12.0 (#105)
 
@@ -464,6 +481,9 @@ cross-shard tx).
 > **Follow-up**: scatter-gather (lectura cross-shard con merge), extracción de
 > shard key desde la entidad, ejemplo runnable PG. **Con F6-7, los pillars de
 > Fase 6 quedan entregados** (sólo F6-3b y F6-8b diferidos) — candidato a v1.0.
+> **Gate ≥3× retirado** ([ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md),
+> 2026-05-25): el último bloqueo arquitectónico a v1.0 queda resuelto; v1.0 se
+> mide contra el checklist honesto de `ANALISIS_MADUREZ.md` §3.
 
 ### F6-8 · Benchmarks proper
 
@@ -500,15 +520,16 @@ in-memory el margen al suelo es ~2×, así que el gate, de cumplirse, será en
 paths más pesados o bajo la concurrencia de F6-9). **Mergeado**:
 PR #98 (`c16de24f`); profiling de seguimiento en PR #102.
 
-#### F6-8b · Comparación codegen-tier (ent + sqlc) — diferido
+#### F6-8b · Comparación codegen-tier (ent + sqlc) — diferido (informativo, no gate)
 
 Añadir ent y sqlc como subpaquetes (`benchmarks/ent/`, `benchmarks/sqlc/`)
 con su código generado commiteado, espejando `benchmarks/gorm/` (mismo
-aislamiento de driver, import de `internal/model`). Es la comparación que
-importa en el gate de v1.0 (ADR-0002, ≥3× p99 con codegen), cuando Quark
-tenga su propio path generado (F6-2/F6-3) para compararse contra los ORMs
-codegen-tier. **Done**: ent y sqlc en la matriz; números publicados junto a
-los de 8a; metodología actualizada.
+aislamiento de driver, import de `internal/model`). **Disposición final
+([ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md), 2026-05-25):**
+con el gate ≥3× retirado, esta comparación pasa a ser **informativa/opcional,
+no un gate de v1.0**. Aporta señal comparativa apples-to-apples, pero no
+bloquea el tag. **Done** (si se entrega): ent y sqlc en la matriz; números
+publicados junto a los de 8a; metodología actualizada.
 
 ### F6-9 · Stress / load testing ✅ v0.13.0 (#109)
 
@@ -541,13 +562,17 @@ documentado con números; identifica el primer cuello de botella real
 
 ### Cierre de Fase 6 → v1.0.0
 
-Cuando F6-1..F6-9 estén ✅ **y** los benchmarks (F6-8a baseline + F6-8b
-codegen-tier, contra el path generado de F6-2/F6-3) demuestren el gate de
-performance de ADR-0002, taggear **v1.0.0** vía `/release v1.0.0` — el
-primer release "production-ready" honesto. Issue de planning con los 9 items:
-ver GitHub. Cada F6-N es 1 PR con `code-reviewer` + docs +
-CHANGELOG; los items que abren ADR (F6-5/F6-7) escriben el ADR en el
-mismo PR.
+Los cuatro pilares de Fase 6 están entregados (F6-1/2/3a/4 codegen,
+F6-5/6 HA, F6-7 sharding, F6-8a/F6-9 benchmarks+stress); sólo F6-3b y
+F6-8b quedan diferidos y **no bloquean v1.0**. El gate de performance
+≥3× de ADR-0002 **ya NO es la condición de v1.0**: fue retirado por
+[ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) (2026-05-25).
+**v1.0.0 se taggea contra el checklist honesto de
+`docs/ANALISIS_MADUREZ.md` §3** (gaps estructurales cerrados, cobertura
+cross-engine), no contra un speedup. Cuando ese checklist esté verde,
+taggear **v1.0.0** vía `/release v1.0.0`. Cada F6-N es 1 PR con
+`code-reviewer` + docs + CHANGELOG; los items que abren ADR (F6-5/F6-7)
+escriben el ADR en el mismo PR.
 
 ---
 

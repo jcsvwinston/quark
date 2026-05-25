@@ -6,8 +6,12 @@ the same model, schema, data, and operations.
 
 This is the F6-8 deliverable: a real harness with documented methodology,
 not estimated numbers. It exists to give an honest, pre-codegen baseline so
-the generated-code work (F6-2/F6-3) can be measured against the
-[ADR-0002](../docs/adr/0002-reflect-default-codegen-fase-6.md) gate.
+the generated-code work (F6-2/F6-3) could be measured against the
+[ADR-0002](../docs/adr/0002-reflect-default-codegen-fase-6.md) gate. That
+gate (≥3× p99 with codegen) has since been **retired** by
+[ADR-0017](../docs/adr/0017-codegen-type-safety-not-perf-gate.md): the
+baseline + profiling below showed reflect is not the bottleneck, so codegen
+is justified by type-safety (F6-4), not speed.
 
 ## Why this is a separate module
 
@@ -139,12 +143,12 @@ Reading of this run:
 - Quark's reflect path runs ~1.5–2.1× the hand-written `database/sql` floor.
   That gap is the headroom the generated path (F6-2/F6-3) can recover — it
   also bounds it, since generated code cannot beat hand-written SQL. This is
-  a direct input to the ADR-0002 v1.0 gate (which asks codegen to justify
-  itself with a ≥3× p99 improvement): on these single-row in-memory
-  operations the measured headroom to the floor is closer to 2×, so the gate
-  is most likely to be met (if at all) on heavier paths — wide rows, large
-  result sets where per-row reflection dominates, or under the concurrency
-  that F6-9 will exercise.
+  a direct input to the (now-retired) ADR-0002 ≥3× p99 codegen gate: on these
+  single-row in-memory operations the measured headroom to the floor is closer
+  to 2×, and the scan/bind codegen results (~1–5%) plus the profiling in
+  `PROFILING.md` showed the gate was unreachable by codegen of scan/bind. The
+  gate has since been retired (ADR-0017); codegen is justified by type-safety
+  (F6-4), not speed.
 - Quark and GORM are in the same performance class; neither dominates. Quark
   is faster on inserts and updates here, GORM is faster on the single-row
   read and the filtered list.
@@ -153,8 +157,9 @@ Reading of this run:
 
 ent and sqlc are codegen tools: each needs its generated code committed
 (an ent schema + `ent generate`, or a `sqlc.yaml` + `sqlc generate`). They
-are the codegen-tier comparison that matters once Quark itself has a
-generated path to compare (the v1.0 gate), and they carry the same
-driver-isolation constraint as GORM. Add each as its own subpackage
+are the codegen-tier comparison against Quark's own generated path
+(F6-2/F6-3). This was originally the v1.0 gate input, but that ≥3× gate has
+been retired (ADR-0017) — F6-8b is now informational, not a v1.0 blocker.
+They carry the same driver-isolation constraint as GORM. Add each as its own subpackage
 (`./ent`, `./sqlc`) that imports `internal/model` but not the Quark core,
 mirroring `./gorm`. Tracked as F6-8b in `../TASKS.md`.

@@ -161,19 +161,21 @@ the operational backlog lives at
 
 ## In progress (Phase 6 — path to v1.0)
 
-- **Read replicas** (F6-5) — **experimental**: `WithReplicas(replica1, …)`
-  routes multi-row reads round-robin to replicas; writes always go to
-  the primary; `Sticky(ctx)` pins reads to the primary for
-  read-your-writes. **No health-checking or failover yet** — a
-  configured replica going down means failed reads on that node. See
+- **Read replicas** (F6-5) — **delivered** (v0.13.0): `WithReplicas(replica1, …)`
+  routes reads to replicas; writes always go to the primary; `Sticky(ctx)`
+  pins reads to the primary for read-your-writes. Failover and health
+  cooldown shipped with F6-6. See
   [Read replicas](../advanced/read-replicas).
-- **Primary failover** (F6-6) — pending. Reuses the deadlock-classifier
-  pattern of F4-7. Will open ADR-0015 with replicas.
-- **Sharding** (`ShardRouter`, F6-7) — pending. Opens ADR-0016.
-- **Stress testing harness** (F6-9) — harness landed in
-  `benchmarks/stress/`; PR + doc pending.
-- **ent + sqlc in the benchmarks harness** (F6-8b) — pending; relevant
-  for the v1.0 codegen-tier comparison.
+- **Primary failover** (F6-6) — **delivered** (v0.13.0): replica failover +
+  health cooldown (ADR-0015).
+- **Sharding** (`ShardRouter`, F6-7) — **delivered**: routes per query by
+  shard key (ADR-0016). Follow-ups (scatter-gather, shard-key-from-entity,
+  runnable PG example) pending.
+- **Stress testing harness** (F6-9) — **delivered** (v0.13.0) in
+  `benchmarks/stress/`.
+- **ent + sqlc in the benchmarks harness** (F6-8b) — deferred;
+  informational only, not a v1.0 gate (the ≥3× gate was retired by
+  ADR-0017).
 - **UPDATE / partial / batch binder codegen** (F6-3b) — **deferred**;
   measured payoff ~1% (`benchmarks/PROFILING.md`).
 
@@ -181,11 +183,13 @@ the operational backlog lives at
 
 - **Oracle is excluded from CI** while the testcontainers image issue
   is open. Oracle-specific SQL is validated manually with a DSN env var.
-- **The ADR-0002 ≥3× p99 gate is not met by scan/bind codegen**
-  (~2–5% scan, ~1% INSERT) — the per-op CPU is dominated by
-  `database/sql` and the engine, not reflection. The codegen layer
-  remains valuable for type-safety (F6-4) and forward compatibility;
-  it is not the path to a 3× speedup. See `benchmarks/PROFILING.md`.
+- **The ADR-0002 ≥3× p99 codegen gate has been retired** (ADR-0017).
+  Scan/bind codegen measured ~2–5% (scan) / ~1% (INSERT); per-op CPU is
+  dominated by `database/sql` and the engine, not reflection, so the
+  gate was unreachable by scan/bind codegen. The codegen layer remains
+  valuable for type-safety (F6-4) and forward compatibility — it is not
+  a speed feature, and v1.0 no longer gates on a speedup target. See
+  `benchmarks/PROFILING.md` and ADR-0017.
 - The **versioned migration registry** in `migrate/migrate.go` is still
   global. The model registry has been per-Client since v0.6 (F3-7); the
   versioned registry stays as documented debt.

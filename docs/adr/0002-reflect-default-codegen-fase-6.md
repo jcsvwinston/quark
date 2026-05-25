@@ -4,7 +4,7 @@ title: Reflect por defecto, codegen opt-in en Fase 6
 status: accepted
 date: 2026-05-10
 deciders: jcsvwinston
-related: [0001]
+related: [0001, 0014, 0017]
 supersedes: null
 tags: [architecture, performance, codegen, dx]
 ---
@@ -59,8 +59,10 @@ Hasta Fase 6, **no se introduce reflect adicional en hot paths sin discusión pr
 
 - Toda capa nueva debe ser **reflect-friendly** o tener un hook obvio para que el codegen la reemplace.
 - Las firmas públicas no pueden depender de tipos generados por codegen (el usuario sin codegen debe poder importar todo).
-- Cuando llegue Fase 6, los benchmarks deben demostrar mejora de ≥3× en latencia p99 para justificar el paso.
+- ~~Cuando llegue Fase 6, los benchmarks deben demostrar mejora de ≥3× en latencia p99 para justificar el paso.~~ **Superseded por [ADR-0017](0017-codegen-type-safety-not-perf-gate.md) (2026-05-25):** el gate ≥3× p99 se **retira**. Tres data points de Fase 6 (F6-8a baseline ~1.5–2.1×, scan codegen ~2–5 %, insert binder ~1 %) + profiling (`benchmarks/PROFILING.md`) demuestran que reflect no es el cuello de botella, así que el gate no es alcanzable por codegen de scan/bind. Codegen se justifica ahora por **type-safety** (F6-4), no por velocidad.
 
 ## Cuándo reabrir
 
 Si tras Fase 4 los benchmarks muestran que reflect ya no es el cuello de botella (porque el cuello es de I/O o cache), reevaluar prioridad de Fase 6.
+
+> **Resuelto (2026-05-25, [ADR-0017](0017-codegen-type-safety-not-perf-gate.md)):** esta condición de reapertura se cumplió. Los benchmarks de Fase 6 (F6-8a + profiling) mostraron que el cuello es el motor + `database/sql` y allocs arquitectónicas, no reflect. ADR-0017 actúa sobre esa evidencia: retira el gate ≥3× y reencuadra codegen como type-safety. El resto de ADR-0002 (reflect default, codegen opt-in, misma API) sigue vigente.

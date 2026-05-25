@@ -172,4 +172,9 @@ reflect coexistence). Decomposed into F6-1..F6-9 in
       stress/load testing (F6-9).
 
 The v1.0 honest checklist is in [`docs/ANALISIS_MADUREZ.md`](ANALISIS_MADUREZ.md) §3 (gaps).
-v1.0 ships only when F6-8 proves the ≥3× p99 codegen gate from ADR-0002.
+The ADR-0002 ≥3× p99 codegen gate has been **retired** by
+[ADR-0017](adr/0017-codegen-type-safety-not-perf-gate.md): F6-8a + profiling
+(`benchmarks/PROFILING.md`) showed reflect is not the bottleneck (engine +
+`database/sql` + architectural allocs dominate), so the gate is unreachable by
+scan/bind codegen. Codegen is justified by **type-safety** (F6-4), not speed.
+v1.0 now ships against the honest checklist above, not a speedup target.

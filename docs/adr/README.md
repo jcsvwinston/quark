@@ -8,7 +8,7 @@
 | ID | Título | Estado | Fase relacionada |
 |---:|---|---|---|
 | [0001](0001-active-record-no-data-mapper.md) | Persistencia: Active Record, no Data Mapper | Accepted | — |
-| [0002](0002-reflect-default-codegen-fase-6.md) | Reflect por defecto, codegen opt-in en Fase 6 | Accepted | Fase 6 |
+| [0002](0002-reflect-default-codegen-fase-6.md) | Reflect por defecto, codegen opt-in en Fase 6 | Accepted (gate ≥3× superseded by [0017](0017-codegen-type-safety-not-perf-gate.md)) | Fase 6 |
 | [0003](0003-rls-cliente-fase-5-motor.md) | RLS hoy es WHERE-injection cliente; motor real en Fase 5 | Superseded by [0012](0012-rls-real-postgres-set-local-plus-policies.md) | Fase 5 |
 | [0004](0004-cache-l2-integrada.md) | Caché L2 integrada (memory/redis), no plugin externo | Accepted | Fase 4 |
 | [0005](0005-no-nosql-solo-relacional.md) | Quark es relacional. No soporte NoSQL | Accepted | — |
@@ -20,9 +20,10 @@
 | [0011](0011-cache-stampede-protection-wrapper.md) | Cache stampede protection vía wrapper común sobre CacheStore | Accepted | Fase 4 |
 | [0012](0012-rls-real-postgres-set-local-plus-policies.md) | RLS real Postgres vía `SET LOCAL app.tenant_id` + `CREATE POLICY` | Accepted | Fase 5 |
 | [0013](0013-transactional-hooks-and-sync-eventbus.md) | Hooks transaccionales + EventBus síncrono en commit-phase | Accepted | Fase 5 |
-| [0014](0014-codegen-coexistence-typed-registry.md) | Codegen coexiste vía registry de funciones tipadas por tipo con fallback a reflect | Proposed | Fase 6 |
+| [0014](0014-codegen-coexistence-typed-registry.md) | Codegen coexiste vía registry de funciones tipadas por tipo con fallback a reflect | Accepted | Fase 6 |
 | [0015](0015-read-replicas-routing.md) | Read replicas: routing en ejecución, opt-in, sticky read-your-writes | Accepted | Fase 6 |
 | [0016](0016-sharding-shardrouter.md) | Sharding: ShardRouter enruta por shard key vía ClientProvider; sin cross-shard implícito | Accepted | Fase 6 |
+| [0017](0017-codegen-type-safety-not-perf-gate.md) | Codegen es type-safety, no velocidad; se retira el gate ≥3× p99 de ADR-0002 | Accepted | Fase 6 |
 
 ## Cómo añadir un ADR nuevo
 

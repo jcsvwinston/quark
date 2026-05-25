@@ -69,7 +69,9 @@ way. Run the harness against one to characterise it there.
 Under load the cost is **pool acquisition and the engine**, not Quark's
 reflect-based mapping — the same conclusion the per-operation profiling reached
 ([`benchmarks/PROFILING.md`](../../../benchmarks/PROFILING.md)) and the basis
-for the ADR-0002 gate decision to stop chasing codegen-for-speed. The
+for the gate decision to stop chasing codegen-for-speed — formalized in
+[ADR-0017](../../adr/0017-codegen-type-safety-not-perf-gate.md), which retires
+the ADR-0002 ≥3× gate and reframes codegen as type-safety. The
 actionable, post-1.0 priorities this surfaces:
 
 1. **Document pool-sizing guidance** prominently (size `MaxOpenConns` to
