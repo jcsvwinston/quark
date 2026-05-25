@@ -184,14 +184,11 @@ func WithDefaultTZ(loc *time.Location) Option {
 
 // WithReplicas registers read-replica DSNs (F6-5, ADR-0015). [New] opens one
 // read-only connection pool per DSN (same pool options and dialect as the
-// primary) and routes multi-row reads (List / Iter / eager-loading) to them
-// round-robin, while writes always go to the primary. Pass the same engine's
-// replica endpoints; a read-your-writes path uses [Sticky].
-//
-// Skeleton scope: single-row reads (First/Find/Count) currently stay on the
-// primary — they share an execution primitive with the INSERT...RETURNING
-// write path, so routing them is a follow-up (ADR-0015). Multi-row reads, the
-// common scaling case, do route.
+// primary) and routes reads to them — both multi-row reads (List / Iter /
+// eager-loading) and single-row reads (First / Find / Count / aggregates) —
+// while writes always go to the primary. Pass the same engine's replica
+// endpoints; a read-your-writes path uses [Sticky]. The selection strategy
+// defaults to round-robin; change it with [WithReplicaStrategy].
 //
 // Opt-in: without it, every operation uses the single primary connection,
 // unchanged. Reads inside [Client.Tx] and under RowLevelSecurityNative always
@@ -209,6 +206,22 @@ func WithDefaultTZ(loc *time.Location) Option {
 func WithReplicas(dsns ...string) Option {
 	return func(c *Client) {
 		c.replicaDSNs = append(c.replicaDSNs, dsns...)
+	}
+}
+
+// WithReplicaStrategy sets how a routed read picks among healthy replicas
+// (F6-5, ADR-0015): [ReplicaRoundRobin] (default), [ReplicaRandom], or
+// [ReplicaLeastConn]. Only meaningful alongside [WithReplicas] with more than
+// one replica; with a single replica all strategies pick it. Every strategy
+// honours the F6-6 health cooldown.
+//
+//	client, err := quark.New("pgx", primaryDSN,
+//	    quark.WithReplicas(replica1DSN, replica2DSN),
+//	    quark.WithReplicaStrategy(quark.ReplicaLeastConn),
+//	)
+func WithReplicaStrategy(s ReplicaStrategy) Option {
+	return func(c *Client) {
+		c.replicaStrategy = s
 	}
 }
 

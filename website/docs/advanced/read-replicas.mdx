@@ -27,16 +27,40 @@ as the primary) and pings each. `Close` closes them all.
 
 ## What routes where
 
-- **Multi-row reads** (`List`, `Iter`, eager-loading) round-robin across the
-  replicas.
+- **Reads** route to a replica — both **multi-row** reads (`List`, `Iter`,
+  eager-loading) and **single-row** reads (`First`, `Find`, `Count`, and the
+  aggregates `Sum`/`Avg`/`Min`/`Max`).
 - **Writes** (`Create`, `Update`, `UpdateFields`, `Delete`) always go to the
-  primary.
+  primary, including the write paths that read a row back (`INSERT ...
+  RETURNING`, MSSQL `SCOPE_IDENTITY()`).
 - **Reads inside `Client.Tx`** use the transaction's connection (the primary),
   so they always see the transaction's own writes.
+- **Reads under `RowLevelSecurityNative`** stay on the primary — the policy is
+  evaluated on the connection that set the session variable, so the read must
+  not move to another pool.
 
-Single-row reads (`First`/`Find`/`Count`) currently stay on the primary — they
-share an execution path with `INSERT ... RETURNING`, so routing them is a
-follow-up. Multi-row reads, the common scaling case, do route.
+## Selection strategy
+
+When more than one replica is configured, the strategy decides which healthy
+replica serves each read. Set it with `WithReplicaStrategy`; the default is
+round-robin:
+
+```go
+client, err := quark.New("pgx", primaryDSN,
+    quark.WithReplicas(replica1DSN, replica2DSN),
+    quark.WithReplicaStrategy(quark.ReplicaLeastConn),
+)
+```
+
+- **`ReplicaRoundRobin`** (default) — advances an atomic cursor one slot per
+  read; the most even distribution under steady concurrency.
+- **`ReplicaRandom`** — picks a replica at random (uniform across healthy
+  replicas); no shared cursor, so it avoids round-robin's single contended atomic.
+- **`ReplicaLeastConn`** — picks the replica with the fewest in-use pool
+  connections; best when replica query latencies are uneven.
+
+Every strategy honours the failover cooldown below: a replica taken out of
+rotation is never chosen until its cooldown expires.
 
 ## Consistency: stale reads and `Sticky`
 

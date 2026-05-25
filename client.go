@@ -31,7 +31,7 @@ type Client struct {
 
 	// Read replicas (F6-5, ADR-0015). replicaDSNs is set by WithReplicas;
 	// New() opens one read-only *sql.DB per DSN into replicas. Reads route
-	// to a replica (round-robin via replicaRR) when one is configured and the
+	// to a replica (selected by replicaStrategy) when one is configured and the
 	// query is not bound to a tx / native-RLS executor / Sticky context;
 	// writes always use the primary db. Empty replicas = single-DB behaviour,
 	// zero cost. replicas is read-only after New(); never mutated concurrently
@@ -40,7 +40,12 @@ type Client struct {
 	// (F6-6, see replicaUnhealthyUntil / markReplicaDown).
 	replicaDSNs []string
 	replicas    []*sql.DB
-	replicaRR   atomic.Uint64
+	// replicaStrategy selects which healthy replica serves a read (set by
+	// WithReplicaStrategy; round-robin is the zero-value default). See
+	// pickReplica / ReplicaStrategy.
+	replicaStrategy ReplicaStrategy
+	// replicaRR is the round-robin cursor (only used by ReplicaRoundRobin).
+	replicaRR atomic.Uint64
 	// replicaUnhealthyUntil[i] is a unix-nano deadline (F6-6): reads skip
 	// replica i until now passes it. Set when a read to that replica fails
 	// with a transient connection error (see markReplicaDown); 0 = healthy.

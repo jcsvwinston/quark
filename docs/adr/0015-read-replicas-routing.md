@@ -3,7 +3,7 @@ id: 0015
 title: Read replicas — execution-time read/write routing, opt-in, with sticky read-your-writes
 status: accepted
 date: 2026-05-24
-implemented: F6-5 (skeleton); F6-6 (failover)
+implemented: F6-5 (skeleton + strategies + single-row read routing); F6-6 (failover)
 deciders: jcsvwinston
 related: [0007, 0012, 0013]
 supersedes: null
@@ -44,19 +44,21 @@ la misma conexión donde se puso la session var).
   - **Lecturas multi-fila** (`executeQuery`: `List`/`Iter`/eager-loading) → una
     réplica elegida por estrategia.
   - **Escrituras** (`executeExec`: INSERT/UPDATE/DELETE) → siempre el primary.
-  - **`executeQueryRow` NO se enruta** (se queda en `q.exec`/primary). Es el
-    primitivo de una-fila **compartido** entre lecturas (`First`/`Find`/`Count`)
-    y el **camino de escritura** (`INSERT ... RETURNING`, `SCOPE_IDENTITY()` de
-    MSSQL): enrutarlo mandaría escrituras a una réplica. El skeleton F6-5 enruta
-    sólo `executeQuery`; separar las lecturas de una-fila del RETURNING para
-    enrutar también `First`/`Find`/`Count` es **follow-up** (no bloquea el
-    modelo; es trabajo mecánico de partir el primitivo). Hasta entonces esas
-    lecturas van al primary — correcto, sólo no aprovechan las réplicas.
+  - **Lecturas de una-fila** (`First`/`Find`/`Count`/agregados) → una réplica.
+    `First`/`Find` ya enrutaban desde el skeleton porque bajan a `List` →
+    `executeQuery`. `Count` y los agregados usaban `executeQueryRow`, el
+    primitivo de una-fila **compartido** con el **camino de escritura**
+    (`INSERT ... RETURNING`, `SCOPE_IDENTITY()` de MSSQL). El follow-up partió
+    ese primitivo: `executeReadRow` (lectura, enrutado vía `readExec` + failover
+    F6-6) vs `executeQueryRow` (escritura, siempre primary). `Count` y los
+    agregados ahora usan `executeReadRow`; el camino RETURNING/LastInsertID se
+    queda en `executeQueryRow`. *Hecho* (follow-up F6-5, tras el skeleton).
 
-- **Estrategia de selección pluggable; el skeleton entrega round-robin.** El
-  diseño contempla round-robin (default), random y least-conn; F6-5 implementa
-  round-robin y deja las otras como extensión (un campo de estrategia en el
-  Client, no una bifurcación de API).
+- **Estrategia de selección pluggable (`WithReplicaStrategy`).** Round-robin
+  (default), random y least-conn, como un campo de estrategia en el Client — no
+  una bifurcación de API. `pickReplica` despacha sobre `replicaStrategy`; las
+  tres respetan el cooldown de salud (F6-6). El skeleton entregó round-robin;
+  random y least-conn llegaron en el follow-up F6-5. *Hecho.*
 
 - **Modelo de consistencia: eventual por defecto, read-your-writes vía
   `Sticky(ctx)`.** Las réplicas van potencialmente atrasadas, así que una
