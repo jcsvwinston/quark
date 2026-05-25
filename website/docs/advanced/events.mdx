@@ -160,9 +160,18 @@ hand off to the broker.
 
 `EventBus` is the **outbound** CRUD-event side. The **inbound**
 PostgreSQL `LISTEN/NOTIFY` listener (`ListenerFactory.CreateListener`,
-the helper `Notify`) is a separate, unrelated mechanism that remains
-out of scope for Fase 5 — it needs a dedicated connection outside the
-pool. `ListenerFactory.CreateListener` returns `ErrDialectNotSupported`.
+the helper `Notify`) is a separate, unrelated mechanism that needs a
+dedicated connection outside the pool.
+
+:::warning Inbound LISTEN is not implemented yet
+The event bus delivers **outbound** events only (your code reacts to
+Quark's CRUD inside the same process). There is **no inbound listener**:
+`ListenerFactory.CreateListener` returns `ErrDialectNotSupported` on every
+dialect today. If you need to consume PostgreSQL `LISTEN/NOTIFY` (a
+dedicated `pgx.Conn` that survives the pool, with reconnect/backpressure
+semantics), drive it yourself outside Quark for now. Inbound support is
+planned **post-v1.0** — it is a tracked v1.0 known limitation, not a bug.
+:::
 
 :::note Renamed in v0.9.0
 

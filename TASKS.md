@@ -3,22 +3,23 @@
 > **🚦 Gate v1.0 — bloqueante actual.** ADR-0017 retiró el gate ≥3× p99
 > de ADR-0002 y delegó el nuevo checklist a
 > [`docs/V1_GATE.md`](docs/V1_GATE.md). **Lee ese documento antes de
-> taggear v1.0.0 o de elegir trabajo destinado a v1.0.** Resumen del §A
-> (los 5 items que bloquean el tag):
+> taggear v1.0.0 o de elegir trabajo destinado a v1.0.** Estado del §A
+> (los 5 items que bloquean el tag) — **2/5 cerrados (2026-05-25)**:
 >
-> 1. **Oracle en CI** — elige Salida A (resolver image issue),
->    B (degradar posicionamiento) o C (nightly job).
-> 2. **F6-7 follow-ups** — al menos `examples/sharding/` runnable y
->    doc; scatter-gather y `shard-key-from-entity` diferibles a v1.1.
-> 3. **`LISTEN/NOTIFY` listener side** — entregar (Salida A,
->    2-3 sesiones) o explicitar la asimetría outbound/inbound
->    (Salida B, 1 sesión).
-> 4. **Cross-instance stampede protection** — entregar hook
->    `DistributedLock` (Salida A) o promover el warning "in-process
->    only" a sitio visible (Salida B).
-> 5. **`RELEASE_NOTES_v1.0.0.md` con Known limitations** — recopila
->    los waivers (Salida B) de los items 1-4 + diferidos F6-3b y
->    versioned migration registry global.
+> 1. **Oracle en CI** — ⏳ ABIERTO. Elige Salida A (resolver image issue),
+>    B (degradar posicionamiento) o C (nightly job). _Decisión estratégica._
+> 2. **F6-7 follow-ups** — ⏳ ABIERTO. Al menos `examples/sharding/`
+>    runnable y doc; scatter-gather y `shard-key-from-entity` diferibles a v1.1.
+> 3. ~~**`LISTEN/NOTIFY` listener side**~~ — ✅ CERRADO vía Salida B:
+>    asimetría outbound/inbound documentada (warning en `events.mdx` +
+>    caveat en `intro.mdx`); inbound real diferido a post-v1.0.
+> 4. ~~**Cross-instance stampede protection**~~ — ✅ CERRADO vía Salida B:
+>    warning "in-process only" promovido en `caching-observability.mdx` +
+>    caveat en `intro.mdx`; hook `DistributedLock` diferido a post-v1.0.
+> 5. **`RELEASE_NOTES_v1.0.0.md` con Known limitations** — ⏳ EN CURSO:
+>    `docs/RELEASE_NOTES_v1.0.0.md` creado como DRAFT con los waivers de
+>    items 3+4 (+ F6-3b, migration registry global, failover pasivo);
+>    se completa al cerrar items 1-2.
 >
 > **Items recomendados pero no bloqueantes**: bug-bash externo
 > (`v0.x-rc1` con ventana de feedback), F6-3b (UPDATE/partial binder),

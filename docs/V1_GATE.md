@@ -2,6 +2,9 @@
 
 > **Fecha:** 2026-05-25
 > **Estado actual:** `v0.13.0` taggeada; F6-5 / F6-6 / F6-7 / F6-9 entregados.
+> **Progreso §A:** **2/5 cerrados** (Items 3 y 4 vía *Salida B*, 2026-05-25).
+> Abiertos: Item 1 (Oracle en CI — decisión estratégica), Item 2 (ejemplo
+> sharding runnable), Item 5 (`RELEASE_NOTES_v1.0.0.md` — DRAFT en curso).
 > **Origen:** [ADR-0017](adr/0017-codegen-type-safety-not-perf-gate.md) §3 retira el gate
 > ≥3× p99 de ADR-0002 y delega el nuevo gate a *"el checklist honesto de
 > `docs/ANALISIS_MADUREZ.md` §3 (cobertura cross-engine, gaps estructurales)"*.
@@ -117,7 +120,19 @@ grep -q "advanced/sharding" website/sidebars.ts
 
 ---
 
-### Item 3 — `LISTEN/NOTIFY` listener side (PG)
+### ~~Item 3 — `LISTEN/NOTIFY` listener side (PG)~~ ✅ Cerrado (Salida B)
+
+> **Cerrado 2026-05-25 vía Salida B (documentar la asimetría).** La
+> limitación inbound se hace visible en `website/docs/advanced/events.mdx`
+> (`:::warning Inbound LISTEN is not implemented yet`) y en la fila "Event
+> bus + audit log" de `intro.mdx` ("outbound only — inbound
+> `LISTEN/NOTIFY` post-v1.0"). El caveat queda recogido en
+> `docs/RELEASE_NOTES_v1.0.0.md` §Known limitations. La entrega real del
+> inbound (Salida A) se difiere a post-v1.0.
+>
+> **Corrección factual:** el método devuelve `ErrDialectNotSupported` (no
+> `ErrUnsupportedFeature` como decía la versión previa de este item y el
+> roadmap) — verificado en `events.go:172`.
 
 **Por qué bloqueante:** `Client.UseEventBus` se presenta en `intro.mdx`
 (tabla "Why QUARK") como **"Event bus + audit log"** sin caveat. El
@@ -132,8 +147,8 @@ donde el usuario lo ve antes de adoptar la API**.
 - `EventBus.Publish` (outbound, post-commit): ✅ entregado en v0.9.0.
 - `Notify` (outbound `pg_notify`): ✅ entregado.
 - **`ListenerFactory.CreateListener` (inbound `LISTEN`):** devuelve
-  `ErrUnsupportedFeature`. Requiere conexión dedicada fuera del pool de
-  `database/sql`.
+  `ErrDialectNotSupported` (`events.go:172`). Requiere conexión dedicada
+  fuera del pool de `database/sql`.
 
 **Cómo cerrar (elige una salida):**
 
@@ -152,19 +167,28 @@ donde el usuario lo ve antes de adoptar la API**.
 ```bash
 # Salida A
 grep -n "ListenerFactory.CreateListener" events.go
-# no debe devolver "ErrUnsupportedFeature"
+# no debe devolver "ErrDialectNotSupported"
 
 # Salida B
 grep -E "outbound|inbound" website/docs/advanced/events.mdx website/docs/intro.mdx
 # debe haber al menos una mención que aclare la asimetría
 ```
 
-**Decisión pendiente:** ¿A o B? Coste: A = 2-3 sesiones; B = 1 sesión
-(sólo docs).
+**Decisión tomada (2026-05-25):** **Salida B** — documentar la asimetría
+(ver banner ✅ arriba). Salida A (entregar inbound) diferida a post-v1.0.
 
 ---
 
-### Item 4 — Cross-instance stampede protection
+### ~~Item 4 — Cross-instance stampede protection~~ ✅ Cerrado (Salida B)
+
+> **Cerrado 2026-05-25 vía Salida B (documentar la limitación).** La nota
+> "in-process only" se promovió a un `:::warning In-process only —
+> cross-instance is post-v1.0` al inicio de la sección "Stampede
+> protection" de `website/docs/advanced/caching-observability.mdx`, y la
+> fila "Production caché" de `intro.mdx` ahora dice "in-process —
+> cross-instance coordination planned post-v1.0". El caveat queda en
+> `docs/RELEASE_NOTES_v1.0.0.md` §Known limitations. El hook
+> `DistributedLock` (Salida A) se difiere a post-v1.0.
 
 **Por qué bloqueante:** v1.0 con caché L2 a Redis debe tratar el caso
 multi-réplica. ADR-0011 admite que el singleflight es **in-process
@@ -209,7 +233,9 @@ grep -E "in-process only|cross-instance" website/docs/advanced/caching-observabi
 # debe haber un :::warning admonition en la sección Stampede
 ```
 
-**Decisión pendiente:** ¿A o B?
+**Decisión tomada (2026-05-25):** **Salida B** — promover la nota
+"in-process only" a warning visible + caveat en intro (ver banner ✅
+arriba). Salida A (hook `DistributedLock`) diferida a post-v1.0.
 
 ---
 
