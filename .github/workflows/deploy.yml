@@ -17,6 +17,15 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# The JS actions used below (checkout, setup-node, upload-pages-artifact,
+# deploy-pages) still declare Node 20 in their action.yml. GitHub forces Node 20
+# JS actions to Node 24 on 2026-06-02; this env var opts in early so the
+# workflow keeps running through the transition. Workflow-level so it covers
+# every step in both jobs. Remove once the actions ship Node 24 releases.
+# Mirrors .github/workflows/release-please.yml.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
