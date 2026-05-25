@@ -416,7 +416,7 @@ diseño con ADR-0015.
 > `TestReplicaFailoverToPrimary`, `TestReplicaHealthRecovery`,
 > `TestIsTransientConnErr`. Verde. Cierra el pillar HA F6-5+F6-6.
 
-### F6-7 · Sharding pluggable (`ShardRouter`)
+### F6-7 · Sharding pluggable (`ShardRouter`) ✅ skeleton (pendiente PR/merge; scatter-gather → follow-up)
 
 Interface `ShardRouter` que, dada una entidad + operación, elige el
 Client del shard. Fan-out de reads con scatter-gather opcional.
@@ -424,6 +424,23 @@ Client del shard. Fan-out de reads con scatter-gather opcional.
 cross-shard). **Done**: ejemplo con 2 shards en SQLite/PG; test de
 routing por shard key; doc de límites (no cross-shard joins, no
 cross-shard tx).
+
+> **Entregado esta sesión (design-first; pendiente code-reviewer + PR).**
+> **ADR-0016 escrito y aceptado** (`docs/adr/0016-sharding-shardrouter.md`):
+> shard key por contexto y por operación (uniforme read/write; extracción por
+> entidad = futuro), mapeo key→shard pluggable (`ShardFunc`), **sin cross-shard
+> implícito** (query sin shard key → error, no fan-out), límites duros (no
+> cross-shard joins, no cross-shard tx, shards fijos en construcción),
+> composición ortogonal con multi-tenancy. API en `shard_router.go`:
+> `ShardRouter` (implementa `ClientProvider`), `NewShardRouter(shards, resolve,
+> shardFor)` con validación, `GetClient` (resuelve key→shard→Client),
+> `WithShardKey`/`ShardKeyFromContext`/`DefaultShardResolver`, `HashShardFunc`
+> (FNV-1a mod N), `ShardNames()`. Tests `shard_router_test.go`: routing por key
+> + no-leak entre shards, missing-key error, validación de construcción,
+> determinismo del hash. Doc pública `advanced/sharding.mdx` + sidebar.
+> **Follow-up**: scatter-gather (lectura cross-shard con merge), extracción de
+> shard key desde la entidad, ejemplo runnable PG. **Con F6-7, los pillars de
+> Fase 6 quedan entregados** (sólo F6-3b y F6-8b diferidos) — candidato a v1.0.
 
 ### F6-8 · Benchmarks proper
 

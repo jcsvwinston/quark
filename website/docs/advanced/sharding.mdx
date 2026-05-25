@@ -1,0 +1,63 @@
+---
+sidebar_position: 7
+title: Sharding
+description: Partition data across multiple databases with a pluggable ShardRouter.
+---
+
+# Sharding
+
+For datasets too large for one database, `ShardRouter` partitions data across
+several **shard** databases by a *shard key* (e.g. `user_id`, `region`). Each
+row lives on exactly one shard; a query routes to the shard that owns its key.
+Unlike [read replicas](./read-replicas), shards hold **disjoint** data and
+scale **writes** as well as reads.
+
+`ShardRouter` is a `ClientProvider`, so it drops into `quark.For[T]` like any
+client — the rest of the ORM is unaware of sharding.
+
+```go
+shards := map[string]*quark.Client{
+    "shard-a": clientA, // each is a normal quark.New(...) client
+    "shard-b": clientB,
+}
+router, err := quark.NewShardRouter(
+    shards,
+    quark.DefaultShardResolver,            // reads the key set by WithShardKey
+    quark.HashShardFunc([]string{"shard-a", "shard-b"}), // FNV-1a hash → shard
+)
+
+// The caller supplies the shard key (a string) per operation, via the context.
+shardCtx := quark.WithShardKey(ctx, user.Region)        // shard by region
+_ = quark.For[User](shardCtx, router).Create(&user)     // → the shard owning user.Region
+got, _ := quark.For[User](shardCtx, router).Where("id", "=", user.ID).List()
+```
+
+## How routing works
+
+1. `DefaultShardResolver` reads the shard key from the context
+   (`WithShardKey`); `ShardKeyFromContext` exposes that value if you need it.
+   You can supply your own `ShardResolver` to read an existing request value.
+2. The `ShardFunc` maps that key to a shard name. `HashShardFunc` is the stable
+   hash-mod default; supply your own for range, geo, or lookup-table policies —
+   it is the seam you control for resharding.
+3. The query runs on that shard's `*Client`, unchanged.
+
+A query **without a shard key in context errors** — there is no implicit
+cross-shard fan-out (forgetting the key fails loudly rather than silently
+querying every shard).
+
+## Limits
+
+- **No cross-shard joins** — a `JOIN` only sees the resolved shard.
+- **No cross-shard transactions** — a `Tx` is bound to one shard's client; there
+  is no two-phase commit. Design the model so each operation stays within a
+  shard (choose the shard key well; denormalize where needed).
+- **Scatter-gather reads** (query all shards and merge) are not yet available —
+  a deliberate follow-up, not an implicit fallback.
+- **Resharding** (changing the `ShardFunc` + migrating data) is an operator
+  task; the shard set is fixed at construction.
+
+Multi-tenancy composes orthogonally: a shard's `*Client` can itself sit behind
+a `TenantRouter`. See
+[ADR-0016](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0016-sharding-shardrouter.md)
+for the full rationale.
