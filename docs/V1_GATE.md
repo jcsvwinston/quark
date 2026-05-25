@@ -3,9 +3,10 @@
 > **Fecha:** 2026-05-25
 > **Estado actual:** `v0.13.0` taggeada; F6-5 / F6-6 / F6-7 / F6-9 entregados.
 > **Progreso §A:** **3/5 cerrados** (Items 3, 4 vía *Salida B*; Item 2
-> alcance mínimo, 2026-05-25). Abiertos: **Item 1** (Oracle en CI —
-> decisión estratégica) y **Item 5** (`RELEASE_NOTES_v1.0.0.md` — DRAFT,
-> se finaliza al cerrar Item 1).
+> alcance mínimo, 2026-05-25). Abiertos: **Item 1** (Oracle en CI — **Salida A
+> elegida (Full), programa multi-sesión EN PROGRESO**; diagnóstico local
+> 187/24) y **Item 5** (`RELEASE_NOTES_v1.0.0.md` — DRAFT, se finaliza al
+> cerrar Item 1).
 > **Origen:** [ADR-0017](adr/0017-codegen-type-safety-not-perf-gate.md) §3 retira el gate
 > ≥3× p99 de ADR-0002 y delega el nuevo gate a *"el checklist honesto de
 > `docs/ANALISIS_MADUREZ.md` §3 (cobertura cross-engine, gaps estructurales)"*.
@@ -31,7 +32,37 @@ del mantenedor", debe haber un commit que lo documente — no basta con
 
 ## §A · Items bloqueantes (cierra antes de v1.0)
 
-### Item 1 — Oracle en CI
+### Item 1 — Oracle en CI · 🚧 Salida A elegida (Full), EN PROGRESO
+
+> **Decisión del mantenedor (2026-05-25): Salida A — Oracle en CI bloqueante.**
+> Programa multi-sesión. Se ejecuta como una secuencia de PRs enfocados (abajo).
+>
+> **Diagnóstico local (2026-05-25), `gvenzl/oracle-free:23-slim` + `go-ora`
+> (driver puro Go, sin Instant Client):** `TestSuiteOracle` (SharedSuite)
+> corre **187 PASS / 24 FAIL**. **La imagen NO es el bloqueante** — el
+> contenedor arranca en ~30 s en local. El bloqueante real es **completitud
+> de dialecto**. Reparto de los 24 fallos:
+>
+> | Causa | Fallos | Tipo | Task |
+> | --- | --- | --- | --- |
+> | Schema introspection Oracle (F3-2) sin implementar | 5 | Feature grande | #30 |
+> | Lock de migración distribuido Oracle sin implementar | 4 | Feature | #31 |
+> | JSON path como literal (ORA-40454: path not a literal) | 3 | Fix de dialecto (Oracle-only) | #28 |
+> | `''` → NULL al escanear a `string` | 2 | Fix de scan | #27 |
+> | `TEXT` no es tipo Oracle (ORA-00902) | 1 | Parte de F3-2 (col.Type ya es dialect-native vía catálogo) | #30 |
+> | Resto (CTE/UpdateZeroValues/ORA-00942/ORA-00001 rerun) | ~9 | Triage dialecto-vs-test | #29 |
+>
+> **Hallazgo clave:** el cluster `PlanMigration` (incl. el `TEXT`) **no son
+> fixes sueltos** — dependen de la introspección F3-2 (el ejecutor trata
+> `col.Type` como tipo nativo del catálogo, que Oracle no produce todavía).
+>
+> **Orden de PRs:** (a) fixes de dialecto contenidos y verificables en local
+> (JSON-path-literal #28 + `''`→NULL #27); (b) introspección F3-2 Oracle #30
+> (PR grande, incluye el vocabulario de tipos / `TEXT`→`CLOB`/`VARCHAR2`);
+> (c) lock distribuido #31; (d) triage del resto #29; (e) **flip final**:
+> añadir Oracle a la matriz de CI bloqueante #32 sólo cuando el SharedSuite
+> esté **211/211**. Cada PR con `code-reviewer` + sin regresión en los otros
+> 5 motores (SQLite local + 4 en CI; Oracle local vía contenedor).
 
 **Por qué bloqueante:** Quark se posiciona como *"el ORM con Oracle real"*
 (ver `comparison.mdx` y la justificación competitiva del análisis de
@@ -40,10 +71,11 @@ contradictorio. La promesa pública supera a la cobertura real.
 
 **Estado hoy:**
 
-- Tests Oracle existen (`oracle_suite_test.go`).
-- Oracle queda fuera de CI mientras dure el testcontainers image issue —
-  documentado en `roadmap.mdx:182` y `intro.mdx:9`.
-- Validación: manual por release con DSN env var.
+- Tests Oracle existen (`oracle_suite_test.go`); driver `go-ora` (puro Go).
+- ~~Oracle queda fuera de CI mientras dure el testcontainers image issue~~
+  **corregido el diagnóstico:** la imagen arranca bien; lo que falta es
+  completitud de dialecto (187/24 en local).
+- Validación: manual por release con DSN env var (mientras dure el programa A).
 
 **Cómo cerrar (elige una salida):**
 
@@ -70,8 +102,11 @@ grep -A5 strategy .github/workflows/ci.yml | grep -i oracle
 # debe devolver una entrada en la matriz; ahora mismo no la hay
 ```
 
-**Decisión pendiente:** ¿A, B o C? Coste estimado:
-A = 1-2 sesiones; B = 1 sesión (sólo docs); C = 1 sesión.
+**Decisión tomada (2026-05-25): Salida A (Full).** Programa multi-sesión en
+curso (ver banner 🚧 arriba). Coste revisado a la luz del diagnóstico local:
+introspección F3-2 + lock distribuido son las piezas grandes; **bastante más
+que las "1-2 sesiones" estimadas** antes de medir. La salida no se cierra
+hasta SharedSuite 211/211 + Oracle en la matriz de CI.
 
 ---
 
