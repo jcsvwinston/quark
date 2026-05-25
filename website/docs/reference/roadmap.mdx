@@ -195,7 +195,8 @@ the operational backlog lives at
   versioned registry stays as documented debt.
 - **`LISTEN/NOTIFY` listener side** (PG) is not implemented in the
   EventBus. `Notify` for outbound notifications is supported;
-  `ListenerFactory.CreateListener` returns `ErrUnsupportedFeature`.
+  `ListenerFactory.CreateListener` returns `ErrDialectNotSupported`.
+  Inbound `LISTEN` is planned post-v1.0.
 - `Select` and `Where` validate simple identifiers; dotted columns and
   SQL expressions require views or controlled raw SQL via the
   `internal/guard` layer.
