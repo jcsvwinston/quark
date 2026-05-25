@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0](https://github.com/jcsvwinston/quark/compare/v0.12.0...v0.13.0) (2026-05-24)
+
+
+### Added
+
+* **replicas:** replica failover + health cooldown (F6-6) ([#113](https://github.com/jcsvwinston/quark/issues/113)) ([73bb580](https://github.com/jcsvwinston/quark/commit/73bb580813b7e0204bebf38a5857014ed871dad8))
+* **replicas:** WithReplicas + Sticky read-replica routing (F6-5) ([#110](https://github.com/jcsvwinston/quark/issues/110)) ([33e5e9e](https://github.com/jcsvwinston/quark/commit/33e5e9e3eda42570f93525febdab8d9ad6924069))
+
+
+### Performance
+
+* **query:** copy-on-write builder clone via capacity-bounded append ([#107](https://github.com/jcsvwinston/quark/issues/107)) ([65b68d8](https://github.com/jcsvwinston/quark/commit/65b68d84fde0f229e3334a616e0f3550c42b0969))
+
+
+### Documentation
+
+* full sync pass (docs-auditor first run) ([#112](https://github.com/jcsvwinston/quark/issues/112)) ([585cf16](https://github.com/jcsvwinston/quark/commit/585cf16dc3489448ba1c40bce7abde481ca9c250))
+
+
+### Tests
+
+* **benchmarks:** F6-9 stress/load harness + documented run ([#109](https://github.com/jcsvwinston/quark/issues/109)) ([9940b5c](https://github.com/jcsvwinston/quark/commit/9940b5c888d89c70e1b47a202f85e0ca58999277))
+
 ## [0.12.0](https://github.com/jcsvwinston/quark/compare/v0.11.0...v0.12.0) (2026-05-24)
 
 
