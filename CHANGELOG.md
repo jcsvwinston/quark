@@ -94,6 +94,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      entries live in the [0.10.0] section (PR #94) and in
      docs/RELEASE_NOTES_v0.10.0.md. -->
 
+### Fixed
+
+- **oracle:** `WhereJSON` now inlines the JSON path as a literal on Oracle.
+  Oracle's `JSON_VALUE` rejects a bound path (`ORA-40454: path expression not
+  a literal`); the validated path (`internal/guard.ValidateJSONPath`,
+  `[A-Za-z0-9_.]` grammar) is inlined instead, which stays injection-safe by
+  the same rule that makes a validated identifier safe. Other dialects keep
+  binding the path. (#28)
+- **scan:** a `NULL` column scanned into a non-pointer `string` field now
+  coerces to `""` instead of failing with `converting NULL to string is
+  unsupported`. This is consistent across all six dialects and reconciles
+  Oracle — which stores `''` as `NULL` — so empty strings round-trip the same
+  everywhere. Use `*string` or `sql.Null[string]` to keep the `NULL` vs `""`
+  distinction. (#27)
+
 ## [0.9.0] - 2026-05-21
 
 Phase 5 release — engine-enforced multi-tenancy, transactional hooks,

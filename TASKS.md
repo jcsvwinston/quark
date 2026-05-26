@@ -9,8 +9,11 @@
 > 1. **Oracle en CI** — 🚧 **Salida A (Full) elegida, EN PROGRESO** (2026-05-25).
 >    Diagnóstico local: SharedSuite 187/24 (la imagen NO es el bloqueante; lo es
 >    la completitud de dialecto). Programa multi-sesión: introspección F3-2 +
->    lock distribuido + fixes JSON-path/`''`→NULL + flip de CI. Detalle y reparto
->    en [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
+>    lock distribuido + fixes JSON-path/`''`→NULL + flip de CI. **PR (a)
+>    entregado (2026-05-26): #28 (JSON path literal) + #27 (`''`→NULL scan) →
+>    187/24 → 194/17, sin regresión en los otros 5 motores.** Restan F3-2 #30,
+>    lock #31, triage #29 y el flip de CI #32. Detalle y reparto en
+>    [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
 > 2. ~~**F6-7 follow-ups**~~ — ✅ CERRADO (alcance mínimo): ejemplo runnable
 >    `examples/sharding/main.go` (SQLite, self-contained) + `advanced/sharding.mdx`;
 >    scatter-gather y `shard-key-from-entity` diferidos a v1.1.

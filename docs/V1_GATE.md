@@ -47,8 +47,8 @@ del mantenedor", debe haber un commit que lo documente — no basta con
 > | --- | --- | --- | --- |
 > | Schema introspection Oracle (F3-2) sin implementar | 5 | Feature grande | #30 |
 > | Lock de migración distribuido Oracle sin implementar | 4 | Feature | #31 |
-> | JSON path como literal (ORA-40454: path not a literal) | 3 | Fix de dialecto (Oracle-only) | #28 |
-> | `''` → NULL al escanear a `string` | 2 | Fix de scan | #27 |
+> | ~~JSON path como literal (ORA-40454: path not a literal)~~ ✅ | 3 | Fix de dialecto (Oracle-only) | #28 |
+> | ~~`''` → NULL al escanear a `string`~~ ✅ | 2 | Fix de scan | #27 |
 > | `TEXT` no es tipo Oracle (ORA-00902) | 1 | Parte de F3-2 (col.Type ya es dialect-native vía catálogo) | #30 |
 > | Resto (CTE/UpdateZeroValues/ORA-00942/ORA-00001 rerun) | ~9 | Triage dialecto-vs-test | #29 |
 >
@@ -63,6 +63,20 @@ del mantenedor", debe haber un commit que lo documente — no basta con
 > añadir Oracle a la matriz de CI bloqueante #32 sólo cuando el SharedSuite
 > esté **211/211**. Cada PR con `code-reviewer` + sin regresión en los otros
 > 5 motores (SQLite local + 4 en CI; Oracle local vía contenedor).
+>
+> **Progreso (2026-05-26) — PR (a) entregado:** SharedSuite Oracle **187/24
+> → 194/17** (medido en local, contenedor `gvenzl/oracle-free:23-slim`).
+> #28 (Oracle `JSON_VALUE` con path inline como literal, injection-safe vía
+> `ValidateJSONPath`) y #27 (NULL→`""` al escanear a `string` no-puntero, vía
+> `emptyStringScanner`) cerrados; el fix de scan además resolvió en cascada
+> 2 subtests de DirtyTracking que abortaban por el error de scan. Sin
+> regresión en PG/MySQL/MariaDB/MSSQL (4 motores CI verdes vía
+> testcontainers) ni SQLite. **Restan 12 fallos-hoja**, todos fuera del scope
+> de (a): PlanMigration ×6 (#30 / F3-2), MigrationLock ×3 (#31), DirtyTracking
+> ×2 + CTE ×1 (#29, case-sensitivity test-vs-dialecto — el SQL emitido es
+> correcto, el assert busca columnas en minúscula y Oracle las uppercasea).
+> **Siguiente PR sugerido:** (b) introspección F3-2 #30 o (d) triage #29
+> (barato: ajustar asserts a case-insensitive).
 
 **Por qué bloqueante:** Quark se posiciona como *"el ORM con Oracle real"*
 (ver `comparison.mdx` y la justificación competitiva del análisis de
