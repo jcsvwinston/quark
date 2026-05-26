@@ -71,12 +71,19 @@ del mantenedor", debe haber un commit que lo documente — no basta con
 > `emptyStringScanner`) cerrados; el fix de scan además resolvió en cascada
 > 2 subtests de DirtyTracking que abortaban por el error de scan. Sin
 > regresión en PG/MySQL/MariaDB/MSSQL (4 motores CI verdes vía
-> testcontainers) ni SQLite. **Restan 12 fallos-hoja**, todos fuera del scope
-> de (a): PlanMigration ×6 (#30 / F3-2), MigrationLock ×3 (#31), DirtyTracking
-> ×2 + CTE ×1 (#29, case-sensitivity test-vs-dialecto — el SQL emitido es
-> correcto, el assert busca columnas en minúscula y Oracle las uppercasea).
-> **Siguiente PR sugerido:** (b) introspección F3-2 #30 o (d) triage #29
-> (barato: ajustar asserts a case-insensitive).
+> testcontainers) ni SQLite.
+>
+> **Progreso (2026-05-26) — PR (d) entregado (#29 triage):** SharedSuite
+> Oracle **194/17 → 199/12**. Triage de los 3 fallos test-vs-dialecto: los 3
+> eran del lado del test (Oracle uppercasea identifiers, los asserts buscaban
+> columnas en minúscula; el SQL emitido era correcto, incluido el threading de
+> args del CTE). Fix test-only: comparar contra el SQL en minúscula en
+> `cte_test.go` (`CTEArgsAreThreadedBeforeWHERE`) y `dirty_track_test.go`
+> (`WritesZeroValuesWhenChanged`, `SnapshotRefreshesAfterSave`). Sin cambio de
+> producción. Verificado en los 6 motores. **Restan 9 fallos-hoja**, los dos
+> bloques grandes: PlanMigration ×6 (#30 / F3-2 introspección) y MigrationLock
+> ×3 (#31 lock distribuido). **Siguiente PR sugerido:** (b) introspección
+> F3-2 #30 (desbloquea PlanMigration) o (c) lock distribuido #31.
 
 **Por qué bloqueante:** Quark se posiciona como *"el ORM con Oracle real"*
 (ver `comparison.mdx` y la justificación competitiva del análisis de

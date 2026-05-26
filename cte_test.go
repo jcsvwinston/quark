@@ -284,9 +284,14 @@ func testCTE(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		// exactly two '?' markers in the rendered fragment in the
 		// canonical order (amount-comparison first, name-comparison
 		// second). For ordinal dialects the same order would translate
-		// to $1 then $2.
-		amountIdx := strings.Index(s, "amount")
-		nameIdx := strings.Index(s, "name")
+		// to $1 then $2. Match against a lowercased copy so the column
+		// refs are found on Oracle, which uppercases identifiers. The
+		// ordering check is sound because no other structural element of
+		// the SQL (table/CTE names top_orders/cte_orders/cte_users)
+		// contains the substrings "amount" or "name".
+		lower := strings.ToLower(s)
+		amountIdx := strings.Index(lower, "amount")
+		nameIdx := strings.Index(lower, "name")
 		if amountIdx < 0 || nameIdx < 0 {
 			t.Fatalf("captured SQL missing column refs: %q", s)
 		}
