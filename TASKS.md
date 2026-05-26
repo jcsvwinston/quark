@@ -15,9 +15,12 @@
 >    194/17 → 199/12. PR (b): #30 / F3-2 introspección Oracle
 >    (`IntrospectSchema` + normalización de tipos identity + `ColumnTypeMapper`
 >    TEXT→CLOB) → 199/12 → 211/5 (cierra PlanMigration ×6 + el contrato
->    SchemaIntrospection ×5).** Sin regresión en los otros 5 motores. **Resta
->    sólo lock distribuido #31 (MigrationLock ×3)** para 216/0, luego el flip
->    de CI #32. Detalle en [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
+>    SchemaIntrospection ×5). PR (c): #31 / lock distribuido Oracle
+>    (`AcquireMigrationLock` vía `DBMS_LOCK`, ADR-0018) → 211/5 → **216/0** ✅
+>    (cierra MigrationLock ×3).** Sin regresión en los otros 5 motores.
+>    **SharedSuite Oracle en verde total (216/0).** Sólo queda el **flip de CI
+>    #32** (añadir Oracle a la matriz + grant DBMS_LOCK en el job) para cerrar
+>    §A Item 1 y el gate. Detalle en [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
 > 2. ~~**F6-7 follow-ups**~~ — ✅ CERRADO (alcance mínimo): ejemplo runnable
 >    `examples/sharding/main.go` (SQLite, self-contained) + `advanced/sharding.mdx`;
 >    scatter-gather y `shard-key-from-entity` diferidos a v1.1.

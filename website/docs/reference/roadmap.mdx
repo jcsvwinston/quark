@@ -81,7 +81,8 @@ the operational backlog lives at
   transactional; MySQL / MariaDB / Oracle resumable with
   `quark_migration_state` checkpoints.
 - **Distributed migration lock**: PG `pg_advisory_lock`, MySQL/MariaDB
-  `GET_LOCK`, MSSQL `sp_getapplock`. SQLite/Oracle return
+  `GET_LOCK`, MSSQL `sp_getapplock`, Oracle `DBMS_LOCK` (needs `GRANT
+  EXECUTE ON DBMS_LOCK`, see ADR-0018). SQLite returns
   `ErrUnsupportedFeature`.
 - **Orchestrated `Backfill`** with PK-based batching and resume tokens
   in `quark_backfill_state`.

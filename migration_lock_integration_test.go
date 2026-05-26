@@ -25,9 +25,8 @@ import (
 //     blocks on the call or receives ErrLockTimeout if the wait was
 //     shorter than the first holder's grip.
 //  3. **UnsupportedOnSQLite** — `Client.AcquireMigrationLock` on a
-//     SQLite client surfaces ErrUnsupportedFeature. Same expected
-//     behaviour on Oracle (deferred); covered by the unit test on the
-//     dialect interface assertion.
+//     SQLite client surfaces ErrUnsupportedFeature. Oracle implements
+//     the lock via DBMS_LOCK (ADR-0018) and runs the full three subtests.
 func testMigrationLock(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	t.Helper()
 
@@ -64,6 +63,11 @@ func testMigrationLock(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		// holder sleeps briefly to ensure the second sees a held lock
 		// and either waits or times out. We assert: at no point are
 		// both holding (`heldCount` never exceeds 1).
+		//
+		// Each AcquireMigrationLock pulls a fresh connection from the
+		// pool, so two goroutines are two sessions — the same shape as
+		// two processes (the cross-process case migrations actually
+		// care about). The session-scoped lock serialises both.
 		const lockName = "f3-1-concurrent"
 		var heldCount int32
 		var maxHeld int32

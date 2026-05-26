@@ -46,11 +46,11 @@ Ninguno crítico hoy en este módulo. Pero hay **deuda estructural** que debe se
 
 El plan: introspección completa + diff estructural en Fase 3 (`docs/ANALISIS_MADUREZ.md` §4 Fase 3).
 
-### Sin lock distribuido
+### Lock distribuido (F3-1 — cerrado)
 
-Dos pods aplicando `Up` en paralelo es **race condition garantizada**. Los locks que existen en cada motor (PG `pg_advisory_xact_lock`, MySQL `GET_LOCK`, MSSQL `sp_getapplock`, Oracle `DBMS_LOCK`) **no se usan**.
+`Client.AcquireMigrationLock(ctx, name, timeout)` da exclusión cross-proceso, opt-in (NO se llama solo desde `Migrate`). Implementado en 5 motores con primitivos session-scoped: PG `pg_advisory_lock`, MySQL/MariaDB `GET_LOCK`, MSSQL `sp_getapplock`, **Oracle `DBMS_LOCK` (ADR-0018; requiere `GRANT EXECUTE ON DBMS_LOCK`)**. SQLite devuelve `ErrUnsupportedFeature` (single-writer; usa `BEGIN IMMEDIATE` en proceso). Detalle por motor en `dialect_migration_lock.go`; contrato en `migration_lock_integration_test.go` (SharedSuite). Timeout → `ErrLockTimeout`.
 
-Hoy: documenta en producción que las migraciones deben ejecutarse desde un único pod (job de migración separado, no desde el pod de la app). Fase 3 lo arregla.
+**Anti-pattern**: cualquier nuevo locker debe ser session-scoped (la interfaz `DBConn` no expone transacciones — por eso el `FOR UPDATE` transaction-scoped no encaja; ver ADR-0018 §Alternativas).
 
 ### Down se escribe a mano siempre
 

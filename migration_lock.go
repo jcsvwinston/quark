@@ -29,8 +29,8 @@ type MigrationLock interface {
 }
 
 // MigrationLocker is the optional interface a Dialect implements to
-// support distributed migration locks. PG / MySQL / MariaDB / MSSQL
-// implement it; SQLite and (currently) Oracle do not.
+// support distributed migration locks. PG / MySQL / MariaDB / MSSQL /
+// Oracle implement it; SQLite does not.
 //
 // Kept as an optional interface — not a required method on Dialect —
 // so custom Dialect implementations downstream don't have to grow
@@ -98,12 +98,13 @@ var ErrLockTimeout = errors.New("migration lock acquisition timed out")
 //   - MySQL / MariaDB: `GET_LOCK(name, timeout_seconds)` + `RELEASE_LOCK`.
 //   - MSSQL: `sp_getapplock @LockMode='Exclusive', @LockOwner='Session'`
 //   - `sp_releaseapplock`.
+//   - Oracle: `DBMS_LOCK.ALLOCATE_UNIQUE` + `REQUEST(X_MODE,
+//     release_on_commit => FALSE)` — session-scoped, survives the
+//     implicit commits of DDL. Requires `GRANT EXECUTE ON DBMS_LOCK`
+//     (see ADR-0018).
 //   - SQLite: returns `ErrUnsupportedFeature` — no distributed-lock
 //     primitive; use a `BEGIN IMMEDIATE` transaction inside the
 //     process for single-writer semantics.
-//   - Oracle: returns `ErrUnsupportedFeature` — the DBMS_LOCK API
-//     requires PL/SQL blocks and per-lock allocation handles; deferred
-//     to a follow-up PR.
 func (c *Client) AcquireMigrationLock(ctx context.Context, name string, timeout time.Duration) (MigrationLock, error) {
 	locker, ok := c.dialect.(MigrationLocker)
 	if !ok {

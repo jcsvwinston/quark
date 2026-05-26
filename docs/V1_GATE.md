@@ -98,6 +98,18 @@ del mantenedor", debe haber un commit que lo documente — no basta con
 > regresión en los otros 5 motores. **Resta sólo MigrationLock ×3 (#31 lock
 > distribuido Oracle)** para 216/0, luego el flip de CI #32. **Siguiente PR:**
 > (c) lock distribuido #31 — el último bloque del Item 1.
+>
+> **Progreso (2026-05-26) — PR (c) entregado (#31 lock distribuido Oracle):**
+> SharedSuite Oracle **211/5 → 216/0** ✅. `OracleDialect.AcquireMigrationLock`
+> vía `DBMS_LOCK` (session-scoped, `release_on_commit => FALSE` para sobrevivir
+> a los commits implícitos del DDL; ADR-0018). Se eligió `DBMS_LOCK` sobre
+> lock-table `FOR UPDATE` porque la interfaz `DBConn` del locker es
+> session-scoped y no expone transacciones. Requiere `GRANT EXECUTE ON
+> DBMS_LOCK` (lo aplica el contenedor de test vía SYSDBA; documentado en
+> `migrations.mdx`). Sin regresión en los otros 5 motores. **El SharedSuite
+> Oracle está en verde total (216/0).** Sólo queda el **flip de CI #32**:
+> añadir Oracle a la matriz bloqueante de `.github/workflows/ci.yml` (+ el
+> grant DBMS_LOCK en el setup del job) → cierra §A Item 1 y el gate.
 
 **Por qué bloqueante:** Quark se posiciona como *"el ORM con Oracle real"*
 (ver `comparison.mdx` y la justificación competitiva del análisis de

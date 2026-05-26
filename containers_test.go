@@ -18,6 +18,7 @@ package quark_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"testing"
@@ -230,6 +231,32 @@ func setupOracleContainer(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("oracle port: %v", err)
 	}
+	// The migration lock uses DBMS_LOCK (ADR-0018), which Oracle does not
+	// grant to schema users by default. Grant it once as SYSDBA so the
+	// SharedSuite's MigrationLock subtest passes; the gvenzl SYS password
+	// is ORACLE_PASSWORD ("quark"). DBMS_LOCK is a hard prerequisite — if
+	// the grant fails the whole Oracle suite aborts (t.Fatalf).
+	grantOracleDBMSLock(t, host, port.Port())
+
 	// go-ora DSN: oracle://user:pass@host:port/service
 	return fmt.Sprintf("oracle://quark:quark@%s:%s/FREEPDB1", host, port.Port())
+}
+
+// grantOracleDBMSLock grants EXECUTE on DBMS_LOCK to the app user via a
+// short-lived SYSDBA connection. See ADR-0018 for why the lock needs it.
+func grantOracleDBMSLock(t *testing.T, host, port string) {
+	t.Helper()
+	// go-ora/v2: a space in a query param is '+' (URL form-encoded), so
+	// `DBA+PRIVILEGE=SYSDBA` is the option "DBA PRIVILEGE=SYSDBA".
+	dsn := fmt.Sprintf("oracle://sys:quark@%s:%s/FREEPDB1?DBA+PRIVILEGE=SYSDBA", host, port)
+	db, err := sql.Open("oracle", dsn)
+	if err != nil {
+		t.Fatalf("oracle DBMS_LOCK grant: open sysdba: %v", err)
+	}
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctx, "GRANT EXECUTE ON DBMS_LOCK TO quark"); err != nil {
+		t.Fatalf("oracle DBMS_LOCK grant: %v", err)
+	}
 }

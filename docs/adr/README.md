@@ -24,6 +24,7 @@
 | [0015](0015-read-replicas-routing.md) | Read replicas: routing en ejecución, opt-in, sticky read-your-writes | Accepted | Fase 6 |
 | [0016](0016-sharding-shardrouter.md) | Sharding: ShardRouter enruta por shard key vía ClientProvider; sin cross-shard implícito | Accepted | Fase 6 |
 | [0017](0017-codegen-type-safety-not-perf-gate.md) | Codegen es type-safety, no velocidad; se retira el gate ≥3× p99 de ADR-0002 | Accepted | Fase 6 |
+| [0018](0018-oracle-migration-lock-dbms-lock.md) | Lock de migración Oracle vía `DBMS_LOCK` (session-scoped), no lock-table `FOR UPDATE` | Accepted | Fase 3 / v1.0-gate |
 
 ## Cómo añadir un ADR nuevo
 
