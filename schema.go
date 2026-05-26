@@ -151,15 +151,40 @@ type SchemaIntrospector interface {
 	IntrospectSchema(ctx context.Context, exec Executor) (Schema, error)
 }
 
+// ColumnTypeMapper is the optional Dialect interface for translating a
+// neutral/foreign column-type string into the dialect's native form
+// before it reaches DDL. Kept as a stand-alone interface (same pattern
+// as SchemaIntrospector / MigrationLocker) so custom dialects don't have
+// to grow the method to keep compiling — dialects that don't implement
+// it leave the type string untouched.
+//
+// It exists because a hand-built [Plan] can carry a generic type like
+// "TEXT" (every engine except Oracle accepts it); Oracle's CLOB is the
+// native equivalent. MapColumnType must be idempotent — a type that is
+// already dialect-native (e.g. "NUMBER(19)") passes through unchanged.
+type ColumnTypeMapper interface {
+	MapColumnType(t string) string
+}
+
+// mapColumnType translates a column-type string to the dialect's native
+// form when the dialect implements [ColumnTypeMapper], and returns it
+// unchanged otherwise.
+func (c *Client) mapColumnType(t string) string {
+	if m, ok := c.dialect.(ColumnTypeMapper); ok {
+		return m.MapColumnType(t)
+	}
+	return t
+}
+
 // IntrospectSchema reads the current state of the database's schema and
 // returns it as a dialect-neutral [Schema]. It's the first half of the
 // F3 migration story: the diff comparator (F3-3) takes the Schema
 // produced here plus the Schema derived from the Go models and emits
 // the operations needed to bring them into alignment.
 //
-// Supported dialects: PostgreSQL, SQLite, MySQL, MariaDB, MSSQL.
-// Oracle returns `ErrUnsupportedFeature` until F3-2-oracle lands
-// (deferred while the container image situation is resolved).
+// Supported dialects: PostgreSQL, SQLite, MySQL, MariaDB, MSSQL, Oracle.
+// A dialect that doesn't implement [SchemaIntrospector] returns
+// `ErrUnsupportedFeature`.
 //
 // Surface: tables, columns, non-PK indexes, foreign keys, and CHECK
 // constraints. SQLite returns `Checks=nil` (the only catalog read it

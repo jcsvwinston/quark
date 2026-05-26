@@ -1440,3 +1440,365 @@ func pgListChecks(ctx context.Context, exec Executor, table string) ([]Check, er
 	}
 	return out, rows.Err()
 }
+
+// --- Oracle ------------------------------------------------------------------
+
+// IntrospectSchema reads the Oracle schema from the data dictionary
+// (`USER_TABLES`, `USER_TAB_COLUMNS`, `USER_INDEXES`/`USER_IND_COLUMNS`,
+// `USER_CONSTRAINTS`/`USER_CONS_COLUMNS`). It is scoped to the connected
+// user's own schema — the `USER_*` views never cross schema boundaries.
+//
+// Oracle-specific handling:
+//   - Identifiers come back UPPERCASE (Oracle folds unquoted names), so
+//     every table / column / referenced name is lowercased to match the
+//     neutral lowercase form the models and the other dialects use.
+//   - NUMBER reassembly: precision/scale are glued back on
+//     (`NUMBER(19)`, `NUMBER(10,2)`); a NULL precision stays bare
+//     `NUMBER`. CHAR/VARCHAR2 use CHAR_LENGTH so the displayed length
+//     matches the DDL the migrator wrote.
+//   - NOT NULL is stored as a system CHECK constraint (`"COL" IS NOT
+//     NULL`); those are filtered out of Checks — they are surfaced via
+//     Column.Nullable, not as user CHECK constraints.
+//   - CHECK predicates are read from `SEARCH_CONDITION_VC` (the
+//     VARCHAR2 mirror of the LONG `SEARCH_CONDITION`, available on
+//     12.2+), avoiding LONG-column scan issues.
+//   - Oracle has no ON UPDATE referential action; OnUpdate is always
+//     "NO ACTION".
+func (o *OracleDialect) IntrospectSchema(ctx context.Context, exec Executor) (Schema, error) {
+	tableNames, err := oracleListTables(ctx, exec)
+	if err != nil {
+		return Schema{}, fmt.Errorf("oracle introspect: list tables: %w", err)
+	}
+	tables := make([]Table, 0, len(tableNames))
+	for _, name := range tableNames {
+		cols, err := oracleListColumns(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("oracle introspect: list columns for %q: %w", name, err)
+		}
+		idx, err := oracleListIndexes(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("oracle introspect: list indexes for %q: %w", name, err)
+		}
+		fks, err := oracleListForeignKeys(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("oracle introspect: list foreign keys for %q: %w", name, err)
+		}
+		checks, err := oracleListChecks(ctx, exec, name)
+		if err != nil {
+			return Schema{}, fmt.Errorf("oracle introspect: list checks for %q: %w", name, err)
+		}
+		tables = append(tables, Table{Name: strings.ToLower(name), Columns: cols, Indexes: idx, ForeignKeys: fks, Checks: checks})
+	}
+	return Schema{Tables: tables}, nil
+}
+
+// oracleListTables returns the user's tables, excluding Quark's internal
+// bookkeeping tables and recycle-bin (`BIN$…`) entries. The catalog name
+// stays UPPERCASE here because the per-table queries below bind it
+// against the UPPERCASE catalog; the public Table.Name is lowercased by
+// the caller.
+func oracleListTables(ctx context.Context, exec Executor) ([]string, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT table_name
+		  FROM user_tables
+		 WHERE table_name NOT LIKE 'QUARK\_%' ESCAPE '\'
+		   AND table_name NOT LIKE 'BIN$%'
+		 ORDER BY table_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+func oracleListColumns(ctx context.Context, exec Executor, table string) ([]Column, error) {
+	o := &OracleDialect{}
+	q := fmt.Sprintf(`
+		SELECT column_name,
+		       data_type,
+		       char_length,
+		       data_precision,
+		       data_scale,
+		       nullable,
+		       data_default
+		  FROM user_tab_columns
+		 WHERE table_name = %s
+		 ORDER BY column_id`, o.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Column
+	for rows.Next() {
+		var (
+			name      string
+			dataType  string
+			charLen   sql.NullInt64
+			precision sql.NullInt64
+			scale     sql.NullInt64
+			nullable  string
+			dflt      sql.NullString
+		)
+		if err := rows.Scan(&name, &dataType, &charLen, &precision, &scale, &nullable, &dflt); err != nil {
+			return nil, err
+		}
+		col := Column{
+			Name:     strings.ToLower(name),
+			Type:     oracleReassembleType(dataType, charLen, precision, scale),
+			Nullable: nullable == "Y",
+		}
+		if dflt.Valid {
+			// Oracle pads DATA_DEFAULT with trailing whitespace/newline.
+			s := strings.TrimSpace(dflt.String)
+			if s != "" {
+				col.Default = &s
+			}
+		}
+		out = append(out, col)
+	}
+	return out, rows.Err()
+}
+
+// oracleListIndexes reads `USER_INDEXES` joined with `USER_IND_COLUMNS`,
+// excluding the indexes that back a PRIMARY KEY constraint (those are a
+// constraint concern, not a secondary index — same filtering every other
+// dialect applies). UNIQUENESS is 'UNIQUE' / 'NONUNIQUE'.
+func oracleListIndexes(ctx context.Context, exec Executor, table string) ([]Index, error) {
+	o := &OracleDialect{}
+	q := fmt.Sprintf(`
+		SELECT i.index_name,
+		       i.uniqueness,
+		       ic.column_name,
+		       ic.column_position
+		  FROM user_indexes i
+		  JOIN user_ind_columns ic
+		    ON ic.index_name = i.index_name
+		 WHERE i.table_name = %s
+		   AND i.index_name NOT IN (
+		       SELECT c.index_name
+		         FROM user_constraints c
+		        WHERE c.table_name = %s
+		          AND c.constraint_type = 'P'
+		          AND c.index_name IS NOT NULL)
+		 ORDER BY i.index_name, ic.column_position`, o.Placeholder(1), o.Placeholder(2))
+	rows, err := exec.QueryContext(ctx, q, table, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type accum struct {
+		unique bool
+		cols   []string
+	}
+	byName := map[string]*accum{}
+	var order []string
+	for rows.Next() {
+		var (
+			indexName  string
+			uniqueness string
+			columnName string
+			position   int
+		)
+		if err := rows.Scan(&indexName, &uniqueness, &columnName, &position); err != nil {
+			return nil, err
+		}
+		a, ok := byName[indexName]
+		if !ok {
+			a = &accum{unique: uniqueness == "UNIQUE"}
+			byName[indexName] = a
+			order = append(order, indexName)
+		}
+		a.cols = append(a.cols, strings.ToLower(columnName))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Index, 0, len(order))
+	for _, name := range order {
+		a := byName[name]
+		out = append(out, Index{Name: strings.ToLower(name), Columns: a.cols, Unique: a.unique})
+	}
+	return out, nil
+}
+
+// oracleListForeignKeys reads R-type constraints from `USER_CONSTRAINTS`,
+// resolving the referenced table/columns through R_CONSTRAINT_NAME.
+// DELETE_RULE carries the ON DELETE action ('CASCADE', 'SET NULL', 'NO
+// ACTION'); Oracle has no ON UPDATE action, so OnUpdate is always
+// "NO ACTION" to match the other dialects' default.
+func oracleListForeignKeys(ctx context.Context, exec Executor, table string) ([]ForeignKey, error) {
+	o := &OracleDialect{}
+	q := fmt.Sprintf(`
+		SELECT c.constraint_name,
+		       cc.column_name,
+		       rc.table_name AS ref_table,
+		       rcc.column_name AS ref_column,
+		       c.delete_rule,
+		       cc.position
+		  FROM user_constraints c
+		  JOIN user_cons_columns cc
+		    ON cc.constraint_name = c.constraint_name
+		  JOIN user_constraints rc
+		    ON rc.constraint_name = c.r_constraint_name
+		  JOIN user_cons_columns rcc
+		    ON rcc.constraint_name = c.r_constraint_name
+		   AND rcc.position = cc.position
+		 WHERE c.table_name = %s
+		   AND c.constraint_type = 'R'
+		 ORDER BY c.constraint_name, cc.position`, o.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type accum struct {
+		refTable string
+		cols     []string
+		refCols  []string
+		onDelete string
+	}
+	byName := map[string]*accum{}
+	var order []string
+	for rows.Next() {
+		var (
+			fkName     string
+			columnName string
+			refTable   string
+			refColumn  string
+			deleteRule string
+			position   int
+		)
+		if err := rows.Scan(&fkName, &columnName, &refTable, &refColumn, &deleteRule, &position); err != nil {
+			return nil, err
+		}
+		a, ok := byName[fkName]
+		if !ok {
+			a = &accum{refTable: strings.ToLower(refTable), onDelete: oracleFKDeleteRule(deleteRule)}
+			byName[fkName] = a
+			order = append(order, fkName)
+		}
+		a.cols = append(a.cols, strings.ToLower(columnName))
+		a.refCols = append(a.refCols, strings.ToLower(refColumn))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]ForeignKey, 0, len(order))
+	for _, name := range order {
+		a := byName[name]
+		out = append(out, ForeignKey{
+			Name:       strings.ToLower(name),
+			Columns:    a.cols,
+			RefTable:   a.refTable,
+			RefColumns: a.refCols,
+			OnDelete:   a.onDelete,
+			OnUpdate:   "NO ACTION",
+		})
+	}
+	return out, nil
+}
+
+// oracleListChecks reads C-type constraints from `USER_CONSTRAINTS`,
+// using `SEARCH_CONDITION_VC` (the VARCHAR2 mirror of the LONG
+// SEARCH_CONDITION, present on Oracle 12.2+) to avoid LONG-column scan
+// limitations. The system-generated NOT NULL checks (`"COL" IS NOT
+// NULL`) are filtered out — NOT NULL is surfaced via Column.Nullable,
+// not as a user CHECK constraint, matching the other dialects.
+func oracleListChecks(ctx context.Context, exec Executor, table string) ([]Check, error) {
+	o := &OracleDialect{}
+	q := fmt.Sprintf(`
+		SELECT constraint_name, search_condition_vc
+		  FROM user_constraints
+		 WHERE table_name = %s
+		   AND constraint_type = 'C'
+		 ORDER BY constraint_name`, o.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Check
+	for rows.Next() {
+		var name string
+		var cond sql.NullString
+		if err := rows.Scan(&name, &cond); err != nil {
+			return nil, err
+		}
+		expr := strings.TrimSpace(cond.String)
+		if oracleIsNotNullCheck(expr) {
+			continue
+		}
+		out = append(out, Check{Name: strings.ToLower(name), Expression: expr})
+	}
+	return out, rows.Err()
+}
+
+// oracleReassembleType glues precision/scale or length back onto the
+// bare DATA_TYPE from USER_TAB_COLUMNS. NUMBER(p,s) keeps both when the
+// scale is non-zero; NUMBER(p) when scale is zero/absent; bare NUMBER
+// when precision is NULL. VARCHAR2/CHAR/NVARCHAR2 use CHAR_LENGTH.
+// Everything else (CLOB, BLOB, DATE, TIMESTAMP variants, FLOAT) keeps
+// the catalog's DATA_TYPE verbatim.
+func oracleReassembleType(dataType string, charLen, precision, scale sql.NullInt64) string {
+	switch dataType {
+	case "NUMBER":
+		if !precision.Valid {
+			return "NUMBER"
+		}
+		if !scale.Valid || scale.Int64 == 0 {
+			return fmt.Sprintf("NUMBER(%d)", precision.Int64)
+		}
+		return fmt.Sprintf("NUMBER(%d,%d)", precision.Int64, scale.Int64)
+	case "VARCHAR2", "CHAR", "NVARCHAR2", "NCHAR":
+		if charLen.Valid && charLen.Int64 > 0 {
+			return fmt.Sprintf("%s(%d)", dataType, charLen.Int64)
+		}
+	}
+	return dataType
+}
+
+// oracleFKDeleteRule maps Oracle's DELETE_RULE to the SQL-standard
+// verbose form used in ForeignKey.OnDelete. Oracle only exposes
+// 'CASCADE', 'SET NULL', and 'NO ACTION'.
+func oracleFKDeleteRule(rule string) string {
+	switch rule {
+	case "CASCADE":
+		return "CASCADE"
+	case "SET NULL":
+		return "SET NULL"
+	default:
+		return "NO ACTION"
+	}
+}
+
+// oracleIsNotNullCheck reports whether a CHECK condition is a
+// system-generated NOT NULL constraint, which Oracle stores as exactly
+// `"COL" IS NOT NULL`. Quark surfaces NOT NULL via Column.Nullable, so
+// these are filtered out of Table.Checks.
+//
+// The match is anchored to the *whole* condition being a single
+// double-quoted identifier followed by ` IS NOT NULL` — a user CHECK
+// that merely ends in IS NOT NULL (e.g. `"x" > 0 OR "x" IS NOT NULL`)
+// is kept, because its prefix is not a bare quoted identifier.
+func oracleIsNotNullCheck(cond string) bool {
+	s := strings.TrimSpace(cond)
+	const suffix = " IS NOT NULL"
+	if !strings.HasSuffix(strings.ToUpper(s), suffix) {
+		return false
+	}
+	ident := strings.TrimSpace(s[:len(s)-len(suffix)])
+	return len(ident) >= 2 &&
+		ident[0] == '"' && ident[len(ident)-1] == '"' &&
+		!strings.Contains(ident[1:len(ident)-1], `"`)
+}

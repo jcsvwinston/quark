@@ -367,7 +367,7 @@ Dialect coverage (F3-2 progress):
 | MySQL | ✅ supported — `INFORMATION_SCHEMA.{TABLES,COLUMNS}` scoped to `DATABASE()`, `COLUMN_TYPE` verbatim |
 | MariaDB | ✅ supported — shares the MySQL implementation |
 | SQL Server | ✅ supported — `sys.tables` / `sys.columns` / `sys.types` + `sys.default_constraints` LEFT JOIN; type reassembly from `max_length` / `precision` / `scale` with nvarchar byte→char halving and `MAX` for `max_length = -1` |
-| Oracle | ⚠️ returns `ErrUnsupportedFeature` — F3-2-oracle deferred (no CI) |
+| Oracle | ✅ supported — `USER_TABLES` / `USER_TAB_COLUMNS` / `USER_INDEXES` / `USER_CONSTRAINTS`; identifiers lowercased, `NUMBER`/`VARCHAR2` reassembly, NOT-NULL system checks filtered, `SEARCH_CONDITION_VC` for CHECK predicates |
 
 Schema surface currently covers **tables, columns, non-primary-key
 indexes, and foreign keys**:

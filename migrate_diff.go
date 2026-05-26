@@ -478,9 +478,31 @@ func sortedKeys[V any](m map[string]V) []string {
 
 func columnsEqual(a, b Column) bool {
 	return a.Name == b.Name &&
-		normalizeType(a.Type) == normalizeType(b.Type) &&
+		typesEqual(a.Type, b.Type) &&
 		a.Nullable == b.Nullable &&
 		defaultsEqual(a.Default, b.Default)
+}
+
+// typesEqual reports whether two column types are equivalent after
+// normalisation, plus one cross-dialect special case: Oracle identity
+// columns report as a bare `NUMBER` (no precision) in the catalog, while
+// the model's int kinds map to `NUMBER(19)`. A bare `number` is treated
+// as matching any `number(p[,s])`. This is safe because the catalog only
+// emits bare `number` for identity columns and the model side never
+// produces one — so it never collapses two explicit precisions
+// (`number(1)` ≠ `number(19)` still holds, keeping bool vs int distinct).
+func typesEqual(a, b string) bool {
+	na, nb := normalizeType(a), normalizeType(b)
+	if na == nb {
+		return true
+	}
+	return oracleBareNumberMatch(na, nb) || oracleBareNumberMatch(nb, na)
+}
+
+// oracleBareNumberMatch reports whether `bare` is exactly `number` and
+// `sized` is a parameterised `number(...)`. See [typesEqual].
+func oracleBareNumberMatch(bare, sized string) bool {
+	return bare == "number" && strings.HasPrefix(sized, "number(")
 }
 
 // defaultsEqual returns true when two Column.Default values are
@@ -519,15 +541,21 @@ func defaultsEqual(a, b *string) bool {
 
 // isAutoincrementDefault reports whether a Column.Default string is
 // an engine-generated autoincrement marker rather than a logical
-// user-specified default. Currently matches PG's
-// `nextval(...)` expressions, which is the only engine that exposes
-// autoincrement plumbing via the DEFAULT clause (MySQL uses the
-// EXTRA field; MSSQL uses IDENTITY as a separate property; SQLite
-// uses INTEGER PRIMARY KEY AUTOINCREMENT — none of those produce a
-// COLUMN_DEFAULT row in the catalog).
+// user-specified default. Matches:
+//
+//   - PG's `nextval(...)` expressions for SERIAL / IDENTITY columns.
+//   - Oracle's identity-column default, which points at the internal
+//     sequence the GENERATED AS IDENTITY clause creates — e.g.
+//     `"SCHEMA"."ISEQ$$_12345".nextval`. It always ends in `.nextval`,
+//     which also covers a user-declared Oracle sequence default the
+//     model side leaves nil (same treatment as PG's nextval).
+//
+// MySQL uses the EXTRA field; MSSQL uses IDENTITY as a separate
+// property; SQLite uses INTEGER PRIMARY KEY AUTOINCREMENT — none of
+// those produce a COLUMN_DEFAULT row in the catalog.
 func isAutoincrementDefault(s string) bool {
 	low := strings.ToLower(strings.TrimSpace(s))
-	return strings.HasPrefix(low, "nextval(")
+	return strings.HasPrefix(low, "nextval(") || strings.HasSuffix(low, ".nextval")
 }
 
 // normalizeType produces a comparable canonical form for a SQL type

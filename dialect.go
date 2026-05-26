@@ -749,6 +749,19 @@ func (o *OracleDialect) SupportsTransactionalDDL() bool {
 	return true
 }
 
+// MapColumnType translates a neutral column-type string into Oracle's
+// native form. Oracle has no TEXT type (`ORA-00902: invalid datatype`),
+// so the generic TEXT that other engines accept becomes CLOB — the
+// semantic equivalent for unbounded text. Already-native types pass
+// through unchanged, so this is safe to apply to every column type.
+func (o *OracleDialect) MapColumnType(t string) string {
+	switch strings.ToUpper(strings.TrimSpace(t)) {
+	case "TEXT":
+		return "CLOB"
+	}
+	return t
+}
+
 // UpsertSQL for Oracle: MERGE syntax — same as MSSQL, built separately.
 func (o *OracleDialect) UpsertSQL(conflictCols, updateCols []string, _ int) string {
 	return ""

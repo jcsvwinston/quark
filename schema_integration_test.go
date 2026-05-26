@@ -5,7 +5,6 @@ package quark_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -29,32 +28,17 @@ type schemaFixture struct {
 	Description string `db:"description"`
 }
 
-// testSchemaIntrospection runs the F3-2 contract against any dialect
-// the SharedSuite covers. SQLite, PostgreSQL, MySQL, MariaDB, and
-// MSSQL all implement the introspector at the column / index / FK
-// level (and at the CHECK level for the 4 non-SQLite engines —
-// SQLite intentionally returns Checks=nil; see schema.Check godoc).
-// Only Oracle still asserts `ErrUnsupportedFeature` until
-// F3-2-oracle lands.
+// testSchemaIntrospection runs the F3-2 contract against every dialect
+// the SharedSuite covers. All six — SQLite, PostgreSQL, MySQL, MariaDB,
+// MSSQL, and Oracle (F3-2-oracle) — implement the introspector at the
+// column / index / FK level (and at the CHECK level for the 5 non-SQLite
+// engines — SQLite intentionally returns Checks=nil; see schema.Check
+// godoc).
 func testSchemaIntrospection(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	t.Helper()
 
 	dialect := baseClient.Dialect().Name()
 
-	// Dialects without an introspector yet: must surface
-	// ErrUnsupportedFeature. When their follow-up PR lands, this
-	// branch goes away and the dialect joins the main path below.
-	switch dialect {
-	case "oracle":
-		_, err := baseClient.IntrospectSchema(ctx)
-		if !errors.Is(err, quark.ErrUnsupportedFeature) {
-			t.Errorf("dialect %s should return ErrUnsupportedFeature until F3-2-%s lands, got %v",
-				dialect, dialect, err)
-		}
-		return
-	}
-
-	// Supported path: SQLite + PostgreSQL + MySQL + MariaDB + MSSQL.
 	dropTable(baseClient, "schema_fixtures")
 	if err := baseClient.Migrate(ctx, &schemaFixture{}); err != nil {
 		t.Fatalf("migrate: %v", err)

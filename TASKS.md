@@ -11,11 +11,13 @@
 >    la completitud de dialecto). Programa multi-sesión: introspección F3-2 +
 >    lock distribuido + fixes JSON-path/`''`→NULL + flip de CI. **PR (a)
 >    entregado (2026-05-26): #28 (JSON path literal) + #27 (`''`→NULL scan) →
->    187/24 → 194/17. PR (d) entregado (2026-05-26): #29 triage (3 asserts
->    test-vs-dialecto case-sensitive) → 194/17 → 199/12.** Sin regresión en los
->    otros 5 motores. Restan los dos bloques grandes: F3-2 #30 (PlanMigration
->    ×6) y lock distribuido #31 (×3), más el flip de CI #32. Detalle y reparto
->    en [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
+>    187/24 → 194/17. PR (d): #29 triage (3 asserts test-vs-dialecto) →
+>    194/17 → 199/12. PR (b): #30 / F3-2 introspección Oracle
+>    (`IntrospectSchema` + normalización de tipos identity + `ColumnTypeMapper`
+>    TEXT→CLOB) → 199/12 → 211/5 (cierra PlanMigration ×6 + el contrato
+>    SchemaIntrospection ×5).** Sin regresión en los otros 5 motores. **Resta
+>    sólo lock distribuido #31 (MigrationLock ×3)** para 216/0, luego el flip
+>    de CI #32. Detalle en [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
 > 2. ~~**F6-7 follow-ups**~~ — ✅ CERRADO (alcance mínimo): ejemplo runnable
 >    `examples/sharding/main.go` (SQLite, self-contained) + `advanced/sharding.mdx`;
 >    scatter-gather y `shard-key-from-entity` diferidos a v1.1.
@@ -1448,7 +1450,7 @@ Doc: `website/docs/guides/migrations.mdx` § Distributed Migration
 Lock con la tabla per-dialect y notas sobre opt-in / sub-second
 timeout / session-level advisory; CHANGELOG `### Added`.
 
-### F3-2 · Schema introspection (per-dialect) — en progreso
+### F3-2 · Schema introspection (per-dialect) — ✅ cerrado (6 dialectos)
 
 **Core (SQLite + PG) cerrado**. `schema.go` introduce los tipos
 neutrales `Schema{Tables}`, `Table{Name, Columns}`, `Column{Name, Type, Nullable, Default}`,
@@ -1456,7 +1458,7 @@ la interface opcional `SchemaIntrospector`, y `Client.IntrospectSchema(ctx)`.
 `dialect_introspection.go` implementa SQLite (`sqlite_master` + `PRAGMA
 table_info`) y PostgreSQL (`information_schema.tables` / `columns` con
 `current_schema()` scope + reassembly de `varchar(N)`/`numeric(P,S)`).
-MySQL/MariaDB/MSSQL/Oracle devuelven `ErrUnsupportedFeature` por ahora.
+Los seis dialectos implementan `SchemaIntrospector` (ver sub-items).
 
 Pendientes para cerrar F3-2 entero:
 - ~~**F3-2-mysql** / **F3-2-mariadb**~~. **Cerrado** —
@@ -1474,7 +1476,18 @@ Pendientes para cerrar F3-2 entero:
   user-facing. Defaults se pasan raw — MSSQL los devuelve envueltos
   en paréntesis (`(0)`, `(getdate())`), unwrap es responsabilidad
   del F3-3.
-- **F3-2-oracle**: `USER_TABLES`, `USER_TAB_COLUMNS`, `USER_CONS_COLUMNS`. Deferred — Oracle no está en CI hasta que el `gvenzl/oracle-free` image se debuguee.
+- ~~**F3-2-oracle**~~. **Cerrado** (#30 / PR (b) del Gate §A Item 1) —
+  data dictionary `USER_TABLES` / `USER_TAB_COLUMNS` / `USER_INDEXES` /
+  `USER_CONSTRAINTS` (+ `USER_CONS_COLUMNS`). Identifiers lowercaseados
+  (Oracle los almacena en mayúscula), reassembly `NUMBER(p[,s])` /
+  `VARCHAR2(char_len)`, NOT-NULL system checks filtrados (se exponen vía
+  `Column.Nullable`), `SEARCH_CONDITION_VC` para predicados CHECK (evita
+  el LONG `SEARCH_CONDITION`). El diff trata el `NUMBER` desnudo del PK
+  identity y su default de secuencia como equivalentes a `NUMBER(19)`;
+  nueva interface opcional `ColumnTypeMapper` mapea `TEXT`→`CLOB` en el
+  DDL del ejecutor. SharedSuite Oracle 199/12 → 211/5 (cierra
+  PlanMigration ×6 + el contrato SchemaIntrospection ×5). Verificado en
+  los 6 motores.
 - ~~**F3-2-indexes**~~. **Cerrado** — `Table.Indexes`
   poblado en SQLite / PG / MySQL / MariaDB / MSSQL con
   `Index{Name, Columns, Unique}`. PK-backing indexes filtrados

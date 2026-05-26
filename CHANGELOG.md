@@ -94,8 +94,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      entries live in the [0.10.0] section (PR #94) and in
      docs/RELEASE_NOTES_v0.10.0.md. -->
 
+### Added
+
+- **oracle:** schema introspection (`Client.IntrospectSchema`) now supports
+  Oracle, reading the data dictionary (`USER_TABLES`, `USER_TAB_COLUMNS`,
+  `USER_INDEXES`, `USER_CONSTRAINTS`) for tables, columns, non-PK indexes,
+  foreign keys, and CHECK constraints. Completes F3-2 across all six dialects
+  and unblocks `PlanMigration` / `ApplyPlan` on Oracle. (#30)
+- **migrate:** new optional `ColumnTypeMapper` Dialect interface — translates a
+  neutral column-type string to the dialect's native form before DDL. Oracle
+  implements it to map the generic `TEXT` to `CLOB`. Dialects that don't
+  implement it leave types untouched. (#30)
+
 ### Fixed
 
+- **migrate:** `ApplyPlan` of an `OpAddColumn{Type: "TEXT"}` no longer fails
+  with `ORA-00902` on Oracle — the type is mapped to `CLOB` via
+  `ColumnTypeMapper`. The schema diff also treats an Oracle identity column's
+  bare `NUMBER` and its sequence default as equivalent to the model's
+  `NUMBER(19)`, so a migrated model round-trips clean. (#30)
 - **oracle:** `WhereJSON` now inlines the JSON path as a literal on Oracle.
   Oracle's `JSON_VALUE` rejects a bound path (`ORA-40454: path expression not
   a literal`); the validated path (`internal/guard.ValidateJSONPath`,

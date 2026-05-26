@@ -247,7 +247,7 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 		if err := c.guard.ValidateIdentifier(o.Column.Name); err != nil {
 			return fmt.Errorf("add column: %w", err)
 		}
-		ddl := c.dialect.AlterTableAddColumn(o.Table, o.Column.Name, o.Column.Type)
+		ddl := c.dialect.AlterTableAddColumn(o.Table, o.Column.Name, c.mapColumnType(o.Column.Type))
 		_, err := exec.ExecContext(ctx, ddl)
 		return err
 	case OpDropColumn:
@@ -278,7 +278,7 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 			return fmt.Errorf("%w: OpAlterColumn for %s.%s: nullable/default-only changes need F3-3-execute-alter (only type changes are emitted today)",
 				ErrUnsupportedFeature, o.Table, o.New.Name)
 		}
-		ddl := c.dialect.AlterTableAlterColumn(o.Table, o.New.Name, o.New.Type)
+		ddl := c.dialect.AlterTableAlterColumn(o.Table, o.New.Name, c.mapColumnType(o.New.Type))
 		_, err := exec.ExecContext(ctx, ddl)
 		return err
 	case OpCreateIndex:
@@ -387,7 +387,7 @@ func (c *Client) applyCreateTable(ctx context.Context, exec Executor, t Table) e
 		// constructed Plan with adversarial Type/Default strings is
 		// out of scope — the same caveat applies to AddForeignKey's
 		// OnDelete/OnUpdate.
-		piece := c.dialect.Quote(col.Name) + " " + col.Type
+		piece := c.dialect.Quote(col.Name) + " " + c.mapColumnType(col.Type)
 		if !col.Nullable {
 			// The catalog-side Type may already include NOT NULL
 			// in the dialect-native form (PG's `bigint NOT NULL`

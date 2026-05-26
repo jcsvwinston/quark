@@ -72,11 +72,11 @@ the operational backlog lives at
 ### Migrations (schema-as-code)
 
 - `Migrate`, `Sync`, `CreateIndex`, `AddForeignKey`.
-- **Neutral schema introspection** (`Client.IntrospectSchema`) across the
-  four CI dialects + SQLite.
+- **Neutral schema introspection** (`Client.IntrospectSchema`) across all
+  six dialects.
 - **Pure-Go schema diff** (`Diff`, `PlanMigration`, `ApplyPlan`) with
   round-trip identity: `Migrate(model) → PlanMigration(model)` returns
-  empty `Plan` on the five CI motors.
+  empty `Plan` on all six motors.
 - **Transactional or resumable execution**: PG / MSSQL / SQLite
   transactional; MySQL / MariaDB / Oracle resumable with
   `quark_migration_state` checkpoints.
