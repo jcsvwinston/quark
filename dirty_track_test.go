@@ -133,17 +133,21 @@ func testDirtyTracking(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		}
 
 		// Inspect emitted SQL: it must mention the three changed columns
-		// and NOT mention "name" (untouched).
+		// and NOT mention "name" (untouched). Match against a lowercased
+		// copy so the checks hold on Oracle, which uppercases identifiers.
 		sql := obs.latest()
 		if sql == "" {
 			t.Fatal("no EXEC observed")
 		}
+		lower := strings.ToLower(sql)
 		for _, col := range []string{"active", "score", "title"} {
-			if !strings.Contains(sql, col) {
+			if !strings.Contains(lower, col) {
 				t.Errorf("SQL missing changed column %q: %s", col, sql)
 			}
 		}
-		if strings.Contains(strings.ToLower(sql), "\"name\"") || strings.Contains(strings.ToLower(sql), "`name`") || strings.Contains(strings.ToLower(sql), "[name]") {
+		// Quote chars survive ToLower, so the three quote styles still match
+		// per dialect — Oracle's "NAME" lowercases to "name" with quotes intact.
+		if strings.Contains(lower, "\"name\"") || strings.Contains(lower, "`name`") || strings.Contains(lower, "[name]") {
 			t.Errorf("Save touched untouched column 'name': %s", sql)
 		}
 	})
@@ -209,7 +213,9 @@ func testDirtyTracking(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		if _, err := tracked.Save(ctx); err != nil {
 			t.Fatalf("save 3: %v", err)
 		}
-		sql := obs.latest()
+		// Lowercase the haystack so the checks hold on Oracle, which
+		// uppercases identifiers.
+		sql := strings.ToLower(obs.latest())
 		if !strings.Contains(sql, "title") {
 			t.Errorf("expected title in SQL, got: %s", sql)
 		}
