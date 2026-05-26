@@ -84,6 +84,20 @@ del mantenedor", debe haber un commit que lo documente — no basta con
 > bloques grandes: PlanMigration ×6 (#30 / F3-2 introspección) y MigrationLock
 > ×3 (#31 lock distribuido). **Siguiente PR sugerido:** (b) introspección
 > F3-2 #30 (desbloquea PlanMigration) o (c) lock distribuido #31.
+>
+> **Progreso (2026-05-26) — PR (b) entregado (#30 / F3-2 Oracle):**
+> SharedSuite Oracle **199/12 → 211/5**. Implementada
+> `OracleDialect.IntrospectSchema` (data dictionary `USER_*`: tablas,
+> columnas, índices no-PK, FKs, checks; identifiers en minúscula, NOT-NULL
+> system checks filtrados, `SEARCH_CONDITION_VC` para predicados). Cerrados
+> el cluster PlanMigration ×6 **y** el contrato `SchemaIntrospection` ×5 (que
+> se activó al implementar el introspector). Tres piezas: introspección +
+> normalización de tipos en el diff (identity Oracle: bare `NUMBER` ≡
+> `NUMBER(19)` y secuencia identity tratada como autoincrement) + interfaz
+> opcional `ColumnTypeMapper` (`TEXT`→`CLOB`, evita `ORA-00902`). Sin
+> regresión en los otros 5 motores. **Resta sólo MigrationLock ×3 (#31 lock
+> distribuido Oracle)** para 216/0, luego el flip de CI #32. **Siguiente PR:**
+> (c) lock distribuido #31 — el último bloque del Item 1.
 
 **Por qué bloqueante:** Quark se posiciona como *"el ORM con Oracle real"*
 (ver `comparison.mdx` y la justificación competitiva del análisis de
