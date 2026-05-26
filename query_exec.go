@@ -118,6 +118,31 @@ func (ns nullableTimeScanner) Scan(src any) error {
 	return nil
 }
 
+// emptyStringScanner wraps a *string destination so a NULL column scans as the
+// empty string instead of erroring with "converting NULL to string is
+// unsupported". This reconciles Oracle — which stores an empty string as NULL
+// and therefore returns NULL for a round-tripped empty string — with the other
+// engines that preserve it verbatim. A field declared as a plain string opts
+// into this coercion; use *string or sql.Null[string] to keep the NULL vs
+// empty-string distinction.
+type emptyStringScanner struct{ dest *string }
+
+func (s emptyStringScanner) Scan(src any) error {
+	switch v := src.(type) {
+	case nil:
+		*s.dest = ""
+	case string:
+		*s.dest = v
+	case []byte:
+		*s.dest = string(v)
+	default:
+		// Match database/sql's lenient string conversion for any other driver
+		// shape so non-NULL values keep behaving as before.
+		*s.dest = fmt.Sprintf("%v", v)
+	}
+	return nil
+}
+
 // makeScanDest returns the scan destination for a single column, wrapping
 // time-shaped fields so MySQL/MariaDB []uint8 values parse correctly and so
 // the per-column timezone (loc) is applied on the way in. loc nil means no
@@ -141,6 +166,11 @@ func scanDestForPtr(iface any, loc *time.Location) any {
 			return iface
 		}
 		return nullableTimeScanner{dest: dst, loc: loc}
+	case *string:
+		// Non-pointer string field: coerce a NULL column to "" (see
+		// emptyStringScanner). A *string field arrives here as **string and is
+		// left untouched so its NULL / "" distinction is preserved.
+		return emptyStringScanner{dest: dst}
 	}
 	return iface
 }
