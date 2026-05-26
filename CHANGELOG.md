@@ -105,6 +105,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   neutral column-type string to the dialect's native form before DDL. Oracle
   implements it to map the generic `TEXT` to `CLOB`. Dialects that don't
   implement it leave types untouched. (#30)
+- **oracle:** distributed migration lock (`Client.AcquireMigrationLock`) now
+  supports Oracle via `DBMS_LOCK` (session-scoped, survives DDL's implicit
+  commits). Completes F3-1 across all engines except SQLite. Requires `GRANT
+  EXECUTE ON DBMS_LOCK TO <user>` — see ADR-0018. (#31)
 
 ### Fixed
 

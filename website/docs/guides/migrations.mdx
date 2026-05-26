@@ -319,8 +319,8 @@ Per-dialect implementation:
 | PostgreSQL | `pg_advisory_lock(hashtext(name))` + `pg_advisory_unlock`. Timeout via `SET lock_timeout`. SQLSTATE `55P03` mapped to `ErrLockTimeout`. |
 | MySQL / MariaDB | `GET_LOCK(name, timeout_seconds)` + `RELEASE_LOCK`. Return value 0 mapped to `ErrLockTimeout`. |
 | SQL Server | `sp_getapplock @LockMode='Exclusive', @LockOwner='Session'` + `sp_releaseapplock`. Status code `-1` mapped to `ErrLockTimeout`. |
+| Oracle | `DBMS_LOCK.ALLOCATE_UNIQUE` + `REQUEST(X_MODE, release_on_commit => FALSE)` — session-scoped, survives the implicit commits of DDL. Result code `1` mapped to `ErrLockTimeout`. **Requires `GRANT EXECUTE ON DBMS_LOCK TO <user>`** (not granted to schema users by default; see ADR-0018). |
 | SQLite | Not supported — single-writer model; use `BEGIN IMMEDIATE` inside the process. Returns `ErrUnsupportedFeature`. |
-| Oracle | Not yet supported — `DBMS_LOCK.REQUEST` needs PL/SQL plumbing; tracked as F3-1 follow-up. Returns `ErrUnsupportedFeature`. |
 
 Implementation notes:
 
