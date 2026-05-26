@@ -40,6 +40,21 @@ err := quark.For[User](ctx, client).Upsert(
 | MSSQL | `MERGE INTO ... USING ... WHEN MATCHED ...` |
 | Oracle | `MERGE INTO ... USING ... WHEN MATCHED ...` |
 
+## Oracle-specific behavior
+
+Oracle differs from the other engines in two ways worth knowing:
+
+- **Empty strings are NULL.** Oracle stores `''` as `NULL`, so an empty
+  string written to a `VARCHAR2`/`CLOB` column comes back as `NULL`. When
+  scanning into a non-pointer `string` field, QUARK coerces that `NULL` to
+  `""`, so empty strings round-trip consistently with the other engines. Use
+  `*string` or `sql.Null[string]` if you need to tell `NULL` apart from `""`.
+- **JSON path is inlined.** `WhereJSON` binds the JSON path as a parameter on
+  every engine except Oracle, whose `JSON_VALUE` rejects a bound path
+  (`ORA-40454: path expression not a literal`). On Oracle the path is inlined
+  as a literal instead. It stays injection-safe because the path is validated
+  against a strict `[A-Za-z0-9_.]` grammar before it reaches the SQL.
+
 ## Custom dialects
 
 Custom or proprietary engines can be registered:

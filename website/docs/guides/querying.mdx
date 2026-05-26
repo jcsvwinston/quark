@@ -487,8 +487,11 @@ those cases.
 
 ### Injection safety
 
-The path is **bound as a parameter**, never interpolated into the SQL surface.
-A path that matches the grammar above produces:
+On every dialect except Oracle the path is **bound as a parameter**, never
+interpolated into the SQL surface. Oracle's `JSON_VALUE` rejects a bound path
+(`ORA-40454: path expression not a literal`), so there the validated path is
+**inlined as a literal**; only the comparison value stays bound. A path that
+matches the grammar above produces:
 
 | Dialect | Shape (with `column = "metadata"`, `path = "plan"`) |
 | --- | --- |
@@ -497,12 +500,22 @@ A path that matches the grammar above produces:
 | MariaDB | `JSON_VALUE(\`metadata\`, ?) = ?` |
 | SQLite | `JSON_EXTRACT("metadata", ?) = ?` |
 | SQL Server | `JSON_VALUE([metadata], @p1) = @p2` |
-| Oracle | `JSON_VALUE("METADATA", :1) = :2` |
+| Oracle | `JSON_VALUE("METADATA", '$.plan') = :1` (path inlined as a literal) |
 
 Even if the path were attacker-controlled the validator rejects everything
-SQL-meaningful, and the bind-as-parameter render makes injection impossible at
-the dialect surface. If you find a path that breaks either guarantee, file an
-issue under the `security` label.
+SQL-meaningful. On the bound dialects the parameter render makes injection
+impossible; on Oracle the same `[A-Za-z0-9_.]` grammar guarantees the inlined
+literal cannot break out of its quotes — the identical guarantee that makes a
+validated, quoted identifier safe. If you find a path that breaks either
+guarantee, file an issue under the `security` label.
+
+:::note Empty strings and NULL
+When a column is `NULL`, scanning it into a non-pointer `string` field yields
+`""` on every dialect. This matters most on Oracle, which stores `''` as `NULL`
+and so returns `NULL` for a round-tripped empty string — the coercion lets
+empty strings behave the same everywhere. If you need to tell `NULL` apart from
+`""`, model the field as `*string` or `sql.Null[string]`.
+:::
 
 ## Joins
 

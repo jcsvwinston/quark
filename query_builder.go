@@ -696,9 +696,12 @@ func (q *Query[T]) HavingExpr(e Expr) *Query[T] {
 
 // WhereJSON adds a WHERE condition for a JSON field.
 // column is the JSON column name, path is a dotted key path within the JSON
-// object (e.g. "user.name"). The path is validated and bound as a parameter
-// — never interpolated into the SQL surface — so it cannot carry SQL
-// injection. See guard.ValidateJSONPath for the accepted grammar.
+// object (e.g. "user.name"). The path is always validated by
+// guard.ValidateJSONPath and, on every dialect except Oracle, bound as a
+// parameter rather than interpolated. Oracle's JSON_VALUE rejects a bound
+// path (ORA-40454), so there the validated path is inlined as a literal; the
+// [A-Za-z0-9_.] grammar keeps it injection-safe. See guard.ValidateJSONPath
+// for the accepted grammar.
 //
 // On invalid path the error is stashed on the query and surfaces at execution
 // time (List, First, etc.), wrapping ErrInvalidJSONPath.
