@@ -41,14 +41,14 @@ El guard **NO es defensa completa contra inyección SQL** — eso requeriría un
 
 **Fix aplicado** (defense-in-depth, 2 capas):
 
-1. **Bind del path** en cada dialecto. Nueva firma `Dialect.JSONExtract(column, path string) (sql string, args []any, err error)`. SQL fragment usa `?` como marker neutral; `query_exec.go:substitutePathMarkers` los sustituye por `dialect.Placeholder(N)` al render. PG usa `jsonb_extract_path_text(col, ?, ?, …)` con un bind por segmento; el resto usa `JSON_EXTRACT`/`JSON_VALUE(col, ?)` con `$.path`.
+1. **Bind del path** en cada dialecto. Nueva firma `Dialect.JSONExtract(column, path string) (sql string, args []any, err error)`. SQL fragment usa `?` como marker neutral; `query_exec.go:substitutePathMarkers` los sustituye por `dialect.Placeholder(N)` al render. PG usa `jsonb_extract_path_text(col, ?, ?, …)` con un bind por segmento; MySQL/MariaDB/SQLite/MSSQL usan `JSON_EXTRACT`/`JSON_VALUE(col, ?)` con `$.path`. **Excepción Oracle (2026-05-26, #28):** `JSON_VALUE` de Oracle rechaza un path bound (`ORA-40454: path expression not a literal`), así que el path validado se inlinea como literal (`JSON_VALUE("COL", '$.path')`, `args=nil`). Sigue siendo injection-safe por la misma lógica del § Filosofía: un token que el motor NO deja parametrizar se valida antes de concatenar (aquí vía `ValidateJSONPath`). `OracleDialect.JSONExtract` es el patrón de referencia para ese caso.
 2. **`ValidateJSONPath`** (función libre en `internal/guard/guard.go`) — regex `^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$`, max 256 chars. Cada dialecto la llama antes de construir el bind. Path inválido → error envuelto con `ErrInvalidJSONPath` (sentinel nuevo en `errors.go`).
 
 **Decisión sobre `$.user.name`**: rechazado. La API expone `user.name`; el dialecto añade el prefijo `$.` o construye el variadic. Razón: API uniforme, sin obligar al usuario a conocer la sintaxis de cada motor.
 
 **Cobertura de regresión**: `testJSONPathSecurity` en `json_path_security_test.go` wired a `SharedSuite` (los 6 motores). Aserciones: (a) path en bind args, no en SQL; (b) 8 vectores de inyección rechazados (comillas, `;`, `--`, `/*`, leading `$`, dash, espacios, vacío).
 
-**Anti-pattern a evitar al construir nuevas funciones JSON**: cualquier path o expresión proveniente de input del usuario que se interpole con `Sprintf %s` en lugar de pasarse como bind. Si añades soporte JSON nuevo (containment ops, JSONB queries, arrays), sigue el patrón `Dialect.JSONExtract`: validar + retornar args + bind marker neutro.
+**Anti-pattern a evitar al construir nuevas funciones JSON**: cualquier path o expresión proveniente de input del usuario que se interpole con `Sprintf %s` en lugar de pasarse como bind — **salvo cuando el motor rechaza el bind y el valor ya pasó por un validator del guard** (ver `OracleDialect.JSONExtract` como patrón de referencia: literal inline sólo tras `ValidateJSONPath`). Si añades soporte JSON nuevo (containment ops, JSONB queries, arrays), sigue el patrón `Dialect.JSONExtract`: validar + (bind por defecto / literal validado donde el motor lo exija).
 
 ### P0-5 · `JOIN ... ON` se concatenaba raw (cerrado, fase deprecation)
 

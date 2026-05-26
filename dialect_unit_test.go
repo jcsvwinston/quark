@@ -352,7 +352,10 @@ func TestOracleDialect_Full(t *testing.T) {
 	if d.LastInsertIDQuery("t", "id") != "" {
 		t.Error("LastInsertIDQuery")
 	}
-	if sql, args, err := d.JSONExtract("d", "k"); err != nil || !strings.Contains(sql, "JSON_VALUE") || len(args) == 0 {
+	// Oracle's JSON_VALUE rejects a bound path (ORA-40454): the validated path
+	// is inlined as the literal '$.k', the column is quoted (uppercased "D"),
+	// and there is no bind arg.
+	if sql, args, err := d.JSONExtract("d", "k"); err != nil || !strings.Contains(sql, "JSON_VALUE") || !strings.Contains(sql, `"D"`) || !strings.Contains(sql, "'$.k'") || len(args) != 0 {
 		t.Errorf("JSONExtract: sql=%q args=%v err=%v", sql, args, err)
 	}
 	if d.CurrentTimestamp() != "SYSDATE" {

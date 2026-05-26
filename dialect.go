@@ -69,16 +69,20 @@ type Dialect interface {
 	// caller (typically buildWhereClause) substitutes each '?' for the dialect's
 	// placeholder syntax (`$N`, `?`, `@pN`, `:N`) at the appropriate arg index.
 	//
-	// The path is validated and passed as a bind parameter — never interpolated
-	// into the SQL surface. This closes the SQL-injection vector that existed
-	// while the path was concatenated with fmt.Sprintf.
+	// The path is validated by guard.ValidateJSONPath before it reaches the
+	// SQL. Every dialect that can bind the path does so — never interpolating
+	// it — which closes the SQL-injection vector that existed while the path
+	// was concatenated with fmt.Sprintf. Oracle is the one exception: its
+	// JSON_VALUE rejects a bound path (ORA-40454), so the validated path is
+	// inlined as a literal, made safe by the same [A-Za-z0-9_.] restriction
+	// that makes Quote(validatedIdentifier) safe.
 	//
 	// Example outputs (with column "data" and path "user.name"):
 	//   Postgres: jsonb_extract_path_text(("data")::jsonb, ?, ?) / args=["user","name"]
 	//   MySQL:    JSON_EXTRACT(`data`, ?) / args=["$.user.name"]
 	//   SQLite:   JSON_EXTRACT("data", ?) / args=["$.user.name"]
 	//   MSSQL:    JSON_VALUE([data], ?) / args=["$.user.name"]
-	//   Oracle:   JSON_VALUE("DATA", ?) / args=["$.user.name"]
+	//   Oracle:   JSON_VALUE("DATA", '$.user.name') / args=nil (path inlined, see above)
 	JSONExtract(column, path string) (sql string, args []any, err error)
 
 	// AlterTableAddColumn returns SQL to add a column to a table.
@@ -754,7 +758,12 @@ func (o *OracleDialect) JSONExtract(column, path string) (string, []any, error) 
 	if err := guard.ValidateJSONPath(path); err != nil {
 		return "", nil, err
 	}
-	return fmt.Sprintf("JSON_VALUE(%s, ?)", o.Quote(column)), []any{"$." + path}, nil
+	// Oracle's JSON_VALUE requires the path as a string literal; binding it
+	// raises ORA-40454 ("path expression not a literal"). The path cannot be
+	// parameterised, so it is concatenated like an identifier. This stays
+	// injection-safe because ValidateJSONPath restricts path to [A-Za-z0-9_.]
+	// — the same guarantee that makes Quote(validatedIdentifier) safe.
+	return fmt.Sprintf("JSON_VALUE(%s, '$.%s')", o.Quote(column), path), nil, nil
 }
 
 // MariaDBDialect implements the MariaDB dialect.
