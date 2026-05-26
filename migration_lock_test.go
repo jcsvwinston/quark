@@ -7,12 +7,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
 
 // TestAcquireMigrationLock_UnsupportedDialects pins the rejection
-// contract: SQLite and Oracle do not implement MigrationLocker, so
+// contract: SQLite does not implement MigrationLocker, so
 // Client.AcquireMigrationLock returns ErrUnsupportedFeature wrapped
 // with a descriptive message. The test runs without any database
 // connection; the dialect-detection happens before any RPC.
@@ -23,24 +24,20 @@ func TestAcquireMigrationLock_UnsupportedDialects(t *testing.T) {
 	if _, ok := any(&SQLiteDialect{}).(MigrationLocker); ok {
 		t.Errorf("SQLiteDialect must NOT implement MigrationLocker (decision in F3-1)")
 	}
-
-	// Oracle is also deferred — same contract.
-	if _, ok := any(&OracleDialect{}).(MigrationLocker); ok {
-		t.Errorf("OracleDialect must NOT implement MigrationLocker yet — deferred to follow-up PR")
-	}
 }
 
 // TestAcquireMigrationLock_SupportedDialects mirrors the unsupported
-// check: PG / MySQL / MariaDB / MSSQL must implement MigrationLocker.
-// A regression where one of them silently drops the interface would
-// surface as `ErrUnsupportedFeature` at runtime against a real DB —
-// expensive to catch then; cheap to catch here.
+// check: PG / MySQL / MariaDB / MSSQL / Oracle must implement
+// MigrationLocker. A regression where one of them silently drops the
+// interface would surface as `ErrUnsupportedFeature` at runtime against
+// a real DB — expensive to catch then; cheap to catch here.
 func TestAcquireMigrationLock_SupportedDialects(t *testing.T) {
 	for _, d := range []any{
 		&PostgresDialect{},
 		&MySQLDialect{},
 		&MariaDBDialect{},
 		&MSSQLDialect{},
+		&OracleDialect{},
 	} {
 		if _, ok := d.(MigrationLocker); !ok {
 			t.Errorf("dialect %T must implement MigrationLocker", d)
@@ -180,5 +177,44 @@ func TestMSSQLMigrationLock_TimeoutMapping(t *testing.T) {
 	_, err := d.AcquireMigrationLock(context.Background(), fakeConnector{conn: conn}, "x", time.Second)
 	if !errors.Is(err, ErrLockTimeout) {
 		t.Errorf("expected ErrLockTimeout, got %v", err)
+	}
+}
+
+// TestOracleMigrationLock_EmitsExpectedSQL pins the Oracle DBMS_LOCK
+// shape against the fake conn: Acquire runs an ALLOCATE_UNIQUE + REQUEST
+// PL/SQL block, Release runs an ALLOCATE_UNIQUE + RELEASE block and
+// closes the connection. The fake doesn't populate the OUT result, so it
+// stays 0 (acquired) — the timeout-result mapping is covered by the
+// SharedSuite integration test (TimeoutWhenAlreadyHeld).
+func TestOracleMigrationLock_EmitsExpectedSQL(t *testing.T) {
+	conn := &fakeConn{}
+	d := &OracleDialect{}
+	lock, err := d.AcquireMigrationLock(context.Background(), fakeConnector{conn: conn}, "schema-migrate", 2*time.Second)
+	if err != nil {
+		t.Fatalf("AcquireMigrationLock: %v", err)
+	}
+	if len(conn.execs) != 1 {
+		t.Fatalf("expected 1 exec on acquire, got %d (%v)", len(conn.execs), conn.execs)
+	}
+	if !strings.Contains(conn.execs[0], "DBMS_LOCK.ALLOCATE_UNIQUE") ||
+		!strings.Contains(conn.execs[0], "DBMS_LOCK.REQUEST") {
+		t.Errorf("acquire SQL should call ALLOCATE_UNIQUE + REQUEST, got %q", conn.execs[0])
+	}
+
+	if err := lock.Release(context.Background()); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if len(conn.execs) != 2 || !strings.Contains(conn.execs[1], "DBMS_LOCK.RELEASE") {
+		t.Errorf("release SQL should call DBMS_LOCK.RELEASE, got %v", conn.execs)
+	}
+	if !conn.closeCalled {
+		t.Errorf("Release should close the connection")
+	}
+	// Idempotent — second Release is a no-op (no extra exec).
+	if err := lock.Release(context.Background()); err != nil {
+		t.Errorf("second Release should be no-op, got %v", err)
+	}
+	if len(conn.execs) != 2 {
+		t.Errorf("second Release should not emit SQL, got %v", conn.execs)
 	}
 }

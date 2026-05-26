@@ -248,15 +248,117 @@ func (l *mssqlMigrationLock) Release(ctx context.Context) error {
 	return closeErr
 }
 
-// --- SQLite & Oracle: intentionally NOT MigrationLocker ----------------------
+// --- Oracle ------------------------------------------------------------------
+
+// dbmsLockMaxWait is DBMS_LOCK's "wait forever" sentinel (the documented
+// MAXWAIT constant, 32767 seconds). Used when the caller passes a
+// non-positive timeout.
+const dbmsLockMaxWait = 32767
+
+// AcquireMigrationLock uses Oracle's `DBMS_LOCK` package — the session-
+// scoped advisory lock that mirrors PG's `pg_advisory_lock` and MySQL's
+// `GET_LOCK`. `ALLOCATE_UNIQUE(name)` maps the lock name to a handle
+// (deterministic per name), and `REQUEST(handle, X_MODE,
+// release_on_commit => FALSE)` takes the exclusive lock. Because the
+// lock is session-scoped and explicitly NOT released on commit, it
+// survives Oracle's implicit DDL commits and needs no open transaction
+// — which is what lets it fit the connection-only DBConn interface (a
+// lock-table `SELECT … FOR UPDATE` would need a held transaction the
+// interface doesn't expose). See ADR-0018.
+//
+// REQUEST returns 0 (acquired), 1 (timeout), 2 (deadlock), 3 (parameter
+// error), 4 (already own this lock), 5 (illegal handle). 0 and 4 are
+// success; 1 maps to ErrLockTimeout; the rest are errors.
+//
+// Requires `GRANT EXECUTE ON DBMS_LOCK TO <user>` — DBMS_LOCK is not
+// granted to schema users by default. The timeout is in whole seconds
+// (DBMS_LOCK's granularity); sub-second waits round up to 1s.
+//
+// Prerequisite caveat is documented in website/docs/guides/migrations.mdx.
+func (d *OracleDialect) AcquireMigrationLock(ctx context.Context, db DBConnector, name string, timeout time.Duration) (MigrationLock, error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("oracle migration lock: get conn: %w", err)
+	}
+	waitSecs := int64(timeout / time.Second)
+	switch {
+	case timeout <= 0:
+		waitSecs = dbmsLockMaxWait
+	case waitSecs == 0:
+		waitSecs = 1
+	}
+	var result int
+	_, err = conn.ExecContext(ctx,
+		`DECLARE
+		   h VARCHAR2(128);
+		 BEGIN
+		   DBMS_LOCK.ALLOCATE_UNIQUE(:lockname, h);
+		   :result := DBMS_LOCK.REQUEST(lockhandle => h, lockmode => DBMS_LOCK.X_MODE, timeout => :wait, release_on_commit => FALSE);
+		 END;`,
+		sql.Named("lockname", name),
+		sql.Named("result", sql.Out{Dest: &result}),
+		sql.Named("wait", waitSecs),
+	)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("oracle migration lock: DBMS_LOCK.REQUEST: %w", err)
+	}
+	switch result {
+	case 0, 4: // 0 = acquired, 4 = this session already owns it
+		return &oracleMigrationLock{conn: conn, name: name}, nil
+	case 1:
+		_ = conn.Close()
+		return nil, ErrLockTimeout
+	default:
+		_ = conn.Close()
+		return nil, fmt.Errorf("oracle migration lock: DBMS_LOCK.REQUEST returned %d", result)
+	}
+}
+
+type oracleMigrationLock struct {
+	conn     DBConn
+	name     string
+	released bool
+	mu       sync.Mutex
+}
+
+// Release re-derives the handle on the same (still-held) session via
+// ALLOCATE_UNIQUE — deterministic for the name — and calls
+// DBMS_LOCK.RELEASE, then returns the connection to the pool. Idempotent.
+func (l *oracleMigrationLock) Release(ctx context.Context) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.released {
+		return nil
+	}
+	l.released = true
+	var result int
+	_, err := l.conn.ExecContext(ctx,
+		`DECLARE
+		   h VARCHAR2(128);
+		 BEGIN
+		   DBMS_LOCK.ALLOCATE_UNIQUE(:lockname, h);
+		   :result := DBMS_LOCK.RELEASE(h);
+		 END;`,
+		sql.Named("lockname", l.name),
+		sql.Named("result", sql.Out{Dest: &result}),
+	)
+	closeErr := l.conn.Close()
+	if err != nil {
+		return fmt.Errorf("oracle migration lock: DBMS_LOCK.RELEASE: %w", err)
+	}
+	// RELEASE returns 0 (released) or 4 (didn't own — already gone). Both
+	// are acceptable end states; other codes signal a lifecycle bug.
+	if result != 0 && result != 4 {
+		return fmt.Errorf("oracle migration lock: DBMS_LOCK.RELEASE returned %d", result)
+	}
+	return closeErr
+}
+
+// --- SQLite: intentionally NOT MigrationLocker -------------------------------
 //
 // SQLite has no distributed-lock primitive (single-writer model;
 // transactions block on the WAL). Use `BEGIN IMMEDIATE` inside the
 // process for the equivalent semantic. The dialect therefore does not
 // implement MigrationLocker — `Client.AcquireMigrationLock` returns
 // `ErrUnsupportedFeature`.
-//
-// Oracle's `DBMS_LOCK.REQUEST` requires PL/SQL blocks, a per-lock
-// `ALLOCATE_UNIQUE` handle, and a global-namespace-of-names; it doesn't
-// fit cleanly into the same sync-style interface as the others. Defer
-// to a follow-up PR with proper PL/SQL plumbing.
