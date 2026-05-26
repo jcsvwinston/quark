@@ -53,6 +53,38 @@ func TestNormalizeType(t *testing.T) {
 	}
 }
 
+// TestTypesEqual pins the type-equivalence contract used by
+// columnsEqual, including the Oracle identity special case: a bare
+// `number` (what the catalog reports for a GENERATED AS IDENTITY
+// column) matches any parameterised `number(...)` (the model's int
+// kinds map to `NUMBER(19)`). The invariant that must hold is that two
+// *explicit* precisions still differ — `number(1)` (bool) ≠ `number(19)`
+// (int) — so the wildcard never collapses distinct sized types.
+func TestTypesEqual(t *testing.T) {
+	cases := []struct {
+		name      string
+		a, b      string
+		wantEqual bool
+	}{
+		{"identical sized number, case fold", "NUMBER(19)", "number(19)", true},
+		{"bare number matches sized (Oracle identity PK)", "NUMBER", "NUMBER(19)", true},
+		{"sized matches bare (reversed)", "number(19)", "number", true},
+		{"bare number matches number(p,s)", "NUMBER", "NUMBER(10,2)", true},
+		{"explicit precisions stay distinct (bool vs int)", "NUMBER(1)", "NUMBER(19)", false},
+		{"bare number does NOT match a non-number type", "NUMBER", "INTEGER", false},
+		{"bare number does NOT match varchar", "NUMBER", "varchar(255)", false},
+		{"falls through to normalizeType for non-number", "BIGINT", "bigint", true},
+		{"non-number different types stay different", "varchar(255)", "varchar(100)", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := typesEqual(tc.a, tc.b); got != tc.wantEqual {
+				t.Errorf("typesEqual(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.wantEqual)
+			}
+		})
+	}
+}
+
 // TestDefaultsEqual pins the cross-dialect default-equivalence
 // contract added to close PR #55's CI red on PG: a column whose
 // catalog reports `nextval('seq'::regclass)` must compare equal
@@ -78,6 +110,13 @@ func TestDefaultsEqual(t *testing.T) {
 		{"nil vs whitespace+nextval", nil, str("  nextval('seq')  "), true},
 		{"nextval-looking string is not stripped at non-prefix",
 			str("foo_nextval('seq')"), nil, false},
+		{"nil vs Oracle identity sequence default", nil,
+			str(`"QUARK"."ISEQ$$_73722".nextval`), true},
+		{"Oracle identity default vs nil",
+			str(`"QUARK"."ISEQ$$_73722".nextval`), nil, true},
+		{"nil vs Oracle user sequence .nextval", nil, str("app_seq.nextval"), true},
+		{"literal default ending in word nextval stays literal",
+			str("'pending_nextval'"), nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

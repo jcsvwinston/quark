@@ -8,16 +8,13 @@ import (
 )
 
 // TestSchema_DialectInterfaceConformance pins which dialects implement
-// SchemaIntrospector. SQLite, PG, MySQL, MariaDB, and MSSQL all opt
-// in (post-F3-2-core / F3-2-mysql / F3-2-mssql). Only Oracle does
-// not yet — it returns ErrUnsupportedFeature from
-// Client.IntrospectSchema until F3-2-oracle lands.
+// SchemaIntrospector. All six — SQLite, PG, MySQL, MariaDB, MSSQL, and
+// Oracle (F3-2-oracle) — opt in.
 //
 // The test is the lever that locks the expectation: if a future PR
 // accidentally regresses a dialect's introspector (e.g. removes the
 // method during a refactor), this test fires with "<dialect> must
-// implement SchemaIntrospector", reminding the author. When
-// F3-2-oracle lands, flip Oracle's expectation to `true`.
+// implement SchemaIntrospector", reminding the author.
 func TestSchema_DialectInterfaceConformance(t *testing.T) {
 	cases := []struct {
 		dialect any
@@ -29,7 +26,7 @@ func TestSchema_DialectInterfaceConformance(t *testing.T) {
 		{&MySQLDialect{}, true, "MySQL must implement SchemaIntrospector (F3-2-mysql)"},
 		{&MariaDBDialect{}, true, "MariaDB must implement SchemaIntrospector (F3-2-mysql — shares impl with MySQL)"},
 		{&MSSQLDialect{}, true, "MSSQL must implement SchemaIntrospector (F3-2-mssql)"},
-		{&OracleDialect{}, false, "Oracle introspector is deferred (no CI coverage; needs local DBMS access)"},
+		{&OracleDialect{}, true, "Oracle must implement SchemaIntrospector (F3-2-oracle)"},
 	}
 	for _, tc := range cases {
 		_, ok := tc.dialect.(SchemaIntrospector)
