@@ -1,13 +1,10 @@
-# Quark v1.0.0 — Release Notes (DRAFT)
+# Quark v1.0.0 — Release Notes
 
-> **⚠ DRAFT — v1.0.0 is NOT tagged yet.** The [v1.0 gate](V1_GATE.md) §A is
-> now **fully closed (5/5)** as of PR #127 (Oracle in blocking CI, Item 1).
-> v1.0.0 is unblocked: tag it with **`/release v1.0.0`** — that command does
-> the version bump, Docusaurus versioning, and tag. This banner is removed by
-> the release PR, not here.
->
-> The **Known limitations** section below is authoritative: each waiver landed
-> here in the same PR that closed its gate item (V1_GATE.md §D).
+The first stable release. v1.0 closes the qualitative [v1.0 gate](V1_GATE.md)
+§A (5/5) — most notably Oracle joining the blocking CI matrix (216/0), which
+completes cross-engine coverage across all six dialects. The **Known
+limitations** section below is authoritative: each waiver landed in the same
+PR that closed its gate item (V1_GATE.md §D).
 
 ## What v1.0 means
 
@@ -24,10 +21,65 @@ is committed to under SemVer:
 
 ## Phases delivered
 
-_(Authored by the `/release v1.0.0` PR — one paragraph per phase, Fases 0–6,
-written alongside the version bump and Docusaurus versioning per
-`.claude/commands/release.md` step 8. The gate is closed; the narrative is
-release prose, not a gate blocker.)_
+v1.0 is the sum of seven development phases (0–6). Each shipped incrementally
+across the v0.x line; the per-version detail is in [`CHANGELOG.md`](../CHANGELOG.md)
+and [`docs/ROADMAP.md`](ROADMAP.md).
+
+- **Phase 0 — security & correctness** (v0.3.0, cleanup in v0.5.0). Closed the
+  five P0 bugs found in the first audit: tenant-isolation leak in `Or()`,
+  `WhereJSON` path injection (now validated + bound), swallowed `linkM2M`
+  errors, the `Update` zero-value trap, and raw `JOIN ... ON` concatenation.
+  The v0.5.0 cleanup added the infrastructure the rest of the line relies on:
+  a testcontainers per-engine CI matrix (blocking on PG/MySQL/MariaDB/MSSQL),
+  release-please automation, a docs linter, and the Docusaurus deploy pipeline.
+
+- **Phase 1 — rich types + dirty tracking** (v0.3.0; closed out in v0.6.0 and
+  v0.7.0). Dirty tracking (`Track().Find().Save()`), the `JSON[T]` and
+  `Nullable[T]` typed wrappers, `RegisterTypeMapper` with `size`/`precision`/
+  `scale` tag sizing, soft-delete scopes, and optimistic locking
+  (`quark:"version"`). The deferred type work closed later: `Array[T]` in
+  v0.6.0 and per-column timezones (`quark:"tz=..."`, UTC-on-the-wire) in v0.7.0.
+
+- **Phase 2 — advanced query builder** (v0.4.0). A composable expression AST,
+  typed subqueries (`Exists`/`InSub`/…), CTEs (`With`/`WithRecursive`), window
+  functions, set operations (`Union`/`Intersect`/`Except`), pessimistic
+  locking (`ForUpdate`/`SkipLocked`/…), dotted-path nested preload, and
+  IN-list chunking. The structured `Join(table).On(...)` builder replaced the
+  v0.3.x string form (breaking — see [`MIGRATION_v0.4.0.md`](MIGRATION_v0.4.0.md)).
+
+- **Phase 3 — schema-as-code migrations** (v0.6.0; Oracle completed at the v1.0
+  cut). Distributed migration lock, neutral schema introspection, a pure-Go
+  schema diff with a `models → Plan → Apply` pipeline, transactional or
+  resumable apply per dialect, the `quarkmigrate` plan/verify/apply library,
+  orchestrated `Backfill`, and a per-Client model registry. Oracle
+  introspection (F3-2) and its `DBMS_LOCK`-based migration lock landed in the
+  v1.0 cut, completing the pipeline on all six engines.
+
+- **Phase 4 — observability + resilient cache** (v0.8.0). OpenTelemetry metrics
+  and spans with argument redaction, a slow-query log, deterministic
+  (collision-free) cache keys, in-process stampede protection (singleflight +
+  TTL jitter + XFetch), per-row cache invalidation, and opt-in deadlock retry
+  on `Client.Tx` across all engines.
+
+- **Phase 5 — engine-enforced multi-tenancy, hooks, events, audit** (v0.9.0).
+  PostgreSQL-native row-level security (`RowLevelSecurityNative` via
+  `set_config` + `CREATE POLICY`) with the `quarktenant` policy-installer CLI;
+  transactional `After*` hooks that fire post-commit plus `Before/AfterFind`;
+  public `Tx.OnCommit`/`Tx.OnRollback`; a real `EventBus`; and an audit log
+  written atomically with each write. Two breaking-minors — see
+  [`MIGRATION_v0.9.0.md`](MIGRATION_v0.9.0.md).
+
+- **Phase 6 — code generation, HA, sharding, benchmarks** (v0.10.0 → v1.0.0).
+  Opt-in code generation (`quark gen`: typed scanners and a single-integer-PK
+  INSERT binder) that auto-registers and falls back to reflection; typed query
+  field accessors; read replicas with pool routing and replica failover; a
+  pluggable `ShardRouter`; a stress/load harness; and a reproducible benchmark
+  harness comparing Quark against raw `database/sql`, GORM, and the
+  code-generation tier (ent, sqlc). The benchmarks ([ADR-0017](adr/0017-codegen-type-safety-not-perf-gate.md))
+  showed reflection is not the bottleneck — sqlc (no runtime) sits on the raw
+  floor while ent (codegen + a runtime) stays in the reflect class — so the
+  ADR-0002 ≥3× p99 performance gate was retired and codegen reframed as a
+  type-safety feature, not a speedup.
 
 ## Known limitations
 

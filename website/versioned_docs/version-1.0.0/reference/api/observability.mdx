@@ -1,0 +1,224 @@
+# Observability API Reference
+
+Reference for observers, middleware, OpenTelemetry, hooks, and notifications.
+
+## QueryObserver
+
+```go
+type QueryObserver interface {
+    ObserveQuery(event QueryEvent)
+}
+```
+
+Attach observers with `WithQueryObserver`:
+
+```go
+type MetricsObserver struct{}
+
+func (m *MetricsObserver) ObserveQuery(event quark.QueryEvent) {
+    metrics.Record(event.Table, event.Operation, event.Duration, event.Rows, event.Error)
+}
+
+client, err := quark.New("postgres", dsn,
+    quark.WithQueryObserver(&MetricsObserver{}),
+)
+```
+
+### `QueryEvent`
+
+```go
+type QueryEvent struct {
+    SQL       string
+    Args      []any
+    Duration  time.Duration
+    Rows      int64
+    Error     error
+    Table     string
+    Operation string
+}
+```
+
+Operations include values such as `SELECT`, `EXEC`, `QUERY_ROW`,
+`SELECT (stream)`, `SELECT (cursor)`, `RAW_QUERY`, and `RAW_EXEC`.
+
+## Middleware
+
+```go
+type Middleware interface {
+    WrapExec(next ExecFunc) ExecFunc
+    WrapQuery(next QueryFunc) QueryFunc
+    WrapQueryRow(next QueryRowFunc) QueryRowFunc
+}
+```
+
+Function types:
+
+```go
+type ExecFunc func(ctx context.Context, exec Executor, sqlStr string, args []any) (sql.Result, error)
+type QueryFunc func(ctx context.Context, exec Executor, sqlStr string, args []any) (*sql.Rows, error)
+type QueryRowFunc func(ctx context.Context, exec Executor, sqlStr string, args []any) *sql.Row
+```
+
+Embed `BaseMiddleware` to override only the paths you need:
+
+```go
+type LoggingMiddleware struct {
+    quark.BaseMiddleware
+}
+
+func (l *LoggingMiddleware) WrapQuery(next quark.QueryFunc) quark.QueryFunc {
+    return func(ctx context.Context, exec quark.Executor, sqlStr string, args []any) (*sql.Rows, error) {
+        start := time.Now()
+        rows, err := next(ctx, exec, sqlStr, args)
+        log.Printf("query duration=%s err=%v sql=%s", time.Since(start), err, sqlStr)
+        return rows, err
+    }
+}
+```
+
+## Slow query log
+
+`WithSlowQueryThreshold(d)` enables a structured WARN log line for every
+Quark operation that takes longer than `d`. The line is emitted through
+`Client.logger` (the configured `*slog.Logger`) before any registered
+`QueryObserver` is notified.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithSlowQueryThreshold(100*time.Millisecond),
+)
+```
+
+Fields on the log record:
+
+| Attribute | Type | Source |
+| --- | --- | --- |
+| `duration_ms` | int64 | The observed duration in milliseconds. |
+| `threshold_ms` | int64 | The configured threshold in milliseconds. |
+| `operation` | string | `SELECT` / `EXEC` / `SELECT_ROW` / `RAW_QUERY` / `RAW_EXEC`. |
+| `table` | string | The Quark-managed table, when known (raw queries leave it empty). |
+| `rows` | int64 | Rows affected for `EXEC` / rows returned for `SELECT_ROW`; zero otherwise. |
+| `sql` | string | The parameterised SQL. **Bind arguments are NOT included** — same redaction principle as the F4-2 span policy. |
+
+Default: `0` (disabled). A negative value is also treated as disabled.
+Callers that want richer context (or argument-aware reporting under their
+own retention policy) should register a `QueryObserver`.
+
+The threshold check is a single comparison; a Client with the feature
+disabled pays nothing on the observer hot path.
+
+## OpenTelemetry
+
+```go
+import quarkotel "github.com/jcsvwinston/quark/otel"
+
+client, err := quark.New("postgres", dsn,
+    quark.WithMiddleware(quarkotel.New()),
+)
+```
+
+The middleware emits **spans** and **metrics** for every database operation.
+Both tracer and meter are resolved lazily from the OTel global providers
+at query-execution time — install your `TracerProvider` / `MeterProvider`
+before the first query.
+
+### Spans
+
+| Execution | Span name |
+| --- | --- |
+| `ExecContext` | `quark.exec` |
+| `QueryContext` | `quark.query` |
+| `QueryRowContext` | `quark.query_row` |
+
+Attributes: `db.statement` (parameterised SQL with placeholders), `db.operation`
+(`EXEC` / `SELECT` / `SELECT_ROW`), and — when `WithDBSystem` is set —
+`db.system`. Bind arguments are **not** attached to spans by default.
+
+### Span redaction (`WithSpanRedaction`)
+
+By default the middleware operates in **`RedactArgs`** mode: bind arguments
+never reach a span. Only the parameterised SQL ends up in `db.statement`.
+
+For local debugging you can opt in to **`IncludeArgs`**, which attaches a
+`db.statement.args` attribute (a string slice rendered via `fmt.Sprintf("%v", arg)`):
+
+```go
+quarkotel.New(quarkotel.WithSpanRedaction(quarkotel.IncludeArgs))
+```
+
+Use `IncludeArgs` only in development. A tracing backend MUST NOT see user
+values it has no authority to retain.
+
+### Metrics
+
+The middleware emits three instruments on the `github.com/jcsvwinston/quark`
+meter:
+
+| Instrument | Kind | Unit | Description |
+| --- | --- | --- | --- |
+| `quark.queries.total` | counter (Int64) | — | Every Quark operation increments this. |
+| `quark.queries.duration` | histogram (Float64) | `ms` | Wall-clock time of the operation, including middleware overhead. |
+| `quark.queries.rows` | histogram (Int64) | — | Rows affected, **Exec only** — emitted when `sql.Result.RowsAffected()` succeeds. `SELECT` / `SELECT_ROW` do not emit (counting them would require wrapping `*sql.Rows`, a future enhancement). |
+
+Every data point carries `db.operation` and — when `WithDBSystem` is set —
+`db.system`.
+
+### `WithDBSystem`
+
+The middleware sits below the query builder and does not introspect the
+Quark `Client`. If you want the `db.system` attribute populated, pass the
+dialect name explicitly:
+
+```go
+quarkotel.New(quarkotel.WithDBSystem("postgres"))
+```
+
+When unset, the attribute is omitted from spans and metrics.
+
+## Hooks
+
+Entity-level hooks:
+
+```go
+type BeforeCreateHook interface {
+    BeforeCreate(ctx context.Context) error
+}
+```
+
+Available hook interfaces:
+
+| Interface | Method |
+| --- | --- |
+| `BeforeCreateHook` | `BeforeCreate(context.Context) error` |
+| `AfterCreateHook` | `AfterCreate(context.Context) error` |
+| `BeforeUpdateHook` | `BeforeUpdate(context.Context) error` |
+| `AfterUpdateHook` | `AfterUpdate(context.Context) error` |
+| `BeforeDeleteHook` | `BeforeDelete(context.Context) error` |
+| `AfterDeleteHook` | `AfterDelete(context.Context) error` |
+
+## Notifications
+
+### `Notify(ctx context.Context, provider ClientProvider, channel, payload string) error`
+
+Sends a database notification where supported.
+
+```go
+err := quark.Notify(ctx, client, "user_events", `{"type":"signup","id":123}`)
+```
+
+Current support:
+
+| Dialect | Behavior |
+| --- | --- |
+| PostgreSQL | Uses `pg_notify($1, $2)`. |
+| MySQL | Returns not supported. |
+| SQLite | Returns not supported. |
+| Other dialects | Returns not supported. |
+
+### `NewListenerFactory(client *Client) *ListenerFactory`
+
+Creates the inbound LISTEN/NOTIFY listener factory (renamed from
+`NewEventBus` in v0.9.0). `CreateListener` is not implemented and returns
+`ErrDialectNotSupported` — LISTEN/NOTIFY is out of scope for Fase 5
+(ADR-0013). This is unrelated to the outbound CRUD-event
+[`EventBus`](../../advanced/events) interface.
