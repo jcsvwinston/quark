@@ -1,14 +1,13 @@
 # Quark v1.0.0 — Release Notes (DRAFT)
 
-> **⚠ DRAFT — v1.0.0 is NOT tagged yet.** This document is being assembled
-> as the [v1.0 gate](V1_GATE.md) closes. **One** §A blocking item remains open
-> before v1.0 can be tagged: **Item 1 (Oracle in CI)**. Do **not** run
-> `/release v1.0.0` until `V1_GATE.md §A` is fully closed and this banner is
-> removed.
+> **⚠ DRAFT — v1.0.0 is NOT tagged yet.** The [v1.0 gate](V1_GATE.md) §A is
+> now **fully closed (5/5)** as of PR #127 (Oracle in blocking CI, Item 1).
+> v1.0.0 is unblocked: tag it with **`/release v1.0.0`** — that command does
+> the version bump, Docusaurus versioning, and tag. This banner is removed by
+> the release PR, not here.
 >
-> The **Known limitations** section below is authoritative as items close via
-> *Salida B* (document-the-waiver): each waiver lands here in the same PR that
-> closes its gate item (V1_GATE.md §D).
+> The **Known limitations** section below is authoritative: each waiver landed
+> here in the same PR that closed its gate item (V1_GATE.md §D).
 
 ## What v1.0 means
 
@@ -25,7 +24,10 @@ is committed to under SemVer:
 
 ## Phases delivered
 
-_(To be written when the gate closes — one paragraph per phase, Fases 0–6.)_
+_(Authored by the `/release v1.0.0` PR — one paragraph per phase, Fases 0–6,
+written alongside the version bump and Docusaurus versioning per
+`.claude/commands/release.md` step 8. The gate is closed; the narrative is
+release prose, not a gate blocker.)_
 
 ## Known limitations
 
@@ -63,9 +65,6 @@ adopters see the boundary before they build on it.
   scatter-gather** (read fan-out with merge) and **shard-key-from-entity**
   (deriving the key from the model on writes) are deferred to v1.1; there are no
   cross-shard joins or transactions. *(V1_GATE §A Item 2.)*
-- **Oracle CI coverage:** _PENDING — V1_GATE §A Item 1 decision (Salida A/B/C).
-  This bullet will state the final stance (Oracle in blocking CI, nightly job,
-  or manual-validation-only positioning) when Item 1 closes._
 
 ## Migration from v0.x
 
