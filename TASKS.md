@@ -1,11 +1,18 @@
 # Quark — backlog táctico
 
-> **🚦 Gate v1.0 — bloqueante actual.** ADR-0017 retiró el gate ≥3× p99
-> de ADR-0002 y delegó el nuevo checklist a
-> [`docs/V1_GATE.md`](docs/V1_GATE.md). **Lee ese documento antes de
-> taggear v1.0.0 o de elegir trabajo destinado a v1.0.** Estado del §A
-> (los 5 items que bloquean el tag) — **5/5 cerrados (2026-05-27)**.
-> **§A cerrado → v1.0.0 desbloqueado: usa `/release v1.0.0`.**
+> **✅ v1.0.0 publicado (2026-05-27).** Tag `v1.0.0` (PR #116, vía
+> release-please con trailer `Release-As: 1.0.0`); GitHub Release marcada
+> Latest; docs live en `jcsvwinston.github.io/quark/docs` (1.0.0 es ahora
+> la versión por defecto). El gate v1.0 ([`docs/V1_GATE.md`](docs/V1_GATE.md))
+> §A cerró 5/5; ADR-0017 ya había retirado el gate ≥3× p99 de ADR-0002 y
+> reencuadrado el codegen como type-safety. **Fase 6 cerrada — era la última
+> fase pre-v1.0; con ella el roadmap a v1.0 está completo.** Compromiso
+> SemVer: `v1.x` mantiene compatibilidad de API; breaking → `v2.x` con
+> `docs/MIGRATION_v2.0.0.md`. **Trabajo siguiente = post-v1.0 / v1.1**
+> (items diferidos abajo: scatter-gather y shard-key-from-entity de F6-7,
+> F6-3b sólo si type-safety, inbound `LISTEN/NOTIFY`, stampede
+> cross-instance, registry de migración versionado per-Client). El
+> historial del §A se conserva abajo.
 >
 > 1. ~~**Oracle en CI**~~ — ✅ **CERRADO (2026-05-27, Salida A — Oracle en CI
 >    bloqueante)**. Programa multi-sesión: PR (a) #123 (JSON path literal +
@@ -114,8 +121,10 @@
 > **No empieces "explorando".** Invoca `/next-session [foco]` (definido en
 > `.claude/commands/next-session.md`) y trabaja el bloque que indique.
 >
-> Foco admitido: `fase6` | `auto`. Si dudas, usa `auto`. Los focos
-> `f0`, `fase3`, `tipos`, `fase4` y `fase5` ya no aplican — cerrados.
+> Foco admitido: `auto` (post-v1.0). Si dudas, usa `auto`. Los focos
+> `f0`, `fase3`, `tipos`, `fase4`, `fase5` y `fase6` ya no aplican —
+> cerrados; **v1.0.0 publicado**. El trabajo post-v1.0 (v1.1) aún no tiene
+> fase formal abierta — `auto` audita el backlog diferido y propone.
 
 Estado real del backlog post-v0.9.0 (releases v0.5.0 → v0.9.0 hechos;
 **Fases 0, 1, 2, 3, 4 y 5 cerradas**; `[Unreleased]` con la deuda menor

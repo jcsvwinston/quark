@@ -6,10 +6,9 @@ description: Implemented Quark capabilities and planned future work, aligned wit
 
 # Roadmap
 
-Quark is currently **v0.13 — late-alpha**, with **Phase 6** substantially
-delivered (all four pillars) toward a v1.0 honesto. This page separates what already ships from
-what is planned, so the docs do not read like a promise that every idea is
-already in `main`.
+Quark is **v1.0.0** — the first stable release under SemVer, with Phases 0–6
+complete. This page separates what already ships from what is planned, so the
+docs do not read like a promise that every idea is already in `main`.
 
 The canonical roadmap (with the phased plan and trade-offs) lives at
 [`docs/ANALISIS_MADUREZ.md` §4](https://github.com/jcsvwinston/quark/blob/main/docs/ANALISIS_MADUREZ.md);
@@ -160,7 +159,7 @@ the operational backlog lives at
 
 - Stored routine helpers (`routine_builder.go`).
 
-## In progress (Phase 6 — path to v1.0)
+## Phase 6 — delivered (v1.0.0)
 
 - **Read replicas** (F6-5) — **delivered** (v0.13.0): `WithReplicas(replica1, …)`
   routes reads to replicas; writes always go to the primary; `Sticky(ctx)`
@@ -170,15 +169,17 @@ the operational backlog lives at
 - **Primary failover** (F6-6) — **delivered** (v0.13.0): replica failover +
   health cooldown (ADR-0015).
 - **Sharding** (`ShardRouter`, F6-7) — **delivered**: routes per query by
-  shard key (ADR-0016). Follow-ups (scatter-gather, shard-key-from-entity,
-  runnable PG example) pending.
+  shard key (ADR-0016), with a runnable example in `examples/sharding/`.
+  Scatter-gather and shard-key-from-entity are deferred to v1.1.
 - **Stress testing harness** (F6-9) — **delivered** (v0.13.0) in
   `benchmarks/stress/`.
-- **ent + sqlc in the benchmarks harness** (F6-8b) — deferred;
-  informational only, not a v1.0 gate (the ≥3× gate was retired by
-  ADR-0017).
-- **UPDATE / partial / batch binder codegen** (F6-3b) — **deferred**;
-  measured payoff ~1% (`benchmarks/PROFILING.md`).
+- **ent + sqlc in the benchmarks harness** (F6-8b) — **delivered** (v1.0.0):
+  the code-generation tier in the comparison harness; informational, not a
+  v1.0 gate (the ≥3× gate was retired by ADR-0017). See
+  [Benchmarks](./benchmarks).
+- **UPDATE / partial / batch binder codegen** (F6-3b) — **deferred** to v1.1;
+  measured payoff ~1% (`benchmarks/PROFILING.md`), reopened only if motivated
+  by type-safety.
 
 ## Known current boundaries
 
