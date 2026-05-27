@@ -8,7 +8,8 @@
   [`website/docs/reference/benchmarks.mdx`](../website/docs/reference/benchmarks.mdx)
 - **The reproducible harness:** [`benchmarks/`](../benchmarks/README.md) — a
   standalone module with `go test -bench` functions comparing Quark, raw
-  `database/sql`, and GORM on the same model, schema, and operations.
+  `database/sql`, GORM, ent, and sqlc on the same model, schema, and
+  operations.
 
 ## Run it
 
@@ -25,4 +26,6 @@ in-memory SQLite; the gap between Quark's reflect path and the hand-written
 `database/sql` floor is the baseline the code-generation work (F6-2/F6-3) is
 measured against, per
 [ADR-0002](adr/0002-reflect-default-codegen-fase-6.md). The codegen-tier
-comparison (ent, sqlc) is tracked as F6-8b in [`TASKS.md`](../TASKS.md).
+comparison (ent, sqlc) is delivered as F6-8b — see the published table and
+its reading in
+[`website/docs/reference/benchmarks.mdx`](../website/docs/reference/benchmarks.mdx).

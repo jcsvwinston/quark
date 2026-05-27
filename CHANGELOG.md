@@ -130,6 +130,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   everywhere. Use `*string` or `sql.Null[string]` to keep the `NULL` vs `""`
   distinction. (#27)
 
+### Tests
+
+- **benchmarks:** added the code-generation tier to the comparison harness
+  (F6-8b) — `benchmarks/ent` (ent, schema-generated typed client) and
+  `benchmarks/sqlc` (sqlc, SQL-generated `database/sql` wrappers), each its
+  own test binary mirroring `benchmarks/gorm`. The run confirms the ADR-0017
+  finding: sqlc sits on the raw `database/sql` floor (no runtime) while ent
+  (codegen + a rich runtime) stays in the reflect class, so cross-library
+  speed tracks runtime/allocation design, not reflect-vs-codegen. Published
+  numbers and methodology in `website/docs/reference/benchmarks.mdx`. This is
+  informational, not a v1.0 gate (the ≥3× p99 gate it once fed was retired by
+  ADR-0017).
+
 ## [0.9.0] - 2026-05-21
 
 Phase 5 release — engine-enforced multi-tenancy, transactional hooks,
