@@ -528,10 +528,10 @@ cross-shard tx).
 > 2026-05-25): el último bloqueo arquitectónico a v1.0 queda resuelto; v1.0 se
 > mide contra el checklist honesto de `ANALISIS_MADUREZ.md` §3.
 
-### F6-8 · Benchmarks proper
+### F6-8 · Benchmarks proper ✅ (8a v0.11.0 #98; 8b entregado 2026-05-27)
 
 > **Dividido en 8a (baseline, mergeado en v0.11.0) y 8b (codegen-tier,
-> diferido).** Razón: el objetivo declarado del foco "benchmarks first" es
+> entregado 2026-05-27).** Razón: el objetivo declarado del foco "benchmarks first" es
 > el **baseline pre-codegen** (Quark vs `database/sql` puro), que es lo que
 > mide el overhead que el codegen quita y contra lo que se mide el gate de
 > ADR-0002. ent y sqlc son codegen-tier (necesitan código generado
@@ -563,16 +563,29 @@ in-memory el margen al suelo es ~2×, así que el gate, de cumplirse, será en
 paths más pesados o bajo la concurrencia de F6-9). **Mergeado**:
 PR #98 (`c16de24f`); profiling de seguimiento en PR #102.
 
-#### F6-8b · Comparación codegen-tier (ent + sqlc) — diferido (informativo, no gate)
+#### ~~F6-8b · Comparación codegen-tier (ent + sqlc)~~ ✅ entregado (informativo, no gate)
 
-Añadir ent y sqlc como subpaquetes (`benchmarks/ent/`, `benchmarks/sqlc/`)
-con su código generado commiteado, espejando `benchmarks/gorm/` (mismo
-aislamiento de driver, import de `internal/model`). **Disposición final
-([ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md), 2026-05-25):**
-con el gate ≥3× retirado, esta comparación pasa a ser **informativa/opcional,
-no un gate de v1.0**. Aporta señal comparativa apples-to-apples, pero no
-bloquea el tag. **Done** (si se entrega): ent y sqlc en la matriz; números
-publicados junto a los de 8a; metodología actualizada.
+**Cerrado (2026-05-27).** ent y sqlc añadidos como subpaquetes propios
+(`benchmarks/ent/`, `benchmarks/sqlc/`), cada uno su binario de test
+espejando `benchmarks/gorm/` (aislamiento de driver, import de
+`internal/model`, sin core de Quark). ent: schema en `ent/schema` +
+cliente generado vía `go generate` (tool `entgo.io/ent/cmd/ent` fijado por
+directiva `tool` en `go.mod`). sqlc: `schema.sql`/`query.sql`/`sqlc.yaml` +
+paquete generado `sqlc/sqlcdb` (sólo importa `database/sql`, cero deps de
+módulo). Las 5 ops por implementación. **Hallazgo (confirma
+[ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md)):** sqlc va al
+suelo de `database/sql` (~1.0–1.1×, sin runtime) mientras ent —también
+codegen pero con runtime rico (builders/mutaciones)— se queda en la clase
+reflect (su Update es el más lento de los 5); la diferencia de velocidad
+entre librerías la marca el diseño de runtime/allocs, NO reflect-vs-codegen.
+Esto es exactamente por qué el codegen propio de Quark (F6-2/F6-3) recupera
+~1–5% y se reencuadró como type-safety. Números publicados (medianas
+`-count=6` + benchstat) en `website/docs/reference/benchmarks.mdx`; README
+del harness + `docs/benchmarks.md` actualizados; CHANGELOG `[Unreleased]
+### Tests`. **Disposición final (ADR-0017):** informativo/opcional, NO gate
+de v1.0 (el gate ≥3× que alimentaba quedó retirado). Asimetría documentada:
+sqlc no emite batch multi-fila para SQLite (`:copyfrom`/`:batch` son
+pgx-only) → su InsertBatch es bucle single-row en una transacción.
 
 ### F6-9 · Stress / load testing ✅ v0.13.0 (#109)
 
