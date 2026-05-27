@@ -81,21 +81,30 @@ jobs:
           go test -run=^$ -bench=. -benchtime=1x -count=1 ./...
 
   # F0-8: per-engine integration matrix.
-  # Spins up each engine via testcontainers-go and runs the SharedSuite
-  # against it. Docker is pre-installed on ubuntu-latest runners.
-  # Each engine runs in parallel; the matrix excludes SQLite (covered
-  # by the `test` job above) and Oracle (see followup F — the gvenzl
-  # images crash on hosted runners; the helper stays for local use).
+  # Spins up each engine and runs the SharedSuite against it. Docker is
+  # pre-installed on ubuntu-latest runners. Each engine runs in parallel;
+  # the matrix excludes SQLite (covered by the `test` job above).
   #
-  # **Blocking** as of F0-8 followup final: PG / MySQL / MariaDB /
-  # MSSQL all run the SharedSuite end-to-end and a red light fails
-  # the PR. The matrix landed first as advisory while the 11 latent
-  # test-side bugs the first run surfaced were fixed in followups
-  # A-G; with those closed, the matrix is now the canonical signal.
+  # PG / MySQL / MariaDB / MSSQL boot via testcontainers-go inside the
+  # test process. Oracle does NOT: testcontainers' lifecycle (reaper +
+  # wait strategy) makes the gvenzl image exit code 1 within seconds on
+  # hosted runners. Instead the `oracle` entry boots a plain `docker run`
+  # container in a setup step and hands the suite a DSN via
+  # QUARK_TEST_ORACLE_DSN — the proven path (v1.0 gate §A Item 1). When
+  # that env var is set, `resolveOracleDSN` (containers_test.go) uses it
+  # directly and skips testcontainers entirely.
+  #
+  # **Blocking** as of F0-8 followup final: a red light on any engine
+  # fails the PR. The matrix landed first as advisory while the 11 latent
+  # test-side bugs the first run surfaced were fixed in followups A-G;
+  # with those closed, the matrix is now the canonical signal.
   integration:
     name: Integration (${{ matrix.engine }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Job-level cap covers the slowest engine (Oracle: ~3-6 min cold boot
+    # + suite). Per-engine test execution is bounded by the run step's
+    # own timeout below; this only sizes the wall-clock envelope.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -108,16 +117,11 @@ jobs:
             run: 'TestSuiteMariaDB|TestMariaDBCache'
           - engine: mssql
             run: TestSuiteMSSQL
-          # Oracle is intentionally excluded from the matrix. Both
-          # `gvenzl/oracle-free:23-slim` and `:23-slim-faststart` exit
-          # with code 1 inside ~5 seconds on ubuntu-latest runners with
-          # no startup log emitted. Likely a memory cap / kernel quirk
-          # on hosted runners; gvenzl issue tracker has similar reports.
-          # The `setupOracleContainer` helper stays in
-          # `containers_test.go` so a developer with a working Oracle
-          # runtime locally can still run
-          # `go test -tags=integration -run TestSuiteOracle ./...`.
-          # F0-8 followup F tracks the open investigation.
+          - engine: oracle
+            run: TestSuiteOracle
+            # Oracle does a full DB init from scratch (~3 min cold) on
+            # plain `:23-slim`; budget extra wall-clock for boot + suite.
+            timeout: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -125,6 +129,40 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      # Oracle-only: testcontainers crashes on hosted runners, so boot a
+      # plain container, wait for readiness, grant DBMS_LOCK (the DSN path
+      # bypasses the test helper's grant), and export the DSN. ADR-0018:
+      # the migration lock needs EXECUTE ON DBMS_LOCK, not granted to
+      # schema users by default.
+      - name: Start Oracle
+        if: matrix.engine == 'oracle'
+        run: |
+          docker run -d --name quark-oracle -p 1521:1521 \
+            -e ORACLE_PASSWORD=quark \
+            -e APP_USER=quark \
+            -e APP_USER_PASSWORD=quark \
+            gvenzl/oracle-free:23-slim
+
+          echo "Waiting for Oracle to report ready..."
+          deadline=$((SECONDS + 600))
+          until docker logs quark-oracle 2>&1 | grep -q "DATABASE IS READY TO USE!"; do
+            if [ $SECONDS -ge $deadline ]; then
+              echo "Oracle did not become ready within 10 minutes; logs:"
+              docker logs quark-oracle
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "Granting EXECUTE ON DBMS_LOCK to quark..."
+          docker exec quark-oracle sqlplus -S -L sys/quark@localhost:1521/FREEPDB1 as sysdba <<'SQL'
+          WHENEVER SQLERROR EXIT SQL.SQLCODE
+          GRANT EXECUTE ON DBMS_LOCK TO quark;
+          EXIT
+          SQL
+
+          echo "QUARK_TEST_ORACLE_DSN=oracle://quark:quark@localhost:1521/FREEPDB1" >> "$GITHUB_ENV"
 
       - name: Run ${{ matrix.engine }} suite
         timeout-minutes: ${{ matrix.timeout || 20 }}
