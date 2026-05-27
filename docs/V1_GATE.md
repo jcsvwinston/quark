@@ -1,12 +1,12 @@
 # Gate v1.0 — qué falta para taggear honesto
 
-> **Fecha:** 2026-05-25
+> **Fecha:** 2026-05-25 (actualizado 2026-05-27)
 > **Estado actual:** `v0.13.0` taggeada; F6-5 / F6-6 / F6-7 / F6-9 entregados.
-> **Progreso §A:** **3/5 cerrados** (Items 3, 4 vía *Salida B*; Item 2
-> alcance mínimo, 2026-05-25). Abiertos: **Item 1** (Oracle en CI — **Salida A
-> elegida (Full), programa multi-sesión EN PROGRESO**; diagnóstico local
-> 187/24) y **Item 5** (`RELEASE_NOTES_v1.0.0.md` — DRAFT, se finaliza al
-> cerrar Item 1).
+> **Progreso §A:** **5/5 cerrados.** Item 1 (Oracle en CI, Salida A) cerrado
+> 2026-05-27 vía PR #127 — Oracle en la matriz bloqueante en verde (216/0).
+> Items 3, 4 vía *Salida B*; Item 2 alcance mínimo. Item 5
+> (`RELEASE_NOTES_v1.0.0.md`) finalizado junto a Item 1. **§A cerrado →
+> v1.0.0 desbloqueado para `/release v1.0.0`.**
 > **Origen:** [ADR-0017](adr/0017-codegen-type-safety-not-perf-gate.md) §3 retira el gate
 > ≥3× p99 de ADR-0002 y delega el nuevo gate a *"el checklist honesto de
 > `docs/ANALISIS_MADUREZ.md` §3 (cobertura cross-engine, gaps estructurales)"*.
@@ -32,7 +32,7 @@ del mantenedor", debe haber un commit que lo documente — no basta con
 
 ## §A · Items bloqueantes (cierra antes de v1.0)
 
-### Item 1 — Oracle en CI · 🚧 Salida A elegida (Full), EN PROGRESO
+### Item 1 — Oracle en CI · ✅ Cerrado (Salida A — Oracle en CI bloqueante)
 
 > **Decisión del mantenedor (2026-05-25): Salida A — Oracle en CI bloqueante.**
 > Programa multi-sesión. Se ejecuta como una secuencia de PRs enfocados (abajo).
@@ -110,19 +110,37 @@ del mantenedor", debe haber un commit que lo documente — no basta con
 > Oracle está en verde total (216/0).** Sólo queda el **flip de CI #32**:
 > añadir Oracle a la matriz bloqueante de `.github/workflows/ci.yml` (+ el
 > grant DBMS_LOCK en el setup del job) → cierra §A Item 1 y el gate.
+>
+> **Cerrado (2026-05-27) — flip de CI (PR [#127](https://github.com/jcsvwinston/quark/pull/127)):**
+> Oracle está en la matriz `integration` bloqueante, en verde sobre runner
+> hosted (`Integration (oracle)` 2m1s, **216/0**) sin regresión en
+> PG/MySQL/MariaDB/MSSQL. El job arranca `gvenzl/oracle-free:23-slim` con
+> `docker run` (no testcontainers — su reaper + wait-strategy salía con
+> código 1 en runners hosted), espera el log de readiness, hace `GRANT
+> EXECUTE ON DBMS_LOCK` vía `sqlplus` como sysdba, y pasa el DSN por
+> `QUARK_TEST_ORACLE_DSN` (que hace a `resolveOracleDSN` saltarse
+> testcontainers). **Hallazgo:** la imagen gvenzl **sí arranca** en
+> ubuntu-latest vía `docker run` (~30-90 s) — el bloqueo histórico era
+> específico de testcontainers, no de la imagen. **Gotcha corregido en el
+> mismo PR:** `docker exec` sin `-i` no reenvía el heredoc al stdin de
+> sqlplus, así que el grant era un no-op silencioso (exit 0, sin SQL) y
+> MigrationLock fallaba con `PLS-00201`; con `-i` el grant corre y el
+> `WHENEVER SQLERROR` salta de verdad. §A Item 1 **cerrado**.
 
 **Por qué bloqueante:** Quark se posiciona como *"el ORM con Oracle real"*
 (ver `comparison.mdx` y la justificación competitiva del análisis de
 madurez). Un v1.0 que se vende por Oracle **sin** validar Oracle en CI es
 contradictorio. La promesa pública supera a la cobertura real.
 
-**Estado hoy:**
+**Estado hoy (cerrado 2026-05-27):**
 
 - Tests Oracle existen (`oracle_suite_test.go`); driver `go-ora` (puro Go).
 - ~~Oracle queda fuera de CI mientras dure el testcontainers image issue~~
-  **corregido el diagnóstico:** la imagen arranca bien; lo que falta es
-  completitud de dialecto (187/24 en local).
-- Validación: manual por release con DSN env var (mientras dure el programa A).
+  **resuelto:** Oracle corre en la matriz `integration` bloqueante (216/0
+  sobre runner hosted, PR #127). La imagen arranca vía `docker run`; lo que
+  faltaba era completitud de dialecto, cerrada en los PRs (a)-(c).
+- Validación: **automática en cada PR** (matriz CI), igual que los otros 5
+  motores. La validación manual por DSN sigue disponible en local.
 
 **Cómo cerrar (elige una salida):**
 
@@ -144,16 +162,16 @@ contradictorio. La promesa pública supera a la cobertura real.
 **Comando de verificación:**
 
 ```bash
-# Oracle en CI bloqueante (Salida A)
-grep -A5 strategy .github/workflows/ci.yml | grep -i oracle
-# debe devolver una entrada en la matriz; ahora mismo no la hay
+# Oracle en CI bloqueante (Salida A) — ahora devuelve la entrada de la matriz
+grep -n 'engine: oracle' .github/workflows/ci.yml
 ```
 
-**Decisión tomada (2026-05-25): Salida A (Full).** Programa multi-sesión en
-curso (ver banner 🚧 arriba). Coste revisado a la luz del diagnóstico local:
-introspección F3-2 + lock distribuido son las piezas grandes; **bastante más
-que las "1-2 sesiones" estimadas** antes de medir. La salida no se cierra
-hasta SharedSuite 211/211 + Oracle en la matriz de CI.
+**Decisión tomada (2026-05-25): Salida A (Full).** **Cerrada 2026-05-27**
+(PR #127). El programa multi-sesión entregó los fixes de dialecto (#123),
+la introspección F3-2 (#125) y el lock distribuido (#126) hasta SharedSuite
+**216/0**, y el flip de CI puso Oracle en la matriz bloqueante en verde sobre
+runner hosted. Coste real: bastante mayor que las "1-2 sesiones" estimadas
+antes de medir — la completitud de dialecto fue el grueso, no la imagen.
 
 ---
 

@@ -4,23 +4,19 @@
 > de ADR-0002 y delegó el nuevo checklist a
 > [`docs/V1_GATE.md`](docs/V1_GATE.md). **Lee ese documento antes de
 > taggear v1.0.0 o de elegir trabajo destinado a v1.0.** Estado del §A
-> (los 5 items que bloquean el tag) — **3/5 cerrados (2026-05-25)**:
+> (los 5 items que bloquean el tag) — **5/5 cerrados (2026-05-27)**.
+> **§A cerrado → v1.0.0 desbloqueado: usa `/release v1.0.0`.**
 >
-> 1. **Oracle en CI** — 🚧 **Salida A (Full) elegida, EN PROGRESO** (2026-05-25).
->    Diagnóstico local: SharedSuite 187/24 (la imagen NO es el bloqueante; lo es
->    la completitud de dialecto). Programa multi-sesión: introspección F3-2 +
->    lock distribuido + fixes JSON-path/`''`→NULL + flip de CI. **PR (a)
->    entregado (2026-05-26): #28 (JSON path literal) + #27 (`''`→NULL scan) →
->    187/24 → 194/17. PR (d): #29 triage (3 asserts test-vs-dialecto) →
->    194/17 → 199/12. PR (b): #30 / F3-2 introspección Oracle
->    (`IntrospectSchema` + normalización de tipos identity + `ColumnTypeMapper`
->    TEXT→CLOB) → 199/12 → 211/5 (cierra PlanMigration ×6 + el contrato
->    SchemaIntrospection ×5). PR (c): #31 / lock distribuido Oracle
->    (`AcquireMigrationLock` vía `DBMS_LOCK`, ADR-0018) → 211/5 → **216/0** ✅
->    (cierra MigrationLock ×3).** Sin regresión en los otros 5 motores.
->    **SharedSuite Oracle en verde total (216/0).** Sólo queda el **flip de CI
->    #32** (añadir Oracle a la matriz + grant DBMS_LOCK en el job) para cerrar
->    §A Item 1 y el gate. Detalle en [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
+> 1. ~~**Oracle en CI**~~ — ✅ **CERRADO (2026-05-27, Salida A — Oracle en CI
+>    bloqueante)**. Programa multi-sesión: PR (a) #123 (JSON path literal +
+>    `''`→NULL) 187/24→199/12; PR (b) #125 / F3-2 introspección Oracle
+>    199/12→211/5; PR (c) #126 / lock distribuido `DBMS_LOCK` (ADR-0018)
+>    211/5→**216/0**. **Flip de CI: PR #127** — Oracle en la matriz
+>    `integration` bloqueante, en verde sobre runner hosted (216/0) sin
+>    regresión en los otros 5 motores. El job arranca `gvenzl/oracle-free`
+>    con `docker run` + DSN (no testcontainers, que crashea en hosted);
+>    `docker exec -i` para el grant `DBMS_LOCK` (sin `-i` el grant era un
+>    no-op silencioso). Detalle en [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
 > 2. ~~**F6-7 follow-ups**~~ — ✅ CERRADO (alcance mínimo): ejemplo runnable
 >    `examples/sharding/main.go` (SQLite, self-contained) + `advanced/sharding.mdx`;
 >    scatter-gather y `shard-key-from-entity` diferidos a v1.1.
@@ -30,10 +26,12 @@
 > 4. ~~**Cross-instance stampede protection**~~ — ✅ CERRADO vía Salida B:
 >    warning "in-process only" promovido en `caching-observability.mdx` +
 >    caveat en `intro.mdx`; hook `DistributedLock` diferido a post-v1.0.
-> 5. **`RELEASE_NOTES_v1.0.0.md` con Known limitations** — ⏳ EN CURSO:
->    `docs/RELEASE_NOTES_v1.0.0.md` creado como DRAFT con los waivers de
->    items 2+3+4 (+ F6-3b, migration registry global, failover pasivo);
->    se completa al cerrar el Item 1.
+> 5. ~~**`RELEASE_NOTES_v1.0.0.md` con Known limitations**~~ — ✅ CERRADO
+>    (2026-05-27, PR #127): `docs/RELEASE_NOTES_v1.0.0.md` con los waivers de
+>    items 2+3+4 (+ F6-3b, migration registry global, failover pasivo) y la
+>    fila Oracle ya resuelta (Oracle en CI bloqueante). La narrativa "Phases
+>    delivered" la escribe el PR de `/release v1.0.0` (prosa de release, no
+>    bloqueante del gate).
 >
 > **Items recomendados pero no bloqueantes**: bug-bash externo
 > (`v0.x-rc1` con ventana de feedback), F6-3b (UPDATE/partial binder),
