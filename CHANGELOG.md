@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0](https://github.com/jcsvwinston/quark/compare/v0.13.0...v1.0.0) (2026-05-27)
+
+
+### release
+
+* v1.0.0 DoD — release notes + Docusaurus 1.0.0 snapshot ([#129](https://github.com/jcsvwinston/quark/issues/129)) ([4a99f41](https://github.com/jcsvwinston/quark/commit/4a99f412b628810780dbeab1b0ca388253dfee75))
+
+
+### Added
+
+* **oracle:** distributed migration lock via DBMS_LOCK — v1.0 gate §A Item 1 PR (c) ([#126](https://github.com/jcsvwinston/quark/issues/126)) ([9231d1d](https://github.com/jcsvwinston/quark/commit/9231d1df44ede14cc69abad4a9ff6281a3676f78))
+* **oracle:** schema introspection (F3-2) — v1.0 gate §A Item 1 PR (b) ([#125](https://github.com/jcsvwinston/quark/issues/125)) ([424a012](https://github.com/jcsvwinston/quark/commit/424a012f24ef9ad09f461330b242b1512f35e557))
+* **replicas:** replica strategies + single-row read routing (F6-5 follow-up) ([#118](https://github.com/jcsvwinston/quark/issues/118)) ([ed5ad96](https://github.com/jcsvwinston/quark/commit/ed5ad96b5dd915989bb345381cefc3294b1a7b0d))
+* **sharding:** pluggable ShardRouter — route per query by shard key (F6-7) ([#115](https://github.com/jcsvwinston/quark/issues/115)) ([039f7ef](https://github.com/jcsvwinston/quark/commit/039f7ef951f5189c00994470709f3529f587c72d))
+
+
+### Fixed
+
+* **oracle:** JSON path literal (ORA-40454) + NULL-&gt;empty-string scan — v1.0 gate §A Item 1 PR (a) ([#123](https://github.com/jcsvwinston/quark/issues/123)) ([6180446](https://github.com/jcsvwinston/quark/commit/61804466a7f37406f728f03e9c1e421b5b5441b5))
+
+
+### Documentation
+
+* **adr:** ADR-0017 — retire ADR-0002 ≥3× p99 codegen gate, reframe codegen as type-safety ([6b16c3c](https://github.com/jcsvwinston/quark/commit/6b16c3c0f082a045266522d34f0c755b2761ff31))
+* doc-sync pass — align public docs to v0.13.0 ([#119](https://github.com/jcsvwinston/quark/issues/119)) ([c1e97d8](https://github.com/jcsvwinston/quark/commit/c1e97d815382f313a772326dfa7a74a0288aa58c))
+* **sharding:** runnable example + close v1.0-gate §A Item 2 ([#121](https://github.com/jcsvwinston/quark/issues/121)) ([ad8e284](https://github.com/jcsvwinston/quark/commit/ad8e28491e70d4934cdbc9dcc891a3bb2f4b665a))
+* **v1-gate:** record Oracle Salida A decision + local 187/24 diagnosis ([#122](https://github.com/jcsvwinston/quark/issues/122)) ([dc82b04](https://github.com/jcsvwinston/quark/commit/dc82b04b399f02c489ffc434bc862341cf8798c2))
+* v1.0 gate checklist (V1_GATE.md) + close §A Items 3 & 4 ([#120](https://github.com/jcsvwinston/quark/issues/120)) ([4049805](https://github.com/jcsvwinston/quark/commit/404980557fbf61fff579a8c3bd9d8fe572dec177))
+
+
+### Tests
+
+* **benchmarks:** add ent + sqlc codegen-tier comparison — F6-8b ([#128](https://github.com/jcsvwinston/quark/issues/128)) ([2347a15](https://github.com/jcsvwinston/quark/commit/2347a15e7634933140c096a315e21f34a63894ad))
+* **oracle:** make DirtyTracking/CTE asserts case-insensitive ([#29](https://github.com/jcsvwinston/quark/issues/29)) ([#124](https://github.com/jcsvwinston/quark/issues/124)) ([eff5a72](https://github.com/jcsvwinston/quark/commit/eff5a72e447c3c25f48fa16ee6227358b667a06a))
+
 ## [0.13.0](https://github.com/jcsvwinston/quark/compare/v0.12.0...v0.13.0) (2026-05-24)
 
 
