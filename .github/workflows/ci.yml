@@ -145,10 +145,12 @@ jobs:
             gvenzl/oracle-free:23-slim
 
           echo "Waiting for Oracle to report ready..."
-          deadline=$((SECONDS + 600))
+          # 6 min is ample (observed ~30-90s on hosted runners) and keeps the
+          # worst case (setup + boot + 25m suite) inside the 35m job cap.
+          deadline=$((SECONDS + 360))
           until docker logs quark-oracle 2>&1 | grep -q "DATABASE IS READY TO USE!"; do
             if [ $SECONDS -ge $deadline ]; then
-              echo "Oracle did not become ready within 10 minutes; logs:"
+              echo "Oracle did not become ready within 6 minutes; logs:"
               docker logs quark-oracle
               exit 1
             fi

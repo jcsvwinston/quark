@@ -65,12 +65,6 @@ adopters see the boundary before they build on it.
   scatter-gather** (read fan-out with merge) and **shard-key-from-entity**
   (deriving the key from the model on writes) are deferred to v1.1; there are no
   cross-shard joins or transactions. *(V1_GATE §A Item 2.)*
-- **Oracle is in blocking CI** (no longer a limitation). As of PR #127 the
-  Oracle SharedSuite (216/0) runs on every PR in the `integration` matrix
-  alongside PostgreSQL/MySQL/MariaDB/MSSQL — the *"ORM with real Oracle"*
-  positioning is now backed by CI, not manual validation (V1_GATE §A Item 1,
-  *Salida A*). The job boots `gvenzl/oracle-free` via `docker run` rather than
-  testcontainers (whose lifecycle crashes on hosted runners).
 
 ## Migration from v0.x
 

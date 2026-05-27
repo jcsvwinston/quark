@@ -182,8 +182,10 @@ the operational backlog lives at
 
 ## Known current boundaries
 
-- **Oracle is excluded from CI** while the testcontainers image issue
-  is open. Oracle-specific SQL is validated manually with a DSN env var.
+- **Oracle runs in the blocking `integration` CI matrix** (all six
+  dialects validated on every PR). The Oracle job boots `gvenzl/oracle-free`
+  via `docker run` instead of testcontainers, whose lifecycle exited code 1
+  on hosted runners; the suite gets a DSN via `QUARK_TEST_ORACLE_DSN`.
 - **The ADR-0002 ≥3× p99 codegen gate has been retired** (ADR-0017).
   Scan/bind codegen measured ~2–5% (scan) / ~1% (INSERT); per-op CPU is
   dominated by `database/sql` and the engine, not reflection, so the
