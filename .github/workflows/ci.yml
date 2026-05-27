@@ -156,7 +156,12 @@ jobs:
           done
 
           echo "Granting EXECUTE ON DBMS_LOCK to quark..."
-          docker exec quark-oracle sqlplus -S -L sys/quark@localhost:1521/FREEPDB1 as sysdba <<'SQL'
+          # -i is required: without it `docker exec` does not forward the
+          # heredoc to sqlplus's stdin, so the grant silently no-ops (exit
+          # 0, no SQL run) and the MigrationLock subtest later fails with
+          # PLS-00201 on DBMS_LOCK. With -i the WHENEVER SQLERROR guard
+          # below also actually fires on a failed/missing grant.
+          docker exec -i quark-oracle sqlplus -S -L sys/quark@localhost:1521/FREEPDB1 as sysdba <<'SQL'
           WHENEVER SQLERROR EXIT SQL.SQLCODE
           GRANT EXECUTE ON DBMS_LOCK TO quark;
           EXIT
