@@ -92,7 +92,7 @@ adopters see the boundary before they build on it.
   `ListenerFactory.CreateListener` returns `ErrDialectNotSupported` on every
   dialect. Consuming `LISTEN/NOTIFY` (a dedicated connection outside the pool,
   with reconnect/backpressure semantics) is planned post-v1.0. See
-  [Event Bus → Not the same as LISTEN/NOTIFY](https://jcsvwinston.github.io/quark-docs/docs/advanced/events). *(V1_GATE §A Item 3.)*
+  [Event Bus → Not the same as LISTEN/NOTIFY](https://jcsvwinston.github.io/quark/docs/advanced/events). *(V1_GATE §A Item 3.)*
 - **Cache stampede protection is in-process only.** Singleflight, TTL jitter,
   and XFetch coordinate within a single process. In a multi-replica deployment,
   N replicas can each compute the same hot key once (much less severe than an

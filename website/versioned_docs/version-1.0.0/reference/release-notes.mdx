@@ -6,18 +6,30 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is documented here as a **v0.x** project (currently **v0.13.0** —
-late-alpha, not yet v1.0 production-ready). **Phase 6** (codegen + HA +
-sharding + benchmarks → v1.0) has substantially delivered all four
-pillars; v0.11–v0.13 are the cuts so far.
+Quark is **v1.0.0** — the first stable release under SemVer. Phases 0–6 are
+complete; `v1.x` keeps API compatibility and breaking changes go to `v2.x`.
 
 Per-version release notes live in the main repository under
 [`docs/RELEASE_NOTES_*.md`](https://github.com/jcsvwinston/quark/tree/main/docs).
 The current tag is documented at
-[`docs/RELEASE_NOTES_v0.13.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.13.0.md).
+[`docs/RELEASE_NOTES_v1.0.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.0.0.md).
 Migration steps for the most recent breaking changes are at
 [`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
-v0.10 through v0.13 introduced **no breaking changes**.
+v0.10 through v1.0 introduced **no breaking changes**.
+
+## v1.0.0
+
+The first stable release. v1.0 closes the qualitative
+[v1.0 gate](https://github.com/jcsvwinston/quark/blob/main/docs/V1_GATE.md) §A
+(5/5) — most notably Oracle joining the blocking CI matrix (216/0), which
+completes cross-engine coverage across all six dialects. No new public API
+beyond the v0.13 surface and **no breaking changes** since v0.9.0; v1.0 is the
+SemVer commitment to that surface. The benchmark harness gained the
+code-generation tier (ent + sqlc, F6-8b), confirming codegen is a type-safety
+feature rather than a speedup ([ADR-0017](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0017-codegen-type-safety-not-perf-gate.md)
+retired the ≥3× p99 gate). Known limitations consciously deferred to v1.1+ are
+listed in the release notes.
+See [`RELEASE_NOTES_v1.0.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.0.0.md).
 
 ## v0.13.0
 

@@ -20,7 +20,7 @@
 
 ## 📌 Status
 
-Quark is in **v0.13** — late-alpha. **Phase 6** (codegen + HA + sharding + benchmarks → v1.0) has substantially delivered all four pillars ([ADR-0014](docs/adr/0014-codegen-coexistence-typed-registry.md)); [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so the path to a real v1.0 is now the honest checklist in [`docs/ANALISIS_MADUREZ.md`](docs/ANALISIS_MADUREZ.md) §3, not a speedup target. **It is not yet v1.0 production-ready** — see the gap analysis.
+Quark is **v1.0.0** — the first stable release under SemVer. Phases 0–6 are complete: the core query builder, CRUD, schema-as-code migrations across all six dialects (Oracle now in blocking CI), multi-tenancy, caché, hooks/events/audit log, observability, opt-in code generation, read replicas with failover, and pluggable sharding. `v1.x` keeps API compatibility; breaking changes go to `v2.x` with a `docs/MIGRATION_v2.0.0.md`. v1.0 was gated on the qualitative checklist in [`docs/V1_GATE.md`](docs/V1_GATE.md) (cross-engine coverage, structural gaps closed or consciously waived), not on a performance target — [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so code generation is a type-safety feature, not a speedup. Known limitations consciously deferred to v1.1+ are listed in [`docs/RELEASE_NOTES_v1.0.0.md`](docs/RELEASE_NOTES_v1.0.0.md).
 
 **v0.13** (Phase 6 HA cut): opt-in **read replicas** (`WithReplicas`) with read/write split, read-your-writes (`Sticky`), and automatic **failover** to the primary on transient replica errors (with a configurable replica cooldown, ADR-0015); a copy-on-write query-builder clone that drops a "fat base" derive to 1 alloc/op; and a runnable stress/load harness in `benchmarks/stress`. No breaking changes.
 
@@ -44,7 +44,7 @@ Quark is in **v0.13** — late-alpha. **Phase 6** (codegen + HA + sharding + ben
 
 **v0.3** (Phase 1 — rich types + dirty tracking): `Nullable[T]`, `JSON[T]`, `RegisterTypeMapper`, optimistic locking, soft-delete scopes.
 
-Breaking changes are documented in `docs/MIGRATION_vX.Y.Z.md` per version ([`MIGRATION_v0.9.0.md`](docs/MIGRATION_v0.9.0.md) covers the two breaking-minor changes in v0.9; none for v0.13, v0.12, v0.11, v0.10, v0.8, v0.7, v0.6 or v0.5; [`MIGRATION_v0.4.0.md`](docs/MIGRATION_v0.4.0.md) covers the Join builder rename from v0.3.x). Release notes per version live under [`docs/RELEASE_NOTES_*.md`](docs/).
+Breaking changes are documented in `docs/MIGRATION_vX.Y.Z.md` per version ([`MIGRATION_v0.9.0.md`](docs/MIGRATION_v0.9.0.md) covers the two breaking-minor changes in v0.9; none for v1.0, v0.13, v0.12, v0.11, v0.10, v0.8, v0.7, v0.6 or v0.5; [`MIGRATION_v0.4.0.md`](docs/MIGRATION_v0.4.0.md) covers the Join builder rename from v0.3.x). Release notes per version live under [`docs/RELEASE_NOTES_*.md`](docs/).
 
 ---
 
