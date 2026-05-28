@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Duration, `[]byte`, Nullable set/NULL) and exercises the CRUD primitives
   (`Create`/`Find`/`Count`/`Update`/`UpdateFields`/`List`/`Delete`/`HardDelete`)
   against the real domain. Green on SQLite and PostgreSQL (no findings).
+- **bug-bash:** added phase **F2 (API surface)** — exercises the query
+  builder across all six engines: predicates + Expr AST + subqueries,
+  aggregates, group-by/having, ordering/pagination, streaming, joins, set
+  ops, locking, soft delete, batches, optimistic locking, preload, and
+  window/CTE SQL generation. Ran on all six engines; surfaced three findings
+  filed under `TASKS.md` § "Bug-bash hallazgos": **BB-2** (typed `Join` does
+  `SELECT *` without scoping to the base table), **BB-3** (MariaDB rejects
+  `FOR SHARE`), **BB-4** (Oracle `ForUpdate` + implicit `List()` limit →
+  ORA-02014). No library code changed.
 
 ## [1.0.0](https://github.com/jcsvwinston/quark/compare/v0.13.0...v1.0.0) (2026-05-27)
 
