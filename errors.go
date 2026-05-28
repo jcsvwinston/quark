@@ -86,6 +86,17 @@ var (
 	// the OTel-style event `quark.event.emit_failure` rather than
 	// propagated (the commit already returned success).
 	ErrEventEmitFailed = errors.New("event emit failed after commit")
+
+	// ErrListenerClosed indicates an operation was attempted on an
+	// EventListener (PostgreSQL LISTEN/NOTIFY) after Close was called.
+	// The dedicated connection has been returned to the pool; create a
+	// fresh listener via ListenerFactory.CreateListener. See ADR-0019.
+	ErrListenerClosed = errors.New("event listener closed")
+
+	// ErrNoSubscription indicates Receive was called on an EventListener
+	// that has no active channel subscription — Listen must be called at
+	// least once before Receive. See ADR-0019.
+	ErrNoSubscription = errors.New("event listener has no channel subscribed")
 )
 
 // wrapDBError maps low-level database/context errors to quark sentinel errors.

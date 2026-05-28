@@ -149,9 +149,9 @@ type EventListener interface {
 // interface above — this is the *inbound* channel-listener side.
 //
 // Renamed from the v0.8.0 `EventBus` struct in v0.9.0 to free the
-// `EventBus` name for the CRUD-event interface. The listener side
-// remains unimplemented (ADR-0013 puts LISTEN/NOTIFY out of scope for
-// Fase 5 — it needs a dedicated connection outside the pool).
+// `EventBus` name for the CRUD-event interface. The PostgreSQL listener
+// is implemented over a dedicated pool connection (ADR-0019); other
+// dialects return [ErrDialectNotSupported].
 type ListenerFactory struct {
 	client *Client
 }
@@ -163,15 +163,23 @@ func NewListenerFactory(client *Client) *ListenerFactory {
 	return &ListenerFactory{client: client}
 }
 
-// CreateListener creates an EventListener based on the dialect.
+// CreateListener returns an EventListener for the client's dialect.
 //
-// NOT yet implemented: native LISTEN/NOTIFY (PostgreSQL) requires a
-// dedicated connection outside the pool with a driver-specific
-// implementation. ADR-0013 keeps it out of scope for Fase 5; the
-// method returns [ErrDialectNotSupported] until a future release.
+// PostgreSQL is supported: the listener pins a dedicated connection from
+// the pool (acquired lazily on the first Listen) and consumes
+// notifications via pgx's WaitForNotification (ADR-0019). It is
+// single-goroutine — see [EventListener] and pgListener. Every other
+// dialect returns [ErrDialectNotSupported]: LISTEN/NOTIFY has no
+// portable equivalent and Quark does not emulate it with polling.
 func (f *ListenerFactory) CreateListener() (EventListener, error) {
-	return nil, fmt.Errorf("%w: ListenerFactory.CreateListener (LISTEN/NOTIFY) is not implemented for dialect %q — out of scope for Fase 5 (ADR-0013)",
-		ErrDialectNotSupported, f.client.dialect.Name())
+	if f.client.dialect.Name() != "postgres" {
+		return nil, fmt.Errorf("%w: LISTEN/NOTIFY listener is PostgreSQL-only, dialect %q has no equivalent (ADR-0019)",
+			ErrDialectNotSupported, f.client.dialect.Name())
+	}
+	return &pgListener{
+		db:    f.client.db,
+		guard: f.client.guard,
+	}, nil
 }
 
 // Notify triggers a database PubSub notification (PostgreSQL

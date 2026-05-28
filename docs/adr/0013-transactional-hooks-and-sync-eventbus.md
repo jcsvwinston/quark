@@ -189,6 +189,12 @@ satélite (`github.com/jcsvwinston/quark-nats`, etc.).
 LISTEN/NOTIFY de PG requiere conexión dedicada fuera del pool y no
 casa con el modelo de `*sql.DB`. Es un proyecto en sí mismo.
 
+> **Resuelto post-v1.0 por [ADR-0019](0019-inbound-listen-notify-dedicated-conn.md):**
+> el listener inbound de PostgreSQL se implementa sobre una `*sql.Conn`
+> dedicada tomada del pool del `Client` (vía `conn.Raw` →
+> `*pgx.Conn.WaitForNotification`). Sólo PostgreSQL; los demás dialectos
+> siguen devolviendo `ErrDialectNotSupported`.
+
 ## Consecuencias
 
 **Positivas:**

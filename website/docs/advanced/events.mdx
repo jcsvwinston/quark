@@ -160,17 +160,67 @@ hand off to the broker.
 
 `EventBus` is the **outbound** CRUD-event side. The **inbound**
 PostgreSQL `LISTEN/NOTIFY` listener (`ListenerFactory.CreateListener`,
-the helper `Notify`) is a separate, unrelated mechanism that needs a
-dedicated connection outside the pool.
+the helper `Notify`) is a separate, unrelated mechanism that pins a
+dedicated connection from the pool.
 
-:::warning Inbound LISTEN is not implemented yet
-The event bus delivers **outbound** events only (your code reacts to
-Quark's CRUD inside the same process). There is **no inbound listener**:
-`ListenerFactory.CreateListener` returns `ErrDialectNotSupported` on every
-dialect today. If you need to consume PostgreSQL `LISTEN/NOTIFY` (a
-dedicated `pgx.Conn` that survives the pool, with reconnect/backpressure
-semantics), drive it yourself outside Quark for now. Inbound support is
-planned **post-v1.0** — it is a tracked v1.0 known limitation, not a bug.
+### Inbound listener (PostgreSQL only)
+
+`ListenerFactory.CreateListener` returns a listener that consumes
+PostgreSQL `NOTIFY` messages. It pins one connection from the `Client`
+pool (acquired lazily on the first `Listen`) for the listener's
+lifetime, because a `LISTEN` registration lives on the physical
+connection and the pool rotates connections freely
+([ADR-0019](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0019-inbound-listen-notify-dedicated-conn.md)).
+Every non-PostgreSQL dialect returns `ErrDialectNotSupported`.
+
+```go
+listener, err := quark.NewListenerFactory(client).CreateListener()
+if err != nil {
+    return err // ErrDialectNotSupported on non-PostgreSQL dialects
+}
+defer listener.Close()
+
+if err := listener.Listen(ctx, "orders"); err != nil {
+    return err
+}
+
+// Emit from anywhere (a pooled connection, a trigger, another service):
+//   quark.Notify(ctx, client, "orders", `{"id":42}`)
+
+for {
+    payload, err := listener.Receive(ctx) // blocks until a NOTIFY arrives
+    if err != nil {
+        return err // ctx cancelled, or the connection dropped — reconnect
+    }
+    log.Printf("channel=%s payload=%s", payload.Channel, payload.Payload)
+}
+```
+
+The listener returns these sentinel errors (match with `errors.Is`):
+
+| Sentinel | Returned by | Condition |
+| --- | --- | --- |
+| `ErrDialectNotSupported` | `CreateListener` | the `Client` dialect is not PostgreSQL |
+| `ErrNoSubscription` | `Receive` | called before any `Listen` (no channel subscribed) |
+| `ErrListenerClosed` | `Listen` / `Unlisten` / `Receive` | called after `Close` — create a fresh listener |
+
+:::warning Single-goroutine, no durable delivery
+The listener is **single-goroutine**: `Listen`/`Unlisten`/`Receive`/`Close`
+are serialized over the one pinned connection. `Receive` blocks holding
+that connection, so you cannot `Listen` or `Close` from another goroutine
+while a `Receive` is in flight — register every channel first, then loop
+`Receive` in one goroutine. To stop, cancel the `Receive` context, then
+`Close`.
+
+PostgreSQL `LISTEN/NOTIFY` is **fire-and-forget**: notifications emitted
+while the connection is down (network blip, failover, server restart) are
+**lost** — there is no durable buffer or replay. On a connection error
+`Receive` returns it; reconnect with a fresh `CreateListener` + `Listen`
+and reconcile state yourself. This is not a substitute for a durable queue.
+
+The listener holds one connection out of `MaxOpenConns` for its whole
+lifetime. For a long-lived listener, size the pool accordingly or give it
+its own `Client`.
 :::
 
 :::note Renamed in v0.9.0

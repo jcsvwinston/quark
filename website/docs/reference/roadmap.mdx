@@ -197,10 +197,11 @@ the operational backlog lives at
 - The **versioned migration registry** in `migrate/migrate.go` is still
   global. The model registry has been per-Client since v0.6 (F3-7); the
   versioned registry stays as documented debt.
-- **`LISTEN/NOTIFY` listener side** (PG) is not implemented in the
-  EventBus. `Notify` for outbound notifications is supported;
-  `ListenerFactory.CreateListener` returns `ErrDialectNotSupported`.
-  Inbound `LISTEN` is planned post-v1.0.
+- **`LISTEN/NOTIFY` is PostgreSQL-only.** Both sides ship: `Notify`
+  (outbound) and the inbound `ListenerFactory.CreateListener` listener
+  (ADR-0019). Other dialects return `ErrDialectNotSupported`. Delivery is
+  fire-and-forget — notifications emitted while the listener connection is
+  down are lost (no durable replay); it is not a substitute for a queue.
 - `Select` and `Where` validate simple identifiers; dotted columns and
   SQL expressions require views or controlled raw SQL via the
   `internal/guard` layer.

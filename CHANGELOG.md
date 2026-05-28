@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **events:** inbound PostgreSQL `LISTEN/NOTIFY` listener. `ListenerFactory.CreateListener`
+  now returns a working `EventListener` on PostgreSQL (`Listen`/`Unlisten`/`Receive`/`Close`)
+  that pins a dedicated connection from the pool via pgx; non-PostgreSQL dialects still return
+  `ErrDialectNotSupported`. Closes the v1.0 known-limitation that inbound `LISTEN/NOTIFY` was
+  deferred post-v1.0. New sentinels `ErrListenerClosed` (operation after `Close`) and
+  `ErrNoSubscription` (`Receive` before any `Listen`). Single-goroutine, fire-and-forget
+  delivery semantics (no durable replay). See [ADR-0019](docs/adr/0019-inbound-listen-notify-dedicated-conn.md)
+  and `website/docs/advanced/events.mdx`.
+
 ## [1.0.0](https://github.com/jcsvwinston/quark/compare/v0.13.0...v1.0.0) (2026-05-27)
 
 
