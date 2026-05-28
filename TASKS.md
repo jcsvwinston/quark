@@ -20,12 +20,34 @@
 
 ## Bug-bash hallazgos (activos)
 
-> Mantenido por `bugbash-reporter` tras cada pasada. Vacío al
-> 2026-05-28: el bug-bash queda implementado (plan, dominio, comando y
-> reporter) pero la primera pasada no se ha corrido todavía. Code la
-> atajará en sesiones dedicadas siguiendo [`bugbash/README.md`](bugbash/README.md).
+> Mantenido por `bugbash-reporter` tras cada pasada. F1 (smoke) se corrió
+> el 2026-05-28 sobre los 6 motores (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle);
+> 5 limpios, 1 hallazgo (BB-1). El resto de fases (F2-F14) pendientes.
 
-_(sin entradas)_
+### BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)
+
+**Severidad:** P2 (footgun con corrupción silenciosa; el camino documentado
+—`VARCHAR(36)`— funciona). **Categoría:** doc-drift / gap. **Motor:** MSSQL.
+**Fase:** F1 (`bugbash/phases/f01_smoke`). **Estado:** abierto.
+
+Detectado en la 1ª pasada real de F1 multi-motor. Mapear `uuid.UUID` a la
+columna nativa `UNIQUEIDENTIFIER` y hacer round-trip devuelve un UUID
+**distinto**: SQL Server almacena los 3 primeros grupos del GUID en
+little-endian mientras `github.com/google/uuid` (RFC-4122) es big-endian, así
+que `go-mssqldb` los devuelve byte-swapped. Ejemplo real:
+`want 6a4c38e2-218a-4d93-… → got e2384c6a-8a21-934d-…` (grupos 1-3 invertidos).
+PG (native `UUID`), MySQL/MariaDB/Oracle (`VARCHAR`/`VARCHAR2(36)`) hacen
+round-trip correcto; sólo `UNIQUEIDENTIFIER` falla.
+
+- **Workaround (ya aplicado en el harness):** mapear uuid a `VARCHAR(36)` en
+  MSSQL — coincide con el ejemplo `type_mapper.go` de Quark. F1 quedó verde
+  6/6 con ese cambio (`bugbash/domain/mappers.go`).
+- **Acción Quark sugerida:** la docs/ejemplo usan `VARCHAR(36)` para uuid en
+  MSSQL pero **no explican por qué** (la trampa de `UNIQUEIDENTIFIER`). Añadir
+  un caveat explícito en la guía de tipos custom, o proveer un helper de uuid
+  que maneje el byte-order de UNIQUEIDENTIFIER (`mssql.UniqueIdentifier`).
+- **Reproducer:** `go test -tags=bugbash -run TestSmoke ./phases/f01_smoke/... -engines=mssql`
+  revirtiendo el mapper de `mappers.go` a `UNIQUEIDENTIFIER`.
 
 ---
 

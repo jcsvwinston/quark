@@ -159,7 +159,7 @@ func Down(engines ...string) {
 func envVar(engine string) string { return "BUGBASH_DSN_" + strings.ToUpper(engine) }
 
 func sqliteDSN() string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("bugbash-f0-%d.db", time.Now().UnixNano()))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("bugbash-%d.db", time.Now().UnixNano()))
 }
 
 func dockerAvailable() bool {
@@ -213,7 +213,11 @@ func waitReady(ctx context.Context, driver, dsn string, timeout time.Duration) e
 		} else {
 			lastErr = err
 		}
-		time.Sleep(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
 	}
 	return fmt.Errorf("timed out after %s: %w", timeout, lastErr)
 }

@@ -22,11 +22,15 @@ func init() {
 		switch dialect {
 		case "postgres":
 			return "UUID"
-		case "mssql":
-			return "UNIQUEIDENTIFIER"
 		case "oracle":
 			return "VARCHAR2(36)"
-		default: // mysql, mariadb, sqlite
+		default: // mysql, mariadb, sqlite, mssql
+			// NOT mssql UNIQUEIDENTIFIER: SQL Server stores a GUID's first
+			// three groups little-endian while google/uuid is big-endian, so
+			// a uuid.UUID round-trips byte-swapped (silent corruption). Text
+			// storage sidesteps it — this matches Quark's own type_mapper.go
+			// example. The UNIQUEIDENTIFIER footgun is filed under TASKS.md
+			// § "Bug-bash hallazgos" (F1, BB-1).
 			return "VARCHAR(36)"
 		}
 	})

@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SQLite and PostgreSQL; gated by the `bugbash` build tag so it stays out of
   the library's `go test ./...`. See `bugbash/README.md` and
   [`docs/BUGBASH_PLAN.md`](docs/BUGBASH_PLAN.md).
+- **bug-bash:** added the `reporter` package (structured `Fail`/`Failure`
+  sink → `failures.jsonl`) and phase **F1 (smoke per engine)** — round-trips
+  every rich column type (decimal, uuid, JSON[T], Array[T], per-column TZ,
+  Duration, `[]byte`, Nullable set/NULL) and exercises the CRUD primitives
+  (`Create`/`Find`/`Count`/`Update`/`UpdateFields`/`List`/`Delete`/`HardDelete`)
+  against the real domain. Green on SQLite and PostgreSQL (no findings).
 
 ## [1.0.0](https://github.com/jcsvwinston/quark/compare/v0.13.0...v1.0.0) (2026-05-27)
 
