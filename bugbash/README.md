@@ -12,11 +12,12 @@
 | Pieza | Estado |
 | --- | --- |
 | Plan maestro | ✅ [`docs/BUGBASH_PLAN.md`](../docs/BUGBASH_PLAN.md) |
-| Dominio | ✅ [`DOMAIN.md`](DOMAIN.md) (spec; structs Go pendientes) |
-| `bugbash/go.mod` con `replace ../` | ⏳ pendiente (primera sesión) |
-| `bugbash/domain/*.go` | ⏳ pendiente (primera sesión) |
-| `bugbash/seed/seed.go` | ⏳ pendiente (segunda sesión) |
-| Fases F0-F14 | ⏳ pendiente (una por sesión, F0 primero) |
+| Dominio | ✅ [`DOMAIN.md`](DOMAIN.md) (spec) + [`domain/`](domain) (structs Go) |
+| `bugbash/go.mod` con `replace ../` | ✅ hecho |
+| `bugbash/domain/*.go` | ✅ hecho (20 modelos + mappers uuid/decimal) |
+| `bugbash/tools/` | ✅ [`docker.go`](tools/docker.go) (boot/teardown por motor) |
+| `bugbash/seed/seed.go` | ⏳ pendiente (siguiente sesión) |
+| Fases F0-F14 | 🚧 F0 (`phases/f00_install/`) hecho — migra el dominio entero por motor; F1-F14 pendientes (una por sesión). Leg de codegen de F0 (`quark gen`) pendiente |
 | Subagente `bugbash-reporter` | ✅ [`.claude/agents/bugbash-reporter.md`](../.claude/agents/bugbash-reporter.md) |
 | Slash command `/bugbash` | ✅ [`.claude/commands/bugbash.md`](../.claude/commands/bugbash.md) |
 
