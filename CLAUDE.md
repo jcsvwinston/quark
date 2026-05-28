@@ -140,7 +140,8 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 
 ## Otros punteros
 
-- **Gate v1.0 (lo que falta para taggear honesto)**: [`docs/V1_GATE.md`](docs/V1_GATE.md) — **este es el bloqueante actual a v1.0**. Formaliza el checklist que ADR-0017 §3 delegó tras retirar el gate ≥3× p99 de ADR-0002. Léelo antes de pensar en un `/release v1.0.0`.
+- **Gate v1.0 (cerrado)**: [`docs/V1_GATE.md`](docs/V1_GATE.md) — los 5 items §A están en verde, v1.0.0 está taggeada (2026-05-27). Lo dejamos como referencia histórica del proceso; ya no bloquea trabajo nuevo.
+- **Bug-bash post-v1.0 (herramienta operativa)**: [`docs/BUGBASH_PLAN.md`](docs/BUGBASH_PLAN.md) + [`bugbash/DOMAIN.md`](bugbash/DOMAIN.md). Slash command `/bugbash`, subagente `bugbash-reporter`. **Antes de taggear cualquier v1.0.x patch: F0+F1+F13 obligatorios.** Antes de cualquier v1.x.0 minor: pasada completa F0-F13. Los fallos aparecen en `TASKS.md` § "Bug-bash hallazgos".
 - **Backlog vivo**: `TASKS.md` en raíz + issues de GitHub.
 - **Roadmap público**: `docs/ROADMAP.md` (mantén alineado con el plan de fases del análisis).
 - **Comparativa con otros ORMs**: §2 de ANALISIS_MADUREZ y `docs/comparison.md`.

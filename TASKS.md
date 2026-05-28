@@ -1,5 +1,34 @@
 # Quark — backlog táctico
 
+> **🧪 Bug-bash post-v1.0 — herramienta operativa de calidad.** Con
+> v1.0.0 publicada y los 5 items §A del V1_GATE.md cerrados, el bloqueante
+> de calidad para v1.0.x / v1.1 no es ya un gate cuantitativo. Es la
+> **acumulación silenciosa** de regresiones cross-engine y dialect-specific
+> gaps que la suite unitaria no atrapa, y que el bug-bash post-v1.0 está
+> diseñado para capturar antes de que las reporte un usuario externo.
+>
+> **Plan:** [`docs/BUGBASH_PLAN.md`](docs/BUGBASH_PLAN.md). **Dominio:**
+> [`bugbash/DOMAIN.md`](bugbash/DOMAIN.md). **Comando:** `/bugbash`. **Subagente:**
+> `bugbash-reporter`.
+>
+> **Cadencia recomendada:** F0+F1+F13 obligatorios antes de cualquier
+> v1.0.x patch; pasada completa F0-F13 antes de cualquier v1.x.0 minor;
+> F14 soak overnight en ventana de release-candidate.
+>
+> Los fallos del bug-bash aparecen en la sección § "Bug-bash hallazgos"
+> de abajo (creada por `bugbash-reporter` al cerrar cada pasada).
+
+## Bug-bash hallazgos (activos)
+
+> Mantenido por `bugbash-reporter` tras cada pasada. Vacío al
+> 2026-05-28: el bug-bash queda implementado (plan, dominio, comando y
+> reporter) pero la primera pasada no se ha corrido todavía. Code la
+> atajará en sesiones dedicadas siguiendo [`bugbash/README.md`](bugbash/README.md).
+
+_(sin entradas)_
+
+---
+
 > **✅ v1.0.0 publicado (2026-05-27).** Tag `v1.0.0` (PR #116, vía
 > release-please con trailer `Release-As: 1.0.0`); GitHub Release marcada
 > Latest; docs live en `jcsvwinston.github.io/quark/docs` (1.0.0 es ahora
