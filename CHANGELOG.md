@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delivery semantics (no durable replay). See [ADR-0019](docs/adr/0019-inbound-listen-notify-dedicated-conn.md)
   and `website/docs/advanced/events.mdx`.
 
+### Tests
+
+- **bug-bash:** bootstrapped the executable bug-bash harness (`bugbash/`, a
+  separate module via local `replace`). Adds the ERP-SaaS domain (20 models
+  exercising decimal/uuid/JSON[T]/Array[T]/per-column TZ/composite PK), the
+  per-engine container plumbing (`bugbash/tools`), and phase **F0
+  (install & boot)** which migrates the whole domain per engine. Verified on
+  SQLite and PostgreSQL; gated by the `bugbash` build tag so it stays out of
+  the library's `go test ./...`. See `bugbash/README.md` and
+  [`docs/BUGBASH_PLAN.md`](docs/BUGBASH_PLAN.md).
+
 ## [1.0.0](https://github.com/jcsvwinston/quark/compare/v0.13.0...v1.0.0) (2026-05-27)
 
 
