@@ -20,9 +20,11 @@
 
 ## Bug-bash hallazgos (activos)
 
-> Mantenido por `bugbash-reporter` tras cada pasada. F1 (smoke) se corrió
-> el 2026-05-28 sobre los 6 motores (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle);
-> 5 limpios, 1 hallazgo (BB-1). El resto de fases (F2-F14) pendientes.
+> Mantenido por `bugbash-reporter` tras cada pasada. F1 (smoke) y F2 (API
+> surface) se corrieron el 2026-05-28 sobre los 6 motores
+> (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle). Hallazgos abiertos: BB-1 (F1),
+> BB-2/BB-3/BB-4 (F2). PG y SQLite limpios en ambas fases. Fases F3-F14
+> pendientes.
 
 ### BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)
 
@@ -48,6 +50,66 @@ round-trip correcto; sólo `UNIQUEIDENTIFIER` falla.
   que maneje el byte-order de UNIQUEIDENTIFIER (`mssql.UniqueIdentifier`).
 - **Reproducer:** `go test -tags=bugbash -run TestSmoke ./phases/f01_smoke/... -engines=mssql`
   revirtiendo el mapper de `mappers.go` a `UNIQUEIDENTIFIER`.
+
+### BB-2 · Los `Join` sobre queries tipadas no acotan el `SELECT` a la tabla base
+
+**Severidad:** P1 (joins es feature core; produce error duro o corrupción
+silenciosa). **Categoría:** gap. **Motores:** todos (es generación de SQL).
+**Fase:** F2 (`bugbash/phases/f02_api_surface`). **Estado:** abierto.
+
+Una query `For[T]` sin `Select` explícito genera `SELECT *` (confirmado en
+`query_builder.go:601`). Bajo un `Join`, eso trae **columnas duplicadas** de
+todas las tablas unidas, y además el filtro de soft-delete se inyecta **sin
+cualificar** (`deleted_at IS NULL`, no `orders.deleted_at IS NULL`). Síntomas:
+
+- `For[Order].Join("customers")…List()` → `ambiguous column name: deleted_at`
+  (orders y customers tienen `deleted_at`) — en los 6 motores.
+- `For[Order].LeftJoin("order_lines")…List()` → `converting NULL to int64`
+  (el `order_lines.id` NULL del outer join se escanea en `Order.ID`).
+- `For[Order].With(cte).Join(cte)…List()` → `ambiguous column 'id'`
+  (MSSQL `Ambiguous column name 'id'`, Oracle `ORA-00918`).
+
+La suite de Quark **no tiene cobertura de `Join().List()`** (greppeado). Un
+inner join "funciona" en motores laxos pero puede escanear el `id` de la otra
+tabla en `T.ID` (corrupción silenciosa).
+
+- **Acción Quark sugerida:** para queries tipadas con join, proyectar
+  `SELECT <tabla_base>.*` (o columnas cualificadas) y cualificar el filtro de
+  soft-delete con la tabla base. Mientras tanto, el harness valida la
+  generación de SQL del join vía `AsSubquery` y no ejecuta el join-en-`T`.
+- **Reproducer:** `For[Order](ctx,c).Join("customers").On("orders.customer_id","=","customers.id").List()`.
+
+### BB-3 · MariaDB rechaza `FOR SHARE` (sintaxis MySQL-8 en el dialecto compartido)
+
+**Severidad:** P2. **Categoría:** dialect-specific. **Motor:** MariaDB.
+**Fase:** F2. **Estado:** abierto.
+
+`ForShare()` emite `FOR SHARE` (sintaxis de MySQL 8) porque Quark trata a
+MariaDB con el mismo dialecto que MySQL. MariaDB no soporta `FOR SHARE` (usa
+`LOCK IN SHARE MODE`): `Error 1064 … syntax error … near 'SHARE'`. `ForUpdate`
+sí funciona en MariaDB.
+
+- **Acción Quark sugerida:** distinguir MariaDB de MySQL (server version o
+  flag) y emitir `LOCK IN SHARE MODE`, o devolver `ErrUnsupportedFeature`
+  limpio en MariaDB para `ForShare`.
+- **Reproducer:** `For[Order](ctx,c).Where("status","=","pending").ForShare().List()` en MariaDB.
+
+### BB-4 · Oracle: `ForUpdate` + el `Limit` implícito de `List()` → ORA-02014
+
+**Severidad:** P1 (FOR UPDATE vía `List()` está roto en Oracle: `List` aplica
+un `Limit` por defecto). **Categoría:** dialect-specific. **Motor:** Oracle.
+**Fase:** F2. **Estado:** abierto.
+
+`ForUpdate().List()` falla en Oracle con `ORA-02014: cannot select FOR UPDATE
+from view with DISTINCT, GROUP BY, etc.`: `List()` aplica un `Limit(100)` por
+defecto, que en Oracle se implementa envolviendo la query en una vista
+(ROWNUM/OFFSET), y `FOR UPDATE` no puede aplicarse sobre esa vista envuelta.
+Afecta a `ForUpdate`/`SkipLocked`/`NoWait` (todos pasan por la envoltura).
+
+- **Acción Quark sugerida:** en Oracle, empujar `FOR UPDATE` dentro de la
+  subconsulta no envuelta, o no envolver cuando hay locking, o devolver un
+  error claro guiando a usar `Limit` explícito compatible.
+- **Reproducer:** `For[Order](ctx,c).Where("status","=","pending").ForUpdate().List()` en Oracle.
 
 ---
 
