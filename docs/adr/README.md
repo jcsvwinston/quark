@@ -25,6 +25,7 @@
 | [0016](0016-sharding-shardrouter.md) | Sharding: ShardRouter enruta por shard key vía ClientProvider; sin cross-shard implícito | Accepted | Fase 6 |
 | [0017](0017-codegen-type-safety-not-perf-gate.md) | Codegen es type-safety, no velocidad; se retira el gate ≥3× p99 de ADR-0002 | Accepted | Fase 6 |
 | [0018](0018-oracle-migration-lock-dbms-lock.md) | Lock de migración Oracle vía `DBMS_LOCK` (session-scoped), no lock-table `FOR UPDATE` | Accepted | Fase 3 / v1.0-gate |
+| [0019](0019-inbound-listen-notify-dedicated-conn.md) | Inbound LISTEN/NOTIFY (PostgreSQL) sobre `*sql.Conn` dedicada del pool, no un pool propio | Accepted | post-v1.0 / v1.1 |
 
 ## Cómo añadir un ADR nuevo
 

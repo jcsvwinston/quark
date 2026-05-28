@@ -10,9 +10,10 @@
 > SemVer: `v1.x` mantiene compatibilidad de API; breaking → `v2.x` con
 > `docs/MIGRATION_v2.0.0.md`. **Trabajo siguiente = post-v1.0 / v1.1**
 > (items diferidos abajo: scatter-gather y shard-key-from-entity de F6-7,
-> F6-3b sólo si type-safety, inbound `LISTEN/NOTIFY`, stampede
-> cross-instance, registry de migración versionado per-Client). El
-> historial del §A se conserva abajo.
+> F6-3b sólo si type-safety, stampede cross-instance, registry de
+> migración versionado per-Client; **inbound `LISTEN/NOTIFY` ya
+> entregado** en `[Unreleased]`, ADR-0019 — ver abajo). El historial del
+> §A se conserva abajo.
 >
 > 1. ~~**Oracle en CI**~~ — ✅ **CERRADO (2026-05-27, Salida A — Oracle en CI
 >    bloqueante)**. Programa multi-sesión: PR (a) #123 (JSON path literal +
@@ -27,9 +28,17 @@
 > 2. ~~**F6-7 follow-ups**~~ — ✅ CERRADO (alcance mínimo): ejemplo runnable
 >    `examples/sharding/main.go` (SQLite, self-contained) + `advanced/sharding.mdx`;
 >    scatter-gather y `shard-key-from-entity` diferidos a v1.1.
-> 3. ~~**`LISTEN/NOTIFY` listener side**~~ — ✅ CERRADO vía Salida B:
->    asimetría outbound/inbound documentada (warning en `events.mdx` +
->    caveat en `intro.mdx`); inbound real diferido a post-v1.0.
+> 3. ~~**`LISTEN/NOTIFY` listener side**~~ — ✅ CERRADO en dos pasos:
+>    (a) en v1.0, Salida B: asimetría outbound/inbound documentada
+>    (warning en `events.mdx` + caveat en `intro.mdx`), inbound diferido
+>    a post-v1.0; (b) **inbound real entregado post-v1.0** (`[Unreleased]`,
+>    [ADR-0019](docs/adr/0019-inbound-listen-notify-dedicated-conn.md)):
+>    `ListenerFactory.CreateListener` devuelve un `EventListener` real en
+>    PostgreSQL sobre una `*sql.Conn` dedicada del pool (pgx
+>    `WaitForNotification`); otros dialectos siguen en
+>    `ErrDialectNotSupported`. `pg_listener.go` + `pg_listener_test.go`
+>    (round-trip Listen→Notify→Receive gated por DSN). Sentinels nuevos
+>    `ErrListenerClosed`/`ErrNoSubscription`.
 > 4. ~~**Cross-instance stampede protection**~~ — ✅ CERRADO vía Salida B:
 >    warning "in-process only" promovido en `caching-observability.mdx` +
 >    caveat en `intro.mdx`; hook `DistributedLock` diferido a post-v1.0.
