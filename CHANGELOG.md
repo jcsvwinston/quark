@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **modeling:** documented the SQL Server `UNIQUEIDENTIFIER` footgun for
+  `uuid.UUID`. Mapping `uuid.UUID` to the native `UNIQUEIDENTIFIER` column
+  silently corrupts values on round-trip — SQL Server stores the first three
+  GUID groups little-endian while `github.com/google/uuid` (RFC 4122) is
+  big-endian, so `go-mssqldb` returns them byte-swapped. Added a warning in
+  the custom type-mappers guide steering `uuid.UUID` to `VARCHAR(36)` /
+  `NVARCHAR(36)` on SQL Server (Quark's auto-migrator already does this), and
+  pointing to the driver's `mssql.UniqueIdentifier` type for anyone who needs
+  the native column. No code change — the working path was already the
+  default. Found by the post-v1.0 bug-bash (BB-1, phase F1). See
+  `website/docs/guides/modeling.mdx` § Custom type mappers.
+
 ### Added
 
 - **dialects:** automatic MariaDB detection. MariaDB ships no dedicated

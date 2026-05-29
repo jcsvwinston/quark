@@ -206,10 +206,14 @@ name and the parsed `TypeOptions`; return the dialect-specific SQL type:
 ```go
 func init() {
     quark.RegisterTypeMapper(reflect.TypeOf(uuid.UUID{}), func(d string, _ quark.TypeOptions) string {
-        if d == "postgres" {
+        switch d {
+        case "postgres":
             return "UUID"
+        case "mssql":
+            return "NVARCHAR(36)" // never UNIQUEIDENTIFIER — see warning below
+        default:
+            return "VARCHAR(36)"
         }
-        return "VARCHAR(36)"
     })
 }
 ```
@@ -219,6 +223,23 @@ covers `*uuid.UUID`. Re-registering the same type overwrites the previous
 mapper. The `time.Duration` mapper ships with Quark and emits `BIGINT`
 (`NUMBER(19)` on Oracle) — override it if you'd rather store durations as
 text or in a different unit.
+
+:::warning Don't map `uuid.UUID` to SQL Server's native `UNIQUEIDENTIFIER`
+The example above deliberately uses `VARCHAR(36)` (textual) on every engine
+except PostgreSQL. On SQL Server, **do not** return `UNIQUEIDENTIFIER`: a
+round-trip silently changes the value. SQL Server stores the first three
+groups of a GUID little-endian, while `github.com/google/uuid` (RFC&nbsp;4122)
+is big-endian, so `go-mssqldb` hands back the bytes swapped — e.g. writing
+`6a4c38e2-218a-4d93-…` reads back `e2384c6a-8a21-934d-…` (groups 1–3
+reversed). The corruption is silent: no error, just a different UUID.
+
+Stick with `VARCHAR(36)` / `NVARCHAR(36)` on SQL Server (it round-trips
+cleanly and matches the other engines). Quark's automatic migrator already
+maps a string-typed UUID primary key to `NVARCHAR(36)` on SQL Server for this
+reason. If you genuinely need the native column, store the value as the
+driver's own `mssql.UniqueIdentifier` type (which handles the byte-order)
+rather than `uuid.UUID`.
+:::
 
 The mapper handles only the DDL side. Round-trip read/write goes through
 `database/sql` — the type must implement `sql.Scanner` + `driver.Valuer`,
