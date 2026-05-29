@@ -262,7 +262,13 @@ func HasPlaceholders(query string) bool {
 	return false
 }
 
-// ValidateRawQuery performs basic validation on a raw SQL query.
+// ValidateRawQuery performs basic validation on a raw SQL query. It is a
+// best-effort heuristic backstop for the opt-in raw path (AllowRawQueries),
+// NOT a complete anti-injection filter. It does not parse SQL, so it has known
+// false positives — e.g. a `--` inside a string literal (`'range--max'`) is
+// rejected even though it is not a comment; rephrase such a query. The real
+// boundary for raw queries is AllowRawQueries (off by default) + placeholders
+// for values.
 func (g *SQLGuard) ValidateRawQuery(query string, requirePlaceholders bool) error {
 	if requirePlaceholders && !HasPlaceholders(query) {
 		return fmt.Errorf("ErrInvalidQuery: raw queries must use placeholders (?, $1, @p1, :1, etc.)")
@@ -275,6 +281,13 @@ func (g *SQLGuard) ValidateRawQuery(query string, requirePlaceholders bool) erro
 		`UNION\s+SELECT`,
 		`OR\s+1\s*=\s*1`,
 		`OR\s+'\s*1\s*'\s*=\s*'\s*1`,
+		`--`, // SQL line comment: the classic injection tail (`... OR 1=1 --`).
+		// Block comments (/* */) are intentionally NOT rejected: they are
+		// legitimate in raw queries as optimizer hints (MySQL `/*+ ... */`,
+		// Oracle `/*+ INDEX(...) */`). ValidateRawQuery is a best-effort
+		// heuristic backstop, not a complete anti-injection filter — the real
+		// boundary is AllowRawQueries (off by default) + placeholders for
+		// values. See docs/playbooks/security.md.
 	}
 
 	upper := strings.ToUpper(query)

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **guard:** `ValidateRawQuery` now rejects the SQL line-comment tail `--` in
+  raw queries (`RawQuery`/`Exec` under `AllowRawQueries=true`), closing a
+  classic injection-truncation vector and aligning the code with the documented
+  behaviour (the security playbook already listed `--` as filtered; the regex
+  did not implement it). Block comments (`/* */`) remain allowed by design —
+  they are legitimate optimizer hints (`/*+ … */`); `ValidateRawQuery` is a
+  best-effort heuristic backstop, not a complete filter, and the real boundary
+  for raw queries stays `AllowRawQueries` (off by default) + placeholders for
+  values. Surfaced while implementing bug-bash phase F13. Covered by
+  `guard_test.go` (`TestValidateRawQuery_SuspiciousLineComment` /
+  `_BlockCommentAllowed`).
+
 ### Documentation
 
 - **modeling:** documented the SQL Server `UNIQUEIDENTIFIER` footgun for

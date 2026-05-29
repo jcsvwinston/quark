@@ -241,6 +241,31 @@ func TestValidateRawQuery_SuspiciousDelete(t *testing.T) {
 	}
 }
 
+func TestValidateRawQuery_SuspiciousLineComment(t *testing.T) {
+	g := guard.New()
+	// The `--` line-comment tail is the classic way to truncate the rest of a
+	// statement after an injected predicate. Must be rejected (and the
+	// security playbook documents it as filtered).
+	for _, q := range []string{
+		"SELECT * FROM users WHERE id = ? -- AND active = 1",
+		"SELECT * FROM users WHERE name = ?--",
+	} {
+		if err := g.ValidateRawQuery(q, false); err == nil {
+			t.Errorf("expected error for line-comment payload %q, got nil", q)
+		}
+	}
+}
+
+// Block comments stay allowed: optimizer hints (`/*+ ... */`) are legitimate
+// in raw queries. This pins the deliberate non-rejection so a future change
+// doesn't silently break hints. (See ValidateRawQuery comment.)
+func TestValidateRawQuery_BlockCommentAllowed(t *testing.T) {
+	g := guard.New()
+	if err := g.ValidateRawQuery("SELECT /*+ MAX_EXECUTION_TIME(1000) */ id FROM users WHERE id = ?", false); err != nil {
+		t.Errorf("optimizer-hint block comment should be allowed, got %v", err)
+	}
+}
+
 // --- ValidateJSONPath ---
 
 func TestValidateJSONPath_Valid(t *testing.T) {
