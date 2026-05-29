@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **query-builder:** pessimistic locking on Oracle no longer hard-fails through
+  `List()`. Oracle rejects `FOR UPDATE`/`SKIP LOCKED`/`NOWAIT` combined with a
+  row-limiting clause (`OFFSET … FETCH`) — ORA-02014 — and `List()` applies an
+  implicit `Limit(100)`, so `ForUpdate().List()` was unusable on Oracle. The
+  implicit cap is now suppressed under a lock on Oracle (the lock spans all
+  matching rows; a `WARN` is logged), so `ForUpdate().List()` works. An
+  *explicit* `Limit`/`Offset` alongside a lock returns `ErrUnsupportedFeature`
+  on Oracle (no valid single-statement form) instead of silently widening the
+  lock or emitting invalid SQL. The other five engines are unaffected
+  (PostgreSQL/MySQL/MariaDB allow `LIMIT` + `FOR UPDATE`; SQL Server uses table
+  hints). Found by the post-v1.0 bug-bash (BB-4, phase F2); regression covered
+  by `testPessimisticLocking` in the SharedSuite. See
+  `website/docs/guides/querying.mdx` § Oracle: locking and row limits don't mix.
 - **query-builder:** typed queries with a `Join`/`LeftJoin`/`RightJoin` and no
   explicit `Select` now project only the base table (`SELECT "orders".*`)
   instead of a bare `SELECT *`. A bare `*` over a JOIN pulled every joined
