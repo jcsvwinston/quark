@@ -17,7 +17,7 @@
 | `bugbash/domain/*.go` | ✅ hecho (20 modelos + mappers uuid/decimal) |
 | `bugbash/tools/` | ✅ [`docker.go`](tools/docker.go) (boot/teardown por motor) |
 | `bugbash/seed/seed.go` | ⏳ pendiente (siguiente sesión) |
-| Fases F0-F14 | 🚧 F0 (`phases/f00_install/`) hecho — migra el dominio entero por motor; F1-F14 pendientes (una por sesión). Leg de codegen de F0 (`quark gen`) pendiente |
+| Fases F0-F14 | 🚧 Hechas: **F0** (`f00_install`, migra el dominio por motor), **F1** (`f01_smoke`, round-trip de tipos + CRUD), **F2** (`f02_api_surface`, superficie del query builder), **F13** (`f13_security`, negative/anti-injection). Pendientes: F3-F12, F14 (una por sesión). Leg de codegen de F0 (`quark gen`) pendiente. Nota: F13 está implementada fuera de orden por ser el gate obligatorio antes de cualquier patch v1.0.x. |
 | Subagente `bugbash-reporter` | ✅ [`.claude/agents/bugbash-reporter.md`](../.claude/agents/bugbash-reporter.md) |
 | Slash command `/bugbash` | ✅ [`.claude/commands/bugbash.md`](../.claude/commands/bugbash.md) |
 
@@ -100,7 +100,7 @@ bugbash/
 │   ├── f10_sharding/
 │   ├── f11_replicas/
 │   ├── f12_resilience/
-│   ├── f13_negative/
+│   ├── f13_security/
 │   └── f14_soak/
 └── REPORTS/                        # generado por runs; gitignore esperable
     └── run-2026-MM-DD-HHMM/

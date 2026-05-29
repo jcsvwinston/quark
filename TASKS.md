@@ -24,7 +24,9 @@
 > surface) se corrieron el 2026-05-28 sobre los 6 motores
 > (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle). **Sin hallazgos F1/F2 abiertos:
 > BB-1, BB-2, BB-3 y BB-4 cerrados** (2026-05-29). PG y SQLite limpios en
-> ambas fases. Fases F3-F14 pendientes.
+> ambas fases. **Fases implementadas: F0, F1, F2, F13** (F13 — security/
+> anti-injection — añadida 2026-05-29, gate obligatorio antes de patch
+> v1.0.x; verde en los 6 motores, sin hallazgos). Pendientes: F3-F12, F14.
 
 ### ~~BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)~~
 

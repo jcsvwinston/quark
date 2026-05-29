@@ -406,7 +406,10 @@ coherentes.
 - `Join(t, raw)` con `raw` malicioso — bloqueado por `ValidateJoinOn`.
 - `RawQuery` sin `AllowRawQueries` — bloqueado.
 - `RawQuery` con regex anti-injection del guard (UNION SELECT, OR 1=1,
-  comentarios `--`/`/**/`).
+  `;DROP`/`;DELETE`, comentario de línea `--`). Nota: los comentarios de
+  bloque `/* */` se permiten a propósito (optimizer hints) — la evasión
+  `UNION/**/SELECT` es una limitación heurística documentada, no un gate;
+  la frontera real es `AllowRawQueries` off + placeholders.
 - Tenant ID inyectado: `^[a-z0-9_-]+$` debe rechazar `'; DROP--`.
 
 **Verifica:**
