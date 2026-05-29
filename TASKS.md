@@ -22,11 +22,24 @@
 
 > Mantenido por `bugbash-reporter` tras cada pasada. F1 (smoke) y F2 (API
 > surface) se corrieron el 2026-05-28 sobre los 6 motores
-> (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle). Hallazgos abiertos: BB-1 (F1).
-> **BB-2, BB-3 y BB-4 cerrados** (2026-05-29). PG y SQLite limpios en
+> (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle). **Sin hallazgos F1/F2 abiertos:
+> BB-1, BB-2, BB-3 y BB-4 cerrados** (2026-05-29). PG y SQLite limpios en
 > ambas fases. Fases F3-F14 pendientes.
 
-### BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)
+### ~~BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)~~
+
+**Cerrado** (2026-05-29, rama `fix/bb1-mssql-uuid-caveat`). Fix **docs-only**:
+el default de Quark ya es seguro (el migrador mapea uuid-PK → `NVARCHAR(36)` en
+MSSQL, `internal/migrate/migrate.go:240`), y la trampa sólo aparece si el
+usuario registra un `TypeMapper` que devuelva `UNIQUEIDENTIFIER`. Se añadió un
+admonition `:::warning` en `website/docs/guides/modeling.mdx` §"Custom type
+mappers" explicando el byte-swap (SQL Server little-endian vs google/uuid
+big-endian RFC-4122), dirigiendo a `VARCHAR(36)`/`NVARCHAR(36)`, y apuntando a
+`mssql.UniqueIdentifier` (del driver) para quien necesite la columna nativa.
+Sin cambio de código ni nueva API (un helper uuid sería superficie nueva, fuera
+de scope para un finding doc-drift). CHANGELOG `[Unreleased]/Documentation`.
+
+<details><summary>Descripción original del hallazgo</summary>
 
 **Severidad:** P2 (footgun con corrupción silenciosa; el camino documentado
 —`VARCHAR(36)`— funciona). **Categoría:** doc-drift / gap. **Motor:** MSSQL.
@@ -50,6 +63,8 @@ round-trip correcto; sólo `UNIQUEIDENTIFIER` falla.
   que maneje el byte-order de UNIQUEIDENTIFIER (`mssql.UniqueIdentifier`).
 - **Reproducer:** `go test -tags=bugbash -run TestSmoke ./phases/f01_smoke/... -engines=mssql`
   revirtiendo el mapper de `mappers.go` a `UNIQUEIDENTIFIER`.
+
+</details>
 
 ### ~~BB-2 · Los `Join` sobre queries tipadas no acotan el `SELECT` a la tabla base~~
 
