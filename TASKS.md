@@ -22,8 +22,8 @@
 
 > Mantenido por `bugbash-reporter` tras cada pasada. F1 (smoke) y F2 (API
 > surface) se corrieron el 2026-05-28 sobre los 6 motores
-> (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle). Hallazgos abiertos: BB-1 (F1),
-> BB-3 (F2). **BB-2 y BB-4 cerrados** (2026-05-29). PG y SQLite limpios en
+> (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle). Hallazgos abiertos: BB-1 (F1).
+> **BB-2, BB-3 y BB-4 cerrados** (2026-05-29). PG y SQLite limpios en
 > ambas fases. Fases F3-F14 pendientes.
 
 ### BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)
@@ -98,7 +98,26 @@ tabla en `T.ID` (corrupción silenciosa).
 
 </details>
 
-### BB-3 · MariaDB rechaza `FOR SHARE` (sintaxis MySQL-8 en el dialecto compartido)
+### ~~BB-3 · MariaDB rechaza `FOR SHARE` (sintaxis MySQL-8 en el dialecto compartido)~~
+
+**Cerrado** (2026-05-29, rama `fix/bb3-mariadb-for-share`). Dos partes:
+(1) **causa raíz** — MariaDB no tiene driver `database/sql` propio (usa
+`go-sql-driver/mysql`, nombre "mysql"), así que `New` le asignaba el dialecto
+MySQL. Ahora `New` hace `SELECT VERSION()` una vez en conexiones "mysql" y
+cambia a `MariaDBDialect` si el server es MariaDB (`client.go:isMariaDBServer`;
+`WithDialect` explícito gana y salta el probe). (2) **fix de dialecto** —
+`MariaDBDialect.LockSuffix` emite `LOCK IN SHARE MODE` para `ForShare` (MariaDB
+no tiene `FOR SHARE`); como esa forma no admite modificadores,
+`ForShare`+`SkipLocked`/`NoWait` devuelve `ErrUnsupportedFeature`. `ForUpdate`
+intacto; MySQL sigue emitiendo `FOR SHARE`. Regresión:
+`TestLockSuffix_PerDialect` (casos MariaDB) + subtests
+`MariaDBForShareUsesLockInShareMode` / `MariaDBForShareWithSkipLockedUnsupported`
+/ `MySQLForShareStillEmitsForShare` en `testPessimisticLocking`. Verde en
+MariaDB + MySQL + SQLite local. Docs: `CHANGELOG.md` `[Unreleased]`
+(Added: auto-detect; Fixed: ForShare) + `website/docs/guides/installation.mdx`
++ `querying.mdx` §Pessimistic Locking.
+
+<details><summary>Descripción original del hallazgo</summary>
 
 **Severidad:** P2. **Categoría:** dialect-specific. **Motor:** MariaDB.
 **Fase:** F2. **Estado:** abierto.
@@ -112,6 +131,8 @@ sí funciona en MariaDB.
   flag) y emitir `LOCK IN SHARE MODE`, o devolver `ErrUnsupportedFeature`
   limpio en MariaDB para `ForShare`.
 - **Reproducer:** `For[Order](ctx,c).Where("status","=","pending").ForShare().List()` en MariaDB.
+
+</details>
 
 ### ~~BB-4 · Oracle: `ForUpdate` + el `Limit` implícito de `List()` → ORA-02014~~
 

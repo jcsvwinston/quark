@@ -29,10 +29,21 @@ func (m *MySQLDialect) LockSuffix(opts LockOptions) (string, string, error) {
 	return "", forUpdateSuffix(opts), nil
 }
 
-// MariaDB 10.6+ supports SKIP LOCKED and NOWAIT in the same shape as MySQL.
+// MariaDB pessimistic locking. FOR UPDATE [SKIP LOCKED|NOWAIT] works on
+// MariaDB 10.6+ just like MySQL. Shared locks are the one divergence:
+// MariaDB has no FOR SHARE (that is MySQL-8 syntax — it raises Error 1064);
+// it uses the older LOCK IN SHARE MODE, which does not accept SKIP LOCKED or
+// NOWAIT. So emit LOCK IN SHARE MODE for ForShare, and reject the modifiers
+// rather than emitting SQL MariaDB can't parse. (BB-3)
 func (m *MariaDBDialect) LockSuffix(opts LockOptions) (string, string, error) {
 	if opts.IsZero() {
 		return "", "", nil
+	}
+	if opts.Mode == LockForShare {
+		if opts.SkipLocked || opts.NoWait {
+			return "", "", fmt.Errorf("%w: mariadb shared locking uses LOCK IN SHARE MODE, which has no SKIP LOCKED/NOWAIT; use ForUpdate for those modifiers or RawQuery", ErrUnsupportedFeature)
+		}
+		return "", " LOCK IN SHARE MODE", nil
 	}
 	return "", forUpdateSuffix(opts), nil
 }

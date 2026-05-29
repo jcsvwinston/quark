@@ -241,6 +241,20 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 		} else {
 			c.dialect = dialect
 		}
+		// MariaDB ships no dedicated database/sql driver — it speaks the MySQL
+		// wire protocol through go-sql-driver/mysql ("mysql"), so DetectDialect
+		// cannot tell them apart by name. Probe the server version and upgrade
+		// to the MariaDB dialect when actually connected to MariaDB, so the
+		// dialect divergences (e.g. LOCK IN SHARE MODE vs the MySQL-8-only
+		// FOR SHARE — BB-3) are emitted correctly. An explicit WithDialect
+		// applied below still wins. (BB-3)
+		if c.dialect.Name() == "mysql" && isMariaDBServer(ctx, db) {
+			c.dialect = MariaDB()
+			// Debug, not Info: WithOptions re-runs New (and thus this probe) on
+			// every clone, so an Info line here would spam logs in apps that
+			// derive clients per-request or in test suites.
+			c.logger.Debug("detected a MariaDB server via SELECT VERSION(); using the MariaDB dialect instead of MySQL")
+		}
 	}
 
 	// Apply client options (skip pool options)
@@ -301,6 +315,19 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 	)
 
 	return c, nil
+}
+
+// isMariaDBServer reports whether the server reached through db identifies as
+// MariaDB. MariaDB embeds the literal "MariaDB" in its version string (e.g.
+// "11.4.2-MariaDB-ubu2404"), while MySQL does not. Any probe error is treated
+// as "not MariaDB" so dialect detection never blocks New() — the worst case is
+// the MySQL dialect on a MariaDB server, i.e. the pre-BB-3 behaviour.
+func isMariaDBServer(ctx context.Context, db *sql.DB) bool {
+	var version string
+	if err := db.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version); err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(version), "mariadb")
 }
 
 // For creates a Query builder for the given model type.
