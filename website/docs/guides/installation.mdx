@@ -56,6 +56,14 @@ SQLite is the simplest local starting point because it needs no external service
 For MySQL and MariaDB, include `parseTime=true` in the DSN when you scan
 `time.Time` fields.
 
+MariaDB has no dedicated `database/sql` driver — it speaks the MySQL wire
+protocol through `github.com/go-sql-driver/mysql` (driver name `"mysql"`).
+Quark detects MariaDB automatically: on a `"mysql"` connection it probes
+`SELECT VERSION()` once at `New()` and switches to the MariaDB dialect when the
+server identifies as MariaDB. So `quark.New("mysql", dsn)` picks the right
+dialect for both engines. Passing `WithDialect(quark.MariaDB())` explicitly
+still works and skips the probe.
+
 ## Optional Packages
 
 | Package | Purpose |

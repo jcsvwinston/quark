@@ -179,6 +179,65 @@ func testPessimisticLocking(ctx context.Context, t *testing.T, baseClient *quark
 		}
 	})
 
+	t.Run("MariaDBForShareUsesLockInShareMode", func(t *testing.T) {
+		// BB-3: MariaDB has no FOR SHARE (MySQL-8 syntax → Error 1064); it must
+		// emit the older LOCK IN SHARE MODE instead.
+		if client.Dialect().Name() != "mariadb" {
+			t.Skip("BB-3 LOCK IN SHARE MODE is MariaDB-specific")
+		}
+		obs.reset()
+		if _, err := quark.For[LockOrder](ctx, client).
+			Where("status", "=", "pending").
+			ForShare().
+			Limit(10).
+			List(); err != nil {
+			t.Fatalf("ForShare().List() on MariaDB: %v", err)
+		}
+		if got := obs.latestContaining("LOCK IN SHARE MODE"); got == "" {
+			t.Errorf("expected LOCK IN SHARE MODE in emitted SQL, got: %s", obs.latestContaining("status"))
+		}
+		if got := obs.latestContaining("FOR SHARE"); got != "" {
+			t.Errorf("MariaDB must not emit FOR SHARE (Error 1064): %s", got)
+		}
+	})
+
+	t.Run("MariaDBForShareWithSkipLockedUnsupported", func(t *testing.T) {
+		// LOCK IN SHARE MODE cannot carry SKIP LOCKED / NOWAIT → clear error.
+		if client.Dialect().Name() != "mariadb" {
+			t.Skip("BB-3 shared-lock modifier rejection is MariaDB-specific")
+		}
+		_, err := quark.For[LockOrder](ctx, client).
+			Where("status", "=", "pending").
+			ForShare().
+			SkipLocked().
+			Limit(10).
+			List()
+		if err == nil {
+			t.Fatal("expected ErrUnsupportedFeature for ForShare().SkipLocked() on MariaDB")
+		}
+		if !errors.Is(err, quark.ErrUnsupportedFeature) {
+			t.Errorf("expected ErrUnsupportedFeature, got %v", err)
+		}
+	})
+
+	t.Run("MySQLForShareStillEmitsForShare", func(t *testing.T) {
+		// Non-regression: the BB-3 fix is MariaDB-only; MySQL 8 keeps FOR SHARE.
+		if client.Dialect().Name() != "mysql" {
+			t.Skip("MySQL FOR SHARE contract")
+		}
+		obs.reset()
+		if _, err := quark.For[LockOrder](ctx, client).
+			Where("status", "=", "pending").
+			ForShare().
+			Limit(10).
+			List(); err != nil {
+			t.Fatalf("ForShare().List() on MySQL: %v", err)
+		}
+		if obs.latestContaining("FOR SHARE") == "" {
+			t.Error("expected FOR SHARE in emitted SQL on MySQL")
+		}
+	})
+
 	t.Run("ForUpdateListUnaffectedOnRowLockDialects", func(t *testing.T) {
 		// PG/MySQL/MariaDB allow LIMIT + FOR UPDATE, so the implicit cap stays
 		// and the lock is still emitted — a non-regression guard for the

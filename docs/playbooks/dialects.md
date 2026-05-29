@@ -53,6 +53,10 @@ Esto está por encima de bun y al nivel de ent. **No simplifiques esto** sin ver
 
 `query_exec.go:541-555` inyecta `ORDER BY 1` (fallback) cuando hay OFFSET sin ORDER BY explícito. MSSQL y Oracle lo exigen. Si introduces nuevo path de paginación, sigue este patrón — un OFFSET sin ORDER BY en estos motores es un error sintáctico.
 
+### MariaDB se autodetecta por versión de servidor (BB-3)
+
+MariaDB no tiene driver `database/sql` propio (usa `go-sql-driver/mysql`, nombre "mysql"), así que `DetectDialect` no puede distinguirlo por nombre. `client.New` hace `SELECT VERSION()` una vez en conexiones "mysql" (`isMariaDBServer`) y cambia a `MariaDBDialect` si el server es MariaDB; un `WithDialect` explícito gana y salta el probe. Consecuencia: `MariaDBDialect.LockSuffix` emite `LOCK IN SHARE MODE` para `ForShare` (MariaDB no tiene `FOR SHARE` — `Error 1064`), y rechaza `ForShare`+`SkipLocked`/`NoWait` con `ErrUnsupportedFeature` (esa forma no admite modificadores). Si añades comportamiento dialect-divergente MariaDB↔MySQL nuevo, ponlo en `MariaDBDialect` (override), no en `MySQLDialect`.
+
 **Oracle + lock pesimista (BB-4):** Oracle prohíbe combinar el row-limiting clause (`OFFSET/FETCH`) con `FOR UPDATE`/`SKIP LOCKED`/`NOWAIT` — **ORA-02014**. `buildSelect` detecta `!q.lock.IsZero() && dialect=="oracle"` y activa `suppressRowLimit`, que inhibe **tanto el OFFSET/FETCH como el ORDER BY implícito** (sin row-limiting, Oracle no exige ORDER BY). El cap implícito de `List()` se descarta (lock sobre todas las filas, con WARN); un `Limit`/`Offset` explícito —o `First()`, que aplica `Limit(1)`— junto al lock devuelve `ErrUnsupportedFeature`. Sólo Oracle; MSSQL usa table hints y sí convive con OFFSET/FETCH.
 
 ### Wrapper `timeScanner` para MySQL

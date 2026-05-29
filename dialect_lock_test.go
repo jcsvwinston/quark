@@ -32,9 +32,18 @@ func TestLockSuffix_PerDialect(t *testing.T) {
 		// MySQL
 		{"mysql/for-update", quark.LockOptions{Mode: quark.LockForUpdate}, quark.MySQL(), "", " FOR UPDATE", false, nil},
 		{"mysql/for-update+skip", quark.LockOptions{Mode: quark.LockForUpdate, SkipLocked: true}, quark.MySQL(), "", " FOR UPDATE SKIP LOCKED", false, nil},
+		// MySQL 8 keeps FOR SHARE (the BB-3 fix is MariaDB-only).
+		{"mysql/for-share", quark.LockOptions{Mode: quark.LockForShare}, quark.MySQL(), "", " FOR SHARE", false, nil},
 
 		// MariaDB
+		{"mariadb/for-update", quark.LockOptions{Mode: quark.LockForUpdate}, quark.MariaDB(), "", " FOR UPDATE", false, nil},
 		{"mariadb/for-update+nowait", quark.LockOptions{Mode: quark.LockForUpdate, NoWait: true}, quark.MariaDB(), "", " FOR UPDATE NOWAIT", false, nil},
+		{"mariadb/for-update+skip", quark.LockOptions{Mode: quark.LockForUpdate, SkipLocked: true}, quark.MariaDB(), "", " FOR UPDATE SKIP LOCKED", false, nil},
+		// MariaDB has no FOR SHARE (MySQL-8 syntax); it uses LOCK IN SHARE MODE,
+		// which cannot carry SKIP LOCKED / NOWAIT. (BB-3)
+		{"mariadb/for-share", quark.LockOptions{Mode: quark.LockForShare}, quark.MariaDB(), "", " LOCK IN SHARE MODE", false, nil},
+		{"mariadb/for-share+skip-unsupported", quark.LockOptions{Mode: quark.LockForShare, SkipLocked: true}, quark.MariaDB(), "", "", true, quark.ErrUnsupportedFeature},
+		{"mariadb/for-share+nowait-unsupported", quark.LockOptions{Mode: quark.LockForShare, NoWait: true}, quark.MariaDB(), "", "", true, quark.ErrUnsupportedFeature},
 
 		// Oracle
 		{"oracle/for-update", quark.LockOptions{Mode: quark.LockForUpdate}, quark.Oracle(), "", " FOR UPDATE", false, nil},

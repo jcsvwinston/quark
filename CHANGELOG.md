@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **dialects:** automatic MariaDB detection. MariaDB ships no dedicated
+  `database/sql` driver — it uses `go-sql-driver/mysql` (driver name `"mysql"`),
+  so Quark could not tell it apart from MySQL by driver name and applied the
+  MySQL dialect. `New()` now probes `SELECT VERSION()` once on a `"mysql"`
+  connection and switches to the MariaDB dialect when the server identifies as
+  MariaDB. `quark.New("mysql", dsn)` therefore picks the correct dialect for
+  both engines; an explicit `WithDialect(quark.MariaDB())` still works and skips
+  the probe. This is what makes the BB-3 `ForShare` fix below take effect on a
+  plain MariaDB connection.
+
 ### Fixed
+
+- **dialects:** `ForShare()` on MariaDB no longer emits invalid SQL. MariaDB has
+  no `FOR SHARE` keyword (MySQL-8 syntax — it raises `Error 1064`); Quark now
+  emits the older `LOCK IN SHARE MODE` for shared locks on MariaDB. Because that
+  form takes no modifiers, combining `ForShare()` with `SkipLocked()`/`NoWait()`
+  returns `ErrUnsupportedFeature` on MariaDB (use `ForUpdate()` for those).
+  `ForUpdate()` on MariaDB is unchanged. MySQL keeps emitting `FOR SHARE`. Found
+  by the post-v1.0 bug-bash (BB-3, phase F2); regression covered by
+  `TestLockSuffix_PerDialect` and `testPessimisticLocking` in the SharedSuite.
+  See `website/docs/guides/querying.mdx` § Pessimistic Locking.
 
 - **query-builder:** pessimistic locking on Oracle no longer hard-fails through
   `List()`. Oracle rejects `FOR UPDATE`/`SKIP LOCKED`/`NOWAIT` combined with a

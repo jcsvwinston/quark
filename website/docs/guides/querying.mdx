@@ -610,10 +610,19 @@ orders, err := quark.For[Order](ctx, client).
 | Dialect | `ForUpdate` | `SkipLocked` | `NoWait` | `ForShare` |
 | --- | --- | --- | --- | --- |
 | PostgreSQL | `FOR UPDATE` | ✅ | ✅ | `FOR SHARE` |
-| MySQL 8+ / MariaDB 10.6+ | `FOR UPDATE` | ✅ | ✅ | `FOR SHARE` |
+| MySQL 8+ | `FOR UPDATE` | ✅ | ✅ | `FOR SHARE` |
+| MariaDB 10.6+ | `FOR UPDATE` | ✅ | ✅ | `LOCK IN SHARE MODE` ¹ |
 | Oracle | `FOR UPDATE` | ✅ (12c+) | ✅ | ❌ → `ErrUnsupportedFeature` |
 | SQL Server | `WITH (UPDLOCK, ROWLOCK)` | `READPAST` | ❌ → `ErrUnsupportedFeature` | `WITH (HOLDLOCK, ROWLOCK)` |
 | SQLite | ❌ → `ErrUnsupportedFeature` | n/a | n/a | n/a |
+
+¹ MariaDB has no `FOR SHARE` keyword (that is MySQL-8 syntax — MariaDB raises
+`Error 1064`), so `ForShare()` emits the older `LOCK IN SHARE MODE`. That form
+takes no modifiers, so combining `ForShare()` with `SkipLocked()` or `NoWait()`
+returns [`ErrUnsupportedFeature`](/docs/reference/api/errors) on MariaDB — use
+`ForUpdate()` for those. Quark auto-detects MariaDB vs MySQL from the server
+version (see [Installation](/docs/guides/installation)), so this is picked
+automatically on a `"mysql"` connection.
 
 SQLite has no row-level pessimistic-lock primitive — use `BEGIN IMMEDIATE`
 or `BEGIN EXCLUSIVE` in your transaction wrapper instead. SQL Server's
