@@ -110,4 +110,93 @@ func testPessimisticLocking(ctx context.Context, t *testing.T, baseClient *quark
 			t.Errorf("expected no WITH (...) hint when lock not requested: %s", got)
 		}
 	})
+
+	// BB-4: Oracle rejects FOR UPDATE combined with a row-limiting clause
+	// (OFFSET/FETCH) — ORA-02014. List() applies an implicit Limit(100), which
+	// made ForUpdate().List() fail outright on Oracle.
+	t.Run("OracleForUpdateListDropsImplicitRowLimit", func(t *testing.T) {
+		if client.Dialect().Name() != "oracle" {
+			t.Skip("BB-4 implicit row-limit suppression is Oracle-specific")
+		}
+		obs.reset()
+		got, err := quark.For[LockOrder](ctx, client).
+			Where("status", "=", "pending").
+			ForUpdate().
+			List()
+		if err != nil {
+			t.Fatalf("ForUpdate().List() on Oracle should succeed (implicit cap dropped): %v", err)
+		}
+		if len(got) != 1 {
+			t.Errorf("expected 1 pending order, got %d", len(got))
+		}
+		sql := obs.latestContaining("FOR UPDATE")
+		if sql == "" {
+			t.Fatal("expected FOR UPDATE in emitted SQL")
+		}
+		// The implicit row-limiting clause must be gone (it's what triggers
+		// ORA-02014); the user-facing lock stays.
+		if strings.Contains(sql, "FETCH") || strings.Contains(sql, "OFFSET") {
+			t.Errorf("expected no OFFSET/FETCH row-limiting under an Oracle lock, got: %s", sql)
+		}
+	})
+
+	t.Run("OracleForUpdateExplicitLimitIsUnsupported", func(t *testing.T) {
+		// An explicit Limit alongside a lock has no valid single-statement
+		// form on Oracle, so it must fail clearly rather than silently widen
+		// the lock to every matching row.
+		if client.Dialect().Name() != "oracle" {
+			t.Skip("BB-4 explicit-limit rejection is Oracle-specific")
+		}
+		_, err := quark.For[LockOrder](ctx, client).
+			Where("status", "=", "pending").
+			ForUpdate().
+			Limit(5).
+			List()
+		if err == nil {
+			t.Fatal("expected ErrUnsupportedFeature for ForUpdate().Limit().List() on Oracle")
+		}
+		if !errors.Is(err, quark.ErrUnsupportedFeature) {
+			t.Errorf("expected ErrUnsupportedFeature, got %v", err)
+		}
+	})
+
+	t.Run("OracleForUpdateFirstIsUnsupported", func(t *testing.T) {
+		// First() applies an implicit Limit(1), which Oracle treats as an
+		// explicit row-limiting clause → same ErrUnsupportedFeature contract
+		// as an explicit Limit. (Documented workaround: lock by key.)
+		if client.Dialect().Name() != "oracle" {
+			t.Skip("BB-4 First()+lock rejection is Oracle-specific")
+		}
+		_, err := quark.For[LockOrder](ctx, client).
+			Where("status", "=", "pending").
+			ForUpdate().
+			First()
+		if err == nil {
+			t.Fatal("expected ErrUnsupportedFeature for ForUpdate().First() on Oracle")
+		}
+		if !errors.Is(err, quark.ErrUnsupportedFeature) {
+			t.Errorf("expected ErrUnsupportedFeature, got %v", err)
+		}
+	})
+
+	t.Run("ForUpdateListUnaffectedOnRowLockDialects", func(t *testing.T) {
+		// PG/MySQL/MariaDB allow LIMIT + FOR UPDATE, so the implicit cap stays
+		// and the lock is still emitted — a non-regression guard for the
+		// Oracle-only suppression path.
+		switch client.Dialect().Name() {
+		case "postgres", "mysql", "mariadb":
+		default:
+			t.Skip("row-level FOR UPDATE + LIMIT contract is PG/MySQL/MariaDB-only")
+		}
+		obs.reset()
+		if _, err := quark.For[LockOrder](ctx, client).
+			Where("status", "=", "pending").
+			ForUpdate().
+			List(); err != nil {
+			t.Fatalf("ForUpdate().List(): %v", err)
+		}
+		if obs.latestContaining("FOR UPDATE") == "" {
+			t.Error("expected FOR UPDATE in emitted SQL")
+		}
+	})
 }

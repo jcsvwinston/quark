@@ -620,6 +620,34 @@ or `BEGIN EXCLUSIVE` in your transaction wrapper instead. SQL Server's
 table-hint syntax means the lock instruction lives in the `FROM` clause
 rather than at the end of the `SELECT`; this is invisible to the caller.
 
+### Oracle: locking and row limits don't mix
+
+Oracle rejects a `FOR UPDATE` combined with a row-limiting clause
+(`OFFSET … FETCH`) with **ORA-02014**, because it implements row-limiting as
+an analytic-function view that `FOR UPDATE` cannot read from. Two consequences
+for locking queries on Oracle:
+
+- **`ForUpdate().List()` works** — `List()`'s implicit safety cap (default 100
+  rows) is dropped under a lock, so the statement is valid. The lock then
+  spans **every matching row**, not just the first 100. A `WARN` is logged.
+  Narrow your `WHERE`, or lock by key inside a transaction, if that's too
+  broad.
+- **An explicit `Limit`/`Offset` together with a lock returns
+  [`ErrUnsupportedFeature`](/docs/reference/api/errors)** — there is no valid
+  single-statement form, so Quark fails clearly rather than silently widening
+  the lock or mis-truncating. To lock a bounded set on Oracle, select the
+  primary keys first, then `Where("id", "IN", keys).ForUpdate()` inside the
+  same transaction.
+- **`ForUpdate().First()` also returns `ErrUnsupportedFeature` on Oracle** —
+  `First()` applies an implicit `Limit(1)`, which Oracle treats as an explicit
+  row-limiting clause. To lock a single row on Oracle, look up its primary key
+  first (e.g. `Find(id)` without a lock), then lock it by key:
+  `Where("id", "=", pk).ForUpdate()` inside the same transaction.
+
+The other engines (PostgreSQL, MySQL, MariaDB) allow `LIMIT` with `FOR UPDATE`
+and are unaffected; SQL Server's table-hint locking coexists with
+`OFFSET/FETCH`.
+
 Pessimistic locks belong inside an explicit transaction. Outside a
 transaction the lock is released as soon as the SELECT completes and you
 gain nothing.

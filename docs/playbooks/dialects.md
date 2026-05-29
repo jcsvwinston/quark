@@ -53,6 +53,8 @@ Esto está por encima de bun y al nivel de ent. **No simplifiques esto** sin ver
 
 `query_exec.go:541-555` inyecta `ORDER BY 1` (fallback) cuando hay OFFSET sin ORDER BY explícito. MSSQL y Oracle lo exigen. Si introduces nuevo path de paginación, sigue este patrón — un OFFSET sin ORDER BY en estos motores es un error sintáctico.
 
+**Oracle + lock pesimista (BB-4):** Oracle prohíbe combinar el row-limiting clause (`OFFSET/FETCH`) con `FOR UPDATE`/`SKIP LOCKED`/`NOWAIT` — **ORA-02014**. `buildSelect` detecta `!q.lock.IsZero() && dialect=="oracle"` y activa `suppressRowLimit`, que inhibe **tanto el OFFSET/FETCH como el ORDER BY implícito** (sin row-limiting, Oracle no exige ORDER BY). El cap implícito de `List()` se descarta (lock sobre todas las filas, con WARN); un `Limit`/`Offset` explícito —o `First()`, que aplica `Limit(1)`— junto al lock devuelve `ErrUnsupportedFeature`. Sólo Oracle; MSSQL usa table hints y sí convive con OFFSET/FETCH.
+
 ### Wrapper `timeScanner` para MySQL
 
 `query_exec.go:27-71`. MySQL en algunos drivers/configs devuelve `[]byte` para columnas `DATETIME` en lugar de `time.Time`. El wrapper parsea cuatro formatos. **No quites este código sin verificar primero qué devuelve cada driver para columnas de tiempo en su matriz de configuración.**

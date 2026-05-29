@@ -315,7 +315,13 @@ func (q *Query[T]) List() ([]T, error) {
 	// Safety: if no explicit limit, apply safe default
 	if !q.hasLimit {
 		q.limit = 100 // Safe default
-		q.client.logger.Warn("List() called without explicit Limit(), using safe default of 100. Use Iter() for unbounded queries or call Limit() explicitly.")
+		// Skip the generic "using cap of 100" notice when the cap is about to
+		// be dropped anyway: on Oracle a lock suppresses the row-limiting
+		// clause (buildSelect logs the dropped-cap WARN instead), so emitting
+		// both would contradict each other in the logs. (BB-4)
+		if !(q.dialect.Name() == "oracle" && !q.lock.IsZero()) {
+			q.client.logger.Warn("List() called without explicit Limit(), using safe default of 100. Use Iter() for unbounded queries or call Limit() explicitly.")
+		}
 	}
 
 	// Build query
@@ -835,6 +841,29 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 		sqlBuf.WriteString(lockHint)
 	}
 
+	// Oracle cannot combine a row-limiting clause (OFFSET/FETCH) with
+	// FOR UPDATE/SKIP LOCKED/NOWAIT: ORA-02014, because Oracle implements the
+	// row-limiting clause as an analytic-function view and FOR UPDATE may not
+	// read from it. List() adds an implicit safety Limit(100); when the caller
+	// did not request limiting explicitly, drop the row-limiting clause so the
+	// lock still applies — to every matching row (warned below). When the
+	// caller DID ask for an explicit Limit/Offset alongside the lock there is
+	// no valid single-statement form, so fail clearly rather than silently
+	// widening the lock or mis-truncating the result. (BB-4)
+	suppressRowLimit := false
+	if !q.lock.IsZero() && q.dialect.Name() == "oracle" {
+		if q.hasLimit || q.offset > 0 {
+			return "", nil, fmt.Errorf("%w: oracle cannot combine row locking (FOR UPDATE/SKIP LOCKED/NOWAIT) with an explicit Limit/Offset (ORA-02014); drop the limit to lock all matching rows, or fetch the keys first and lock them by id inside a transaction", ErrUnsupportedFeature)
+		}
+		suppressRowLimit = true
+		// Only warn when there is actually a cap to drop. Cursor()/Iter() set
+		// no limit (q.limit == 0 → nothing suppressed), so the dropped-cap
+		// notice would be a false positive for them. (BB-4, S-4)
+		if q.limit > 0 && q.client != nil && q.client.logger != nil {
+			q.client.logger.Warn("locking query on Oracle: the implicit List() row cap is not applied because Oracle forbids FOR UPDATE with OFFSET/FETCH (ORA-02014); the lock spans every matching row — narrow the WHERE or lock by key inside a transaction")
+		}
+	}
+
 	// JOIN clauses
 	if len(q.joins) > 0 {
 		if len(q.joins) > q.client.limits.MaxJoins {
@@ -952,7 +981,7 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 				sqlBuf.WriteString(" ASC")
 			}
 		}
-	} else if (q.limit > 0 || q.offset > 0) && (q.dialect.Name() == "mssql" || q.dialect.Name() == "oracle") {
+	} else if !suppressRowLimit && (q.limit > 0 || q.offset > 0) && (q.dialect.Name() == "mssql" || q.dialect.Name() == "oracle") {
 		// MSSQL/Oracle REQUIRE ORDER BY for OFFSET/FETCH. Use PK as default.
 		// Both dialects: DISTINCT and GROUP BY restrict which columns may appear in
 		// ORDER BY, so fall back to positional "1" to avoid ORA-01791 / ORA-00979
@@ -977,11 +1006,13 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 		sqlBuf.WriteString(" ASC")
 	}
 
-	// LIMIT/OFFSET
-	limitOffset := q.dialect.LimitOffset(q.limit, q.offset)
-	if limitOffset != "" {
-		sqlBuf.WriteString(" ")
-		sqlBuf.WriteString(limitOffset)
+	// LIMIT/OFFSET — suppressed under an Oracle lock (see ORA-02014 note above).
+	if !suppressRowLimit {
+		limitOffset := q.dialect.LimitOffset(q.limit, q.offset)
+		if limitOffset != "" {
+			sqlBuf.WriteString(" ")
+			sqlBuf.WriteString(limitOffset)
+		}
 	}
 
 	// Pessimistic-lock suffix (PG / MySQL / MariaDB / Oracle).

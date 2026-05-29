@@ -23,7 +23,7 @@
 > Mantenido por `bugbash-reporter` tras cada pasada. F1 (smoke) y F2 (API
 > surface) se corrieron el 2026-05-28 sobre los 6 motores
 > (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle). Hallazgos abiertos: BB-1 (F1),
-> BB-3/BB-4 (F2). **BB-2 cerrado** (2026-05-29). PG y SQLite limpios en
+> BB-3 (F2). **BB-2 y BB-4 cerrados** (2026-05-29). PG y SQLite limpios en
 > ambas fases. Fases F3-F14 pendientes.
 
 ### BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)
@@ -113,7 +113,25 @@ sí funciona en MariaDB.
   limpio en MariaDB para `ForShare`.
 - **Reproducer:** `For[Order](ctx,c).Where("status","=","pending").ForShare().List()` en MariaDB.
 
-### BB-4 · Oracle: `ForUpdate` + el `Limit` implícito de `List()` → ORA-02014
+### ~~BB-4 · Oracle: `ForUpdate` + el `Limit` implícito de `List()` → ORA-02014~~
+
+**Cerrado** (2026-05-29, rama `fix/bb4-oracle-forupdate-list`). Estrategia
+elegida (opción B): en Oracle, bajo lock activo, se **suprime el cap implícito**
+de `List()` (el OFFSET/FETCH desaparece y el `FOR UPDATE` aplica a todas las
+filas que matchean, con `WARN`), de modo que `ForUpdate().List()` funciona; un
+`Limit`/`Offset` **explícito** junto a un lock devuelve `ErrUnsupportedFeature`
+(no hay forma de una sola sentencia en Oracle — ORA-02014). Implementado en
+`query_exec.go:buildSelect` (flag `suppressRowLimit`, gated a
+`dialect.Name()=="oracle" && !lock.IsZero()`). Los otros 5 motores intactos
+(PG/MySQL/MariaDB permiten `LIMIT`+`FOR UPDATE`; MSSQL usa table hints).
+Regresión: subtests `OracleForUpdateListDropsImplicitRowLimit` /
+`OracleForUpdateExplicitLimitIsUnsupported` /
+`ForUpdateListUnaffectedOnRowLockDialects` en `testPessimisticLocking`
+(`locking_test.go`). Verde en Oracle + PG + SQLite local. Docs:
+`CHANGELOG.md` `[Unreleased]/Fixed` + `website/docs/guides/querying.mdx`
+§ Oracle: locking and row limits don't mix.
+
+<details><summary>Descripción original del hallazgo</summary>
 
 **Severidad:** P1 (FOR UPDATE vía `List()` está roto en Oracle: `List` aplica
 un `Limit` por defecto). **Categoría:** dialect-specific. **Motor:** Oracle.
@@ -129,6 +147,8 @@ Afecta a `ForUpdate`/`SkipLocked`/`NoWait` (todos pasan por la envoltura).
   subconsulta no envuelta, o no envolver cuando hay locking, o devolver un
   error claro guiando a usar `Limit` explícito compatible.
 - **Reproducer:** `For[Order](ctx,c).Where("status","=","pending").ForUpdate().List()` en Oracle.
+
+</details>
 
 ---
 
