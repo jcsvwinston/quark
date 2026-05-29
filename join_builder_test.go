@@ -45,6 +45,7 @@ func testJoinBuilder(ctx context.Context, t *testing.T, baseClient *quark.Client
 	if err := quark.For[jbUser](ctx, baseClient).Create(&alice); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
+	var orderIDs []int64
 	for _, o := range []jbOrder{
 		{UserID: alice.ID, Amount: 100},
 		{UserID: alice.ID, Amount: 50},
@@ -53,6 +54,7 @@ func testJoinBuilder(ctx context.Context, t *testing.T, baseClient *quark.Client
 		if err := quark.For[jbOrder](ctx, baseClient).Create(&row); err != nil {
 			t.Fatalf("seed order: %v", err)
 		}
+		orderIDs = append(orderIDs, row.ID)
 	}
 
 	t.Run("OnTypedFormExecutes", func(t *testing.T) {
@@ -60,11 +62,11 @@ func testJoinBuilder(ctx context.Context, t *testing.T, baseClient *quark.Client
 		// qualified identifier that goes through the existing
 		// ValidateJoinOn grammar.
 		//
-		// `Count()` instead of `List()` because both tables expose `id`
-		// and the default `SELECT *` over the JOIN triggers MSSQL's
-		// "Ambiguous column name 'id'". The contract being pinned is
-		// "ON clause is accepted and the JOIN executes" — Count
-		// exercises the same code path with no projection ambiguity.
+		// Count() pins "ON clause is accepted and the JOIN executes". The
+		// List() projection contract — that a bare SELECT under a JOIN
+		// projects only the base table's columns — is pinned separately in
+		// OnTypedFormListsBaseColumns below (the BB-2 fix); cross-engine
+		// coverage of both projection paths lives in testBB2JoinProjection.
 		got, err := quark.For[jbOrder](ctx, baseClient).
 			Join("jb_users").On("jb_users.id", "=", "jb_orders.user_id").
 			Count()
@@ -73,6 +75,41 @@ func testJoinBuilder(ctx context.Context, t *testing.T, baseClient *quark.Client
 		}
 		if got != 2 {
 			t.Errorf("expected 2 orders, got %d", got)
+		}
+	})
+
+	t.Run("OnTypedFormListsBaseColumns", func(t *testing.T) {
+		// Both tables expose `id`. Pre-BB-2 the default `SELECT *` over the
+		// JOIN was ambiguous (hard error on MSSQL, silent mis-bind elsewhere),
+		// which is why the suite used to route every join assertion through
+		// Count(). With base-table projection (`SELECT jb_orders.*`) List()
+		// returns the base rows cleanly — each with its own id, not the
+		// joined user's.
+		got, err := quark.For[jbOrder](ctx, baseClient).
+			Join("jb_users").On("jb_users.id", "=", "jb_orders.user_id").
+			List()
+		if err != nil {
+			t.Fatalf("On list: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("expected 2 orders, got %d: %+v", len(got), got)
+		}
+		for _, o := range got {
+			if o.UserID != alice.ID {
+				t.Errorf("expected user_id %d, got %d", alice.ID, o.UserID)
+			}
+			// id must be one of the seeded order ids — never the joined
+			// user's id (the mis-bind symptom a bare `SELECT *` produced).
+			var isOrderID bool
+			for _, id := range orderIDs {
+				if o.ID == id {
+					isOrderID = true
+					break
+				}
+			}
+			if !isOrderID {
+				t.Errorf("order.ID %d is not a seeded order id — possible mis-bind to the joined table: %+v", o.ID, o)
+			}
 		}
 	})
 

@@ -576,6 +576,22 @@ do not accept dotted identifiers such as `users.active`. For complex join
 filters or projections, use a database view, add columns to a dedicated read
 model, or opt into `RawQuery`.
 
+### Projection under a join
+
+When you don't call `Select(...)`, a query over a JOIN projects **only the
+base model's columns** — Quark emits `SELECT "orders".*`, not a bare
+`SELECT *`. This keeps the result set aligned with `T`: a bare `*` would pull
+every joined table's columns into the row, so shared names like `id` or
+`deleted_at` would collide (a hard *ambiguous column* error on strict engines,
+or silently scanning a joined table's column into your model on lax ones). The
+joined table is available for filtering and `ON` conditions but is not part of
+the projection — if you need joined columns in the output, read them through a
+view, a dedicated read model, or `RawQuery`.
+
+For the same reason the automatic soft-delete predicate is qualified with the
+base table under a join (`"orders"."deleted_at" IS NULL`), so it stays
+unambiguous when the joined table also has a `deleted_at` column.
+
 ## Pessimistic Locking
 
 `ForUpdate`, `ForShare`, `SkipLocked`, and `NoWait` attach a row-level

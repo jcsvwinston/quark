@@ -23,8 +23,8 @@
 > Mantenido por `bugbash-reporter` tras cada pasada. F1 (smoke) y F2 (API
 > surface) se corrieron el 2026-05-28 sobre los 6 motores
 > (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle). Hallazgos abiertos: BB-1 (F1),
-> BB-2/BB-3/BB-4 (F2). PG y SQLite limpios en ambas fases. Fases F3-F14
-> pendientes.
+> BB-3/BB-4 (F2). **BB-2 cerrado** (2026-05-29). PG y SQLite limpios en
+> ambas fases. Fases F3-F14 pendientes.
 
 ### BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)
 
@@ -51,7 +51,24 @@ round-trip correcto; sólo `UNIQUEIDENTIFIER` falla.
 - **Reproducer:** `go test -tags=bugbash -run TestSmoke ./phases/f01_smoke/... -engines=mssql`
   revirtiendo el mapper de `mappers.go` a `UNIQUEIDENTIFIER`.
 
-### BB-2 · Los `Join` sobre queries tipadas no acotan el `SELECT` a la tabla base
+### ~~BB-2 · Los `Join` sobre queries tipadas no acotan el `SELECT` a la tabla base~~
+
+**Cerrado** (2026-05-29, rama `fix/bb2-typed-join-projection`). Dos defectos
+en la generación de SQL bajo join: (A) `buildSelect` emitía `SELECT *`, que
+bajo un join trae columnas de todas las tablas → nombres duplicados / mis-bind
+del scanner; ahora proyecta `SELECT "<tabla_base>".*` cuando hay joins
+(`query_exec.go`). (B) el predicado de soft-delete se inyectaba sin cualificar
+(`deleted_at IS NULL`) → `ambiguous column`; ahora se cualifica con la tabla
+base como fragmento `isRaw` pre-quoteado (`soft_delete.go`). `Join().List()`
+pasa a ser camino soportado en los 6 motores (antes sólo `Count()`).
+Regresión: `testBB2JoinProjection` (nuevo `bb2_join_projection_test.go`,
+wired a SharedSuite) + subtest `OnTypedFormListsBaseColumns` en
+`join_builder_test.go`. Verde en SQLite + Postgres local; resto vía CI.
+Docs: `CHANGELOG.md` `[Unreleased]/Fixed` + `website/docs/guides/querying.mdx`
+§ Projection under a join.
+
+<details><summary>Descripción original del hallazgo</summary>
+
 
 **Severidad:** P1 (joins es feature core; produce error duro o corrupción
 silenciosa). **Categoría:** gap. **Motores:** todos (es generación de SQL).
@@ -78,6 +95,8 @@ tabla en `T.ID` (corrupción silenciosa).
   soft-delete con la tabla base. Mientras tanto, el harness valida la
   generación de SQL del join vía `AsSubquery` y no ejecuta el join-en-`T`.
 - **Reproducer:** `For[Order](ctx,c).Join("customers").On("orders.customer_id","=","customers.id").List()`.
+
+</details>
 
 ### BB-3 · MariaDB rechaza `FOR SHARE` (sintaxis MySQL-8 en el dialecto compartido)
 

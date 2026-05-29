@@ -767,7 +767,17 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	hasCols := len(q.selectCols) > 0
 	hasExprs := len(q.selectExprs) > 0
 	if !hasCols && !hasExprs {
-		sqlBuf.WriteString("*")
+		// A bare `*` under a JOIN pulls every joined table's columns into the
+		// result set: duplicate names (id, deleted_at, …) collide and the
+		// scanner mis-binds another table's column into T (e.g. a NULL
+		// order_lines.id from an outer join scanned into Order.ID). Project
+		// only the base table's columns so the result set matches T. (BB-2)
+		if len(q.joins) > 0 {
+			sqlBuf.WriteString(q.dialect.Quote(q.table))
+			sqlBuf.WriteString(".*")
+		} else {
+			sqlBuf.WriteString("*")
+		}
 	} else {
 		if hasCols {
 			quoted := make([]string, len(q.selectCols))
@@ -951,6 +961,15 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 		if q.distinct || len(q.groupBy) > 0 {
 			sqlBuf.WriteString("1")
 		} else if q.pk.Column != "" {
+			// Under a JOIN the bare PK name is ambiguous when the joined
+			// table also has it (Oracle: ORA-00918; SQL Server resolves it
+			// against the projected SELECT list, but qualifying is correct on
+			// both). Qualify the framework-injected ordering column with the
+			// base table, matching the base-table projection above. (BB-2)
+			if len(q.joins) > 0 {
+				sqlBuf.WriteString(q.dialect.Quote(q.table))
+				sqlBuf.WriteString(".")
+			}
 			sqlBuf.WriteString(q.dialect.Quote(q.pk.Column))
 		} else {
 			sqlBuf.WriteString("(SELECT NULL)") // MSSQL fallback when no PK

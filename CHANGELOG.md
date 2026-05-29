@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **query-builder:** typed queries with a `Join`/`LeftJoin`/`RightJoin` and no
+  explicit `Select` now project only the base table (`SELECT "orders".*`)
+  instead of a bare `SELECT *`. A bare `*` over a JOIN pulled every joined
+  table's columns into the result set, so shared column names (`id`,
+  `deleted_at`, …) collided — a hard *ambiguous column* error on the strict
+  engines (PostgreSQL/MSSQL/Oracle) or a silent mis-bind of a joined table's
+  column into the model on the lax ones (e.g. a NULL `order_lines.id` from an
+  outer join scanned into `Order.ID` → `converting NULL to int64`). The
+  auto-injected soft-delete predicate is likewise qualified with the base
+  table under a join (`"orders"."deleted_at" IS NULL`) so it stays unambiguous
+  when the joined table also exposes `deleted_at`. `Join().List()` is now a
+  supported path on all six engines (previously only `Count()` worked over a
+  join). Found by the post-v1.0 bug-bash (BB-2, phase F2); regression covered
+  by `testBB2JoinProjection` in the SharedSuite. See
+  `website/docs/guides/querying.mdx` § Projection under a join.
+
 ### Added
 
 - **events:** inbound PostgreSQL `LISTEN/NOTIFY` listener. `ListenerFactory.CreateListener`

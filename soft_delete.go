@@ -35,6 +35,21 @@ func (q *BaseQuery) softDeletePredicate() *condition {
 	if q.onlyTrashed {
 		op = "IS NOT NULL"
 	}
+	// Under a JOIN an unqualified `deleted_at` is ambiguous when a joined
+	// table also exposes the column ("ambiguous column name: deleted_at").
+	// Qualify it with the base table and ship it as a pre-quoted raw
+	// fragment so buildWhereClause renders it verbatim instead of re-quoting
+	// the dotted name as a single identifier. Both segments come from
+	// dialect.Quote of trusted identifiers (the model's table and the
+	// literal column), so no user input is concatenated. (BB-2)
+	if len(q.joins) > 0 {
+		return &condition{
+			column:   q.dialect.Quote(q.table) + "." + q.dialect.Quote("deleted_at"),
+			operator: op,
+			logic:    "AND",
+			isRaw:    true,
+		}
+	}
 	return &condition{
 		column:   "deleted_at",
 		operator: op,
