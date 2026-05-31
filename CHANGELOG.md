@@ -49,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **multi-tenant:** `SchemaPerTenant` writes now hit the tenant's schema. On
+  `Create`/`Update` the persistence path built its INSERT/UPDATE from a
+  `BaseQuery` that copied the tenant id and column but **not** the resolved
+  schema, so writes emitted a bare table name and landed in the default
+  `search_path` schema while reads (which honour the schema) looked in the
+  tenant schema — rows effectively vanished, and every tenant's writes
+  co-mingled in one schema. The save path now propagates the schema, so writes
+  and reads agree. Found by the post-v1.0 bug-bash (BB-8, phase F5). Covered by
+  `schema_per_tenant_write_test.go` (asserts the emitted INSERT is
+  schema-qualified) and the F5 tenancy phase on PostgreSQL.
 - **preload:** relations whose foreign key maps to a pointer field (a nullable
   FK such as `*int64`) now load correctly. The eager loader keyed its
   parent/child match map by the raw field value, so a `*int64` key never

@@ -27,14 +27,22 @@
 > ambas fases. **Fases implementadas: F0, F1, F2, F3, F13** (F13 — security/
 > anti-injection — añadida 2026-05-29, gate obligatorio antes de patch
 > v1.0.x; verde en los 6 motores, sin hallazgos. F3 — relaciones — añadida
-> 2026-05-31; halló y **cerró BB-5, BB-6 y BB-7** (todos en el mismo PR).
-> Pendientes: F4-F12, F14.
+> 2026-05-31; halló y **cerró BB-5, BB-6 y BB-7**. F5 — multi-tenancy —
+> añadida 2026-05-31; halló y **cerró BB-8** (SchemaPerTenant write routing).
+> Pendientes: F4, F6-F12, F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
 > abiertos. Los 3 bugs que destapó (BB-5 nullable-FK preload, BB-6 MSSQL null
 > `Nullable[[]byte]`, BB-7 Oracle m2m) quedaron arreglados y verificados
 > cross-engine en la misma pasada.
+>
+> **Pasada F5 cross-engine (2026-05-31, Docker):** **verde en los 6 motores**.
+> RLSClient (aislamiento + Or/P0-1 + concurrencia) y la aserción de
+> `ErrUnsupportedFeature` de RLSNative corren en los 6; DatabasePerTenant en
+> SQLite, SchemaPerTenant + RLSNative (engine-enforced vía rol no-superusuario)
+> en PG. Destapó **BB-8** (writes de SchemaPerTenant iban al schema por
+> defecto, no al del tenant), arreglado y verificado en la misma pasada.
 
 ### ~~BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)~~
 
@@ -298,12 +306,36 @@ segundo desajuste. Aislado porque has_one/has_many/belongs_to/polymorphic
 
 </details>
 
-- **Reproducer:** `For[User](ctx,c).Preload("Roles").Find(uid)` en Oracle con
-  enlaces en `user_roles` → `Roles` vacío.
-- **Acción Quark sugerida:** normalizar las claves numéricas a un tipo
-  canónico (p.ej. `int64`) en el match m2m (y revisar `loadStandard` por si el
-  mismo `Scan(&any)` aplica a FKs escaneadas en otros motores). Distinto de
-  BB-5 y de mayor alcance — su propio PR.
+### ~~BB-8 · `SchemaPerTenant`: los writes van al schema por defecto, no al del tenant~~
+
+**Cerrado** (2026-05-31, mismo PR que añade F5). En `Create`/`Update`, el path
+de persistencia (`saveAny`, `query_crud.go`) construía el INSERT/UPDATE desde
+un `BaseQuery` nuevo (`dq`/`sq`) que copiaba `tenantID`/`tenantCol` de `q` pero
+**no `schema`**, así que `fullTableName()` emitía el nombre de tabla sin
+cualificar y el write caía en el schema del `search_path` por defecto, mientras
+las lecturas (que sí honran `q.schema` vía `fullTableName`) miraban en el schema
+del tenant. Bajo `SchemaPerTenant` los writes "desaparecían" para el lector del
+tenant y los de **todos** los tenants se co-mingaban en un único schema. Fix:
+propagar `schema: q.schema` a `dq` y `sq` en `saveAny`. Verificado en PG por la
+fase F5 (diagnóstico: write → `spa.tdocs`, no `public`). CHANGELOG
+`[Unreleased]/Fixed`.
+
+<details><summary>Descripción del hallazgo</summary>
+
+**Severidad:** P1 (correctness + aislamiento de SchemaPerTenant: writes al
+schema equivocado, co-mingle entre tenants). **Categoría:** regression.
+**Motor:** todos los que soportan schemas (verificado en PG; lógica
+engine-agnostic). **Fase:** F5 (`bugbash/phases/f05_tenancy`).
+
+`For[T](ctx, router)` con `SchemaPerTenant` fija `q.schema = tenantID`. Las
+lecturas lo respetan; `saveAny` no, porque su `BaseQuery` interno no copiaba el
+campo. Aislado porque las otras tres estrategias no usan `q.schema`.
+
+- **Reproducer:** crear schema `spa` + tabla; `For[T](withTenant(ctx,"spa"),
+  router).Create(&row)` con `SchemaPerTenant` → el row aparece en el schema por
+  defecto y `For[T](...,"spa").List()` devuelve 0.
+
+</details>
 
 ---
 

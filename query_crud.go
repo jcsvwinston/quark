@@ -290,6 +290,7 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 					meta:      relMetaFromType(rel.RefType),
 					tenantID:  q.tenantID,
 					tenantCol: q.tenantCol,
+					schema:    q.schema,
 				}
 
 				if _, err := sq.saveAny(ctx, exec, relatedVal.Interface(), actualUpdate); err != nil {
@@ -321,6 +322,11 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		meta:      meta,
 		tenantID:  q.tenantID,
 		tenantCol: q.tenantCol,
+		// schema must propagate so SchemaPerTenant writes hit the tenant's
+		// schema, not the default search_path. Reads already honour q.schema
+		// via fullTableName; without this, INSERT/UPDATE diverged from SELECT
+		// and rows landed in the wrong schema (BB-8).
+		schema: q.schema,
 	}
 
 	rowsAffected := int64(0)
@@ -2112,6 +2118,7 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 				meta:      q.meta,
 				tenantID:  q.tenantID,
 				tenantCol: q.tenantCol,
+				schema:    q.schema, // SchemaPerTenant: keep writes in the tenant schema (BB-8)
 			}
 			sqlStr, args, err := bq.buildUpdate(v)
 			if err != nil {
@@ -2141,8 +2148,14 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 // wrapDBError and returned, so callers see the failure instead of silent
 // corruption.
 func (q *BaseQuery) linkM2M(rel RelationMeta, parentPK, childPK any) error {
+	// Qualify the join table with the tenant schema under SchemaPerTenant, so
+	// the link rows land in the tenant's schema like the entity rows (BB-8).
+	joinTable := q.dialect.Quote(rel.JoinTable)
+	if q.schema != "" {
+		joinTable = q.dialect.Quote(q.schema) + "." + joinTable
+	}
 	sqlStr := fmt.Sprintf("INSERT INTO %s (%s, %s) VALUES (%s, %s)",
-		q.dialect.Quote(rel.JoinTable),
+		joinTable,
 		q.dialect.Quote(rel.JoinFK),
 		q.dialect.Quote(rel.JoinRefFK),
 		q.dialect.Placeholder(1),
