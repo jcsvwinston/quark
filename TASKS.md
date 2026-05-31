@@ -29,7 +29,9 @@
 > v1.0.x; verde en los 6 motores, sin hallazgos. F3 — relaciones — añadida
 > 2026-05-31; halló y **cerró BB-5, BB-6 y BB-7**. F5 — multi-tenancy —
 > añadida 2026-05-31; halló y **cerró BB-8** (SchemaPerTenant write routing).
-> Pendientes: F4, F6-F12, F14.
+> F7 — caché — añadida 2026-05-31; **sin hallazgos** (singleflight,
+> invalidación granular y caching de resultado vacío sólidos en los 6 motores
+> + Redis). Pendientes: F4, F6, F8-F12, F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -43,6 +45,14 @@
 > SQLite, SchemaPerTenant + RLSNative (engine-enforced vía rol no-superusuario)
 > en PG. Destapó **BB-8** (writes de SchemaPerTenant iban al schema por
 > defecto, no al del tenant), arreglado y verificado en la misma pasada.
+>
+> **Pasada F7 cross-engine (2026-05-31, Docker + Redis):** **verde en los 6
+> motores**, sin hallazgos. Verifica singleflight (1000→1), cache-aside +
+> discriminación de key, invalidación granular por PK (F4-6), caching de
+> resultado vacío, y el backend Redis (singleflight + invalidación). Jitter/
+> XFetch quedan citados a `cache_stampede_test.go`; el gap cross-instancia es
+> un non-bug documentado (ADR-0011); el negative-caching de fila (`First`
+> no-rows) sigue diferido (playbook).
 
 ### ~~BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)~~
 
