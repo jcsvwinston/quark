@@ -41,8 +41,8 @@ func (q *BaseQuery) loadStandard(parents reflect.Value, ownerMeta *ModelMeta, re
 	keyMap := make(map[any][]int)
 	for i := 0; i < parents.Len(); i++ {
 		val := indirect(parents.Index(i))
-		pKey := val.Field(parentFieldMeta.Index).Interface()
-		if reflect.ValueOf(pKey).IsZero() {
+		pKey := normalizeKey(val.Field(parentFieldMeta.Index).Interface())
+		if pKey == nil || reflect.ValueOf(pKey).IsZero() {
 			continue
 		}
 		parentKeys = append(parentKeys, pKey)
@@ -106,13 +106,17 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 	if !ok {
 		return fmt.Errorf("could not find parent PK column %s for m2m relation %s", parentCol, relName)
 	}
+	pkFieldMeta, ok := relModel.FieldByCol[strings.ToLower(relModel.PK.Column)]
+	if !ok {
+		return fmt.Errorf("could not find PK column %s in related model", relModel.PK.Column)
+	}
 
 	var parentKeys []any
 	parentKeyMap := make(map[any][]int)
 	for i := 0; i < parents.Len(); i++ {
 		val := indirect(parents.Index(i))
-		pKey := val.Field(parentFieldMeta.Index).Interface()
-		if reflect.ValueOf(pKey).IsZero() {
+		pKey := normalizeKey(val.Field(parentFieldMeta.Index).Interface())
+		if pKey == nil || reflect.ValueOf(pKey).IsZero() {
 			continue
 		}
 		parentKeys = append(parentKeys, pKey)
@@ -147,10 +151,22 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 		}
 		defer joinRows.Close()
 		for joinRows.Next() {
-			var parentID, relatedID any
-			if err := joinRows.Scan(&parentID, &relatedID); err != nil {
+			// Scan the join-table FK columns into destinations typed to the
+			// owner and related PK fields. Scanning into interface{} lets the
+			// driver choose a dynamic type (e.g. go-ora returns NUMBER as a type
+			// that is not == the struct's int64 PK), so the key match below
+			// fails and the relation silently loads empty (BB-7). Typed scan
+			// targets yield the same Go type as the struct PKs on every driver.
+			parentPtr := reflect.New(parentFieldMeta.Type)
+			relatedPtr := reflect.New(pkFieldMeta.Type)
+			if err := joinRows.Scan(
+				makeScanDest(parentPtr.Elem(), nil),
+				makeScanDest(relatedPtr.Elem(), nil),
+			); err != nil {
 				return err
 			}
+			parentID := normalizeKey(parentPtr.Elem().Interface())
+			relatedID := normalizeKey(relatedPtr.Elem().Interface())
 			relatedToParent[relatedID] = append(relatedToParent[relatedID], parentID)
 			if !seenRelated[relatedID] {
 				relatedKeys = append(relatedKeys, relatedID)
@@ -171,11 +187,6 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 		if _, ok := relModel.FieldByCol[strings.ToLower(q.tenantCol)]; ok {
 			hasTenantCol = true
 		}
-	}
-
-	pkFieldMeta, ok := relModel.FieldByCol[strings.ToLower(relModel.PK.Column)]
-	if !ok {
-		return fmt.Errorf("could not find PK column %s in related model", relModel.PK.Column)
 	}
 
 	return chunkParentKeys(relatedKeys, func(chunk []any) error {
@@ -212,7 +223,12 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 			relVal := relPtr.Elem()
 			scanDest := make([]any, len(cols))
 			for i, col := range cols {
-				if fm, ok := relModel.FieldByCol[col]; ok {
+				// Lower-case the driver-reported column name before the field
+				// lookup: Oracle returns identifiers upper-cased, and FieldByCol
+				// is keyed by the lower-case db tag. Without this, no column maps
+				// on Oracle, the related row scans all-zero, and the m2m match
+				// below finds nothing (BB-7). Mirrors scanAndMapStandard.
+				if fm, ok := relModel.FieldByCol[strings.ToLower(col)]; ok {
 					scanDest[i] = makeScanDest(relVal.Field(fm.Index), q.preloadColumnTZ(relModel, fm))
 				} else {
 					var discard any
@@ -222,7 +238,7 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 			if err := rows.Scan(scanDest...); err != nil {
 				return err
 			}
-			relatedID := relVal.Field(pkFieldMeta.Index).Interface()
+			relatedID := normalizeKey(relVal.Field(pkFieldMeta.Index).Interface())
 			if parentIDs, ok := relatedToParent[relatedID]; ok {
 				for _, parentID := range parentIDs {
 					if parentIndexes, ok := parentKeyMap[parentID]; ok {
@@ -243,7 +259,10 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 // loadPolymorphicRelation method.
 func (q *BaseQuery) loadPolymorphic(parents reflect.Value, ownerMeta *ModelMeta, relName string, relMeta *RelationMeta, relModel *ModelMeta) error {
 	parentCol := ownerMeta.PK.Column
-	parentFieldMeta, ok := ownerMeta.FieldByCol[parentCol]
+	// Lower-case the PK column before the lookup, matching loadStandard/loadM2M.
+	// FieldByCol is keyed by the lower-case db tag; an upper-cased tag (or a
+	// driver that reports identifiers upper-cased) would otherwise miss here.
+	parentFieldMeta, ok := ownerMeta.FieldByCol[strings.ToLower(parentCol)]
 	if !ok {
 		return fmt.Errorf("could not find parent PK column %s for polymorphic relation %s", parentCol, relName)
 	}
@@ -252,8 +271,8 @@ func (q *BaseQuery) loadPolymorphic(parents reflect.Value, ownerMeta *ModelMeta,
 	parentKeyMap := make(map[any][]int)
 	for i := 0; i < parents.Len(); i++ {
 		val := indirect(parents.Index(i))
-		pKey := val.Field(parentFieldMeta.Index).Interface()
-		if reflect.ValueOf(pKey).IsZero() {
+		pKey := normalizeKey(val.Field(parentFieldMeta.Index).Interface())
+		if pKey == nil || reflect.ValueOf(pKey).IsZero() {
 			continue
 		}
 		parentKeys = append(parentKeys, pKey)
@@ -323,7 +342,10 @@ func (q *BaseQuery) scanAndMapStandard(rows *sql.Rows, parents reflect.Value, re
 		if err := rows.Scan(scanDest...); err != nil {
 			return err
 		}
-		fKey := relVal.Field(foreignFieldMeta.Index).Interface()
+		fKey := normalizeKey(relVal.Field(foreignFieldMeta.Index).Interface())
+		if fKey == nil {
+			continue
+		}
 		if parentIndexes, ok := keyMap[fKey]; ok {
 			for _, pIdx := range parentIndexes {
 				parentVal := indirect(parents.Index(pIdx))
@@ -363,7 +385,7 @@ func (q *BaseQuery) scanAndMapPolymorphic(rows *sql.Rows, parents reflect.Value,
 		if err := rows.Scan(scanDest...); err != nil {
 			return err
 		}
-		parentID := relVal.Field(polyIDFieldMeta.Index).Interface()
+		parentID := normalizeKey(relVal.Field(polyIDFieldMeta.Index).Interface())
 		if parentIndexes, ok := parentKeyMap[parentID]; ok {
 			for _, pIdx := range parentIndexes {
 				parentVal := indirect(parents.Index(pIdx))
@@ -429,6 +451,24 @@ func gatherLoadedChildren(parents reflect.Value, relName string, relMeta *Relati
 func indirect(v reflect.Value) reflect.Value {
 	if v.Kind() == reflect.Ptr {
 		return v.Elem()
+	}
+	return v
+}
+
+// normalizeKey unwraps a pointer join key to its pointee so a nullable FK
+// (e.g. a `*int64` on a self-referential or optional relation) compares equal
+// to the non-pointer key on the other side of the join. Without this, a
+// belongs_to whose FK column maps to a `*int64` field produces a `*int64`
+// map key while the related row's PK scans to an `int64`, so the keys never
+// match and the relation silently loads as nil/empty. A nil pointer yields
+// nil — a NULL FK matches no parent, so the caller skips it.
+func normalizeKey(v any) any {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return nil
+		}
+		return rv.Elem().Interface()
 	}
 	return v
 }

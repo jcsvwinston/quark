@@ -24,9 +24,17 @@
 > surface) se corrieron el 2026-05-28 sobre los 6 motores
 > (SQLite/PG/MySQL/MariaDB/MSSQL/Oracle). **Sin hallazgos F1/F2 abiertos:
 > BB-1, BB-2, BB-3 y BB-4 cerrados** (2026-05-29). PG y SQLite limpios en
-> ambas fases. **Fases implementadas: F0, F1, F2, F13** (F13 — security/
+> ambas fases. **Fases implementadas: F0, F1, F2, F3, F13** (F13 — security/
 > anti-injection — añadida 2026-05-29, gate obligatorio antes de patch
-> v1.0.x; verde en los 6 motores, sin hallazgos). Pendientes: F3-F12, F14.
+> v1.0.x; verde en los 6 motores, sin hallazgos. F3 — relaciones — añadida
+> 2026-05-31; halló y **cerró BB-5, BB-6 y BB-7** (todos en el mismo PR).
+> Pendientes: F4-F12, F14.
+>
+> **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
+> motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
+> abiertos. Los 3 bugs que destapó (BB-5 nullable-FK preload, BB-6 MSSQL null
+> `Nullable[[]byte]`, BB-7 Oracle m2m) quedaron arreglados y verificados
+> cross-engine en la misma pasada.
 
 ### ~~BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)~~
 
@@ -187,6 +195,115 @@ Afecta a `ForUpdate`/`SkipLocked`/`NoWait` (todos pasan por la envoltura).
 - **Reproducer:** `For[Order](ctx,c).Where("status","=","pending").ForUpdate().List()` en Oracle.
 
 </details>
+
+### ~~BB-5 · `Preload` de relaciones con FK *nullable* (`*int64`) carga `nil`/vacío~~
+
+**Cerrado** (2026-05-31, mismo PR que añade la fase F3). El eager loader
+(`preload_loaders.go`) indexaba el mapa de match padre/hijo por el **valor
+crudo del campo**: cuando la columna de join mapea a un campo puntero
+(`*int64`, típico en FK nullable), la clave del mapa era un `*int64` mientras
+la PK de la fila relacionada se escaneaba a `int64`, así que las claves nunca
+comparaban iguales y la relación cargaba silenciosamente `nil`/vacía. Afectaba
+a **toda** relación con FK nullable en ambas direcciones: belongs_to (la FK
+vive en el dueño, p.ej. `Invoice.Order` sobre `OrderID *int64`) y has_many /
+has_one (la FK vive en el hijo, p.ej. el árbol autorreferencial
+`Category.Children` sobre `ParentID *int64`). Las relaciones con FK `int64`
+(no puntero) nunca se vieron afectadas — de ahí que F1/F2 no lo detectaran.
+
+Fix: helper `normalizeKey` que desreferencia la clave puntero a su pointee
+antes del match en los dos lados del join (`loadStandard` + `scanAndMapStandard`);
+una FK `NULL` no matchea a ningún padre, como debe. Regresión:
+`preload_nullable_fk_test.go` (unit, rápido, 4 subtests cubriendo ambas
+direcciones + FK NULL + dotted anidado) y la fase F3 (cross-engine).
+CHANGELOG `[Unreleased]/Fixed`.
+
+<details><summary>Descripción del hallazgo</summary>
+
+**Severidad:** P1 (corrupción silenciosa de lectura: la relación existe en BD
+pero llega vacía a la app; ningún error). **Categoría:** regression / gap.
+**Motor:** detectado en SQLite, root-cause es lógica de reflect compartida →
+afecta a los 6 motores por igual. **Fase:** F3 (`bugbash/phases/f03_relaciones`).
+**Estado:** cerrado.
+
+- **Reproducer:** `For[Category](ctx,c).Preload("Children").Find(rootID)`
+  con `Category{ParentID *int64; Children []Category rel:"has_many" join:"parent_id"}`
+  → `Children` vacío pese a existir hijos. Idem `Preload("Parent")`.
+
+</details>
+
+### ~~BB-6 · `Nullable[[]byte]` NULL no se inserta en MSSQL (nvarchar→varbinary)~~
+
+**Cerrado** (2026-05-31, mismo PR que añade F3). Fix: `nullBytesArg` en
+`nullable.go` sustituye un `Nullable[[]byte]` inválido por un `[]byte(nil)`
+tipado (NULL binario en los 6 motores) en `bindColumnArg`, en vez de dejar
+que el `Valuer` devuelva un nil sin tipo que go-mssqldb codifica como
+`nvarchar`. Regresión: `nullable_bytes_test.go` (unit del helper + round-trip
+SQLite) y la fase F3 (el seed deja `UserProfile.Avatar` NULL a propósito,
+verde en los 6 motores). CHANGELOG `[Unreleased]/Fixed`.
+
+<details><summary>Descripción del hallazgo</summary>
+
+**Severidad:** P1 (rompía el INSERT de cualquier fila con un BLOB nullable
+vacío en SQL Server). **Categoría:** dialect-specific. **Motor:** MSSQL.
+**Fase:** F3 (`bugbash/phases/f03_relaciones`, destapado al sembrar
+`UserProfile`).
+
+`Nullable[[]byte]` es `sql.Null[[]byte]`. Al insertar uno con `Valid:false`
+(NULL) en MSSQL, el parámetro llega como `nvarchar` contra una columna
+`varbinary(max)` y el motor aborta:
+
+```
+mssql: Implicit conversion from data type nvarchar to varbinary(max) is not
+allowed. Use the CONVERT function to run this query.
+```
+
+PG/MySQL/MariaDB/Oracle/SQLite insertan el NULL sin problema; sólo MSSQL.
+Sospecha: el path de bind de `INSERT` no envía un NULL tipado (o tipa el
+parámetro como string) para `sql.Null[[]byte]` vacío en el dialecto MSSQL.
+
+- **Reproducer:** sembrar cualquier struct con un campo `quark.Nullable[[]byte]`
+  sin valor (`Valid:false`) contra MSSQL. En F3, `UserProfile.Avatar`.
+
+</details>
+
+### ~~BB-7 · `many_to_many` preload carga 0 filas en Oracle (coerción de NUMBER)~~
+
+**Cerrado** (2026-05-31, mismo PR que añade F3). **Dos** defectos en `loadM2M`
+(`preload_loaders.go`) se combinaban: (1) el scan de la fila relacionada hacía
+`FieldByCol[col]` con el nombre de columna tal cual lo reporta el driver, pero
+Oracle lo devuelve en MAYÚSCULAS y `FieldByCol` está indexado por el db-tag en
+minúsculas → no mapeaba ninguna columna y la fila relacionada se escaneaba toda
+a cero (los otros loaders ya hacían `ToLower`; el de m2m no); y (2) las columnas
+FK de la join table se escaneaban en `interface{}`, y go-ora devuelve `NUMBER`
+como `string`, que no es `==` al `int64` de la PK. Fix: el scan ahora hace
+`strings.ToLower(col)` y lee los FK de la join en destinos tipados a los campos
+PK (dueño/relacionado) vía `makeScanDest`, así las claves cuadran en cualquier
+driver. Regresión: la fase F3 sobre Oracle (el path ya funcionaba en los otros
+5 motores; `TestM2MPreload` lo cubre en SQLite). CHANGELOG `[Unreleased]/Fixed`.
+
+<details><summary>Descripción del hallazgo</summary>
+
+**Severidad:** P1 (relación m2m rota en Oracle: la relación existe en la join
+table pero llega vacía a la app, sin error). **Categoría:** dialect-specific.
+**Motor:** Oracle. **Fase:** F3.
+
+`User.Roles` (`many_to_many` vía `user_roles`) cargaba `0` roles en Oracle pese
+a existir los enlaces (verificado: `SELECT COUNT(*)` en la join table = 2); los
+otros 4 motores cargaban los 2 correctos. La causa raíz primaria fue la
+sensibilidad a mayúsculas del lookup de columnas en el scan de la fila
+relacionada (Oracle devuelve `ID`/`NAME`, `FieldByCol` indexa `id`/`name`); el
+scan de la join en `interface{}` (go-ora devuelve `NUMBER` como `string`) era un
+segundo desajuste. Aislado porque has_one/has_many/belongs_to/polymorphic
+**sí** hacían `ToLower` y pasaban en Oracle; sólo m2m fallaba.
+
+</details>
+
+- **Reproducer:** `For[User](ctx,c).Preload("Roles").Find(uid)` en Oracle con
+  enlaces en `user_roles` → `Roles` vacío.
+- **Acción Quark sugerida:** normalizar las claves numéricas a un tipo
+  canónico (p.ej. `int64`) en el match m2m (y revisar `loadStandard` por si el
+  mismo `Scan(&any)` aplica a FKs escaneadas en otros motores). Distinto de
+  BB-5 y de mayor alcance — su propio PR.
 
 ---
 

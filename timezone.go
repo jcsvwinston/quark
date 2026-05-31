@@ -98,6 +98,7 @@ func (q *BaseQuery) columnTZ(dbTag string) *time.Location {
 // timezone and applies the wire conversion in one call. When the feature
 // is inactive for this query it returns val untouched with no lookup.
 func (q *BaseQuery) bindColumnArg(dbTag string, val any) any {
+	val = nullBytesArg(val)
 	if !q.tzActive() {
 		return val
 	}
