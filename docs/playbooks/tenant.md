@@ -121,6 +121,21 @@ func (b BaseQuery) cloneForGroup() BaseQuery {
 }
 ```
 
+### Construir un `BaseQuery{}` interno en `query_crud.go` sin propagar `schema`
+
+**Recurrente (BB-8, F5).** El path de escritura construye `BaseQuery`s
+internos para emitir el SQL: `saveAny` (`dq` entidad + `sq` relación
+belongs_to), `UpdateBatch` (`bq` por fila) y el join de `linkM2M`. Cada uno
+**debe** copiar `schema: q.schema` (y `linkM2M` cualificar la join table con
+`q.schema`), o bajo `SchemaPerTenant` los writes caen en el schema por defecto
+mientras las lecturas (que sí honran `q.schema` vía `fullTableName`) miran el
+schema del tenant — los datos "desaparecen" y los tenants se co-mingan. Esto es
+el gemelo de escritura de P0-1: el `For[T]` overload fija `q.schema`, pero
+cualquier `BaseQuery{}` que se construya aguas abajo lo pierde si no se copia
+explícitamente. Regla: **todo `BaseQuery{}` literal en `query_crud.go` lleva
+`schema: q.schema`**. Regresión: `schema_per_tenant_write_test.go` (cubre
+insert de entidad, link m2m y update batch, schema-qualified) + fase F5.
+
 ### Saltarse el router con `client.Raw()` bajo contexto de tenant
 
 ```go
