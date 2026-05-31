@@ -43,3 +43,17 @@ func SomeOf[T any](v T) Nullable[T] {
 func NullOf[T any]() Nullable[T] {
 	return Nullable[T]{}
 }
+
+// nullBytesArg substitutes a typed nil []byte for a SQL-NULL Nullable[[]byte].
+// An invalid sql.Null[[]byte] returns an untyped nil from its driver.Valuer,
+// which go-mssqldb encodes as an nvarchar NULL — and SQL Server then rejects
+// the INSERT into a varbinary column ("implicit conversion from nvarchar to
+// varbinary(max) is not allowed"). A typed nil []byte encodes as a binary
+// NULL, which is correct on all six engines, so this normalisation is applied
+// unconditionally (BB-6).
+func nullBytesArg(val any) any {
+	if nb, ok := val.(Nullable[[]byte]); ok && !nb.Valid {
+		return []byte(nil)
+	}
+	return val
+}

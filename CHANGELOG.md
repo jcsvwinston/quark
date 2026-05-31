@@ -49,6 +49,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **preload:** relations whose foreign key maps to a pointer field (a nullable
+  FK such as `*int64`) now load correctly. The eager loader keyed its
+  parent/child match map by the raw field value, so a `*int64` key never
+  compared equal to the related row's non-pointer primary key — the relation
+  loaded silently as `nil`/empty. This hit every nullable-FK relation,
+  including the common self-referential tree (`Parent *T` / `Children []T` over
+  a `ParentID *int64`) and optional belongs_to (e.g. an `OrderID *int64`). Keys
+  are now normalised to their pointee before matching (a `NULL` FK matches no
+  parent, as expected). Found by the post-v1.0 bug-bash (BB-5, phase F3).
+  Covered by `preload_nullable_fk_test.go` and the F3 relations phase.
+- **preload:** `many_to_many` relations now load on Oracle. Two defects in the
+  m2m loader combined to make the join match find nothing and the relation load
+  empty: (1) the related-row scan looked up `FieldByCol[col]` with the
+  driver-reported column name verbatim, but Oracle upper-cases identifiers
+  while `FieldByCol` is keyed by the lower-case db tag — so no column mapped and
+  the related rows scanned all-zero (the other loaders already lower-cased; m2m
+  did not); and (2) the join-table FK columns were scanned into `interface{}`,
+  so go-ora returned its `NUMBER` values as `string`, which did not compare
+  equal to the `int64` parent keys. The scan now lower-cases the column name and
+  reads the join FKs into destinations typed to the owner/related PK fields, so
+  keys match on every driver. Found by the post-v1.0 bug-bash (BB-7, phase F3);
+  the reflect path already worked on the other five engines. Covered by the F3
+  relations phase on Oracle. The same lower-casing was applied to the
+  polymorphic loader's parent-key lookup for consistency (it was the last
+  loader still comparing the PK column name case-sensitively).
+- **types:** a SQL-NULL `Nullable[[]byte]` now inserts on SQL Server. An
+  invalid `sql.Null[[]byte]` hands the driver an untyped `nil`, which
+  go-mssqldb encodes as `nvarchar` — and SQL Server rejects the implicit
+  `nvarchar`→`varbinary(max)` conversion, failing the INSERT of any row with a
+  NULL binary column. Quark now binds a typed `[]byte(nil)` (a binary NULL on
+  every driver), so the insert succeeds. Found by the post-v1.0 bug-bash
+  (BB-6, phase F3). Covered by `nullable_bytes_test.go` and the F3 relations
+  phase.
 - **dialects:** `ForShare()` on MariaDB no longer emits invalid SQL. MariaDB has
   no `FOR SHARE` keyword (MySQL-8 syntax — it raises `Error 1064`); Quark now
   emits the older `LOCK IN SHARE MODE` for shared locks on MariaDB. Because that

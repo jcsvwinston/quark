@@ -34,4 +34,11 @@ type Order struct {
 	Customer *Customer   `rel:"belongs_to" join:"customer_id"`
 	Lines    []OrderLine `rel:"has_many" join:"order_id"`
 	Payments []Payment   `rel:"has_many" join:"order_id"`
+	// AuditEvents is the polymorphic side of AuditEvent (subject_type +
+	// subject_id). Quark models polymorphism as an owner-side has-many
+	// filtered by a type literal (rel:"polymorphic"), not as a belongs-to
+	// union — so the DOMAIN.md "AuditEvent.Subject" sketch is wired here as
+	// its inverse. F3 exercises it: loading Order.AuditEvents must return
+	// only rows whose subject_type = "Order".
+	AuditEvents []AuditEvent `rel:"polymorphic" polymorphic:"subject_type:Order" join:"subject_id"`
 }
