@@ -92,6 +92,17 @@ if err := tx.Rollback(); err != nil {
 
 ## Savepoints (Nested Transactions)
 
+Savepoints are supported on all six engines. The statements are resolved per
+dialect: PostgreSQL, MySQL, MariaDB and SQLite use the ANSI `SAVEPOINT` /
+`ROLLBACK TO SAVEPOINT` / `RELEASE SAVEPOINT`; SQL Server uses
+`SAVE TRANSACTION` / `ROLLBACK TRANSACTION` and has no release statement
+(savepoints release at commit); Oracle uses `SAVEPOINT` / `ROLLBACK TO
+SAVEPOINT` and likewise has no `RELEASE SAVEPOINT`. The API below is uniform
+across all of them — `ReleaseSavepoint` is a no-op on the engines without a
+release statement. Custom dialects can override the statements by implementing
+the optional `SavepointDialect` interface; dialects that don't get the ANSI
+form.
+
 ### `Savepoint(name string) error`
 
 Creates a named savepoint.

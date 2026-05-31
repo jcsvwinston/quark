@@ -988,3 +988,41 @@ func DetectDialectByName(name string) (Dialect, error) {
 	// Fall back to standard detection
 	return DetectDialect(name)
 }
+
+// SavepointDialect is an optional [Dialect] extension for engines whose
+// savepoint statements diverge from the ANSI form (SAVEPOINT /
+// ROLLBACK TO SAVEPOINT / RELEASE SAVEPOINT). A Dialect that does not
+// implement it gets the ANSI statements, which are correct for PostgreSQL,
+// MySQL, MariaDB and SQLite. The transaction layer ([Tx.Savepoint],
+// [Tx.RollbackTo], [Tx.ReleaseSavepoint]) consults this interface via a type
+// assertion, so adding it to a dialect is non-breaking for existing custom
+// dialects registered through [RegisterDialect].
+//
+// name arrives already validated by guard.ValidateIdentifier; the dialect
+// decides whether to quote it. A ReleaseSavepointStmt returning "" means the
+// engine has no explicit savepoint-release statement (the savepoint is
+// released at COMMIT) — the Tx layer then skips that Exec. Found by the
+// post-v1.0 bug-bash (BB-9, phase F8): SQL Server uses SAVE TRANSACTION /
+// ROLLBACK TRANSACTION and has no release; Oracle has SAVEPOINT and
+// ROLLBACK TO SAVEPOINT but no RELEASE SAVEPOINT.
+type SavepointDialect interface {
+	SavepointStmt(name string) string
+	RollbackToSavepointStmt(name string) string
+	ReleaseSavepointStmt(name string) string
+}
+
+// --- SQL Server: SAVE TRANSACTION / ROLLBACK TRANSACTION, no release ---
+
+func (m *MSSQLDialect) SavepointStmt(name string) string { return "SAVE TRANSACTION " + name }
+func (m *MSSQLDialect) RollbackToSavepointStmt(name string) string {
+	return "ROLLBACK TRANSACTION " + name
+}
+func (m *MSSQLDialect) ReleaseSavepointStmt(name string) string { return "" }
+
+// --- Oracle: ANSI SAVEPOINT / ROLLBACK TO SAVEPOINT, but no RELEASE ---
+
+func (o *OracleDialect) SavepointStmt(name string) string { return "SAVEPOINT " + o.Quote(name) }
+func (o *OracleDialect) RollbackToSavepointStmt(name string) string {
+	return "ROLLBACK TO SAVEPOINT " + o.Quote(name)
+}
+func (o *OracleDialect) ReleaseSavepointStmt(name string) string { return "" }

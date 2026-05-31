@@ -502,16 +502,11 @@ func TestNestedTx_RollbackDiscardsScopedAfterHooks(t *testing.T) {
 // Tx.OnCommit + a local counter (not the global hookRecorder) so it is
 // self-contained and dialect-portable.
 //
-// MSSQL is skipped: it uses SAVE TRANSACTION / ROLLBACK TRANSACTION
-// rather than the ANSI SAVEPOINT / ROLLBACK TO SAVEPOINT this code
-// emits, so savepoints don't work there today — a pre-existing gap not
-// addressed by this fix. Oracle runs only in local verification (it is
-// out of CI).
+// Runs on all six engines: the savepoint statements are resolved per dialect
+// (SavepointDialect — BB-9), so SQL Server uses SAVE TRANSACTION /
+// ROLLBACK TRANSACTION and Oracle skips the unsupported RELEASE transparently.
 func testSavepointHookUnwind(ctx context.Context, t *testing.T, client *quark.Client) {
 	t.Helper()
-	if client.Dialect().Name() == "mssql" {
-		t.Skip("savepoints emit ANSI SAVEPOINT SQL; MSSQL needs SAVE TRANSACTION (pre-existing gap)")
-	}
 
 	dropTable(client, "sp_hook_rows")
 	type spHookRow struct {
