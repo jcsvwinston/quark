@@ -31,7 +31,9 @@
 > añadida 2026-05-31; halló y **cerró BB-8** (SchemaPerTenant write routing).
 > F7 — caché — añadida 2026-05-31; **sin hallazgos** (singleflight,
 > invalidación granular y caching de resultado vacío sólidos en los 6 motores
-> + Redis). Pendientes: F4, F6, F8-F12, F14.
+> + Redis). F8 — hooks/eventos/audit — añadida 2026-05-31; halló y **cerró
+> BB-9** (savepoints no dialect-aware → tx anidadas rotas en MSSQL/Oracle).
+> Pendientes: F4, F6, F9-F12, F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -53,6 +55,45 @@
 > XFetch quedan citados a `cache_stampede_test.go`; el gap cross-instancia es
 > un non-bug documentado (ADR-0011); el negative-caching de fila (`First`
 > no-rows) sigue diferido (playbook).
+>
+> **Pasada F8 cross-engine (2026-05-31, Docker):** **verde en los 6 motores**.
+> Savepoints anidados 5 niveles (truncación de datos+hooks), OnCommit/OnRollback
+> (fire-or-discard + callback error tolerado), EventBus (post-commit +
+> `ErrEventEmitFailed` sin rollback), audit log (delta + diff válido), atomicidad
+> audit+write, BeforeFind/AfterFind, TxFromContext. Destapó **BB-9** (savepoints
+> no dialect-aware → tx anidadas rotas en MSSQL/Oracle), arreglado y verificado
+> en la misma pasada.
+
+### ~~BB-9 · Savepoints no dialect-aware → tx anidadas rotas en MSSQL y Oracle~~
+
+**Cerrado** (2026-05-31, mismo PR que añade F8). `Tx.Savepoint`/`RollbackTo`/
+`ReleaseSavepoint` (`tx.go`) emitían las sentencias ANSI `SAVEPOINT`/
+`ROLLBACK TO SAVEPOINT`/`RELEASE SAVEPOINT` sin condicionar al dialecto —
+correctas en PG/MySQL/MariaDB/SQLite, pero SQL Server usa `SAVE TRANSACTION`/
+`ROLLBACK TRANSACTION` y no tiene release, y Oracle no tiene `RELEASE SAVEPOINT`.
+Una `tx.Tx(...)` anidada (que envuelve cada nivel en un savepoint) fallaba en
+esos dos motores ("Could not find stored procedure 'SAVEPOINT'" en MSSQL,
+ORA-00900 en Oracle). Fix: interfaz **opcional** `SavepointDialect` (`dialect.go`)
+implementada por MSSQL y Oracle; los dialectos que no la implementan conservan
+las sentencias ANSI (aditivo, **no** rompe la interfaz `Dialect` ni los
+dialectos custom). Regresión: `savepoint_dialect_test.go` + la fase F8 en los 6
+motores. CHANGELOG `[Unreleased]/Fixed`.
+
+<details><summary>Descripción del hallazgo</summary>
+
+**Severidad:** P1 (transacciones anidadas / savepoints rotas en 2 de 6 motores;
+sin error en build, falla en runtime al abrir el savepoint). **Categoría:**
+dialect-specific. **Motor:** MSSQL + Oracle. **Fase:** F8
+(`bugbash/phases/f08_hooks`, grupo SavepointTruncation).
+
+`tx.Tx(ctx, fn)` crea un savepoint por nivel. En MSSQL el `SAVEPOINT sp_1`
+no existe (es `SAVE TRANSACTION`); en Oracle el `RELEASE SAVEPOINT` no existe.
+Aislado porque PG/MySQL/MariaDB/SQLite usan SQL de savepoint ANSI.
+
+- **Reproducer:** `client.Tx(ctx, func(tx){ return tx.Tx(ctx, func(tx){ return nil }) })`
+  en MSSQL u Oracle → error al crear/soltar el savepoint.
+
+</details>
 
 ### ~~BB-1 · `uuid.UUID` se corrompe en silencio si se mapea a `UNIQUEIDENTIFIER` (MSSQL)~~
 
@@ -435,11 +476,11 @@ campo. Aislado porque las otras tres estrategias no usan `q.schema`.
 > `[Unreleased]`: `JSON[T].Value()`/`Array[T].Value()` devuelven string
 > en vez de `[]byte`, así go-mssqldb los bindea como NVARCHAR y no como
 > VARBINARY; round-trip limpio en MSSQL para JSON/Array/audit, skips
-> eliminados), Oracle fuera de CI. **Gap nuevo documentado**: los
-> savepoints emiten SQL ANSI (`SAVEPOINT` / `ROLLBACK TO SAVEPOINT`);
-> MSSQL necesita `SAVE TRANSACTION` / `ROLLBACK TRANSACTION`, así que
-> savepoints no funcionan en MSSQL hoy — `SavepointHookUnwind` skipea
-> MSSQL hasta que se añada el soporte de dialecto (follow-up).
+> eliminados), Oracle fuera de CI. ~~**Gap documentado**: los savepoints
+> emiten SQL ANSI; MSSQL necesita `SAVE TRANSACTION`, así que `SavepointHookUnwind`
+> skipea MSSQL.~~ **Cerrado por BB-9** (F8, ver hallazgos activos): los
+> savepoints son dialect-aware vía `SavepointDialect`; `SavepointHookUnwind`
+> ya no skipea MSSQL y corre en los 6 motores.
 >
 > **Fase 4 cerrada (2026-05-15, v0.8.0).** Los 7 items F4-1..F4-7
 > entregados: OTel metrics + span redaction (#70), slow query log

@@ -537,11 +537,38 @@ func (t *Tx) Savepoint(name string) error {
 	if err := t.client.guard.ValidateIdentifier(name); err != nil {
 		return err
 	}
-	if _, err := t.tx.Exec("SAVEPOINT " + t.client.dialect.Quote(name)); err != nil {
+	if _, err := t.tx.Exec(t.savepointStmt(name)); err != nil {
 		return err
 	}
 	t.markSavepoint(name)
 	return nil
+}
+
+// savepointStmt / rollbackToStmt / releaseSavepointStmt resolve the per-dialect
+// savepoint DML. A dialect implementing [SavepointDialect] (SQL Server, Oracle)
+// overrides the ANSI default; everything else gets ANSI
+// SAVEPOINT / ROLLBACK TO SAVEPOINT / RELEASE SAVEPOINT (correct for
+// PostgreSQL, MySQL, MariaDB, SQLite). A "" release statement means the engine
+// releases savepoints at COMMIT and has no explicit statement (BB-9).
+func (t *Tx) savepointStmt(name string) string {
+	if sd, ok := t.client.dialect.(SavepointDialect); ok {
+		return sd.SavepointStmt(name)
+	}
+	return "SAVEPOINT " + t.client.dialect.Quote(name)
+}
+
+func (t *Tx) rollbackToStmt(name string) string {
+	if sd, ok := t.client.dialect.(SavepointDialect); ok {
+		return sd.RollbackToSavepointStmt(name)
+	}
+	return "ROLLBACK TO SAVEPOINT " + t.client.dialect.Quote(name)
+}
+
+func (t *Tx) releaseSavepointStmt(name string) string {
+	if sd, ok := t.client.dialect.(SavepointDialect); ok {
+		return sd.ReleaseSavepointStmt(name)
+	}
+	return "RELEASE SAVEPOINT " + t.client.dialect.Quote(name)
 }
 
 // RollbackTo rolls back to the named savepoint. Beyond undoing the SQL
@@ -555,7 +582,7 @@ func (t *Tx) RollbackTo(name string) error {
 	if err := t.client.guard.ValidateIdentifier(name); err != nil {
 		return err
 	}
-	if _, err := t.tx.Exec("ROLLBACK TO SAVEPOINT " + t.client.dialect.Quote(name)); err != nil {
+	if _, err := t.tx.Exec(t.rollbackToStmt(name)); err != nil {
 		return err
 	}
 	t.rollbackHooksTo(name)
@@ -569,8 +596,10 @@ func (t *Tx) ReleaseSavepoint(name string) error {
 	if err := t.client.guard.ValidateIdentifier(name); err != nil {
 		return err
 	}
-	if _, err := t.tx.Exec("RELEASE SAVEPOINT " + t.client.dialect.Quote(name)); err != nil {
-		return err
+	if stmt := t.releaseSavepointStmt(name); stmt != "" {
+		if _, err := t.tx.Exec(stmt); err != nil {
+			return err
+		}
 	}
 	t.releaseSavepointMark(name)
 	return nil

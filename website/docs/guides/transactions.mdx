@@ -44,7 +44,12 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 })
 ```
 
-Savepoint support depends on the underlying database engine.
+Savepoints work on all six engines. The `Savepoint` / `RollbackTo` /
+`ReleaseSavepoint` API is uniform; PostgreSQL, MySQL, MariaDB and SQLite use the
+ANSI `SAVEPOINT` / `ROLLBACK TO SAVEPOINT` / `RELEASE SAVEPOINT` statements,
+while SQL Server (`SAVE TRANSACTION` / `ROLLBACK TRANSACTION`, no release) and
+Oracle (no `RELEASE SAVEPOINT`) use their engine-specific statements
+transparently.
 
 Rolling back to a savepoint unwinds more than the SQL: the model
 `After*` hooks and `OnCommit`/`OnRollback` callbacks queued by CRUD run

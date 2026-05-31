@@ -49,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **tx:** nested transactions (savepoints) now work on SQL Server and Oracle.
+  `Tx.Savepoint` / `Tx.RollbackTo` / `Tx.ReleaseSavepoint` emitted the ANSI
+  `SAVEPOINT` / `ROLLBACK TO SAVEPOINT` / `RELEASE SAVEPOINT` statements
+  unconditionally — correct for PostgreSQL/MySQL/MariaDB/SQLite, but SQL Server
+  needs `SAVE TRANSACTION` / `ROLLBACK TRANSACTION` and has no release
+  statement, and Oracle has no `RELEASE SAVEPOINT`. A nested `tx.Tx(...)` (which
+  brackets each level with a savepoint) therefore failed on those two engines.
+  The statements are now resolved per dialect via the new optional
+  `SavepointDialect` interface; dialects that do not implement it keep the ANSI
+  statements (so custom dialects are unaffected — this is additive, not a
+  breaking `Dialect` change). Found by the post-v1.0 bug-bash (BB-9, phase F8).
+  Covered by `savepoint_dialect_test.go` and the F8 hooks phase on all six
+  engines.
 - **multi-tenant:** `SchemaPerTenant` writes now hit the tenant's schema. On
   `Create`/`Update` the persistence path built its INSERT/UPDATE from a
   `BaseQuery` that copied the tenant id and column but **not** the resolved
