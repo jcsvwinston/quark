@@ -35,8 +35,10 @@
 > BB-9** (savepoints no dialect-aware → tx anidadas rotas en MSSQL/Oracle).
 > F4 — volumen — añadida 2026-06-01; halló y **cerró BB-10** (`CreateBatch`
 > no chunkeaba → reventaba el techo de bind-params, fatal en MSSQL a unos
-> cientos de filas y en SQLite/PG/MySQL a unos miles). Pendientes: F6,
-> F9-F12, F14.
+> cientos de filas y en SQLite/PG/MySQL a unos miles). F12 —
+> resiliencia/concurrencia — añadida 2026-06-01; **sin hallazgos** (deadlock
+> retry, pool exhaustion, pánico-rollback con audit inline, y ausencia de leaks
+> bajo 200 tx concurrentes, sólidos). Pendientes: F6, F9-F11, F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -77,6 +79,17 @@
 > sin chunking), arreglado y verificado en la misma pasada (`CreateBatch(10000)`
 > verde en los 5 motores). Memoria/latencia/1M filas quedan a tier F14 soak
 > (escalado logueado en el README de la fase).
+>
+> **Pasada F12 cross-engine (2026-06-01, Docker):** **verde en los 5 motores de
+> CI** (SQLite + PG + MySQL + MariaDB + MSSQL), **sin hallazgos**. Verifica:
+> pool exhaustion (`WithMaxOpenConns(5)` + 50 goroutines esperan, no crashean,
+> `InUse==0` al final), cancelación de `context` (error + conexión liberada),
+> pánico en `BeforeUpdate` dentro de tx (rollback de dato + audit inline +
+> conexión liberada + pánico re-propagado), 200 tx concurrentes con savepoint y
+> pánicos aleatorios (sin leak de conexiones/goroutines, commit selectivo), y
+> **deadlock real recuperado por `WithDeadlockRetry`** en los 4 motores servidor
+> (barrera determinista; SQLite serializa escrituras → skip logueado). Flake-
+> check 2× limpio. Reconexión tras drop de red y soak 30 min quedan a tier F14.
 
 ### ~~BB-10 · `CreateBatch` no chunkeaba → reventaba el techo de bind-params~~
 
