@@ -49,6 +49,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **crud:** `CreateBatch` now chunks large slices so each `INSERT … VALUES`
+  statement stays within the dialect's bind-parameter ceiling. Previously it
+  emitted one statement with `rows × columns` placeholders, which overran SQL
+  Server's ~2100-parameter limit at a few hundred wide rows and
+  SQLite/PostgreSQL/MySQL's limits at a few thousand — the call simply failed
+  ("too many parameters" / "too many SQL variables"). `DeleteBatch` already
+  chunked; `CreateBatch` did not, so the bug was latent on every engine but
+  SQLite (where the unit suite runs) until a batch grew large. Chunks loop on
+  the bound executor (an explicit transaction or native-RLS session still routes
+  correctly) and, like `DeleteBatch`, are not wrapped in an implicit transaction
+  — wrap `CreateBatch` in `client.Tx` for all-or-nothing across chunks. Oracle
+  is unaffected (it already uses a single-row INSERT loop). Found by the
+  post-v1.0 bug-bash (BB-10, phase F4); verified across SQLite + PostgreSQL +
+  MySQL + MariaDB + SQL Server. See `website/docs/guides/batch-operations.mdx`.
+  (`UpsertBatch` has the same un-chunked shape and is tracked separately.)
 - **tx:** nested transactions (savepoints) now work on SQL Server and Oracle.
   `Tx.Savepoint` / `Tx.RollbackTo` / `Tx.ReleaseSavepoint` emitted the ANSI
   `SAVEPOINT` / `ROLLBACK TO SAVEPOINT` / `RELEASE SAVEPOINT` statements

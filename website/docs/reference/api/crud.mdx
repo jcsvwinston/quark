@@ -49,8 +49,13 @@ Behavior:
 
 | Dialect | Shape |
 | --- | --- |
-| PostgreSQL, SQLite, MySQL, MariaDB, SQL Server | One multi-row `INSERT ... VALUES ...` statement. |
+| PostgreSQL, SQLite, MySQL, MariaDB, SQL Server | Multi-row `INSERT ... VALUES ...`, chunked so each statement stays under the dialect's bind-parameter ceiling (SQL Server ~2100). |
 | Oracle | Individual single-row inserts to avoid identity-column conflicts. |
+
+Large slices are chunked automatically, so a call with tens of thousands of rows
+will not overrun a dialect's parameter limit. Chunks run on the bound executor
+and are not wrapped in an implicit transaction — wrap `CreateBatch` in
+`client.Tx` if you need all-or-nothing across chunks.
 
 If the first entity has a zero single-column integer primary key, Quark omits
 that PK column and lets the database assign it. Dialects with `RETURNING` can

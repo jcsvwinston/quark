@@ -12,7 +12,7 @@ automatically.
 
 | Method | SQL shape | Atomicity |
 |---|---|---|
-| `CreateBatch` | Single `INSERT … VALUES (…), (…)` except Oracle identity fallback | Single statement for most dialects |
+| `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked to the dialect's bind-parameter ceiling; Oracle identity fallback | One statement per chunk |
 | `UpsertBatch` | Dialect-specific bulk upsert | Single statement for most dialects, N MERGE for Oracle |
 | `UpdateBatch` | N `UPDATE` statements | Single transaction |
 | `DeleteBatch` | `DELETE … WHERE pk IN (…)` chunked | Chunked statements |
@@ -21,8 +21,24 @@ automatically.
 
 ## CreateBatch
 
-Inserts multiple rows in a single `INSERT` statement. When the dialect supports
-`RETURNING`, primary keys are written back to each entity pointer.
+Inserts multiple rows with a multi-row `INSERT … VALUES (…), (…)`. When the
+dialect supports `RETURNING`, primary keys are written back to each entity
+pointer.
+
+Large slices are **chunked automatically** so each statement stays within the
+dialect's bind-parameter ceiling (SQL Server caps a statement at ~2100
+parameters; SQLite/PostgreSQL/MySQL allow more). You can pass tens of thousands
+of rows in one call without hitting a "too many parameters" / "too many SQL
+variables" error. Chunks are issued on whatever executor the query is bound to
+(the connection pool, or an explicit transaction / native-RLS session), but
+they are **not** wrapped in an implicit transaction — if you need the whole
+batch to be all-or-nothing, run `CreateBatch` inside [`client.Tx`](./transactions):
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    return quark.ForTx[User](ctx, tx).CreateBatch(users)
+})
+```
 
 ```go
 users := []*User{
