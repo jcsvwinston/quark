@@ -33,7 +33,10 @@
 > invalidación granular y caching de resultado vacío sólidos en los 6 motores
 > + Redis). F8 — hooks/eventos/audit — añadida 2026-05-31; halló y **cerró
 > BB-9** (savepoints no dialect-aware → tx anidadas rotas en MSSQL/Oracle).
-> Pendientes: F4, F6, F9-F12, F14.
+> F12 — resiliencia/concurrencia — añadida 2026-06-01; **sin hallazgos**
+> (deadlock retry, pool exhaustion, pánico-rollback con audit inline, y
+> ausencia de leaks bajo 200 tx concurrentes, sólidos). Pendientes: F4, F6,
+> F9-F11, F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -63,6 +66,17 @@
 > audit+write, BeforeFind/AfterFind, TxFromContext. Destapó **BB-9** (savepoints
 > no dialect-aware → tx anidadas rotas en MSSQL/Oracle), arreglado y verificado
 > en la misma pasada.
+>
+> **Pasada F12 cross-engine (2026-06-01, Docker):** **verde en los 5 motores de
+> CI** (SQLite + PG + MySQL + MariaDB + MSSQL), **sin hallazgos**. Verifica:
+> pool exhaustion (`WithMaxOpenConns(5)` + 50 goroutines esperan, no crashean,
+> `InUse==0` al final), cancelación de `context` (error + conexión liberada),
+> pánico en `BeforeUpdate` dentro de tx (rollback de dato + audit inline +
+> conexión liberada + pánico re-propagado), 200 tx concurrentes con savepoint y
+> pánicos aleatorios (sin leak de conexiones/goroutines, commit selectivo), y
+> **deadlock real recuperado por `WithDeadlockRetry`** en los 4 motores servidor
+> (barrera determinista; SQLite serializa escrituras → skip logueado). Flake-
+> check 2× limpio. Reconexión tras drop de red y soak 30 min quedan a tier F14.
 
 ### ~~BB-9 · Savepoints no dialect-aware → tx anidadas rotas en MSSQL y Oracle~~
 
