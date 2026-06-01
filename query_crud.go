@@ -26,6 +26,14 @@ type batchColDef struct {
 // universal safe chunk size covers all supported dialects.
 const batchChunkSize = 1000
 
+// maxBatchBindParams is the per-statement bind-parameter budget for bulk
+// multi-row INSERT (CreateBatch). SQL Server caps a single statement at ~2100
+// parameters — the tightest of the bulk-capable dialects (Oracle takes the
+// single-row INSERT loop and never builds a multi-row statement). Staying
+// under it lets CreateBatch chunk a large slice into statements that are valid
+// on every engine, instead of overrunning the ceiling on the first call.
+const maxBatchBindParams = 2000
+
 // queueOrRunAfterHook is the F5-4 dispatcher for `After*` hooks. It
 // has two modes:
 //
@@ -1708,6 +1716,42 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		return nil
 	}
 
+	// Chunk the multi-row INSERT so each statement stays within the dialect's
+	// bind-parameter ceiling (maxBatchBindParams). Without this, a CreateBatch
+	// of a few hundred wide rows overruns SQL Server's ~2100-parameter limit,
+	// and a few thousand overruns SQLite/Postgres/MySQL — the statement simply
+	// fails. Chunks loop on the bound executor (q.exec), so an explicit tx or a
+	// native-RLS executor still routes correctly; like DeleteBatch, chunks are
+	// not wrapped in an implicit transaction, so callers needing all-or-nothing
+	// across chunks should run CreateBatch inside client.Tx.
+	rowsPerChunk := maxBatchBindParams / len(columns)
+	if rowsPerChunk < 1 {
+		// Only a model with more than maxBatchBindParams (2000) insertable
+		// columns lands here — vanishingly rare. It degrades to one row per
+		// statement (safe, just slower); the guard keeps rowsPerChunk ≥ 1.
+		rowsPerChunk = 1
+	}
+
+	// One timeout context for the whole batch (matches DeleteBatch and the
+	// Oracle path above): QueryTimeout bounds the operation, not each chunk.
+	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+	defer cancel()
+	for start := 0; start < len(entities); start += rowsPerChunk {
+		end := min(start+rowsPerChunk, len(entities))
+		if err := q.createBatchStmt(ctx, entities[start:end], columns, colIndexes, colTags); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// createBatchStmt emits a single multi-row INSERT for one chunk of entities.
+// CreateBatch splits the full slice into chunks small enough to stay under the
+// dialect's bind-parameter ceiling and calls this for each. columns/colIndexes/
+// colTags are computed once by the caller and shared across chunks. For
+// dialects that support RETURNING, generated primary keys are scanned back into
+// the chunk (which aliases the caller's slice, so PKs reach the caller).
+func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns []string, colIndexes []int, colTags []string) error {
 	var sqlBuf strings.Builder
 	sqlBuf.WriteString("INSERT INTO ")
 	sqlBuf.WriteString(q.fullTableName())
@@ -1743,9 +1787,6 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		sqlBuf.WriteString(" ")
 		sqlBuf.WriteString(q.dialect.Returning(q.pk.Column))
 	}
-
-	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-	defer cancel()
 
 	if q.dialect.SupportsReturning() && q.pk.Column != "" {
 		// INSERT ... RETURNING is a write: pin to the primary, never a replica

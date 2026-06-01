@@ -17,7 +17,7 @@
 | `bugbash/domain/*.go` | ✅ hecho (20 modelos + mappers uuid/decimal) |
 | `bugbash/tools/` | ✅ [`docker.go`](tools/docker.go) (boot/teardown por motor) |
 | `bugbash/seed/seed.go` | ⏳ pendiente (siguiente sesión) |
-| Fases F0-F14 | 🚧 Hechas: **F0** (`f00_install`), **F1** (`f01_smoke`), **F2** (`f02_api_surface`), **F3** (`f03_relaciones`), **F5** (`f05_tenancy`), **F7** (`f07_cache`), **F8** (`f08_hooks`), **F12** (`f12_resilience`, deadlock retry / pool / pánico-rollback / concurrencia — sin hallazgos), **F13** (`f13_security`). Pendientes: F4, F6, F9, F10, F11, F14 (una por sesión; F4 en PR aparte). Leg de codegen de F0 (`quark gen`) pendiente. Nota: F13 está implementada fuera de orden por ser el gate obligatorio antes de cualquier patch v1.0.x. |
+| Fases F0-F14 | 🚧 Hechas: **F0** (`f00_install`), **F1** (`f01_smoke`), **F2** (`f02_api_surface`), **F3** (`f03_relaciones`), **F4** (`f04_volume`, cap/paginación/streaming/chunking — halló y cerró BB-10), **F5** (`f05_tenancy`), **F7** (`f07_cache`), **F8** (`f08_hooks`), **F12** (`f12_resilience`, deadlock retry / pool / pánico-rollback / concurrencia — sin hallazgos), **F13** (`f13_security`). Pendientes: F6, F9, F10, F11, F14 (una por sesión). Leg de codegen de F0 (`quark gen`) pendiente. Nota: F13 está implementada fuera de orden por ser el gate obligatorio antes de cualquier patch v1.0.x. |
 | Subagente `bugbash-reporter` | ✅ [`.claude/agents/bugbash-reporter.md`](../.claude/agents/bugbash-reporter.md) |
 | Slash command `/bugbash` | ✅ [`.claude/commands/bugbash.md`](../.claude/commands/bugbash.md) |
 

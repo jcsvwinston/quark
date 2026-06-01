@@ -154,6 +154,42 @@ func TestDeleteBatch_ChunkingLargeSlice(t *testing.T) {
 	}
 }
 
+// TestCreateBatch_ChunkingLargeSlice exercises CreateBatch across the bind-param
+// chunk boundary directly (the cross-engine regression for BB-10 lives in the
+// bug-bash f04_volume phase; this keeps a guard in the standard -short suite).
+// BatchUser has 3 insertable columns, so rowsPerChunk = maxBatchBindParams/3 and
+// 2000 rows spans several chunks — all rows must land, with PKs written back.
+func TestCreateBatch_ChunkingLargeSlice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping large-batch chunking test in short mode")
+	}
+	client, teardown := newBatchClient(t)
+	defer teardown()
+	ctx := context.Background()
+
+	const n = 2000
+	users := make([]*BatchUser, n)
+	for i := 0; i < n; i++ {
+		users[i] = &BatchUser{Name: "Bulk", Email: fmt.Sprintf("bulk%d@x.com", i), Score: i}
+	}
+	if err := quark.For[BatchUser](ctx, client).CreateBatch(users); err != nil {
+		t.Fatalf("CreateBatch across chunk boundary: %v", err)
+	}
+
+	count, err := quark.For[BatchUser](ctx, client).Count()
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != int64(n) {
+		t.Errorf("CreateBatch persisted %d rows, want %d", count, n)
+	}
+	// RETURNING dialects write PKs back to each pointer; the chunk slices alias
+	// the caller slice, so the last entity must have a populated PK.
+	if client.Dialect().SupportsReturning() && users[n-1].ID == 0 {
+		t.Errorf("last entity PK not written back after chunked CreateBatch")
+	}
+}
+
 // ─── UpsertBatch ──────────────────────────────────────────────────────────────
 
 func TestUpsertBatch_InsertsNewRecords(t *testing.T) {

@@ -33,10 +33,12 @@
 > invalidación granular y caching de resultado vacío sólidos en los 6 motores
 > + Redis). F8 — hooks/eventos/audit — añadida 2026-05-31; halló y **cerró
 > BB-9** (savepoints no dialect-aware → tx anidadas rotas en MSSQL/Oracle).
-> F12 — resiliencia/concurrencia — añadida 2026-06-01; **sin hallazgos**
-> (deadlock retry, pool exhaustion, pánico-rollback con audit inline, y
-> ausencia de leaks bajo 200 tx concurrentes, sólidos). Pendientes: F4, F6,
-> F9-F11, F14.
+> F4 — volumen — añadida 2026-06-01; halló y **cerró BB-10** (`CreateBatch`
+> no chunkeaba → reventaba el techo de bind-params, fatal en MSSQL a unos
+> cientos de filas y en SQLite/PG/MySQL a unos miles). F12 —
+> resiliencia/concurrencia — añadida 2026-06-01; **sin hallazgos** (deadlock
+> retry, pool exhaustion, pánico-rollback con audit inline, y ausencia de leaks
+> bajo 200 tx concurrentes, sólidos). Pendientes: F6, F9-F11, F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -67,6 +69,17 @@
 > no dialect-aware → tx anidadas rotas en MSSQL/Oracle), arreglado y verificado
 > en la misma pasada.
 >
+> **Pasada F4 cross-engine (2026-06-01, Docker):** **verde en los 5 motores de
+> CI** (SQLite + PG + MySQL + MariaDB + MSSQL; Oracle excluido de CI por el
+> image issue — su path de `CreateBatch` es el loop single-row, inmune al bug).
+> Verifica el cap implícito de `List()` (100) + override por `Limit()`,
+> paginación profunda sin huecos/duplicados, `Cursor()`/`Iter()` full-scan,
+> early-stop de `Iter()` por error de callback, cancelación de `context` en
+> `Iter()`, y `Paginate()` con `Total` exacto. Destapó **BB-10** (`CreateBatch`
+> sin chunking), arreglado y verificado en la misma pasada (`CreateBatch(10000)`
+> verde en los 5 motores). Memoria/latencia/1M filas quedan a tier F14 soak
+> (escalado logueado en el README de la fase).
+>
 > **Pasada F12 cross-engine (2026-06-01, Docker):** **verde en los 5 motores de
 > CI** (SQLite + PG + MySQL + MariaDB + MSSQL), **sin hallazgos**. Verifica:
 > pool exhaustion (`WithMaxOpenConns(5)` + 50 goroutines esperan, no crashean,
@@ -77,6 +90,30 @@
 > **deadlock real recuperado por `WithDeadlockRetry`** en los 4 motores servidor
 > (barrera determinista; SQLite serializa escrituras → skip logueado). Flake-
 > check 2× limpio. Reconexión tras drop de red y soak 30 min quedan a tier F14.
+
+### ~~BB-10 · `CreateBatch` no chunkeaba → reventaba el techo de bind-params~~
+
+**Cerrado** (2026-06-01, mismo PR que añade F4). `CreateBatch` (`query_crud.go`)
+emitía un único `INSERT … VALUES (…), (…)` con `filas × columnas` placeholders,
+sin condicionar al techo de bind-parameters del motor. `DeleteBatch` ya
+chunkeaba (a `batchChunkSize`), pero `CreateBatch` no — así que el bug quedaba
+**latente en todos los motores menos SQLite** (donde corre la suite unitaria,
+con su techo más holgado) hasta que el batch crecía: fatal en MSSQL a unos
+**cientos** de filas anchas (techo ~2100 params) y en SQLite/PG/MySQL a unos
+**miles** (32766 / 65535). Lo confirma `TestDeleteBatch_ChunkingLargeSlice`, que
+siembra 1200 filas vía `CreateBatch` pero corre sólo en SQLite. Fix: nueva
+constante `maxBatchBindParams=2000` (bajo el techo de MSSQL, el más ajustado de
+los motores con multi-row insert) y un loop que parte el slice en chunks de
+`maxBatchBindParams / nºcolumnas` filas, extraído a `createBatchStmt`. Los chunks
+corren sobre el executor ligado (`q.exec`), así que una tx explícita o un
+executor native-RLS siguen enrutando bien; como en `DeleteBatch`, **no** se
+envuelven en una tx implícita (el caller que quiera all-or-nothing usa
+`client.Tx`). Oracle no se toca (ya usa loop single-row). Regresión:
+`bugbash/phases/f04_volume` (grupo `CreateBatchChunking`) en SQLite + PG + MySQL
++ MariaDB + MSSQL. Doc: `website/docs/guides/batch-operations.mdx` +
+`reference/api/crud.mdx`; CHANGELOG `[Unreleased]/Fixed`. **Seguimiento:**
+`UpsertBatch` tiene la misma forma sin chunking (3 paths de dialecto) — queda
+trackeado aparte, no lo cubre este PR.
 
 ### ~~BB-9 · Savepoints no dialect-aware → tx anidadas rotas en MSSQL y Oracle~~
 
