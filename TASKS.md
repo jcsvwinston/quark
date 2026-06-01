@@ -40,8 +40,10 @@
 > retry, pool exhaustion, pánico-rollback con audit inline, y ausencia de leaks
 > bajo 200 tx concurrentes, sólidos). F11 — réplicas — añadida 2026-06-01;
 > **sin hallazgos** (read/write split, sticky/tx→primary, reparto round-robin,
-> failover transparente a primary, primary-caído→writes-fallan). Pendientes:
-> F6, F9, F10, F14.
+> failover transparente a primary, primary-caído→writes-fallan). F10 —
+> sharding — añadida 2026-06-01; **sin hallazgos** (routing por shard key,
+> error sin key, cero leaks cross-shard, tx por-shard, API estable al
+> resharding; distribución chi-square casi perfecta). Pendientes: F6, F9, F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -103,6 +105,17 @@
 > réplicas caídas (`markReplicaDown` + retry-on-primary), y primary-caído→writes-
 > fallan (sin failover primary→réplica, ADR-0015). Flake-check 3× limpio, teardown
 > sin contenedores residuales. Requiere Docker (skip logueado si no hay).
+>
+> **Pasada F10 (2026-06-01, SQLite):** **verde 5/5**, **sin hallazgos**. Shards =
+> 4→5 ficheros SQLite independientes (el spec admite SQLite files o PG schemas;
+> el routing es engine-agnostic, cada shard es un `*Client`, así que no necesita
+> contenedor). Verifica distribución (`HashShardFunc` FNV-1a, 4000 keys →
+> chi-square 0.004, casi perfecta), error sin shard key (`ErrInvalidQuery`, sin
+> fan-out implícito), cero leaks cross-shard, `Tx` ligada a un único shard
+> (`GetClient` resuelve shards distintos a `*Client` distintos → no hay tx
+> cross-shard, ADR-0016), y estabilidad de la API al añadir un 5º shard. 100k
+> ops del spec escaladas a 4000 (logueado); scatter-gather/rebalanceo de datos
+> son follow-ups de F6-7, fuera de scope.
 
 ### ~~BB-10 · `CreateBatch` no chunkeaba → reventaba el techo de bind-params~~
 
