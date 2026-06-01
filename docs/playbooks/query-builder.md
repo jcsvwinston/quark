@@ -118,9 +118,13 @@ Para lectura masiva, usar `Iter()` o `Cursor()` (server-side iteration), no `Lis
 
 ### Eager loading sin chunkear `IN(...)`
 
-Oracle limita `IN` a 1000 elementos. MSSQL limita el número total de parámetros bind a ~2100. Si añades un nuevo `loadXxxRelation` (ej. para nested preload en Fase 2), **chunkea las parent keys** en bloques de 500 antes de emitir el SELECT. Patrón existente en `DeleteBatch` (`query_crud.go:1356`).
+Oracle limita `IN` a 1000 elementos. MSSQL limita el número total de parámetros bind a ~2100. Si añades un nuevo `loadXxxRelation` (ej. para nested preload en Fase 2), **chunkea las parent keys** en bloques de 500 antes de emitir el SELECT. Patrón existente en `DeleteBatch` (`query_crud.go:1827`, loop sobre `batchChunkSize=1000`).
 
 Hoy `loadStandardRelation`/`loadM2MRelation`/`loadPolymorphicRelation` (`query_exec.go:739-1065`) NO chunkean — es deuda. Cualquier preload masivo en Oracle va a romper.
+
+### Bulk insert sin chunkear el número de bind-params
+
+`CreateBatch` emite un `INSERT … VALUES (…), (…)` multi-fila. **El número de placeholders es `filas × columnas`**, no de elementos en un `IN(...)`: el techo relevante es el de bind-params del motor (MSSQL ~2100, SQLite 32766, PG/MySQL 65535), no el de `IN` de Oracle. Por eso `CreateBatch` chunkea con su propia constante **`maxBatchBindParams=2000`** (bajo el techo de MSSQL) en `rowsPerChunk = maxBatchBindParams / nºcolumnas` (`query_crud.go:1646` → helper `createBatchStmt:1753`), distinta de `batchChunkSize=1000` que cuenta elementos de un `IN`. El bug BB-10 fue precisamente que `CreateBatch` NO chunkeaba (a diferencia de `DeleteBatch`) y reventaba el techo de params en MSSQL a unos cientos de filas. **Patrón a seguir si añades otro bulk multi-row** (`UpsertBatch` sigue sin chunkear — deuda trackeada): el contexto con timeout se crea **una vez antes del loop de chunks** (timeout por operación, no por sentencia), igual que `DeleteBatch`.
 
 ### Comparabilidad de keys en M2M
 
