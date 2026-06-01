@@ -38,7 +38,10 @@
 > cientos de filas y en SQLite/PG/MySQL a unos miles). F12 —
 > resiliencia/concurrencia — añadida 2026-06-01; **sin hallazgos** (deadlock
 > retry, pool exhaustion, pánico-rollback con audit inline, y ausencia de leaks
-> bajo 200 tx concurrentes, sólidos). Pendientes: F6, F9-F11, F14.
+> bajo 200 tx concurrentes, sólidos). F11 — réplicas — añadida 2026-06-01;
+> **sin hallazgos** (read/write split, sticky/tx→primary, reparto round-robin,
+> failover transparente a primary, primary-caído→writes-fallan). Pendientes:
+> F6, F9, F10, F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -90,6 +93,16 @@
 > **deadlock real recuperado por `WithDeadlockRetry`** en los 4 motores servidor
 > (barrera determinista; SQLite serializa escrituras → skip logueado). Flake-
 > check 2× limpio. Reconexión tras drop de red y soak 30 min quedan a tier F14.
+>
+> **Pasada F11 (2026-06-01, Docker):** **verde 7/7**, **sin hallazgos**. PG-only:
+> la fase levanta su propia topología 1 primary + 3 replicas (instancias PG
+> independientes, sin replicación real; el routing se prueba por presencia-de-
+> dato, señal más fuerte que la etiqueta OTel `db.host`). Verifica read/write
+> split (write→primary, read no-sticky→réplica), `Sticky`/tx→primary, reparto
+> round-robin observable, failover transparente a primary con 1 y con todas las
+> réplicas caídas (`markReplicaDown` + retry-on-primary), y primary-caído→writes-
+> fallan (sin failover primary→réplica, ADR-0015). Flake-check 3× limpio, teardown
+> sin contenedores residuales. Requiere Docker (skip logueado si no hay).
 
 ### ~~BB-10 · `CreateBatch` no chunkeaba → reventaba el techo de bind-params~~
 
