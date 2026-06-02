@@ -43,7 +43,10 @@
 > failover transparente a primary, primary-caído→writes-fallan). F10 —
 > sharding — añadida 2026-06-01; **sin hallazgos** (routing por shard key,
 > error sin key, cero leaks cross-shard, tx por-shard, API estable al
-> resharding; distribución chi-square casi perfecta). Pendientes: F6, F9, F14.
+> resharding; distribución chi-square casi perfecta). F9 — codegen — añadida
+> 2026-06-02; **sin hallazgos** (paridad generated-vs-reflect, `WhereP` SQL
+> byte-idéntico, gate de contract-version y drift → reflect, PK no-entera →
+> binder a reflect, `--dry-run` no escribe). Pendientes: F6, F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -116,6 +119,18 @@
 > cross-shard, ADR-0016), y estabilidad de la API al añadir un 5º shard. 100k
 > ops del spec escaladas a 4000 (logueado); scatter-gather/rebalanceo de datos
 > son follow-ups de F6-7, fuera de scope.
+>
+> **Pasada F9 (2026-06-02, SQLite):** **verde 6/6**, **sin hallazgos**. Codegen
+> opt-in (`quark gen`). El `model/quark_gen.go` está commiteado (emitido por el
+> binario real — el módulo de bug-bash no puede importar el generador interno);
+> su `init()` registra scanner+binder para `Account` (PK entera) y scanner +
+> `StubBinder` para `Doc` (PK string). Verifica: paridad generated-vs-reflect
+> (round-trip idéntico a un gemelo reflect-only), `WhereP(AccountColumns…)` con
+> SQL byte-idéntico a `Where(...)` (capturado por observer), gate de
+> contract-version vieja → reflect sin error silencioso (scanner/binder falsos
+> que panican nunca se alcanzan), drift detectado por `CheckGeneratedDrift`, PK
+> no-entera → binder cae a reflect, y `quark gen --dry-run` no escribe. Parity
+> cross-engine y binder UPDATE/batch (F6-3b) fuera de scope.
 
 ### ~~BB-10 · `CreateBatch` no chunkeaba → reventaba el techo de bind-params~~
 

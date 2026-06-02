@@ -326,6 +326,16 @@ exactamente coherente con writes.
 
 **Criterio done:** todos los tests de F1+F2 pasan con y sin codegen.
 
+> **Implementado (2026-06-02):** la fase usa un paquete dedicado
+> `phases/f09_codegen/model/` con 2 modelos (`Account` PK-entera con
+> scanner+binder; `Doc` PK-string con scanner + `StubBinder`) en vez de
+> `bugbash/domain/` — el `quark_gen.go` se commitea (emitido por el binario
+> real; el módulo de bug-bash no puede importar el generador interno). La
+> paridad cross-engine F1+F2 se delega a F1 (el scanner generado enruta por el
+> mismo `quark.ScanTarget` que reflect); F9 verifica en SQLite la paridad
+> generated-vs-reflect, `WhereP` SQL byte-idéntico, gate de versión/drift, PK
+> no-entera→reflect y `--dry-run`. Sin hallazgos.
+
 ### F10 — Sharding
 
 **Qué prueba:** routing per shard key bajo carga.
