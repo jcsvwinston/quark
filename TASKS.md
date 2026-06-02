@@ -48,7 +48,10 @@
 > byte-idéntico, gate de contract-version y drift → reflect, PK no-entera →
 > binder a reflect, `--dry-run` no escribe). F6 — migraciones — añadida
 > 2026-06-03; halló y **cerró BB-11 y BB-12** (introspección MariaDB y migrator
-> versionado MSSQL). Pendientes: F14.
+> versionado MSSQL). F14 — soak — añadida 2026-06-03; **sin hallazgos** (versión
+> acotada; latencia/memoria estables, 0 errores/panics). **Bug-bash F0-F14
+> COMPLETO** — la pasada RC de 12h × 6 motores (F14 full) queda como paso de
+> release-candidate. Pendientes: ninguno (desbloquea v1.1.0).
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -142,6 +145,16 @@
 > implementados y con tests de integración — marcadores stale (la fase lo
 > verificó empíricamente; F3-5 CLI no se ejercita directamente aquí, lo cubre
 > `quarkmigrate/run_test.go`).
+>
+> **Pasada F14 (2026-06-03, acotada, Docker):** **verde 5/5**, **sin hallazgos**.
+> Soak de workload mixto (60% read cacheado / 30% write / 10% JOIN) con caché L2
+> activa, varios workers, por motor. Verifica latencia no-creciente (mediana 2ª
+> mitad ≤ 4× la 1ª), memoria estable (heap post-GC ≤ 5× baseline + piso 64MiB),
+> cero panics, cero errores. SQLite con `busy_timeout` (contención→latencia, no
+> SQLITE_BUSY). Latencias planas/decrecientes en PG/MySQL/MariaDB/MSSQL.
+> Time-boxed: el spec pide 12h × 6 motores (72 engine-h) con snapshots OTel cada
+> 5 min → **pasada de ventana RC** (`-soak-seconds=43200 -engines=all`), no CI.
+> **Con F14, el set F0-F14 queda completo.**
 
 ### ~~BB-12 · Migraciones versionadas rotas en MSSQL (`CREATE TABLE IF NOT EXISTS`)~~
 
