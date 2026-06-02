@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/jcsvwinston/quark"
 )
@@ -40,14 +41,49 @@ func NewMigrator(client *quark.Client) *Migrator {
 }
 
 func (m *Migrator) Init(ctx context.Context) error {
-	query := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s (
+	// The bookkeeping table DDL is dialect-specific: SQL Server has no
+	// CREATE TABLE IF NOT EXISTS (and TIMESTAMP there means rowversion, not a
+	// datetime), and Oracle has neither IF NOT EXISTS nor that TIMESTAMP default
+	// spelling. Same per-dialect shape as the backfill state table. Run via Raw
+	// (like GetApplied) so the SQL Server existence guard isn't rejected by the
+	// raw-query validator.
+	name := m.client.Dialect().Quote(m.tableName)
+	var ddl string
+	switch m.client.Dialect().Name() {
+	case "mssql":
+		// The sys.tables.name comparison uses the bare table name (a string
+		// literal), not the quoted identifier — sys.tables stores names without
+		// the delimiters Quote() would add. tableName is the hardcoded
+		// "quark_migrations", so there is no injection surface here.
+		ddl = fmt.Sprintf(`IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '%s')
+			CREATE TABLE %s (
+				id NVARCHAR(255) NOT NULL PRIMARY KEY,
+				name NVARCHAR(255),
+				applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`, m.tableName, name)
+	case "oracle":
+		ddl = fmt.Sprintf(`CREATE TABLE %s (
+			id VARCHAR2(255) NOT NULL,
+			name VARCHAR2(255),
+			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+			CONSTRAINT pk_%s PRIMARY KEY (id)
+		)`, name, m.tableName)
+	default: // postgres, mysql, mariadb, sqlite
+		ddl = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 			id VARCHAR(255) PRIMARY KEY,
 			name VARCHAR(255),
 			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`, m.tableName)
-	return m.client.Exec(ctx, query)
+		)`, name)
+	}
+	if _, err := m.client.Raw().ExecContext(ctx, ddl); err != nil {
+		// Oracle has no IF NOT EXISTS; ORA-00955 (name already used) means the
+		// table is already there, which is the idempotent success case.
+		if m.client.Dialect().Name() == "oracle" && strings.Contains(err.Error(), "ORA-00955") {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (m *Migrator) GetApplied(ctx context.Context) (map[string]bool, error) {

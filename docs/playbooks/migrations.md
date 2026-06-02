@@ -120,6 +120,27 @@ if dialect.SupportsTransactionalDDL() {
 }
 ```
 
+### Introspección: MariaDB reporta `COLUMN_DEFAULT = "NULL"` (string literal)
+
+(BB-11, cerrado.) En MariaDB, `INFORMATION_SCHEMA.COLUMN_DEFAULT` devuelve el
+**string literal `"NULL"`** para una columna nullable sin default (MySQL devuelve
+NULL real → `sql.NullString{Valid:false}`). Sin normalizar, `PlanMigration`
+emite un `OpAlterColumn` falso-positivo (`default "NULL"→<nil>`) en cada columna
+así, rompiendo el invariante "plan vacío sin cambios". `mysqlLikeIntrospect`
+(`dialect_introspection.go`) normaliza el literal **acotado a `dialectName ==
+"mariadb"`** (MySQL debe conservar un `DEFAULT 'NULL'` real). Si tocas el
+introspector MySQL/MariaDB, no rompas esta normalización.
+
+### Migrator versionado: DDL del bookkeeping table debe ser per-dialecto
+
+(BB-12, cerrado.) `Migrator.Init` (`migrate/migrate.go`) creaba
+`quark_migrations` con `CREATE TABLE IF NOT EXISTS … TIMESTAMP …` — roto en
+MSSQL (no tiene `IF NOT EXISTS`; su `TIMESTAMP` es rowversion) y Oracle. Ahora es
+per-dialecto (MSSQL `IF NOT EXISTS (SELECT … sys.tables)` + `DATETIME`; Oracle
+`VARCHAR2` + swallow ORA-00955), vía `Raw` como `GetApplied`. Mismo patrón que
+`ensureMigrationStateTable`/`ensureBackfillStateTable`. Cualquier tabla interna
+nueva debe seguir este patrón, no asumir DDL portable.
+
 ### `t.Skip` para gatear tests por motor
 
 Anti-pattern explícitamente prohibido por `CLAUDE.md` regla #7. Si tu test sólo aplica a Postgres, usa testcontainers (cuando esté setup F0-8) o build tag `//go:build integration_postgres`.
