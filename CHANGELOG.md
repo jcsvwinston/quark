@@ -49,6 +49,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **migrate:** versioned migrations now work on SQL Server. `Migrator.Init`
+  emitted `CREATE TABLE IF NOT EXISTS quark_migrations (… applied_at TIMESTAMP …)`
+  unconditionally — but SQL Server has no `CREATE TABLE IF NOT EXISTS` (and its
+  `TIMESTAMP` is a rowversion, not a datetime), so `Migrator.Up`/`Down` failed
+  with "Incorrect syntax near 'quark_migrations'". The bookkeeping-table DDL is
+  now per-dialect (SQL Server `IF NOT EXISTS (SELECT … sys.tables)` + `DATETIME`;
+  Oracle `VARCHAR2` + ORA-00955-swallow; others keep `CREATE TABLE IF NOT
+  EXISTS`), mirroring the backfill state table. Found by the post-v1.0 bug-bash
+  (BB-12, phase F6); verified on SQLite + PostgreSQL + MySQL + MariaDB + SQL
+  Server.
+- **migrate:** `PlanMigration` no longer reports a spurious column diff on
+  MariaDB. MariaDB's `DESCRIBE` returns the literal string `"NULL"` as the
+  default of a nullable, no-default column (MySQL returns a real SQL NULL), so
+  the schema differ saw `default "NULL" → <nil>` on every such column and
+  emitted a false-positive `OpAlterColumn` — breaking "empty plan when nothing
+  changed". The MySQL/MariaDB introspector now normalizes that literal `"NULL"`
+  to "no default". Found by the post-v1.0 bug-bash (BB-11, phase F6); verified
+  cross-engine.
 - **crud:** `CreateBatch` now chunks large slices so each `INSERT … VALUES`
   statement stays within the dialect's bind-parameter ceiling. Previously it
   emitted one statement with `rows × columns` placeholders, which overran SQL

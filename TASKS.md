@@ -46,7 +46,9 @@
 > resharding; distribución chi-square casi perfecta). F9 — codegen — añadida
 > 2026-06-02; **sin hallazgos** (paridad generated-vs-reflect, `WhereP` SQL
 > byte-idéntico, gate de contract-version y drift → reflect, PK no-entera →
-> binder a reflect, `--dry-run` no escribe). Pendientes: F6, F14.
+> binder a reflect, `--dry-run` no escribe). F6 — migraciones — añadida
+> 2026-06-03; halló y **cerró BB-11 y BB-12** (introspección MariaDB y migrator
+> versionado MSSQL). Pendientes: F14.
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -131,6 +133,43 @@
 > que panican nunca se alcanzan), drift detectado por `CheckGeneratedDrift`, PK
 > no-entera → binder cae a reflect, y `quark gen --dry-run` no escribe. Parity
 > cross-engine y binder UPDATE/batch (F6-3b) fuera de scope.
+>
+> **Pasada F6 cross-engine (2026-06-03, Docker):** ciclo schema-as-code
+> (PlanMigration/diff, ApplyPlan, Backfill+resume, migración versionada Up/Down,
+> lock de migración). Destapó y **cerró BB-11 y BB-12** en el mismo PR; tras los
+> fixes **verde 4/4 en los 5 motores de CI**. Nota: F3-3/4/5/6 figuraban
+> "abiertos" en el roadmap pero `PlanMigration`/`ApplyPlan`/`Backfill` están
+> implementados y con tests de integración — marcadores stale (la fase lo
+> verificó empíricamente; F3-5 CLI no se ejercita directamente aquí, lo cubre
+> `quarkmigrate/run_test.go`).
+
+### ~~BB-12 · Migraciones versionadas rotas en MSSQL (`CREATE TABLE IF NOT EXISTS`)~~
+
+**Cerrado** (2026-06-03, mismo PR que añade F6). `Migrator.Init`
+(`migrate/migrate.go`) emitía `CREATE TABLE IF NOT EXISTS quark_migrations (…
+applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)` sin condicionar al motor —
+pero SQL Server no tiene `CREATE TABLE IF NOT EXISTS` (y su `TIMESTAMP` es
+rowversion, no datetime), así que `Migrator.Up`/`Down` fallaban con "Incorrect
+syntax near 'quark_migrations'": **toda migración versionada rota en MSSQL**.
+Fix: DDL de la tabla de bookkeeping per-dialecto (MSSQL `IF NOT EXISTS (SELECT …
+sys.tables)` + `DATETIME`; Oracle `VARCHAR2` + swallow ORA-00955; resto conserva
+`CREATE TABLE IF NOT EXISTS`), ejecutado vía `Raw` como `GetApplied` para que el
+guard no rechace el `IF NOT EXISTS` de MSSQL. Regresión: `bugbash/phases/f06_migrations`
+(grupo `VersionedUpDown`) en SQLite + PG + MySQL + MariaDB + MSSQL. CHANGELOG
+`[Unreleased]/Fixed`.
+
+### ~~BB-11 · `PlanMigration` diff falso-positivo en MariaDB (default `"NULL"`)~~
+
+**Cerrado** (2026-06-03, mismo PR que añade F6). En MariaDB,
+`INFORMATION_SCHEMA.COLUMN_DEFAULT` reporta el default de una columna nullable
+sin default como el **string literal `"NULL"`** (MySQL reporta NULL real), así
+que `mysqlLikeIntrospect` (`dialect_introspection.go`) leía `default="NULL"` y el
+differ emitía un `OpAlterColumn` espurio (`default "NULL"→<nil>`) en cada columna
+así → "plan vacío sin cambios" roto en MariaDB (y `ApplyPlan` de ese alter
+fallaba además por F3-3-execute-alter incompleto). Fix: el introspector
+MySQL/MariaDB normaliza el literal `"NULL"` a "sin default". Sólo MariaDB se veía
+afectado (MySQL/PG/MSSQL/SQLite ya estaban limpios). Regresión: grupo
+`PlanAndApply` cross-engine. CHANGELOG `[Unreleased]/Fixed`.
 
 ### ~~BB-10 · `CreateBatch` no chunkeaba → reventaba el techo de bind-params~~
 

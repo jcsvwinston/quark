@@ -269,8 +269,9 @@ func main() {
 }
 ```
 
-The migrator stores applied IDs in `quark_migrations`. It uses `client.Exec`
-internally, so configure the migration client with `AllowRawQueries: true`.
+The migrator stores applied IDs in `quark_migrations`. It runs raw SQL
+internally (`client.Exec` and `client.Raw`), so configure the migration client
+with `AllowRawQueries: true`.
 
 ### Preview and Rollback
 

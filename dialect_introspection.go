@@ -385,7 +385,7 @@ func mysqlLikeIntrospect(ctx context.Context, exec Executor, dialectName string)
 	}
 	tables := make([]Table, 0, len(tableNames))
 	for _, name := range tableNames {
-		cols, err := mysqlListColumns(ctx, exec, name)
+		cols, err := mysqlListColumns(ctx, exec, name, dialectName)
 		if err != nil {
 			return Schema{}, fmt.Errorf("%s introspect: list columns for %q: %w", dialectName, name, err)
 		}
@@ -429,7 +429,7 @@ func mysqlListTables(ctx context.Context, exec Executor) ([]string, error) {
 	return out, rows.Err()
 }
 
-func mysqlListColumns(ctx context.Context, exec Executor, table string) ([]Column, error) {
+func mysqlListColumns(ctx context.Context, exec Executor, table, dialectName string) ([]Column, error) {
 	rows, err := exec.QueryContext(ctx, `
 		SELECT COLUMN_NAME,
 		       COLUMN_TYPE,
@@ -459,7 +459,16 @@ func mysqlListColumns(ctx context.Context, exec Executor, table string) ([]Colum
 			Type:     colType,
 			Nullable: nullable == "YES",
 		}
-		if dflt.Valid {
+		// MariaDB's INFORMATION_SCHEMA.COLUMN_DEFAULT reports a nullable,
+		// no-default column as the literal string "NULL" (MySQL reports a real
+		// SQL NULL → dflt.Valid == false). Left as-is this yields a phantom
+		// default "NULL" → <nil> diff in PlanMigration on every such column.
+		// Scoped to MariaDB on purpose: MySQL has no such quirk, so a genuine
+		// DEFAULT 'NULL' (the 4-char string) must stay intact there. On MariaDB
+		// a real DEFAULT 'NULL' is indistinguishable from "no default" in the
+		// catalog and is also dropped — a MariaDB limitation, not ours.
+		mariaNullLiteral := dialectName == "mariadb" && dflt.Valid && dflt.String == "NULL"
+		if dflt.Valid && !mariaNullLiteral {
 			s := dflt.String
 			col.Default = &s
 		}
