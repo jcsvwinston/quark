@@ -61,9 +61,31 @@ bookkeeping del propio test no domine la medición de memoria.
 
 ```bash
 cd bugbash
-go test -tags=bugbash -run TestSoak -v ./phases/f14_soak/                       # SQLite, 5s
-go test -tags=bugbash -run TestSoak -v ./phases/f14_soak/ -engines=all -soak-seconds=43200 -timeout 13h
+go test -tags=bugbash -run TestSoak -v ./phases/f14_soak/                       # SQLite, 5s (smoke)
 ```
+
+### Pasada RC (12h × 6 motores) — usa el script, no a mano
+
+El soak RC debe cubrir **los 6 motores** (SQLite, PostgreSQL, MySQL, MariaDB, SQL
+Server, **Oracle**) y **sobrevivir al cierre de la terminal/sesión** (un
+`go test` en background muere con la sesión — eso abortó el primer intento). El
+script [`run-rc-soak.sh`](run-rc-soak.sh) cablea los 6 (imposible saltarse uno)
+y lanza cada job desacoplado con `nohup`:
+
+```bash
+./phases/f14_soak/run-rc-soak.sh           # lanza 12h × 6 motores, detached
+./phases/f14_soak/run-rc-soak.sh watch     # check de progreso
+./phases/f14_soak/run-rc-soak.sh collect   # resultado + nº de hallazgos por motor
+./phases/f14_soak/run-rc-soak.sh stop      # mata jobs + borra contenedores
+
+# overrides: SOAK_SECONDS (default 43200=12h), SOAK_WORKERS (default 8),
+# BUGBASH_DSN_ORACLE (reusar un Oracle local en vez de bootear bugbash-oracle).
+```
+
+Oracle: el harness lo arranca solo (gvenzl, ~5 min) y le hace el `GRANT
+DBMS_LOCK`; si tu Oracle local ya ocupa el 1521, exporta `BUGBASH_DSN_ORACLE`
+para reusarlo (evita la colisión de puerto). Aunque Oracle está excluido del
+**CI** (image issue), el soak RC es manual/local y **sí lo incluye**.
 
 ## Hallazgos (en `TASKS.md` § "Bug-bash hallazgos")
 
