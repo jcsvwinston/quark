@@ -184,3 +184,41 @@ The ADR-0002 ≥3× p99 codegen gate has been **retired** by
 `database/sql` + architectural allocs dominate), so the gate is unreachable by
 scan/bind codegen. Codegen is justified by **type-safety** (F6-4), not speed.
 v1.0 now ships against the honest checklist above, not a speedup target.
+
+## v1.1.0 — hardening release — delivered
+
+First minor on the stable `v1.x` line. Output of the post-v1.0 **bug-bash**
+(F0–F14, see [`docs/BUGBASH_PLAN.md`](BUGBASH_PLAN.md) and the closed findings
+in [`TASKS.md`](../TASKS.md) § "Bug-bash hallazgos"). No breaking changes;
+`v1.x` API compatibility holds.
+
+- [x] **Bug-bash F0–F14 cross-engine sweep** — concurrency, volume, resilience,
+      replicas, sharding, codegen, migrations, plus a mixed-workload soak
+      (F14). 13 findings (BB-1…BB-13) triaged and closed.
+- [x] **BB-11** — MariaDB column introspection now distinguishes a real default
+      from the literal `NULL` string MariaDB reports, so `PlanMigration` no
+      longer emits a phantom `ALTER` (`dialect_introspection.go`).
+- [x] **BB-12** — `Migrator.Init` now emits per-dialect bootstrap DDL (MSSQL
+      `IF NOT EXISTS … CREATE TABLE … DATETIME`, Oracle `VARCHAR2` + ORA-00955
+      swallow, others `CREATE TABLE IF NOT EXISTS`) instead of one SQLite-shaped
+      statement (`migrate/migrate.go`).
+- [x] **Automatic MariaDB detection** — a `quark.New("mysql", …)` connection
+      probes `SELECT VERSION()` once at construction and switches to the MariaDB
+      dialect when the server reports MariaDB.
+- [x] **Inbound `LISTEN/NOTIFY` listener** (PostgreSQL) shipped —
+      `ListenerFactory.CreateListener` on a dedicated pinned connection
+      (ADR-0019). Previously scoped out of Phase 5.
+- [x] **`CreateBatch` auto-chunking** by bind-parameter count
+      (`maxBatchBindParams=2000`, under SQL Server's ~2100 limit) so a large
+      batch never overruns the driver limit (BB-10). `DeleteBatch` already
+      chunked its `IN` clause (1000 elements, Oracle's `IN` ceiling) pre-v1.1.
+- [x] **SQLGuard `ValidateRawQuery`** now rejects the `--` line-comment tail as a
+      best-effort backstop when `AllowRawQueries` is on (block-comment hints
+      `/*+ … */` stay allowed).
+
+Deferred to **v1.2+** (not in v1.1): F6-3b UPDATE/partial/batch codegen binder
+(ADR-0017, ~1% payoff), scatter-gather + shard-key-from-entity sharding, and
+cross-instance cache-stampede coordination.
+
+The 12h × 6-engine RC soak (`bugbash/phases/f14_soak/run-rc-soak.sh`) is RC
+assurance, not a hard gate — it does not block the tag.

@@ -159,7 +159,7 @@ client, err := quark.New("postgres", dsn,
 
 ### `WithDeadlockRetry(maxAttempts int) Option`
 
-Enables transparent retry of [`Client.Tx`](#tx) when the transaction
+Enables transparent retry of [`Client.Tx`](../../guides/transactions) when the transaction
 closure returns a deadlock error from the active driver (PG `40P01`,
 MySQL/MariaDB `1213`, MSSQL `1205`, Oracle `ORA-00060`).
 

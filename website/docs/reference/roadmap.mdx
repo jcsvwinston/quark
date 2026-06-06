@@ -6,8 +6,8 @@ description: Implemented Quark capabilities and planned future work, aligned wit
 
 # Roadmap
 
-Quark is **v1.0.0** — the first stable release under SemVer, with Phases 0–6
-complete. This page separates what already ships from what is planned, so the
+Quark is **v1.1.0** — a hardening release on the stable `v1.x` line, with
+Phases 0–6 complete. This page separates what already ships from what is planned, so the
 docs do not read like a promise that every idea is already in `main`.
 
 The canonical roadmap (with the phased plan and trade-offs) lives at
@@ -170,16 +170,40 @@ the operational backlog lives at
   health cooldown (ADR-0015).
 - **Sharding** (`ShardRouter`, F6-7) — **delivered**: routes per query by
   shard key (ADR-0016), with a runnable example in `examples/sharding/`.
-  Scatter-gather and shard-key-from-entity are deferred to v1.1.
+  Scatter-gather and shard-key-from-entity are deferred to v1.2+ (not in v1.1).
 - **Stress testing harness** (F6-9) — **delivered** (v0.13.0) in
   `benchmarks/stress/`.
 - **ent + sqlc in the benchmarks harness** (F6-8b) — **delivered** (v1.0.0):
   the code-generation tier in the comparison harness; informational, not a
   v1.0 gate (the ≥3× gate was retired by ADR-0017). See
   [Benchmarks](./benchmarks).
-- **UPDATE / partial / batch binder codegen** (F6-3b) — **deferred** to v1.1;
+- **UPDATE / partial / batch binder codegen** (F6-3b) — **deferred** to v1.2+;
   measured payoff ~1% (`benchmarks/PROFILING.md`), reopened only if motivated
   by type-safety.
+
+## v1.1.0 — delivered (hardening)
+
+The post-v1.0 bug-bash (phases F0–F14, a systematic cross-engine pass over the
+whole surface) plus the correctness fixes it surfaced:
+
+- **`CreateBatch` chunking** (BB-10) — large batches now chunk to each dialect's
+  bind-parameter ceiling (SQL Server ~2100; others higher) instead of failing.
+- **Versioned migrations on SQL Server** (BB-12) — `Migrator.Init` bookkeeping
+  DDL is now per-dialect (was `CREATE TABLE IF NOT EXISTS … TIMESTAMP`, invalid
+  on SQL Server).
+- **MariaDB schema-diff false positive** (BB-11) — a nullable, no-default column
+  no longer produces a phantom `OpAlterColumn` in `PlanMigration`.
+- **Dialect-aware savepoints** (BB-9), **`SchemaPerTenant` write routing**
+  (BB-8), and three **eager-loading** fixes (BB-5/6/7).
+- **`--` rejected in raw queries** (BB-13) under `AllowRawQueries`.
+- **Automatic MariaDB detection** and an **inbound PostgreSQL `LISTEN/NOTIFY`
+  listener** (ADR-0019).
+
+No breaking changes. The 12h RC soak ran clean on the four testcontainers CI
+engines (PostgreSQL, MySQL, MariaDB, SQL Server); SQLite and Oracle hit only
+harness-level environment limits — not ORM bugs — which were hardened in #154.
+Functional correctness still runs across all six dialects on every PR (see
+boundaries below).
 
 ## Known current boundaries
 
