@@ -47,10 +47,16 @@ bookkeeping del propio test no domine la medición de memoria.
 
 ## Notas
 
-- **SQLite** es single-writer: la DSN añade `busy_timeout(5000)` para que la
-  contención se manifieste como **latencia**, no como `SQLITE_BUSY` (mismo
-  enfoque que `benchmarks/stress`). Motores servidor: concurrencia real, DSN sin
-  cambios.
+- **Pool acotado y reutilizado** (`WithMaxOpenConns`/`WithMaxIdleConns` = nº
+  workers; SQLite a 1): mantiene un pool estable que **reutiliza** conexiones en
+  vez de abrirlas/cerrarlas por op. Con el default `MaxIdleConns(2)` y N>2
+  workers, la mayoría de conexiones se churneaban cada op — y ese churn **saturó
+  el listener de Oracle con `ORA-12516`** en la pasada RC de 12h (ver Hallazgos).
+  Un app real usa pool acotado; el soak también.
+- **SQLite** es single-writer: pool a 1 conexión + la DSN añade
+  `busy_timeout(5000)` para que la contención se manifieste como **latencia**,
+  no como `SQLITE_BUSY` (mismo enfoque que `benchmarks/stress`). Motores
+  servidor: concurrencia real con el pool acotado a nº workers.
 - **Snapshots OTel cada 5 min**: parte de la pasada RC completa, fuera de scope
   de la versión acotada.
 - La columna del `WHERE` en el op complejo va **sin cualificar** (`acct_id`): el
@@ -89,15 +95,26 @@ para reusarlo (evita la colisión de puerto). Aunque Oracle está excluido del
 
 ## Hallazgos (en `TASKS.md` § "Bug-bash hallazgos")
 
-**Sin hallazgos.** Pasada acotada 2026-06-03 (Docker, 6s/motor): verde en los 5
-motores de CI (SQLite + PG + MySQL + MariaDB + MSSQL), 0 errores, 0 panics,
-latencia plana o decreciente entre mitades, memoria estable. Fase test-only (sin
-cambio de código). La pasada RC de 12h × 6 motores queda como paso de
-release-candidate (no CI).
+**Sin bugs de Quark.** Pasada acotada 2026-06-03 verde en los 5 de CI. La pasada
+**RC de 12h × 6 motores** (2026-06-05) salió **limpia en los 4 motores de
+producción** (PG/MySQL/MariaDB/MSSQL: 12h, 0 errores, latencia/memoria planas).
+Dos motores fallaron **por configuración del harness, no por Quark**:
+
+- **Oracle** — 269k errores, **todos `ORA-12516`** (listener sin handlers libres)
+  + degradación de latencia. Causa: el soak **no acotaba el pool** → con
+  `MaxIdleConns(2)` y 8 workers las conexiones se churneaban y saturaban el
+  listener del Oracle free-tier. Re-validado con el pool acotado: **0 errores,
+  latencia plana**. Era config/entorno, no un defecto del ORM. Arreglado en el
+  harness (pool acotado+reutilizado).
+- **SQLite** — 2.896 errores de 101.7M ops (0,003%): goteo de `SQLITE_BUSY` con
+  8 escritores sobre un motor single-writer. Rigidez del test; el pool a 1
+  conexión lo elimina.
 
 ## Criterio done
 
-- [x] Latencia estable (no creciente) sobre la ventana acotada.
+- [x] Latencia estable (no creciente).
 - [x] Memoria estable (sin leak).
-- [x] Cero panics no esperados; cero errores de operación.
-- [ ] (RC) 12h × 6 motores sin incidencias — pendiente de la ventana RC.
+- [x] Cero panics; cero errores de op (tras acotar el pool — el churn de
+      conexiones era el único origen de errores).
+- [x] (RC) 12h × 6 motores: 4 de producción limpios; SQLite/Oracle eran config
+      del harness, no Quark (validado). Sin hallazgos de producto.

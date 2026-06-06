@@ -127,11 +127,21 @@ func soakEngine(t *testing.T, ctx context.Context, conn tools.EngineConn, eng st
 	// honest soak shape), matching benchmarks/stress. Server engines: real
 	// concurrency, DSN unchanged.
 	dsn := conn.DSN
+	maxConns := *soakWorkers
 	if eng == tools.SQLite {
 		dsn += "?_pragma=busy_timeout(5000)"
+		maxConns = 1 // single-writer: serialize through one connection (no SQLITE_BUSY)
 	}
-	// L2 cache configured (reads use Cache()) so the cache path is under load.
-	client, err := quark.New(conn.Driver, dsn, quark.WithCacheStore(memory.New()))
+	// Bounded, REUSED pool: MaxIdle == MaxOpen keeps the connections alive and
+	// reused rather than churned. With the default MaxIdleConns(2) and N workers,
+	// most worker connections open+close every op — that churn hammered the
+	// Oracle listener into ORA-12516 (handler exhaustion) on the 12h RC soak. A
+	// real app runs a bounded pool; the soak should too. L2 cache is on so the
+	// cache path is under load (reads use Cache()).
+	client, err := quark.New(conn.Driver, dsn,
+		quark.WithCacheStore(memory.New()),
+		quark.WithMaxOpenConns(maxConns),
+		quark.WithMaxIdleConns(maxConns))
 	if err != nil {
 		t.Fatalf("quark.New(%q): %v", conn.Driver, err)
 	}
@@ -168,13 +178,14 @@ func soakEngine(t *testing.T, ctx context.Context, conn tools.EngineConn, eng st
 	runtime.ReadMemStats(&msStart)
 
 	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		firstLat []time.Duration // ops that started in the first half of the window
-		lastLat  []time.Duration // ops that started in the second half
-		panics   atomic.Int64
-		errs     atomic.Int64
-		ops      atomic.Int64
+		wg         sync.WaitGroup
+		mu         sync.Mutex
+		firstLat   []time.Duration // ops that started in the first half of the window
+		lastLat    []time.Duration // ops that started in the second half
+		panics     atomic.Int64
+		errs       atomic.Int64
+		ops        atomic.Int64
+		errSamples = map[string]int{} // distinct op-error strings (capped) → count, for diagnosis
 	)
 	half := start.Add(dur / 2)
 
@@ -196,6 +207,15 @@ func soakEngine(t *testing.T, ctx context.Context, conn tools.EngineConn, eng st
 					opStart := time.Now()
 					if err := doOp(ctx, client, accIDs, rng); err != nil {
 						errs.Add(1)
+						// Record a capped sample of distinct error strings so a
+						// non-zero count is diagnosable (which ORA-/driver error?),
+						// not just a number.
+						s := err.Error()
+						mu.Lock()
+						if _, ok := errSamples[s]; ok || len(errSamples) < 20 {
+							errSamples[s]++
+						}
+						mu.Unlock()
 					}
 					lat := time.Since(opStart)
 					ops.Add(1)
@@ -229,6 +249,11 @@ func soakEngine(t *testing.T, ctx context.Context, conn tools.EngineConn, eng st
 	}
 	if n := errs.Load(); n != 0 {
 		r.fail(reporter.SeverityP1, "%d op error(s) during soak (want 0)", n)
+		mu.Lock()
+		for s, c := range errSamples {
+			t.Logf("soak %s: error sample [%dx]: %s", eng, c, s)
+		}
+		mu.Unlock()
 	}
 	if ops.Load() == 0 {
 		r.fail(reporter.SeverityP1, "no operations executed during the soak window")
