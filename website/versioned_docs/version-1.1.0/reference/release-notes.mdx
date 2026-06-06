@@ -6,16 +6,27 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is **v1.0.0** — the first stable release under SemVer. Phases 0–6 are
-complete; `v1.x` keeps API compatibility and breaking changes go to `v2.x`.
+Quark is **v1.1.0** — a hardening release on the stable `v1.x` line. `v1.x`
+keeps API compatibility; breaking changes go to `v2.x`.
 
 Per-version release notes live in the main repository under
 [`docs/RELEASE_NOTES_*.md`](https://github.com/jcsvwinston/quark/tree/main/docs).
 The current tag is documented at
-[`docs/RELEASE_NOTES_v1.0.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.0.0.md).
+[`docs/RELEASE_NOTES_v1.1.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.1.0.md).
 Migration steps for the most recent breaking changes are at
 [`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
-v0.10 through v1.0 introduced **no breaking changes**.
+v0.10 through v1.1 introduced **no breaking changes**.
+
+## v1.1.0
+
+Hardening release: the output of the post-v1.0 bug-bash (phases F0–F14, a
+systematic cross-engine pass over the whole surface) plus the correctness fixes
+it surfaced — versioned migrations on SQL Server, a MariaDB schema-diff false
+positive, `CreateBatch` bind-parameter chunking, dialect-aware savepoints,
+multi-tenant write routing, and three eager-loading fixes (BB-5…BB-13). No new
+public API and **no breaking changes**. The 12h soak ran clean on the four
+production CI engines.
+See [`RELEASE_NOTES_v1.1.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.1.0.md).
 
 ## v1.0.0
 
