@@ -534,6 +534,14 @@ campo. Aislado porque las otras tres estrategias no usan `q.schema`.
 
 ---
 
+> **✅ v1.1.0 publicado (2026-06-06).** Tag `v1.1.0` (PR #131, release-please);
+> GitHub Release Latest; docs versionadas live en
+> `jcsvwinston.github.io/quark/docs` (1.1.0 es ahora la versión por defecto;
+> 1.0.0 en `/docs/1.0.0/`). Release de hardening: **bug-bash F0-F14 completo**
+> (PRs #142-#155), con los fixes BB-5…BB-13 cerrados. El soak RC de 12h salió
+> limpio en los 4 motores de CI; SQLite/Oracle sólo dieron límites de entorno
+> del harness (no del ORM), endurecidos en #154.
+>
 > **✅ v1.0.0 publicado (2026-05-27).** Tag `v1.0.0` (PR #116, vía
 > release-please con trailer `Release-As: 1.0.0`); GitHub Release marcada
 > Latest; docs live en `jcsvwinston.github.io/quark/docs` (1.0.0 es ahora

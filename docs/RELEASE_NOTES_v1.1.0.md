@@ -5,7 +5,8 @@ systematic cross-engine pass (phases F0–F14) over the whole surface, plus the
 correctness fixes it surfaced. No new public API of note — the value is
 fewer dialect-specific sharp edges and a tested-under-load core.
 
-Docs for this version: <https://jcsvwinston.github.io/quark-docs/docs/1.1.0/>
+Docs (1.1.0 is the current version): <https://jcsvwinston.github.io/quark/docs/>
+(older versions under `/docs/1.0.0/` etc.)
 
 ## Fixed (found by the bug-bash)
 
