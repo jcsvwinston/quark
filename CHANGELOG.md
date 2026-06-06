@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/jcsvwinston/quark/compare/v1.0.0...v1.1.0) (2026-06-06)
+
+
+### Added
+
+* **events:** inbound PostgreSQL LISTEN/NOTIFY listener (ADR-0019) ([#132](https://github.com/jcsvwinston/quark/issues/132)) ([1832aca](https://github.com/jcsvwinston/quark/commit/1832aca26b8a3b709ef8d6dad30a387d71c21dcd))
+
+
+### Fixed
+
+* **dialects:** emit LOCK IN SHARE MODE on MariaDB; auto-detect MariaDB (BB-3) ([#139](https://github.com/jcsvwinston/quark/issues/139)) ([9c134f3](https://github.com/jcsvwinston/quark/commit/9c134f39c93a1cdc776f0a7dae97f099cc17a024))
+* **query-builder:** make ForUpdate().List() work on Oracle (BB-4) ([#138](https://github.com/jcsvwinston/quark/issues/138)) ([04c49b3](https://github.com/jcsvwinston/quark/commit/04c49b35f6bbfd6c82d17e40b473449f3add6d7b))
+* **query-builder:** scope typed-join SELECT/soft-delete/ORDER BY to base table (BB-2) ([#137](https://github.com/jcsvwinston/quark/issues/137)) ([cae5216](https://github.com/jcsvwinston/quark/commit/cae52165532fa8c2ddc06efd9f4f7e7ffcff7057))
+
+
+### Documentation
+
+* align public docs to the published v1.0.0 ([#130](https://github.com/jcsvwinston/quark/issues/130)) ([70c9b25](https://github.com/jcsvwinston/quark/commit/70c9b25f93eaa6714dca244644e934fbdca8dc8e))
+* **modeling:** warn against mapping uuid.UUID to UNIQUEIDENTIFIER on MSSQL (BB-1) ([#140](https://github.com/jcsvwinston/quark/issues/140)) ([1adb0ba](https://github.com/jcsvwinston/quark/commit/1adb0ba595c036c58bac84429054ed8d2dcc24db))
+
+
+### Tests
+
+* **bugbash:** add F10 sharding phase (no findings) ([#149](https://github.com/jcsvwinston/quark/issues/149)) ([7e03273](https://github.com/jcsvwinston/quark/commit/7e03273adbc3ce9742d2b79ce95cb6ef5265a66d))
+* **bugbash:** add F11 replicas phase (no findings) ([#148](https://github.com/jcsvwinston/quark/issues/148)) ([a985709](https://github.com/jcsvwinston/quark/commit/a985709119046bf3b2b9001236b1f01230d2a7d6))
+* **bugbash:** add F12 resilience & concurrency phase (no findings) ([#147](https://github.com/jcsvwinston/quark/issues/147)) ([bea688a](https://github.com/jcsvwinston/quark/commit/bea688ac9a3189c68a920fa085e7b256728f43ef))
+* **bugbash:** add F13 security phase + fix(security): reject -- in ValidateRawQuery ([#141](https://github.com/jcsvwinston/quark/issues/141)) ([76b8cc9](https://github.com/jcsvwinston/quark/commit/76b8cc98481ff7bef7bf3b876588e1fc2e9cc740))
+* **bugbash:** add F14 soak phase (no findings) — completes bug-bash F0-F14 ([#152](https://github.com/jcsvwinston/quark/issues/152)) ([3566062](https://github.com/jcsvwinston/quark/commit/3566062b6ad0b08116f2d6809ead4f1632ca2ffc))
+* **bugbash:** add F3 relations phase + fix(preload): nullable-FK, Oracle m2m, MSSQL null []byte (BB-5/6/7) ([#142](https://github.com/jcsvwinston/quark/issues/142)) ([572b70a](https://github.com/jcsvwinston/quark/commit/572b70a463def88ec18af3e8c6225031d3d61d8c))
+* **bugbash:** add F4 volume phase + fix(crud): chunk CreateBatch to bind-param ceiling (BB-10) ([#146](https://github.com/jcsvwinston/quark/issues/146)) ([79795e0](https://github.com/jcsvwinston/quark/commit/79795e0d9eb19711ec8bb0d1bd0f736df3e39636))
+* **bugbash:** add F5 multi-tenancy phase + fix(multi-tenant): SchemaPerTenant write routing (BB-8) ([#143](https://github.com/jcsvwinston/quark/issues/143)) ([bc8c421](https://github.com/jcsvwinston/quark/commit/bc8c4215602717c6d89e0177724742d87ba9963f))
+* **bugbash:** add F6 migrations phase + fix(migrate): MSSQL versioned DDL (BB-12) & MariaDB diff false-positive (BB-11) ([#151](https://github.com/jcsvwinston/quark/issues/151)) ([a34a681](https://github.com/jcsvwinston/quark/commit/a34a6818bb75946a2450d13ffcdd4ebd4e6d4b5e))
+* **bugbash:** add F7 cache phase (singleflight, granular invalidation, Redis) ([#144](https://github.com/jcsvwinston/quark/issues/144)) ([322a0f3](https://github.com/jcsvwinston/quark/commit/322a0f3f845a60cf19e976c21a49debf623e9db4))
+* **bugbash:** add F8 hooks/events/audit phase + fix(tx): dialect-aware savepoints (BB-9) ([#145](https://github.com/jcsvwinston/quark/issues/145)) ([561603f](https://github.com/jcsvwinston/quark/commit/561603f2102599f61f35f5de26cb2ed4fc8da5c4))
+* **bugbash:** add F9 codegen phase (no findings) ([#150](https://github.com/jcsvwinston/quark/issues/150)) ([fa3a3cf](https://github.com/jcsvwinston/quark/commit/fa3a3cffeafb7aa9d5f318dc07496df0ef80c401))
+* **bugbash:** add phase F2 (API surface) — finds BB-2/BB-3/BB-4 ([#136](https://github.com/jcsvwinston/quark/issues/136)) ([8409bc9](https://github.com/jcsvwinston/quark/commit/8409bc9ed839f3b5be932a75ac88b0885b8ccaf6))
+* **bugbash:** add reporter + phase F1 (smoke per engine) ([#135](https://github.com/jcsvwinston/quark/issues/135)) ([fe5a1c3](https://github.com/jcsvwinston/quark/commit/fe5a1c37edd2d10ec300f2188f24a8992a979ecf))
+* **bugbash:** bootstrap executable harness + phase F0 (install & boot) ([#134](https://github.com/jcsvwinston/quark/issues/134)) ([799073d](https://github.com/jcsvwinston/quark/commit/799073da5b63ccfe54cc6349a2a361f20bf8ca90))
+
 ## [Unreleased]
 
 ### Security
