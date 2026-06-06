@@ -78,6 +78,14 @@ client, _ := quark.New("postgres", dsn,
 )
 ```
 
+When raw queries are enabled, Quark still applies a **best-effort** check
+(`ValidateRawQuery`): since v1.1.0 it rejects the SQL line-comment tail `--`
+(a classic injection-truncation vector). Block comments (`/* … */`) stay
+allowed — they are legitimate optimizer hints (`/*+ … */`). This check is a
+heuristic backstop, **not a complete filter**: the real safety boundary for raw
+SQL is keeping `AllowRawQueries` off by default and binding *values* through
+placeholders, never string-concatenating user input.
+
 ## Comparison with other ORMs
 
 | Injection surface | Quark | GORM | ent | sqlx |

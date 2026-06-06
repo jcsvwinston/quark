@@ -26,6 +26,8 @@ in the main repository.
 | Multi-Tenant RLS — **client-side WHERE injection** | ✅ all 6 dialects | manual/plugin | manual | manual/interceptor |
 | Multi-Tenant RLS — **engine-enforced** | ✅ PostgreSQL (`SET LOCAL` + `CREATE POLICY`) | ❌ | ❌ | ❌ |
 | Multi-Tenant — schema-per-tenant / DB-per-tenant | ✅ | manual | manual | manual |
+| Read replicas + automatic failover | ✅ (`Sticky(ctx)` read-your-writes) | plugin (dbresolver) | ❌ | manual |
+| Pluggable sharding | ✅ (`ShardRouter` / `HashShardFunc`) | plugin (sharding) | ❌ | manual |
 | Immutable Query Builder | ✅ | mutable³ | N/A | ✅ |
 | Integrated L2 Cache | ✅ + stampede protection⁵ | plugin | ❌ | ❌ |
 | Schema-as-code migrations (diff + lock + backfill) | ✅ | ❌ (AutoMigrate only) | ❌ | ✅ (with Atlas) |
@@ -34,12 +36,14 @@ in the main repository.
 | Audit log built-in | ✅ atomic with CRUD tx | ❌ | ❌ | partial |
 | `stdlib` `*sql.DB` — no magic pool | ✅ | ✅ | ✅ | ❌ |
 | OpenTelemetry — traces **and metrics** | ✅ | plugin (traces only) | ❌ | plugin |
-| Batch Ops (Delete/Upsert/Update) | ✅ | partial⁴ | ❌ | partial⁴ |
+| Batch Ops (Delete/Upsert/Update) | ✅⁴ | partial⁴ | ❌ | partial⁴ |
+| Automatic dialect detection (MariaDB vs MySQL) | ✅ (v1.1) | ❌ | ❌ | ❌ |
+| Inbound `LISTEN/NOTIFY` listener | ✅ PostgreSQL (v1.1) | ❌ | ❌ | ❌ |
 
 > ¹ GORM v2 core API uses `interface{}`; generic wrappers exist but are not part of the primary API.
 > ² GORM and ent use parameterized queries that protect *values* against injection. Quark additionally validates *identifiers* (column/table names, operators, JSON paths, JOIN-ON clauses) at the API layer. See [SQLGuard](sqlguard) for a detailed breakdown.
 > ³ GORM queries can mutate shared state when chained; `Session(&gorm.Session{NewDB: true})` mitigates this but is opt-in.
-> ⁴ GORM supports `CreateInBatches`; batch DELETE and batch UPDATE require custom loops. Ent supports batch create; batch UPDATE/DELETE require raw queries or custom extensions.
+> ⁴ GORM supports `CreateInBatches`; batch DELETE and batch UPDATE require custom loops. Ent supports batch create; batch UPDATE/DELETE require raw queries or custom extensions. Quark chunks automatically so a large slice never overruns the driver limit: `DeleteBatch` has always chunked its `IN` clause (1000 elements, Oracle's `IN` ceiling), and since v1.1.0 `CreateBatch` also chunks by bind-parameter count (`maxBatchBindParams=2000`, safely under SQL Server's ~2100 limit).
 > ⁵ Quark wraps the cache backing with `stampedeStore` (singleflight + ±jitter + Vattani XFetch — [ADR-0011](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0011-cache-stampede-protection-wrapper.md)), so a hot key never produces a database stampede on miss. No competitor in this matrix ships stampede protection out of the box.
 
 ---

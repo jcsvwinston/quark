@@ -19,6 +19,11 @@ syntax, and DDL operations.
 | MSSQL | `quark.MSSQL()` | `IDENTITY`, `OFFSET/FETCH`, `MERGE` upserts. |
 | Oracle | `quark.Oracle()` | `GENERATED AS IDENTITY`, `MERGE` upserts. |
 
+Since v1.1.0, **MariaDB is detected automatically**: on a `quark.New("mysql", dsn)`
+connection Quark probes `SELECT VERSION()` once at construction and switches to
+the MariaDB dialect when the server reports MariaDB, so you get the MariaDB DDL
+edge cases without picking the constructor explicitly.
+
 ## Upsert mapping
 
 ```go

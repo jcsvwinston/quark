@@ -19,7 +19,11 @@ CPU/allocation overhead, not disk or network I/O. Against a networked
 database, that overhead is a small fraction of round-trip latency — do not
 read these microseconds as production request times. Numbers are also
 machine- and run-specific: treat the **relative ratios** as the signal and
-reproduce locally before drawing conclusions.
+reproduce locally before drawing conclusions. SQLite is the *benchmark*
+engine only; functional correctness is validated separately across all six
+dialects — PostgreSQL, MySQL, MariaDB, SQLite, MSSQL, and **Oracle (booted
+via `docker run gvenzl/oracle-free`, not testcontainers)** — in the blocking
+`integration` CI matrix on every PR.
 :::
 
 ## What is measured
