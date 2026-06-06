@@ -1,0 +1,122 @@
+---
+sidebar_position: 2
+title: Benchmarks
+description: Reproducible go test -bench comparison of Quark, raw database/sql, GORM, ent, and sqlc on in-memory SQLite.
+---
+
+# Benchmarks
+
+These numbers come from a reproducible `go test -bench` harness that lives
+in [`benchmarks/`](https://github.com/jcsvwinston/quark/tree/main/benchmarks)
+in the repository. It measures Quark's per-operation overhead against a
+hand-written `database/sql` baseline and against four peer libraries — GORM
+(the reflect-ORM peer) plus ent and sqlc (the code-generation peers) — on the
+same model, schema, data, and operations.
+
+:::note Microbenchmarks, not production timings
+The harness runs against **in-memory SQLite** so it isolates ORM and driver
+CPU/allocation overhead, not disk or network I/O. Against a networked
+database, that overhead is a small fraction of round-trip latency — do not
+read these microseconds as production request times. Numbers are also
+machine- and run-specific: treat the **relative ratios** as the signal and
+reproduce locally before drawing conclusions.
+:::
+
+## What is measured
+
+Five operations, chosen because they exercise the reflect-based hot paths
+(row scanning, insert/update building) that the optional code generator
+targets:
+
+| Benchmark     | Operation                                           |
+| ------------- | --------------------------------------------------- |
+| `InsertOne`   | Insert a single row                                 |
+| `InsertBatch` | Insert 100 rows in one batch                        |
+| `FindByPK`    | Select one row by primary key                       |
+| `ListWhere`   | Select up to 50 rows with a `WHERE age >= ?` filter |
+| `Update`      | Update one row (all non-PK columns) by primary key  |
+
+Each is implemented five ways against the same `bench_users` table:
+
+- **Raw** — hand-written `database/sql` with manual `Scan`/`Exec`; the floor.
+- **Quark** — the `quark.For[T]` API on the current reflect path.
+- **GORM** — the reflect-ORM peer.
+- **ent** — a code-generation ORM: a typed client generated from a schema,
+  with a rich runtime (builders, mutations, hooks).
+- **sqlc** — a code generator that turns annotated SQL into thin typed
+  wrappers over `database/sql`, with no runtime of its own.
+
+ent and sqlc are the code-generation tier — the same tier Quark's own
+optional generated scanners/binders (shipped in v0.11.0) belong to.
+
+:::note sqlc batch insert is not a multi-row `VALUES`
+sqlc emits no variadic multi-row `INSERT` for SQLite (its `:copyfrom` /
+`:batch` helpers are pgx-only), so its `InsertBatch` is a transaction-wrapped
+loop of single-row inserts — a real API asymmetry vs the multi-row `VALUES`
+batch the other four use. Read sqlc's `InsertBatch` number with that in mind.
+:::
+
+## How to reproduce
+
+```bash
+cd benchmarks
+go test -run=^$ -bench=. -benchmem ./...
+```
+
+See the [harness README](https://github.com/jcsvwinston/quark/blob/main/benchmarks/README.md)
+for the full methodology, its limits, and how to add another ORM.
+
+## A representative run
+
+Apple M4 Pro, macOS, go1.26.0 toolchain, `modernc.org/sqlite v1.23.1`,
+`gorm.io/gorm v1.31.0`, `entgo.io/ent v0.14.6`, `sqlc v1.31.1`, in-memory
+SQLite. Medians of `-bench=. -benchmem -count=6`, summarized with
+[`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat):
+
+Time per operation (ns/op, lower is better):
+
+| Operation     |     Raw |   Quark |    GORM |     ent |    sqlc |
+| ------------- | ------: | ------: | ------: | ------: | ------: |
+| InsertOne     |   6,572 |  12,940 |  19,120 |  13,080 |   6,009 |
+| InsertBatch   | 175,300 | 263,600 | 265,500 | 302,300 | 279,000 |
+| FindByPK      |   7,864 |  14,140 |  10,400 |  11,750 |   7,544 |
+| ListWhere(50) |  33,900 |  66,540 |  54,360 |  45,330 |  35,770 |
+| Update        |   2,851 |   4,611 |   8,327 |  21,000 |   3,014 |
+
+Allocations per operation (allocs/op, lower is better):
+
+| Operation     | Raw | Quark | GORM |   ent | sqlc |
+| ------------- | --: | ----: | ---: | ----: | ---: |
+| InsertOne     |  20 |    61 |   78 |    77 |   21 |
+| InsertBatch   | 622 | 1,277 | 1,287 | 3,278 | 2,307 |
+| FindByPK      |  24 |    65 |   66 |   100 |   25 |
+| ListWhere(50) | 365 |   468 |  705 |   756 |  374 |
+| Update        |  15 |    55 |   84 |   143 |   18 |
+
+## Reading the numbers
+
+- **Code generation alone does not put you at the floor — the absence of a
+  runtime does.** sqlc sits right on the raw `database/sql` floor (~1.0–1.1×)
+  because its generated code is thin wrappers with no runtime. ent is also
+  code-generated, but it carries a rich runtime (builders, mutations); it
+  lands in the reflect class on writes — its `Update` is the slowest here
+  (it does the most work per call) and its `InsertBatch` allocates the most.
+  So the speed difference across these libraries tracks **runtime and
+  allocation design, not reflect-vs-codegen.**
+- **Quark, GORM, and ent are in the same performance class.** None dominates:
+  Quark is faster than GORM on inserts and updates, GORM and ent are faster on
+  the single-row read and the filtered list. Only sqlc is consistently faster,
+  and it trades ergonomics for that (no batch helper on SQLite, hand-written
+  SQL, no model lifecycle).
+- This is exactly why Quark's own code generation (shipped v0.11.0) was
+  reframed. Profiled against this baseline, the generated scanners/binders
+  recover only ~1–5% (`benchmarks/PROFILING.md`): they remove reflection but
+  the cost is architectural allocation plus the driver round-trip — the same
+  reason ent (codegen + a runtime) stays in the reflect class. So codegen in
+  Quark is a **type-safety** feature, not a speedup, and the ADR-0002 ≥3×
+  performance gate was retired
+  ([ADR-0017](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0017-codegen-type-safety-not-perf-gate.md)).
+
+These results are not a claim of fastest-in-class. The per-operation figures
+have run-to-run noise (a few vary ±10–25% between runs); treat the **relative
+ratios** as the signal and reproduce locally before drawing conclusions.

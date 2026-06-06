@@ -1,0 +1,165 @@
+---
+sidebar_position: 8
+title: Release Notes
+description: Quark ORM release notes and compatibility notes.
+---
+
+# Release Notes
+
+Quark is **v1.0.0** — the first stable release under SemVer. Phases 0–6 are
+complete; `v1.x` keeps API compatibility and breaking changes go to `v2.x`.
+
+Per-version release notes live in the main repository under
+[`docs/RELEASE_NOTES_*.md`](https://github.com/jcsvwinston/quark/tree/main/docs).
+The current tag is documented at
+[`docs/RELEASE_NOTES_v1.0.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.0.0.md).
+Migration steps for the most recent breaking changes are at
+[`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
+v0.10 through v1.0 introduced **no breaking changes**.
+
+## v1.0.0
+
+The first stable release. v1.0 closes the qualitative
+[v1.0 gate](https://github.com/jcsvwinston/quark/blob/main/docs/V1_GATE.md) §A
+(5/5) — most notably Oracle joining the blocking CI matrix (216/0), which
+completes cross-engine coverage across all six dialects. No new public API
+beyond the v0.13 surface and **no breaking changes** since v0.9.0; v1.0 is the
+SemVer commitment to that surface. The benchmark harness gained the
+code-generation tier (ent + sqlc, F6-8b), confirming codegen is a type-safety
+feature rather than a speedup ([ADR-0017](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0017-codegen-type-safety-not-perf-gate.md)
+retired the ≥3× p99 gate). Known limitations consciously deferred to v1.1+ are
+listed in the release notes.
+See [`RELEASE_NOTES_v1.0.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.0.0.md).
+
+## v0.13.0
+
+Phase 6 HA cut: opt-in **read replicas** (F6-5/F6-6). `WithReplicas(dsns...)`
+opens read-only pools and routes multi-row reads across them round-robin while
+writes stay on the primary (ADR-0015); `Sticky(ctx)` pins a read to the primary
+for read-your-writes. A read to a replica that hits a transient connection error
+**fails over to the primary**, and the replica is taken out of rotation for a
+cooldown (`WithReplicaDownCooldown`, default 5s). Performance: a copy-on-write
+query-builder clone shares slices and appends through a capacity-bounded
+`ownedAppend`, dropping a "fat base" derive to 1 alloc/op. Tooling: a runnable
+stress/load harness in `benchmarks/stress` (latency percentiles, throughput,
+pool contention). Reads inside `Client.Tx` and under `RowLevelSecurityNative`
+always use the primary. No breaking changes.
+See [`RELEASE_NOTES_v0.13.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.13.0.md).
+
+## v0.12.0
+
+Phase 6 sliver: opt-in **compile-time column type-safety** on top of the
+code generator (F6-4). `quark gen` emits, per model, a `<Model>Columns`
+value of typed column handles, and the query builder gains `Query.WhereP`
+— `WHERE` conditions without magic column strings, with compile-time
+checking of both the column and the bound value. Pure compile-time sugar
+(ADR-0014); the string `Where(...)` API stays valid and interchangeable.
+Performance: the audit row diff is now built only when an audit sink is
+configured (~9% allocation drop on `InsertOne`). No breaking changes.
+See [`RELEASE_NOTES_v0.12.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.12.0.md).
+
+## v0.11.0
+
+Phase 6 first cut: **opt-in code generation**. A new `quark gen`
+subcommand of `cmd/quark` parses your model package (`go/packages` +
+`go/types`) and emits a `quark_gen.go` per package that registers typed
+implementations into a runtime registry — read path (F6-2 typed
+scanners) and INSERT for single-integer-PK models (F6-3a typed
+binder). The reflection path stays the permanent default (ADR-0002);
+codegen is fully opt-in (ADR-0014).
+
+Comes with a reproducible `benchmarks/` module (F6-8a) — Quark vs
+hand-written `database/sql` vs GORM — and an **honest profiling
+finding** in `benchmarks/PROFILING.md`: codegen ~2–5% on scan, ~1% on
+INSERT. Quark's per-op CPU is dominated by `database/sql` and the
+engine, not reflection. **Generate for correctness and forward
+compatibility, not for speed.** No breaking changes.
+See [`RELEASE_NOTES_v0.11.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.11.0.md).
+
+## v0.10.0
+
+Correctness and resilience: `JSON[T]` / `Array[T]` now round-trip on
+SQL Server (a `[]byte`→VARBINARY→NVARCHAR conversion corrupted them);
+rolling back to a savepoint discards the `After*`/`OnCommit`/`OnRollback`
+hooks queued in that scope, so undone work no longer fires its
+side-effects on the outer commit; a real cross-engine deadlock-retry
+integration test (PG/MySQL/MariaDB) backs `WithDeadlockRetry`; raw SQL
+under `RowLevelSecurityNative` emits a `quark.tenant.raw_under_native_rls`
+warning. No breaking changes.
+See [`RELEASE_NOTES_v0.10.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.10.0.md).
+
+## v0.9.0
+
+Phase 5: PostgreSQL engine-enforced multi-tenancy
+(`RowLevelSecurityNative` + the `quarktenant` policy CLI),
+transactional `After*` hooks that fire post-commit plus
+`BeforeFind`/`AfterFind`, `Tx.OnCommit`/`Tx.OnRollback` +
+`quark.TxFromContext`, a real `EventBus` (`Client.UseEventBus`), and an
+optional audit log (`Client.EnableAuditLog`) written atomically with
+each write. Two breaking-minor changes — see
+[`MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md).
+
+## v0.4.0 – v0.8.0
+
+Phases 2–4: composable query builder (typed AST, subqueries, CTEs,
+window functions, set operators, pessimistic locking); schema-as-code
+migrations (introspection, pure-Go diff, transactional/resumable
+apply, `quarkmigrate` CLI, backfill); observability + production caché
+(OTel metrics, span redaction, slow-query log, stampede protection,
+deadlock retry); per-column timezones and `Array[T]`. Per-version
+notes are in-repo under `docs/RELEASE_NOTES_v0.{4,5,6,7,8}.0.md`.
+
+## v0.3.0
+
+First proper tag since v0.1.1. Bundles Phase 0 P0 fixes (security,
+correctness) with the Phase 1 deliverables (rich types, dirty tracking,
+optimistic locking, soft-delete scopes). See the in-repo release notes for
+the full breakdown.
+
+## v0.1.0
+
+Public release baseline.
+
+### Core
+
+- Generic `Query[T]` entry point through `quark.For[T](ctx, provider)`.
+- Immutable builder methods for predictable query composition.
+- CRUD helpers for create, update, delete, hard delete, upsert, and map updates.
+- Read helpers for `Find`, `First`, `List`, `Count`, aggregates, pagination, streaming, and cursors.
+- Validation through `validate` tags and model-level `Validate(context.Context) error`.
+- Lifecycle hooks for create, update, and delete paths.
+
+### Dialects
+
+- SQLite, PostgreSQL, MySQL, MariaDB, SQL Server, and Oracle dialects.
+- Dialect-specific placeholders, identifier quoting, pagination, upsert SQL, generated-ID handling, JSON extraction, and DDL helpers.
+- Custom dialect registration through `RegisterDialect`.
+
+### Schema
+
+- `Migrate` for table and many-to-many join-table creation.
+- `Sync` for additive changes, renames, and controlled destructive drops.
+- `CreateIndex` and `AddForeignKey` helpers.
+- Versioned Go migrations through `github.com/jcsvwinston/quark/migrate`.
+
+### Relations
+
+- `Preload` for `has_one`, `has_many`, `belongs_to`, many-to-many, and polymorphic relations.
+- Recursive association persistence for common aggregate saves.
+- Tenant context propagation through association loads and saves where tenant columns are present.
+
+### Production Features
+
+- Transactions, manual transactions, savepoints, and nested savepoint-style callbacks.
+- `TenantRouter` with database-per-tenant, schema-per-tenant, and row-level strategies.
+- Cache abstraction with memory and Redis stores.
+- Query observers, middleware, and OpenTelemetry middleware.
+- SQLGuard validation for identifiers, operators, and raw-query escape hatches.
+
+## Compatibility Notes
+
+- The `cmd/quark` CLI ships and is installable via `go install` — it provides migration, tenant, and `quark gen` codegen subcommands ([Operational Workflows](../guides/cli)).
+- `DeleteBy` and `DeleteBatch` perform hard deletes.
+- `Select` accepts simple identifiers rather than arbitrary SQL expressions.
+- Raw SQL APIs require `AllowRawQueries: true`.
+- Migration commands that use `migrate.Migrator` should use a client configured with `AllowRawQueries: true`.

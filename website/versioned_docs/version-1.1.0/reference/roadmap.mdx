@@ -1,0 +1,227 @@
+---
+sidebar_position: 7
+title: Roadmap
+description: Implemented Quark capabilities and planned future work, aligned with the phased plan in ANALISIS_MADUREZ.md.
+---
+
+# Roadmap
+
+Quark is **v1.0.0** — the first stable release under SemVer, with Phases 0–6
+complete. This page separates what already ships from what is planned, so the
+docs do not read like a promise that every idea is already in `main`.
+
+The canonical roadmap (with the phased plan and trade-offs) lives at
+[`docs/ANALISIS_MADUREZ.md` §4](https://github.com/jcsvwinston/quark/blob/main/docs/ANALISIS_MADUREZ.md);
+the operational backlog lives at
+[`TASKS.md`](https://github.com/jcsvwinston/quark/blob/main/TASKS.md).
+
+## Implemented core (shipping today)
+
+### Type-safe builder + composable query AST
+
+- Type-safe `Query[T]` builders, immutable composition (clone-per-method).
+- Typed expression AST (`Col`/`Lit`/`Func`/`And`/`Or`/`Not`/`Cast`/`In`/`Exists`).
+- Subqueries composable through `AsSubquery`.
+- **CTEs** (`With`, `WithRecursive`).
+- **Window functions** (`OVER (PARTITION BY … ORDER BY …)`, `RowNumber`/`Rank`/`Lag`).
+- **Set operators**: `UNION`, `INTERSECT`, `EXCEPT`.
+- **Pessimistic locking**: `ForUpdate`, `ForShare`, `SkipLocked`, `NoWait`.
+- **Optimistic locking**: `quark:"version"` tag + `ErrStaleEntity`.
+- `HavingAggregate` for HAVING over aggregates.
+- Nested `Preload` with dotted paths (`"Orders.Items.Product"`).
+- `IN(...)` chunking respecting dialect limits (Oracle 1000, MSSQL 2100).
+- Structured `JoinBuilder` with `ValidateJoinOn`.
+
+### Six dialects + SQLGuard
+
+- SQLite, PostgreSQL, MySQL, MariaDB, SQL Server, Oracle dialects.
+- SQLGuard identifier, operator, raw-query, JSON path, and JOIN-ON validation.
+- Dialect-specific upserts (`ON CONFLICT` / `ON DUPLICATE KEY` / `MERGE`).
+- Custom dialects via `RegisterDialect`.
+
+### Rich types
+
+- `Nullable[T]` generic.
+- `JSON[T]` typed JSON column wrapper.
+- `Array[T]` typed array wrapper (PG native, JSON-backed elsewhere).
+- `RegisterTypeMapper` for extensible mapping (decimal, UUID, etc. as opt-in).
+- `time.Duration` mapped out of the box.
+- **Per-column timezones** via `quark:"tz=..."` tag or Client-wide
+  `WithDefaultTZ`; UTC-always wire contract.
+
+### CRUD + dirty tracking + soft delete
+
+- `Create`/`Update`/`UpdateFields`/`Delete`/`HardDelete`/`UpsertBatch`/
+  `CreateBatch`/`UpdateBatch`/`DeleteBatch`.
+- **Dirty tracking** via `Tracked[T]`: snapshot at load, `Save()` emits
+  UPDATE only over changed fields (closes the `isZeroValue` trap of
+  `Update(entity)` for `false`/`0`/`""`).
+- **Soft delete scopes**: `WithTrashed`, `OnlyTrashed`, `Restore`.
+
+### Lifecycle hooks (transactional in v0.9)
+
+- Before/After hooks for Create / Update / Delete.
+- `BeforeFind` / `AfterFind`.
+- **`After*` fire post-commit under `Client.Tx`** — undone work no longer
+  fires its side-effects.
+- `Tx.OnCommit` / `Tx.OnRollback` + `quark.TxFromContext` for arbitrary
+  commit/rollback side-effects.
+- Savepoint rollback unwinds the queued hooks of that scope (v0.10).
+
+### Migrations (schema-as-code)
+
+- `Migrate`, `Sync`, `CreateIndex`, `AddForeignKey`.
+- **Neutral schema introspection** (`Client.IntrospectSchema`) across all
+  six dialects.
+- **Pure-Go schema diff** (`Diff`, `PlanMigration`, `ApplyPlan`) with
+  round-trip identity: `Migrate(model) → PlanMigration(model)` returns
+  empty `Plan` on all six motors.
+- **Transactional or resumable execution**: PG / MSSQL / SQLite
+  transactional; MySQL / MariaDB / Oracle resumable with
+  `quark_migration_state` checkpoints.
+- **Distributed migration lock**: PG `pg_advisory_lock`, MySQL/MariaDB
+  `GET_LOCK`, MSSQL `sp_getapplock`, Oracle `DBMS_LOCK` (needs `GRANT
+  EXECUTE ON DBMS_LOCK`, see ADR-0018). SQLite returns
+  `ErrUnsupportedFeature`.
+- **Orchestrated `Backfill`** with PK-based batching and resume tokens
+  in `quark_backfill_state`.
+- **Per-Client model registry** (`Client.RegisterModel` and friends).
+- Versioned Go migrations via `github.com/jcsvwinston/quark/migrate`
+  (versioned migration registry still global — see Known boundaries).
+- `quarkmigrate` plan/verify/apply package (library, embeddable in your
+  own `migrations/main.go`).
+
+### Multi-tenancy (four strategies)
+
+- `DatabasePerTenant` with LRU of Clients.
+- `SchemaPerTenant`.
+- **`RowLevelSecurityClient`** — client-side WHERE injection (all six
+  dialects; works through `Or()` thanks to `cloneForGroup`).
+- **`RowLevelSecurityNative`** — PostgreSQL engine-enforced RLS via
+  `set_config('app.tenant_id', …, true)` + `CREATE POLICY`. PG-only;
+  other dialects fail-fast with `ErrUnsupportedFeature`. Includes the
+  `quarktenant install-rls-policies` CLI to generate the policy DDL.
+- Tenant context propagation through association loads/saves.
+
+### Production caché (memory + Redis)
+
+- Pluggable `CacheStore` (memory, Redis).
+- **Stampede protection**: `stampedeStore` wrapper (singleflight +
+  ±jitter + Vattani XFetch) — ADR-0011. Knobs: `WithCacheJitter`,
+  `WithCacheXFetchBeta`.
+- **Per-row invalidation**: `<table>:<pk>` tag on top of the table tag;
+  mutations register the affected PKs.
+- Deterministic, type-tagged, length-prefixed cache keys.
+- Redis tag-TTL bug fixed (NX + GT pair takes the MAX, Redis 7+).
+
+### Observability
+
+- OpenTelemetry **traces** (spans with `db.statement` / `db.operation`).
+- OpenTelemetry **metrics**: counter `quark.queries.total`, histograms
+  `quark.queries.duration` and `quark.queries.rows`.
+- **`WithSpanRedaction`** keeps bind values out of spans by default;
+  `IncludeArgs` is opt-in for local debug.
+- **`WithSlowQueryThreshold`** emits structured slow-query WARNs through
+  `Client.logger`.
+- Query observers and middleware.
+
+### Transactional resilience
+
+- `Client.Tx(...)` callback API; nested savepoint-style callbacks;
+  explicit savepoints; isolation levels.
+- **`WithDeadlockRetry(maxAttempts)`** on `Client.Tx` — re-runs the
+  closure on PG 40P01 / MySQL 1213 / MSSQL 1205 / Oracle ORA-00060 with
+  exponential backoff + jitter (opt-in, ctx-aware).
+
+### Audit log + event bus (v0.9)
+
+- **`Client.EnableAuditLog(ctx, AuditConfig)`** — records every
+  `Create`/`Update`/`Delete` into `quark_audit` **on the same
+  connection/transaction as the write**, atomically.
+- **`Client.UseEventBus(bus)`** — real `EventBus` publishing `created`
+  / `updated` / `deleted` events synchronously post-commit
+  (at-least-once, no outbox — ADR-0013).
+
+### Code generation (Phase 6, opt-in)
+
+- **`cmd/quark` binary** with subcommands: `gen`, `init`, `inspect`,
+  `migrate`, `model`, `seed`, `sync`, `tenant`, `validate`. `quark gen`
+  is generally available since v0.11.
+- **Typed scanners** on the read path (`List`/`First`/`Find`).
+- **Typed INSERT binder** for single-integer-PK models (`Create`).
+- **Typed compile-time column accessors** (`<Model>Columns` +
+  `Query.WhereP`) — pure compile-time sugar; column typos and
+  wrong-typed values fail at build time.
+- Versioned generator contract (`//quark:gen vN`) + model-hash drift
+  check; incompatible-version files fall back to reflection by design.
+
+### Stored routines
+
+- Stored routine helpers (`routine_builder.go`).
+
+## Phase 6 — delivered (v1.0.0)
+
+- **Read replicas** (F6-5) — **delivered** (v0.13.0): `WithReplicas(replica1, …)`
+  routes reads to replicas; writes always go to the primary; `Sticky(ctx)`
+  pins reads to the primary for read-your-writes. Failover and health
+  cooldown shipped with F6-6. See
+  [Read replicas](../advanced/read-replicas).
+- **Primary failover** (F6-6) — **delivered** (v0.13.0): replica failover +
+  health cooldown (ADR-0015).
+- **Sharding** (`ShardRouter`, F6-7) — **delivered**: routes per query by
+  shard key (ADR-0016), with a runnable example in `examples/sharding/`.
+  Scatter-gather and shard-key-from-entity are deferred to v1.1.
+- **Stress testing harness** (F6-9) — **delivered** (v0.13.0) in
+  `benchmarks/stress/`.
+- **ent + sqlc in the benchmarks harness** (F6-8b) — **delivered** (v1.0.0):
+  the code-generation tier in the comparison harness; informational, not a
+  v1.0 gate (the ≥3× gate was retired by ADR-0017). See
+  [Benchmarks](./benchmarks).
+- **UPDATE / partial / batch binder codegen** (F6-3b) — **deferred** to v1.1;
+  measured payoff ~1% (`benchmarks/PROFILING.md`), reopened only if motivated
+  by type-safety.
+
+## Known current boundaries
+
+- **Oracle runs in the blocking `integration` CI matrix** (all six
+  dialects validated on every PR). The Oracle job boots `gvenzl/oracle-free`
+  via `docker run` instead of testcontainers, whose lifecycle exited code 1
+  on hosted runners; the suite gets a DSN via `QUARK_TEST_ORACLE_DSN`.
+- **The ADR-0002 ≥3× p99 codegen gate has been retired** (ADR-0017).
+  Scan/bind codegen measured ~2–5% (scan) / ~1% (INSERT); per-op CPU is
+  dominated by `database/sql` and the engine, not reflection, so the
+  gate was unreachable by scan/bind codegen. The codegen layer remains
+  valuable for type-safety (F6-4) and forward compatibility — it is not
+  a speed feature, and v1.0 no longer gates on a speedup target. See
+  `benchmarks/PROFILING.md` and ADR-0017.
+- The **versioned migration registry** in `migrate/migrate.go` is still
+  global. The model registry has been per-Client since v0.6 (F3-7); the
+  versioned registry stays as documented debt.
+- **`LISTEN/NOTIFY` is PostgreSQL-only.** Both sides ship: `Notify`
+  (outbound) and the inbound `ListenerFactory.CreateListener` listener
+  (ADR-0019). Other dialects return `ErrDialectNotSupported`. Delivery is
+  fire-and-forget — notifications emitted while the listener connection is
+  down are lost (no durable replay); it is not a substitute for a queue.
+- `Select` and `Where` validate simple identifiers; dotted columns and
+  SQL expressions require views or controlled raw SQL via the
+  `internal/guard` layer.
+- `DeleteBy` and `DeleteBatch` are hard-delete APIs in the current
+  implementation.
+- Bulk and WHERE-based methods (`CreateBatch`, `UpdateBatch`,
+  `DeleteBatch`, `DeleteBy`) **bypass hooks**.
+
+## Long-term goals (post-v1.0)
+
+- **Schema-first workflow** with reviewable migration generation from a
+  declarative schema (Atlas/Prisma-style). The pure-Go schema diff
+  shipped in v0.6 is the foundation; the schema-first DSL is the next
+  layer if demand justifies it.
+- **Cross-instance stampede coordination** (distributed lock hook for
+  the cache layer). Documented in ADR-0011 §"Cuándo reabrir"; only
+  reopened if user demand surfaces.
+- **Pluggable ID strategies** (UUID v7, ULID, Snowflake) as built-ins.
+- **Outbound CRUD lifecycle events to NATS/Kafka/Redis Streams** as
+  out-of-the-box `EventBus` implementations beyond the logger/OTel
+  defaults.
+- **More database-native features behind dialect-specific extension
+  points** as the user base demands them.

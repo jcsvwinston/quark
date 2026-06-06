@@ -1,0 +1,79 @@
+---
+sidebar_position: 1
+title: Dialects
+description: Supported engines and dialect-specific behavior.
+---
+
+# Dialects
+
+QUARK routes SQL generation through a dialect abstraction. Dialects are
+responsible for placeholders, identifier quoting, insert ID behavior, upsert
+syntax, and DDL operations.
+
+| Dialect | Constructor | Notes |
+| --- | --- | --- |
+| PostgreSQL | `quark.PostgreSQL()` | `$N` placeholders, `RETURNING`, `ON CONFLICT`. |
+| MySQL | `quark.MySQL()` | `AUTO_INCREMENT`, `LAST_INSERT_ID`, `ON DUPLICATE KEY UPDATE`. |
+| MariaDB | `quark.MariaDB()` | MySQL-compatible upsert behavior (`ON DUPLICATE KEY UPDATE`). Treated as a distinct dialect for DDL edge cases. |
+| SQLite | `quark.SQLite()` | In-memory friendly, `RETURNING` where supported. |
+| MSSQL | `quark.MSSQL()` | `IDENTITY`, `OFFSET/FETCH`, `MERGE` upserts. |
+| Oracle | `quark.Oracle()` | `GENERATED AS IDENTITY`, `MERGE` upserts. |
+
+## Upsert mapping
+
+```go
+user := User{Email: "alice@example.com", Name: "Alice Updated"}
+
+err := quark.For[User](ctx, client).Upsert(
+    &user,
+    []string{"email"},
+    []string{"name", "active"},
+)
+```
+
+| Dialect | Generated shape |
+| --- | --- |
+| PostgreSQL | `ON CONFLICT (email) DO UPDATE SET ...` |
+| MySQL | `ON DUPLICATE KEY UPDATE ...` |
+| MariaDB | `ON DUPLICATE KEY UPDATE ...` |
+| SQLite | `ON CONFLICT (email) DO UPDATE SET col = excluded.col` |
+| MSSQL | `MERGE INTO ... USING ... WHEN MATCHED ...` |
+| Oracle | `MERGE INTO ... USING ... WHEN MATCHED ...` |
+
+## Oracle-specific behavior
+
+Oracle differs from the other engines in two ways worth knowing:
+
+- **Empty strings are NULL.** Oracle stores `''` as `NULL`, so an empty
+  string written to a `VARCHAR2`/`CLOB` column comes back as `NULL`. When
+  scanning into a non-pointer `string` field, QUARK coerces that `NULL` to
+  `""`, so empty strings round-trip consistently with the other engines. Use
+  `*string` or `sql.Null[string]` if you need to tell `NULL` apart from `""`.
+- **JSON path is inlined.** `WhereJSON` binds the JSON path as a parameter on
+  every engine except Oracle, whose `JSON_VALUE` rejects a bound path
+  (`ORA-40454: path expression not a literal`). On Oracle the path is inlined
+  as a literal instead. It stays injection-safe because the path is validated
+  against a strict `[A-Za-z0-9_.]` grammar before it reaches the SQL.
+
+## Custom dialects
+
+Custom or proprietary engines can be registered:
+
+```go
+myDialect := &MyCustomDialect{}
+
+quark.RegisterDialect("customdb", myDialect)
+
+dialect, err := quark.DetectDialectByName("customdb")
+if err != nil {
+    return err
+}
+
+client, err := quark.New("customdb", dsn, quark.WithDialect(dialect))
+```
+
+`DetectDialectByName` looks up a registered dialect by name and returns
+`(Dialect, error)`. Use `RegisterDialect` once at init time.
+
+The dialect interface covers SQL generation, placeholder formatting, identifier
+quoting, and schema DDL.

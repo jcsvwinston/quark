@@ -1,0 +1,110 @@
+---
+sidebar_position: 1
+title: Overview
+description: "Type-safe, security-first ORM for Go — generics on the surface, six dialects underneath."
+---
+
+# QUARK ORM
+
+Quark is **v1.0.0** — the first stable release under SemVer. Phases 0–6 are complete: the core query builder, CRUD, schema-as-code migrations, multi-tenancy, caché, hooks/eventos/audit log, observability, opt-in code generation, read replicas with failover, and pluggable sharding. **All six dialects — Oracle included — run on every PR** in the `integration` CI matrix (Oracle boots via `docker run` rather than testcontainers, whose lifecycle crashed on hosted runners). `v1.x` keeps API compatibility; breaking changes go to `v2.x` with a migration path under [`docs/MIGRATION_vX.Y.Z.md`](https://github.com/jcsvwinston/quark/tree/main/docs). v1.0 was gated on the qualitative checklist in [`docs/V1_GATE.md`](https://github.com/jcsvwinston/quark/blob/main/docs/V1_GATE.md), not a performance target — the ≥3× codegen performance gate was retired (code generation is a type-safety feature, not a speedup). Known limitations consciously deferred to v1.1+ are listed in the [v1.0.0 release notes](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.0.0.md).
+
+QUARK is a modern ORM for Go built around generics,
+immutable query builders, multi-dialect SQL, and production extension points.
+It keeps model code close to plain Go structs while still covering migrations,
+relations, batch operations, transactions, validation, caching, telemetry, and
+multi-tenancy.
+
+```go
+// Query
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Preload("Posts").
+    OrderBy("created_at", "DESC").
+    Limit(20).
+    List()
+
+// Batch upsert — dialect-specific SQL generated automatically
+err = quark.For[Product](ctx, client).UpsertBatch(
+    feed,
+    []string{"sku"},
+    []string{"price", "stock"},
+)
+```
+
+## Why QUARK
+
+| Capability | What it gives you |
+| --- | --- |
+| **Type-safe API** | `quark.For[T]` returns a `*Query[T]` — reads map directly back into model structs. |
+| **Compile-time column accessors** | Opt-in: `quark gen` emits `<Model>Columns` so `WhereP(UserColumns.Email.Eq(...))` catches column typos and wrong-typed values at build time. |
+| **Composable query builder** | Typed expression AST, subqueries, **CTEs**, **window functions**, **set operators** (`UNION`/`INTERSECT`/`EXCEPT`), pessimistic locking (`FOR UPDATE`/`SKIP LOCKED`), optimistic locking (`quark:"version"`). |
+| **Immutable builders** | Query methods clone builder state, making shared base queries safe to reuse across goroutines. |
+| **SQLGuard** | Identifiers, operators, keywords, JSON paths, and JOIN-ON clauses are validated before SQL generation. |
+| **Six dialects** | PostgreSQL, MySQL, MariaDB, SQLite, MSSQL, and Oracle with dialect-specific DDL, upserts (`ON CONFLICT` / `ON DUPLICATE KEY` / `MERGE`), and pagination. |
+| **Full batch suite** | `CreateBatch`, `UpsertBatch`, `UpdateBatch`, `DeleteBatch` — dialect-dispatched and chunked automatically. |
+| **Schema-as-code migrations** | Neutral introspection, pure-Go `Diff`, `PlanMigration`/`ApplyPlan` round-trip, transactional + resumable execution, distributed migration lock, orchestrated `Backfill`. |
+| **Multi-tenancy (4 strategies)** | `DatabasePerTenant`, `SchemaPerTenant`, `RowLevelSecurityClient` (WHERE injection, all dialects), and **`RowLevelSecurityNative`** (PG-only, engine-enforced via `set_config` + `CREATE POLICY` with the `quarktenant` CLI). |
+| **Transactional hooks** | `Before*`/`After*` (with `After*` firing **post-commit** under `Client.Tx`), `BeforeFind`/`AfterFind`, public `Tx.OnCommit`/`Tx.OnRollback` + `quark.TxFromContext`. |
+| **Event bus + audit log** | `Client.UseEventBus` publishes `created`/`updated`/`deleted` synchronously post-commit (outbound); inbound PostgreSQL `LISTEN/NOTIFY` via `ListenerFactory.CreateListener` (dedicated pinned connection, ADR-0019); `Client.EnableAuditLog` writes `quark_audit` **atomically with the CRUD transaction**. |
+| **Dirty tracking** | `Tracked[T]` snapshots at load; `Save()` emits UPDATE limited to changed fields — closes the "can't set `false`/`0`/`""`" trap. |
+| **Production caché** | L2 store (memory / Redis) with **stampede protection** (singleflight + ±jitter + XFetch, ADR-0011; **in-process** — cross-instance coordination is planned post-v1.0), per-row + table tag invalidation. |
+| **Observability** | OpenTelemetry **traces and metrics** (counter + duration/rows histograms), `WithSpanRedaction` (default-on), `WithSlowQueryThreshold`, `WithDeadlockRetry`. |
+
+## Why I built this
+
+After running production services on GORM, three patterns kept causing incidents: every `db.Find(&result)` forced an `interface{}` cast the compiler couldn't verify; column names in `WHERE` clauses were plain strings with no guard against typos or injection in dynamic queries; N+1 queries appeared silently whenever a `Preload` was forgotten, only surfacing in slow-query logs hours later; and multi-tenant isolation meant copy-pasting `WHERE tenant_id = ?` everywhere, relying on discipline instead of enforcement. Quark is the ORM I wished existed: generics end the casts, `SQLGuard` validates every identifier at the API boundary, eager loading is explicit, and multi-tenancy is first-class — not an afterthought.
+
+## Documentation map
+
+### Guides
+
+| Section | Contents |
+|---|---|
+| [Installation](guides/installation) | Requirements, drivers, optional packages, env vars |
+| [Getting Started](guides/getting-started) | Connect, model, migrate, CRUD |
+| [Modeling](guides/modeling) | Tags, composite PKs, soft delete, validation, rich types (`Nullable`/`JSON`/`Array`), per-column timezones |
+| [Query Builder](guides/querying) | Filters, scopes, joins, aggregates, streaming, CTEs, window functions, set operators, locking |
+| [Batch Operations](guides/batch-operations) | CreateBatch, UpsertBatch, UpdateBatch, DeleteBatch |
+| [Relations](guides/relations) | has_many, belongs_to, many_to_many, polymorphic |
+| [Migrations](guides/migrations) | Migrate, Sync, schema diff (`PlanMigration`/`ApplyPlan`), `Backfill`, distributed lock |
+| [Transactions](guides/transactions) | Callback, manual, savepoints, isolation levels, `WithDeadlockRetry` |
+| [Lifecycle Hooks](guides/hooks) | Before/After Create/Update/Delete/Find, post-commit semantics, `Tx.OnCommit`/`Tx.OnRollback` |
+| [Operational Workflows](guides/cli) | `cmd/quark` binary, migrations and tenant Go commands |
+| [Code Generation](guides/codegen) | Opt-in `quark gen` — typed scanners, INSERT binder, compile-time column accessors |
+
+### Advanced
+
+| Section | Contents |
+|---|---|
+| [Multi-Tenant](advanced/multi-tenant) | `DatabasePerTenant`, `SchemaPerTenant`, `RowLevelSecurityClient` |
+| [PostgreSQL Native RLS](advanced/row-level-native) | `RowLevelSecurityNative` engine-enforced + `quarktenant` CLI |
+| [Event Bus](advanced/events) | `Client.UseEventBus`, synchronous post-commit, at-least-once |
+| [Audit Log](advanced/audit-log) | `Client.EnableAuditLog`, atomic with CRUD transaction |
+| [Caching & Observability](advanced/caching-observability) | L2 cache, stampede protection, OTel traces + metrics, slow-query log |
+| [Read Replicas](advanced/read-replicas) | `WithReplicas` read/write split, `Sticky(ctx)` read-your-writes, automatic failover |
+| [Sharding](advanced/sharding) | `ShardRouter`, shard-key context routing, `HashShardFunc`, cross-shard limits |
+
+### Reference
+
+| Section | Contents |
+|---|---|
+| [SQLGuard](reference/sqlguard) | Identifier validation, JSON path, JOIN-ON, AllowRawQueries |
+| [Comparison](reference/comparison) | Cell-by-cell vs GORM, sqlx, Ent |
+| [Configuration](reference/configuration) | Limits, `WithDialect`, `WithCacheStore`, middleware, observability options |
+| [Dialects](reference/dialects) | Dialect table, upsert mapping, custom dialects |
+| [Benchmarks](reference/benchmarks) | Reproducible `database/sql` baseline + GORM comparison |
+| [Architecture](reference/architecture) | Request lifecycle, SQLGuard, schema evolution |
+| [Roadmap](reference/roadmap) | Implemented today vs Phase 6 in progress vs long-term |
+| [Release Notes](reference/release-notes) | Per-version changelog |
+
+## Install
+
+```bash
+go get github.com/jcsvwinston/quark
+```
+
+```go
+import "github.com/jcsvwinston/quark"
+```
+
+See [Installation](guides/installation) for driver requirements, optional packages, and test environment variables.

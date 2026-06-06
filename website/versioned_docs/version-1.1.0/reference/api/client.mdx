@@ -1,0 +1,310 @@
+# Client API Reference
+
+`Client` wraps a `*sql.DB` and owns Quark configuration: dialect, logger,
+SQLGuard, limits, middleware, observers, and cache store.
+
+## New
+
+### `New(driverName, dataSource string, opts ...any) (*Client, error)`
+
+Opens a database connection, pings it, and returns a configured `*Client`. The
+dialect is auto-detected from `driverName`; override it with `WithDialect` only
+when the driver name is ambiguous (e.g. registering a custom dialect under a
+shared driver name like `pgx`).
+
+```go
+import (
+    "log/slog"
+
+    "github.com/jcsvwinston/quark"
+    _ "github.com/lib/pq"
+)
+
+client, err := quark.New("postgres", "postgres://user:pass@localhost/app?sslmode=disable",
+    quark.WithLogger(slog.Default()),
+)
+if err != nil {
+    return err
+}
+defer client.Close()
+```
+
+Driver name → dialect mapping (auto-detected):
+
+| Driver name | Dialect |
+| --- | --- |
+| `sqlite`, `sqlite3` | SQLite |
+| `postgres`, `pgx` | PostgreSQL |
+| `mysql` | MySQL |
+| `mariadb` | MariaDB |
+| `sqlserver`, `mssql` | MSSQL |
+| `oracle`, `godror` | Oracle |
+
+`opts` accepts both client options (`Option`) and pool options (`PoolOption`).
+Pool options are applied before the ping; client options after.
+
+Errors:
+
+| Case | Error |
+| --- | --- |
+| `sql.Open` fails | wraps `ErrConnection` |
+| `PingContext` fails | wraps `ErrConnection` |
+
+## Options
+
+### `WithDialect(d Dialect) Option`
+
+Overrides the dialect that would otherwise be auto-detected from the driver
+name. Useful when a driver name is shared between engines (e.g. `pgx` for both
+PostgreSQL and CockroachDB) or when registering a custom dialect.
+
+```go
+client, err := quark.New("pgx", dsn, quark.WithDialect(quark.PostgreSQL()))
+```
+
+Available constructors:
+
+| Constructor | Dialect name |
+| --- | --- |
+| `quark.PostgreSQL()` | `postgres` |
+| `quark.MySQL()` | `mysql` |
+| `quark.MariaDB()` | `mariadb` |
+| `quark.SQLite()` | `sqlite` |
+| `quark.MSSQL()` | `mssql` |
+| `quark.Oracle()` | `oracle` |
+
+### `WithLogger(l *slog.Logger) Option`
+
+Sets the structured logger.
+
+```go
+logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+client, err := quark.New("postgres", dsn,
+    quark.WithLogger(logger),
+)
+```
+
+Default: `slog.Default()`.
+
+### `WithLimits(l Limits) Option`
+
+Sets security and performance limits.
+
+```go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLimits(limits),
+)
+```
+
+```go
+type Limits struct {
+    MaxQueryLength     int
+    MaxResults         int
+    MaxJoins           int
+    MaxWhereConditions int
+    QueryTimeout       time.Duration
+    AllowRawQueries    bool
+    SafeMigrations     bool
+}
+```
+
+### `DefaultLimits() Limits`
+
+Returns:
+
+| Field | Default |
+| --- | --- |
+| `MaxQueryLength` | `10 * 1024` |
+| `MaxResults` | `10000` |
+| `MaxJoins` | `5` |
+| `MaxWhereConditions` | `20` |
+| `QueryTimeout` | `30 * time.Second` |
+| `AllowRawQueries` | `false` |
+| `SafeMigrations` | `true` |
+
+### `WithCacheStore(s CacheStore) Option`
+
+Attaches a cache backend.
+
+```go
+store := memory.New()
+
+client, err := quark.New("sqlite", "file:app.db?cache=shared",
+    quark.WithCacheStore(store),
+)
+```
+
+### `WithMiddleware(m Middleware) Option`
+
+Adds middleware to the execution chain.
+
+```go
+client, err := quark.New("postgres", dsn,
+    quark.WithMiddleware(quarkotel.New()),
+)
+```
+
+### `WithQueryObserver(o QueryObserver) Option`
+
+Adds a post-execution observer.
+
+```go
+client, err := quark.New("postgres", dsn,
+    quark.WithQueryObserver(&MetricsObserver{}),
+)
+```
+
+### `WithDeadlockRetry(maxAttempts int) Option`
+
+Enables transparent retry of [`Client.Tx`](#tx) when the transaction
+closure returns a deadlock error from the active driver (PG `40P01`,
+MySQL/MariaDB `1213`, MSSQL `1205`, Oracle `ORA-00060`).
+
+The retry wraps the **entire** closure, not individual queries — a
+deadlock aborts the whole transaction, so re-running a single query
+inside a half-committed tx makes no sense. Non-deadlock errors
+propagate on the first attempt; the retry budget is irrelevant for
+them.
+
+`maxAttempts` is the total number of attempts (1 = no retry, the
+historical behaviour; 0 or negative also disables). Between attempts
+the runner sleeps with exponential backoff + ±50% jitter
+(10ms → 20ms → 40ms → … capped at 1s). A cancelled context aborts the
+backoff and returns the context error.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithDeadlockRetry(3),  // up to 3 attempts total
+)
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    // multi-statement work that may deadlock under contention
+    return nil
+})
+```
+
+Disabled by default: callers explicitly opt in to retry semantics —
+the at-most-once-per-call contract that has shipped since v0.1 stays
+the default. SQLite is single-writer and never raises a true deadlock,
+so the option is a no-op there.
+
+### `WithDefaultTZ(loc *time.Location) Option`
+
+Sets the fallback timezone for `time.Time` columns that don't carry their
+own `quark:"tz=..."` tag. A column-level tag always overrides this; a
+column with neither a tag nor a default passes through to the driver
+untouched, so the feature is fully opt-in.
+
+The wire contract is **UTC-always**: `time.Time` values go to the database
+as UTC (every dialect stores the same instant) and are converted to `loc`
+in memory when scanned back. `loc` therefore affects only how the struct
+field reads in Go, not what is persisted.
+
+```go
+client, err := quark.New("pgx", dsn,
+    quark.WithDefaultTZ(time.UTC),
+)
+```
+
+See [Timezones](/docs/guides/modeling#timezones) for the per-column
+override tag and the full precedence rules.
+
+## For
+
+### `For[T any](ctx context.Context, provider ClientProvider) *Query[T]`
+
+Creates a typed query builder for model `T`.
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    OrderBy("created_at", "DESC").
+    Limit(50).
+    List()
+```
+
+`provider` can be a `*Client` or `*TenantRouter`.
+
+```go
+type ClientProvider interface {
+    GetClient(ctx context.Context) (*Client, error)
+}
+```
+
+If a provider cannot return a client, the returned query stores that error and
+will return it on execution.
+
+## RawQuery
+
+### `RawQuery(ctx context.Context, query string, args ...any) (*sql.Rows, error)`
+
+Executes raw SQL that returns rows.
+
+```go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLimits(limits),
+)
+
+rows, err := client.RawQuery(ctx,
+    "SELECT id, email FROM users WHERE active = $1",
+    true,
+)
+```
+
+Raw queries are disabled by default. `RawQuery` also asks SQLGuard to validate
+that placeholders are present and that obvious injection patterns are absent.
+
+## Exec
+
+### `Exec(ctx context.Context, query string, args ...any) error`
+
+Executes raw SQL that does not return rows.
+
+```go
+err := client.Exec(ctx,
+    "CREATE INDEX idx_users_email ON users(email)",
+)
+```
+
+`Exec` requires `AllowRawQueries: true` and runs raw-query validation.
+
+## Raw
+
+### `Raw() *sql.DB`
+
+Returns the underlying database handle.
+
+```go
+db := client.Raw()
+stats := db.Stats()
+```
+
+Operations performed on `Raw()` bypass Quark validation, middleware, cache
+invalidation, observers, and tenant routing.
+
+## Close
+
+### `Close() error`
+
+Closes the underlying `*sql.DB`.
+
+```go
+defer client.Close()
+```
+
+## Dialect
+
+### `Dialect() Dialect`
+
+Returns the active dialect.
+
+```go
+if client.Dialect().Name() == "postgres" {
+    // PostgreSQL-specific integration
+}
+```
