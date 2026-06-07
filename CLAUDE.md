@@ -8,9 +8,11 @@ ORM en Go pensado para el ecosistema **Nucleus** (framework MVC/REST), pero tamb
 
 ## Estado real del proyecto (importante)
 
-**Quark NO es production-ready a pesar de que `docs/RELEASE_NOTES_V1.md` lo sugiera.** El estado real es **alpha-late / MVP avanzado** (~v0.2). Hay un análisis crítico completo en `docs/ANALISIS_MADUREZ.md` que debes leer antes de trabajar en features nuevas; resume los bugs P0 vivos, las brechas estructurales y el plan de fases hasta un v1.0 honesto.
+Quark está en **v1.1.0**, sobre la línea estable `v1.x` (SemVer). v1.0.0 (tag 2026-05-27) fue el primer release estable — gateado contra el checklist cualitativo de [`docs/V1_GATE.md`](docs/V1_GATE.md) (cerrado 5/5), no contra una métrica de rendimiento — y v1.1.0 (tag 2026-06-06) es un release de **hardening**: salida del bug-bash post-v1.0 (fases F0–F14 completas, BB-1…BB-13 cerrados). `v1.x` mantiene compatibilidad de API; los breaking changes van a `v2.x` con guía de migración.
 
-No uses lenguaje de marketing ("enterprise-grade", "production-ready") en commits, PRs, issues, ni docs hasta que el v1.0 honesto esté liberado.
+Para el estado **vivo** trabaja desde [`TASKS.md`](TASKS.md) (backlog táctico + hallazgos de bug-bash) y [`docs/ROADMAP.md`](docs/ROADMAP.md) (fases entregadas + deferrals a v1.2+). [`docs/ANALISIS_MADUREZ.md`](docs/ANALISIS_MADUREZ.md) es la referencia narrativa de fondo (análisis crítico, comparativa, el plan de fases que llevó a v1.0); léela en onboarding, no para consulta operativa.
+
+**Sin lenguaje de marketing.** No uses superlativos de hype ("enterprise-grade", "production-ready", "battle-tested", "blazing fast") en commits, PRs, issues ni docs — describe lo que hace con precisión técnica. La regla es **incondicional**: que v1.0/v1.1 estén liberadas no la levanta; la cultura anti-hype del proyecto se mantiene (el grep de `production-ready\|enterprise-grade\|battle-tested` debe seguir vacío en `/release` y `/next-session`).
 
 ## Estructura del repo
 
@@ -39,7 +41,7 @@ quark/
 2. **Conventional Commits obligatorio** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `BREAKING CHANGE:` en el footer). Ya está documentado en `CONTRIBUTING.md`. No mezcles tipos en un commit.
 3. **API y docs se modifican en el mismo PR.** Cualquier cambio que añada/cambie/elimine API pública requiere su entrada en `website/docs/` y en `CHANGELOG.md` dentro del mismo PR. PRs sin esto los rechaza el `code-reviewer` (`.claude/agents/code-reviewer.md`).
 4. **Bugs P0 antes que features.** Mientras `TASKS.md` tenga items en `## Bugs P0`, no se trabaja en Fase 1+ del plan. Cualquier feature con un P0 abierto se rechaza.
-5. **No introduzcas reflect en hot paths sin discutirlo.** Reflect-everywhere es deuda conocida (ver §1.1 de ANALISIS_MADUREZ); el codegen es la salida, planificada para Fase 6. No añadas reflect adicional sin abrir issue primero.
+5. **No introduzcas reflect en hot paths sin discutirlo.** Reflect-everywhere es deuda conocida (ver §1.1 de ANALISIS_MADUREZ); el codegen es la salida, entregada en Fase 6 (v1.0.0). No añadas reflect adicional sin abrir issue primero.
 6. **Validación de identifiers SIEMPRE.** Cualquier columna, tabla o expresión que provenga de input del usuario debe pasar por `internal/guard.SQLGuard` antes de concatenarse a SQL. La inconsistencia detectada en `JOIN ON` (que no se valida) está en TASKS como P0 — no la repliques en sitios nuevos.
 7. **No uses `t.Skip` para gatear tests por motor.** Usa testcontainers o etiquetas `//go:build integration`. Skips por env var crearon la situación actual de "sólo SQLite cubierto".
 
@@ -73,8 +75,8 @@ Si encuentras una sesión abriendo PRs que tocan API pero no `website/docs/`, re
 ## Decisiones arquitectónicas tomadas (no las cuestiones sin abrir issue)
 
 - **Active Record, no Data Mapper.** Modelos son structs con tags + hooks. Nada de Unit of Work / Identity Map al estilo Hibernate.
-- **Reflect por defecto, codegen opt-in en Fase 6.** No bifurcar la API.
-- **Multi-tenancy: tres estrategias coexisten** (DBPerTenant / SchemaPerTenant / RowLevelSecurityClient — antes `RowLevelSecurity`, alias deprecado hasta v1.0). La modalidad cliente es WHERE-injection en el builder; `RowLevelSecurityNative` (Fase 5, F5-2, PG-only) entrega aislamiento por motor (`SET LOCAL app.tenant_id` + `CREATE POLICY`).
+- **Reflect por defecto, codegen opt-in (entregado en Fase 6, v1.0.0).** No bifurcar la API.
+- **Multi-tenancy: tres estrategias coexisten** (DBPerTenant / SchemaPerTenant / RowLevelSecurityClient — antes `RowLevelSecurity`, alias deprecado desde v1.0; se retira en v2.0). La modalidad cliente es WHERE-injection en el builder; `RowLevelSecurityNative` (Fase 5, F5-2, PG-only) entrega aislamiento por motor (`SET LOCAL app.tenant_id` + `CREATE POLICY`).
 - **Caché L2 integrada** (memory/redis), no plugin externo. Stampede protection y singleflight llegan en Fase 4.
 - **No NoSQL.** Quark es relacional.
 - **Sin GraphQL/admin auto-generado.** Eso es territorio ent.
@@ -114,7 +116,7 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 
 - [`docs/adr/README.md`](docs/adr/README.md) — índice.
 - ADR 0001 — Active Record, no Data Mapper.
-- ADR 0002 — Reflect default, codegen opt-in en Fase 6.
+- ADR 0002 — Reflect default, codegen opt-in (entregado en Fase 6, v1.0.0).
 - ADR 0003 — RLS hoy es WHERE-injection cliente; motor real en Fase 5.
 - ADR 0004 — Caché L2 integrada (no plugin externo).
 - ADR 0005 — Sólo relacional (no NoSQL).
@@ -152,7 +154,7 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 
 ## Cómo arrancar una sesión productiva
 
-1. **Invoca `/next-session [foco]`** (definido en `.claude/commands/next-session.md`). El comando audita el estado real del repo y te ancla a un foco concreto (`fase6` mientras Fase 6 esté abierta; `doc-sync` para saneamiento documental; `auto` para que el comando proponga). Si tras leerlo necesitas saltarlo, justifícalo en el primer mensaje.
+1. **Invoca `/next-session [foco]`** (definido en `.claude/commands/next-session.md`). El comando audita el estado real del repo y te ancla a un foco concreto (`auto` post-v1.0, el comando deriva el foco de TASKS.md; `doc-sync` para saneamiento documental). Si tras leerlo necesitas saltarlo, justifícalo en el primer mensaje.
 2. Si `TASKS.md ## Bugs P0` tiene items vivos, **abandona el foco del slash command** y trabaja un P0 primero — esa regla manda sobre todo lo demás.
 3. **Si la sesión va a empujar Quark hacia v1.0**, lee `docs/V1_GATE.md` antes de elegir item. Los items del §A son los únicos que bloquean v1.0; cualquier otro trabajo es legítimo pero no acerca el tag.
 4. Identifica el módulo donde vas a tocar y **lee su playbook** (`docs/playbooks/<modulo>.md`).
