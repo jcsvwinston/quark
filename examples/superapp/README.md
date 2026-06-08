@@ -22,6 +22,7 @@ no sustituye, la suite unitaria/integración del repo.
 ```
 examples/superapp/
 ├── README.md            ← este blueprint
+├── COVERAGE.md          ← inventario de la API de Quark ejercida por fase (snapshot manual)
 ├── domain/              ← modelos que fuerzan la amplitud de la API
 │   └── models.go
 ├── control/             ← maquinaria de cobertura/paridad/gate (stdlib, compila solo)
