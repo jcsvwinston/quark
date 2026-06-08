@@ -27,7 +27,7 @@ type Account struct {
 	Email     string                    `db:"email" quark:"unique,not_null" validate:"required,email"`
 	Name      string                    `db:"name" quark:"not_null"`
 	Role      string                    `db:"role" default:"'member'" validate:"oneof=admin member viewer"`
-	Active    bool                      `db:"active"` // sin DEFAULT: no hay literal de bool portable a los 6 motores (PG exige true/false, MSSQL 1/0); el caller fija el valor
+	Active    bool                      `db:"active" default:"1"` // portable: el migrator normaliza el bool default por dialecto (PR #170)
 	Bio       quark.Nullable[string]    `db:"bio,size=512"`
 	Settings  quark.JSON[AccountPrefs]  `db:"settings"`
 	Tags      quark.Array[string]       `db:"tags"`
@@ -67,9 +67,9 @@ type Project struct {
 
 	Owner *Account `rel:"belongs_to" join:"owner_id"`
 	Tasks []Task   `rel:"has_many" join:"project_id"`
-	// m2m: confirmar tags exactos (through/join) contra
-	// website/docs/guides/relations.mdx en el slice de exercisers.
-	Tags []Tag `rel:"many_to_many" join:"project_id"`
+	// m2m: tag confirmado vs website/docs/guides/relations.mdx —
+	// formato `m2m:"<tabla_join>:<fk_este>:<fk_otro>"`. Migrate crea project_tags.
+	Tags []Tag `rel:"many_to_many" m2m:"project_tags:project_id:tag_id"`
 }
 
 // Task ejerce belongs_to + una FK NULLABLE (*int64) que Preload debe seguir sin
@@ -78,8 +78,8 @@ type Task struct {
 	ID         int64                     `db:"id" pk:"true"`
 	ProjectID  int64                     `db:"project_id" quark:"not_null"`
 	Title      string                    `db:"title" quark:"not_null"`
-	Done       bool                      `db:"done"`        // sin DEFAULT (idem Account.Active); false es el zero-value de Go
-	AssigneeID *int64                    `db:"assignee_id"` // FK nullable (BB-5)
+	Done       bool                      `db:"done" default:"0"` // portable tras el fix del migrator (PR #170)
+	AssigneeID *int64                    `db:"assignee_id"`      // FK nullable (BB-5)
 	DueAt      quark.Nullable[time.Time] `db:"due_at"`
 	Priority   int                       `db:"priority" default:"0"`
 

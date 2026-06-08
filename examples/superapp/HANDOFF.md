@@ -141,7 +141,7 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   `control.Invoked` (vía `recorder.Collect`). Reusa `engine.Run` (lifecycle +
   anti-fugas). Helpers de key `QM`/`CM`/`QF` que casan EXACTO con `apisurface.json`
   (`QM("Create")` → `…quark.(*Query[T]).Create`).
-- `crud.go`, `tx.go`, `builder.go` entregados — verdes en SQLite **y PG real**
+- `crud.go`, `tx.go`, `builder.go`, `relations.go` entregados — verdes en SQLite **y PG real**
   (`-tags=superapp_engine`, 31 símbolos). **Para añadir un exerciser:** copia la
   forma de `crud.go` — un `Exerciser{Name, Fn}` que `rec.Mark(ctx, QM("X"))` antes
   de cada llamada terminal (atribuye el SQL al símbolo) y `rec.Note(QM("Y"))` para
