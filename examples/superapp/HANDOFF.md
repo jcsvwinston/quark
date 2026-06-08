@@ -141,11 +141,18 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   `control.Invoked` (vía `recorder.Collect`). Reusa `engine.Run` (lifecycle +
   anti-fugas). Helpers de key `QM`/`CM`/`QF` que casan EXACTO con `apisurface.json`
   (`QM("Create")` → `…quark.(*Query[T]).Create`).
-- `crud.go` (canónico) y `tx.go` entregados — verdes en SQLite **y PG real**
-  (`-tags=superapp_engine`). **Para añadir un exerciser:** copia la forma de
-  `crud.go` — un `Exerciser{Name, Fn}` que `rec.Mark(ctx, QM("X"))` antes de cada
-  llamada terminal (atribuye el SQL al símbolo) y `rec.Note(QM("Y"))` para
+- `crud.go`, `tx.go`, `builder.go` entregados — verdes en SQLite **y PG real**
+  (`-tags=superapp_engine`, 31 símbolos). **Para añadir un exerciser:** copia la
+  forma de `crud.go` — un `Exerciser{Name, Fn}` que `rec.Mark(ctx, QM("X"))` antes
+  de cada llamada terminal (atribuye el SQL al símbolo) y `rec.Note(QM("Y"))` para
   builders/funcs sin SQL propio, con asserts funcionales que devuelven error.
+- **Gotchas de portabilidad (los cazó el run en PG; valen para todos los
+  exercisers):** (1) `GroupBy(col)` **exige** `Select(col)` — sin él, `List()`
+  emite `SELECT * … GROUP BY`, que SQLite tolera pero PG/SQL-estándar rechaza.
+  (2) Compara columnas `bool` con un **bool**, nunca con `0`/`1` — pgx es estricto
+  y no encodea int→bool (SQLite sí lo tolera). En general: escribe SQL portable y
+  pasa los tipos exactos; el motor laxo (SQLite) esconde lo que el estricto (PG)
+  rechaza. No son bugs de Quark — son del query mal escrito.
 - **Falta:** `builder.go` (CTE/window/setops/locking — `Join`/`GroupBy`/`Having`/
   `ForUpdate`/`Distinct`/setops, hay ~65 métodos de `Query[T]` que cubrir),
   `relations.go` (**confirma tags m2m/polimórfica vs
