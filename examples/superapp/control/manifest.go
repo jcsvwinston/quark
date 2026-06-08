@@ -19,9 +19,13 @@ func (s Symbol) Key() string { return s.Pkg + "." + s.Name }
 
 // Manifest es el denominador: TODO lo que Quark expone. Lo genera
 // cmd/gen-apisurface con go/packages — nunca se edita a mano.
+//
+// GeneratedAt es un puntero con omitempty: el fichero versionado se genera SIN
+// timestamp (determinista, para que un símbolo público nuevo produzca un diff
+// limpio y CI pueda exigir regenerar). Sólo se rellena en corridas ad-hoc.
 type Manifest struct {
-	GeneratedAt time.Time `json:"generated_at"`
-	Symbols     []Symbol  `json:"symbols"`
+	GeneratedAt *time.Time `json:"generated_at,omitempty"`
+	Symbols     []Symbol   `json:"symbols"`
 }
 
 // LoadManifest lee apisurface.json.
