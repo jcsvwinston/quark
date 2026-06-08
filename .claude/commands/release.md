@@ -61,9 +61,11 @@ go test -count=1 -short ./...                       # SQLite + unit
 go test -count=1 -tags=integration ./...            # 4-5 motores con testcontainers
 ```
 
-Oracle queda fuera de CI mientras dure el image issue; si tu cambio toca
-SQL Oracle-specific (MERGE, sequences, etc.), corre manualmente con DSN
-env-var y déjalo registrado en el PR.
+En CI Oracle corre en la matriz `integration` bloqueante (vía
+`docker run gvenzl/oracle-free`, no testcontainers). En local, si tu cambio
+toca SQL Oracle-specific (MERGE, sequences, etc.) y no tienes el contenedor
+arriba, corre con DSN env-var (`QUARK_TEST_ORACLE_DSN`) y déjalo registrado
+en el PR.
 
 ## Paso 3 — Compilar todos los `examples/`
 
@@ -105,8 +107,8 @@ anti-marketing. Estructura:
 
 - Una frase de qué versión es ("Phase X cut: feature/correctness release").
 - Sección por categoría con bullets concisos.
-- Sección "Known limitations" si aplica (alpha-late, recordar al lector que
-  no es production-ready hasta v1.0).
+- Sección "Known limitations" si aplica (deferrals honestos a la siguiente
+  minor / v2.0; sin lenguaje de hype — ver regla anti-marketing).
 - Enlace a la página versionada del sitio:
   `https://jcsvwinston.github.io/quark-docs/docs/$ARGUMENTS/`.
 

@@ -218,8 +218,8 @@ Report completo: bugbash/REPORTS/run-<timestamp>/summary.md
 
 Próximo /next-session sugerido:
 - Si P0: "bugbash-p0-<id>" (foco en el P0 más grave)
-- Si sólo P1+: "fase6"/"fase7" o lo que toque por roadmap; el bug-bash
-  no bloquea pero conviene atajar P1 en patch release siguiente.
+- Si sólo P1+: "v1.2" o lo que toque por roadmap; el bug-bash
+  no bloquea pero conviene atajar P1 en el patch release siguiente.
 \`\`\`
 
 ## Modos especiales

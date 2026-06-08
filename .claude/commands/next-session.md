@@ -1,6 +1,6 @@
 ---
 description: Arranca una sesión de Quark con foco derivado del estado real del repo. NO lleva el roadmap hardcoded — lee TASKS.md y CHANGELOG.md para decidir el bloque actual. Sustituye al "exploro a ver qué hay".
-argument-hint: [foco opcional: fase6 | doc-sync | auto]
+argument-hint: [foco opcional: v1.2 | doc-sync | auto]
 ---
 
 # /next-session $ARGUMENTS
@@ -41,9 +41,9 @@ sed -n '/## Bugs P0/,/^## /p' TASKS.md | head -40
 git log --oneline -5
 ```
 
-El resultado de este paso reemplaza cualquier asunción que traigas. Si el
-header dice "Fase 6 abierta, items F6-3b/F6-5/F6-6/F6-7/F6-9 pendientes",
-ése es el menú; si dice otra cosa, ése es el menú.
+El resultado de este paso reemplaza cualquier asunción que traigas. Lo que diga
+el header de `TASKS.md` (fase abierta o cerrada, hallazgos de bug-bash activos,
+deferrals a v1.2+) es el menú — no lo que recuerdes de la última sesión.
 
 ## Paso 1 — Elegir foco
 
@@ -52,7 +52,7 @@ de este comando los habituales son:
 
 | Foco       | Trabaja en                                                                    | Cuándo elegirlo                                                       |
 | ---------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `fase6`    | Items F6-N abiertos de la Fase 6 (codegen / HA / sharding / benchmarks)       | Foco habitual mientras la Fase 6 esté abierta camino de v1.0          |
+| `v1.2`     | Deferrals del próximo minor (sharding scatter-gather, cache-stampede cross-instancia, F6-3b binder) + hallazgos de bug-bash activos | Cuando arrancas feature work post-v1.1 |
 | `doc-sync` | Pasada de saneamiento documental: invoca `/doc-sync` (consume `docs-auditor`) | Cuando se hayan acumulado cambios sin reflejar en `website/docs/`     |
 | `auto`     | Audita TASKS.md, propone foco, espera confirmación                            | Default cuando no se pasa argumento                                   |
 
@@ -71,31 +71,30 @@ fase nueva post-v1.0), **respeta lo que dice TASKS.md** — este comando es un
    `docs-auditor`.
 3. **Conventional Commits + docs sincronizadas en el mismo PR** (ADR-0008).
 4. **Cero lenguaje de marketing.** Antes de PR: `grep -rn "production-ready\|enterprise-grade\|battle-tested" .` debe estar vacío.
-5. **Si el cambio toca SQL: 4-5 motores verdes** (PG/MySQL/MariaDB/MSSQL + SQLite; Oracle excluido de CI mientras dure el image issue, documentar caveats en el PR).
+5. **Si el cambio toca SQL: los 6 motores verdes** (PG/MySQL/MariaDB/MSSQL/Oracle + SQLite). Oracle corre en la matriz `integration` bloqueante (vía `docker run gvenzl/oracle-free`, no testcontainers).
 6. **Si la sesión cierra una Fase o entrega un F-N**, actualiza `TASKS.md` (tachar item cerrado con `~~F-N · ...~~` + bloque "**Cerrado** — descripción + PR/commit + doc"), y si toca taggear usa `/release vX.Y.Z`.
 
-## Paso 3 — Foco específico: `fase6`
+## Paso 3 — Foco específico: `v1.2`
 
-Lee `docs/ANALISIS_MADUREZ.md` §4 Fase 6 + `TASKS.md` § "Fase 6 — Codegen,
-performance y HA" para el scope. La descomposición vive ahí; **no la dupliques
-en este comando**.
+Fase 6 (codegen + HA + sharding + benchmarks) está **cerrada** (entregada en
+v1.0.0); v1.1.0 fue el release de hardening (bug-bash F0-F14 completo). El
+trabajo del próximo minor son los **deferrals** documentados en
+`docs/ROADMAP.md` (§ v1.2+) y `TASKS.md`. No los dupliques aquí; el menú vive
+ahí.
 
-Hallazgo importante de F6-2/F6-3a/F6-8a (perfilado en `benchmarks/PROFILING.md`):
-**el gate ADR-0002 ≥3× p99 NO se alcanza con codegen de scan/bind** porque el
-cuello no es reflect sino allocs arquitectónicos y el round-trip driver. Antes
-de seguir invirtiendo en codegen-por-velocidad (F6-3b en particular), revisa
-si el item se justifica por type-safety o si toca abrir ADR sucesor de 0002.
+Deferrals vivos:
+- **Sharding**: scatter-gather + shard-key-from-entity (follow-up de F6-7).
+- **Caché**: coordinación de stampede cross-instancia (hoy in-process, ADR-0011).
+- **F6-3b** (UPDATE/partial/batch binder codegen) — **diferido** por payoff ~1%
+  (ADR-0017); abrir sólo si type-safety lo motiva, **no por velocidad**: el gate
+  ADR-0002 ≥3× p99 está **retirado** (el cuello no es reflect sino allocs
+  arquitectónicos + round-trip driver; ver `benchmarks/PROFILING.md`).
 
-Orden de ataque sugerido para items vivos:
-- **F6-5 / F6-6 / F6-7** (HA, failover, sharding) — independientes del codegen
-  y del gate ADR-0002. Cada uno abre su propio ADR (0015 / 0016).
-- **F6-9** (stress) — ya hay harness en `benchmarks/stress/`; falta PR + doc.
-- **F6-8b** (ent + sqlc en el harness) — habilitar la comparación codegen-tier.
-- **F6-3b** (UPDATE/partial/batch binder) — **diferido** por payoff ~1%; abrir
-  sólo si type-safety lo motiva.
+Antes de feature nueva: si `TASKS.md` § "Bug-bash hallazgos" tiene un hallazgo
+**activo** (p.ej. BB-14), tiene prioridad — ciérralo o avánzalo primero.
 
-Cada F6-N es 1 PR con `code-reviewer` + docs + CHANGELOG; los items que abren
-ADR escriben el ADR en el mismo PR.
+Cada item es 1 PR con `code-reviewer` + docs + CHANGELOG; los que abren ADR
+escriben el ADR en el mismo PR.
 
 ## Paso 4 — Foco específico: `doc-sync`
 
@@ -106,16 +105,16 @@ capabilities entregadas, snapshot de release-notes). Los gaps que requieren
 decisión humana se listan en chat para que tú decidas (ej. desdoblar fila
 multi-tenant del comparison).
 
-Una sesión `doc-sync` no entrega F-N de Fase 6 — entrega coherencia. Si la
-sesión está a punto de marcar un F-N como cerrado, primero invoca `/doc-sync`
-para no dejar el F-N entregado con docs desalineadas.
+Una sesión `doc-sync` no entrega feature — entrega coherencia. Si la sesión
+está a punto de marcar un item como cerrado, primero invoca `/doc-sync` para no
+dejar el item entregado con docs desalineadas.
 
 ## Plantilla de cierre de sesión
 
 Al final de la sesión, deja un comentario al usuario con esta forma:
 
 ```
-Sesión cerrada — foco: <fase6|doc-sync>
+Sesión cerrada — foco: <v1.2|doc-sync|auto>
 
 Items cerrados:
 - <ID> · <título> — PR #<n>, commit <hash>, doc <ruta>
@@ -126,7 +125,7 @@ Items abiertos heredados a próxima sesión:
 Gaps de doc detectados por docs-auditor (si los hay):
 - <gap> · <acción sugerida>
 
-Próximo /next-session sugerido: <auto|fase6|doc-sync> (motivo en una línea)
+Próximo /next-session sugerido: <auto|v1.2|doc-sync> (motivo en una línea)
 ```
 
 Esto deja al siguiente Claude (o al humano del lunes) un puntero limpio sin
@@ -140,7 +139,7 @@ de una release y la auditoría de coherencia. Faltaba el otro extremo: el
 arranque de sesión. Sin él, cada nueva sesión empieza con "déjame mirar el
 estado", lee TASKS, lee análisis, propone tres cosas distintas y termina
 haciendo media. Este comando ancla el arranque a una decisión binaria
-(`fase6|doc-sync`) y al estado vivo del repo, no al recuerdo del último
+(`v1.2|doc-sync`) y al estado vivo del repo, no al recuerdo del último
 Claude ni a un roadmap hardcoded en el frontmatter.
 
 **Nota histórica:** versiones anteriores de este comando llevaban los focos

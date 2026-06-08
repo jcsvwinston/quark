@@ -106,7 +106,7 @@ PR pasa por:
 - **No pasar por `/doc-sync` directo sin `--report-only` previo** la primera vez en una sesión. Querrás ver qué propone antes de autorizar.
 - **No agrupar saneamiento documental con cambio de feature en el mismo PR.** Confunde la review. Saneamiento es PR propio, con tipo `docs:` en el commit.
 - **No reescribir `versioned_docs/version-X.Y.Z/`** salvo error explícito — son snapshots inmutables.
-- **No retirar disclaimers "alpha-late" / "not yet v1.0 production-ready"** aunque sean repetitivos. Esa repetición es la regla anti-marketing del CLAUDE.md.
+- **No retirar caveats honestos** (fire-and-forget, in-process, deferrals a v1.2+/v2.0) aunque sean repetitivos. La regla anti-marketing del CLAUDE.md es **incondicional** — no se levanta porque v1.0/v1.1 estén liberadas.
 
 ---
 
