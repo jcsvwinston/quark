@@ -38,7 +38,10 @@ examples/superapp/
 │   ├── leak.go          ← Run(): client por motor → fn → Close → verifica pool=0 + goroutines
 │   ├── engine_test.go   ← SQLite in-process, sin Docker
 │   └── engine_docker_test.go ← [tag superapp_engine] Postgres docker-run real
-├── exercise/            ← [pendiente] exercisers por área + oráculo de paridad + asserts
+├── exercise/            ← exercisers por área (reusan engine.Run) + cobertura por símbolo
+│   ├── suite.go         ← Run(): recorder por motor → exercisers → cobertura (control.Invoked)
+│   ├── crud.go          ← patrón canónico: Create/First/Count/Update/Delete(soft)/List
+│   └── tx.go            ← transacciones: commit multi-entidad + rollback atómico
 ├── cli/                 ← cobertura del binario cmd/quark (manifiesto de comandos, no de símbolos)
 │   ├── doc.go
 │   └── cli_test.go      ← [tag superapp_cli] exerciser de los 21 comandos + database-first (SQLite)
@@ -126,7 +129,7 @@ matriz de `control/capability.go` lo codifica y el exerciser exige
 - [x] recorder (`Middleware` símbolo→SQL por `context` + `QueryObserver` filas; `Mark`/`Note`/`Collect` → `control.Invoked`, `Statements` → snapshots; e2e SQLite verde)
 - [x] cmd/gen-apisurface + apisurface.json (655 símbolos, determinista) + allowlist.json (S3)
 - [x] engine matrix runner (`engine/`, S4): docker-run + anti-fugas; verde en SQLite in-process + Postgres docker-run (pool 0/0, goroutines estables)
-- [ ] exercisers + paridad + asserts
+- [~] exercisers (S5, en curso): harness `suite.go` + `crud` + `tx` verdes en SQLite y PG real; faltan builder/relations/cache/tenant/migrate/security/ha/observability + oráculo de paridad
 - [~] CLI `cmd/quark` (S9): exerciser SQLite verde (`cli/`, 20/21 comandos + `tenant provision` en allowlist; database-first `model generate --from-table` → compila); falta manifiesto enumerado de cobra + golden output + cross-engine
 - [x] workload de alto volumen + informe ejecutivo (`workload/` + `cmd/workload/`): ~310k filas / 0 errores en SQLite ×10; report.md + metrics.json + quark.log
 - [ ] main + gate + CI

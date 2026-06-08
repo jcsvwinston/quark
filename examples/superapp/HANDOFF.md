@@ -135,13 +135,27 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   - El check de fugas ya estabiliza (`Settle()`) ANTES de leer el pool, así que es
     fiable aunque `fn` devuelva error con conexiones en cierre asíncrono.
 
-**S5 · `exercise/` (siguiente)** — Empieza por `crud.go` como patrón canónico (asserts
-funcionales + hook de paridad), luego `builder.go` (CTE/window/setops/locking),
-`relations.go` (**confirma tags m2m/polimórfica vs
-`website/docs/guides/relations.mdx`**), `tx.go`, `cache.go` (query-count:
-hit=0 SQL, N+1 acotado), `tenant.go`, `migrate.go` (round-trip
-`Migrate`→`PlanMigration` vacío), `security.go` (attack suite SQLGuard),
-`ha.go` (replicas/sharding/deadlock), `observability.go` (OTel in-memory).
+**S5 · `exercise/` — EN CURSO (part 1 hecho).** El patrón canónico está montado:
+- `suite.go` — `Run(conns, tol, exercisers)`: instala un recorder por motor,
+  migra el dominio, corre cada `Exerciser`, y pliega la cobertura a
+  `control.Invoked` (vía `recorder.Collect`). Reusa `engine.Run` (lifecycle +
+  anti-fugas). Helpers de key `QM`/`CM`/`QF` que casan EXACTO con `apisurface.json`
+  (`QM("Create")` → `…quark.(*Query[T]).Create`).
+- `crud.go` (canónico) y `tx.go` entregados — verdes en SQLite **y PG real**
+  (`-tags=superapp_engine`). **Para añadir un exerciser:** copia la forma de
+  `crud.go` — un `Exerciser{Name, Fn}` que `rec.Mark(ctx, QM("X"))` antes de cada
+  llamada terminal (atribuye el SQL al símbolo) y `rec.Note(QM("Y"))` para
+  builders/funcs sin SQL propio, con asserts funcionales que devuelven error.
+- **Falta:** `builder.go` (CTE/window/setops/locking — `Join`/`GroupBy`/`Having`/
+  `ForUpdate`/`Distinct`/setops, hay ~65 métodos de `Query[T]` que cubrir),
+  `relations.go` (**confirma tags m2m/polimórfica vs
+  `website/docs/guides/relations.mdx`** antes), `cache.go` (query-count: hit=0 SQL
+  vía `rec.Count()` diff, N+1 acotado), `tenant.go`, `migrate.go` (round-trip
+  `Migrate`→`PlanMigration` vacío), `security.go` (attack suite SQLGuard →
+  `ErrInvalid*`), `ha.go` (replicas/sharding/deadlock), `observability.go` (OTel
+  in-memory). Y el **oráculo de paridad**: hoy los asserts son por-motor; falta
+  comparar el RESULTADO de cada `fn` entre motores (normalizando Oracle `''`→NULL,
+  MSSQL uuid, UTC) para detectar divergencias silenciosas.
 
 **S6 · `main.go`** — flags `-engines`, `-gate`; corre exercisers por motor,
 `Reconcile`, `Render` la matriz a `REPORTS/`, `Gate`.
