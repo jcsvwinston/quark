@@ -122,16 +122,29 @@ paralelo, a nivel comando:
 - **denominador** = árbol de comandos cobra (enumerable de `Use:`).
 - **numerador** = comandos ejercidos: build del binario → exec → assert.
 - **gate** = exit-code + golden output; allowlist para comandos diferidos.
-- **Hecho:** `cli/doc.go` (diseño) + `cli/cli_smoke_test.go` (tag `superapp_cli`):
-  build de `cmd/quark` una vez, y help / inspect schema / validate (camino OK y
-  el negativo exit≠0) / migrate status+create contra SQLite. Verde. Aprendido: el
-  binario abre SQLite/PG/MySQL por drivers transitivos (no hace falta tocar
-  `cmd/quark`); la config va por env `QUARK_DATABASE_DEFAULT_{DRIVER,DSN}` (viper
-  AutomaticEnv) o `.quark.yml`. El smoke loguea los comandos NO cubiertos.
-- **Pendiente S9 full:** manifiesto de comandos enumerado de cobra (no hardcoded),
-  golden output por comando, los diferidos (`gen/init/model/seed/sync/tenant`,
-  varios necesitan fixtures: modelos Go para `gen`, ficheros de migración para
-  `migrate up/down`), y la matriz cross-engine (reusa el runner de S4).
+- **Hecho:** `cli/doc.go` (diseño) + `cli/cli_test.go` (tag `superapp_cli`):
+  `TestMain` compila `cmd/quark` una vez; `TestCLICoverage` ejerce los **21 paths
+  de comando** contra SQLite real con gate de reconciliación (falla si un comando
+  del inventario queda sin cubrir y no está en allowlist). 20/21 cubiertos;
+  `tenant provision` en allowlist (CREATE DATABASE/SCHEMA + DSN admin, no SQLite).
+  - **Database-first ejercido:** `model generate --from-table` introspecciona la
+    BD → emite modelos Go que **compilan** (`assertGoBuilds`); luego `gen
+    --dry-run` corre el codegen forward sobre ellos. Esquema sembrado rico
+    (int PK / text not-null / int·real·bool·timestamp nullable / json) para
+    ejercer el mapeo SQL→Go.
+  - **Aprendido:** el binario abre SQLite/PG/MySQL por drivers transitivos (no hace
+    falta tocar `cmd/quark`); config por env `QUARK_DATABASE_DEFAULT_{DRIVER,DSN}`
+    (viper AutomaticEnv) o `.quark.yml`. Migraciones del CLI son ficheros Go, así
+    que `migrate up/down` son inertes para ficheros creados por el CLI (assert de
+    exit, no de efecto). `sync`/`seed run`/`seed list` a nivel binario son
+    advisory (no hay structs/seeders compilados) — exit 0 con guía.
+  - **Bug encontrado (flagueado, `task_657121df`):** `model generate <Name>
+    --fields` no hace `MkdirAll` del `--out` (a diferencia de `--from-table`) y
+    sale 0 aunque falle. El subtest pre-crea el dir como workaround; quítalo al
+    arreglar el CLI.
+- **Pendiente S9 full:** inventario de comandos enumerado de cobra (no hardcoded),
+  golden output por comando (snapshots), y la matriz cross-engine (reusa el runner
+  de S4 — el mismo binario, distinto `QUARK_DATABASE_DEFAULT_*`).
 
 ## Definición de hecho (gate)
 

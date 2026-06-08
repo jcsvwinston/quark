@@ -36,7 +36,7 @@ examples/superapp/
 ├── exercise/            ← [pendiente] exercisers por área + oráculo de paridad + asserts
 ├── cli/                 ← cobertura del binario cmd/quark (manifiesto de comandos, no de símbolos)
 │   ├── doc.go
-│   └── cli_smoke_test.go ← [tag superapp_cli] build→exec→assert exit+salida (SQLite)
+│   └── cli_test.go      ← [tag superapp_cli] exerciser de los 21 comandos + database-first (SQLite)
 ├── cmd/gen-apisurface/  ← [pendiente] genera apisurface.json con go/packages
 ├── apisurface.json      ← [generado] denominador: todo lo que Quark expone
 ├── allowlist.json       ← out-of-scope justificado (diferidos a v1.2)
@@ -92,7 +92,7 @@ matriz de `control/capability.go` lo codifica y el exerciser exige
 - [ ] cmd/gen-apisurface + apisurface.json + allowlist.json
 - [ ] engine matrix runner
 - [ ] exercisers + paridad + asserts
-- [~] CLI `cmd/quark` (S9): smoke SQLite verde (`cli/`); falta manifiesto de comandos + golden + cross-engine
+- [~] CLI `cmd/quark` (S9): exerciser SQLite verde (`cli/`, 20/21 comandos + `tenant provision` en allowlist; database-first `model generate --from-table` → compila); falta manifiesto enumerado de cobra + golden output + cross-engine
 - [ ] main + gate + CI
 
 > Nota: este andamiaje se escribió **sin compilador** en el entorno de la sesión;
