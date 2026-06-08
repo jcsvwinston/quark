@@ -280,22 +280,24 @@ func TestCLICoverage(t *testing.T) {
 	})
 
 	t.Run("model generate --fields", func(t *testing.T) {
+		// El --out NO existe a propósito: el CLI debe crearlo (MkdirAll en
+		// runModelGen, igual que --from-table). Antes era un bug — silent-fail +
+		// exit 0 si el dir faltaba —, ya arreglado.
 		outDir := filepath.Join(t.TempDir(), "models")
-		// NB: a diferencia de --from-table, `model generate <Name> --fields` NO
-		// hace MkdirAll del --out (generateFromDefinition lo omite); por eso lo
-		// creamos aquí, replicando el flujo real (tras `quark init` el dir existe).
-		// El bug del CLI (silent-fail + exit 0 si el dir falta) queda flagueado
-		// aparte; el exerciser cubre la generación, no lo gatea todavía.
-		if err := os.MkdirAll(outDir, 0o755); err != nil {
-			t.Fatalf("mkdir outDir: %v", err)
-		}
 		out, code := runCLI(t, work, nil, "model", "generate", "Product",
 			"--fields", "id:int64,name:string,price:float64", "--out", outDir, "--package", "models")
 		okExit(t, out, code, "model generate --fields")
 		if _, err := os.Stat(filepath.Join(outDir, "product.go")); err != nil {
-			t.Errorf("model generate --fields no creó product.go: %v", err)
+			t.Errorf("model generate --fields no creó product.go (¿no hizo MkdirAll del --out?): %v", err)
 		}
 		assertGoBuilds(t, outDir)
+
+		// Camino negativo: definición de campo malformada → exit != 0. Antes la
+		// generación fallida salía 0 (engañoso para scripts/CI).
+		if out, code = runCLI(t, work, nil, "model", "generate", "Bad",
+			"--fields", "no_colon_here", "--out", filepath.Join(t.TempDir(), "m2")); code == 0 {
+			t.Errorf("model generate con --fields malformado debía salir !=0\n%s", out)
+		}
 		mark("model generate")
 	})
 

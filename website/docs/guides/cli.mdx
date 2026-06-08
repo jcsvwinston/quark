@@ -154,9 +154,33 @@ queries, but it does not orchestrate schema provisioning.
 
 ## Model Generation and Introspection
 
-There is no built-in model generator in the current public tree. For existing
-databases, use a small introspection command around `database/sql` or your
-database's information schema, then hand-review generated structs.
+The CLI generates Go model structs, either from an existing database
+(database-first) or from an inline field definition.
+
+From existing tables — introspects the configured database and emits one struct
+per table:
+
+```bash
+quark model generate --from-table users,orders --out ./models --package models
+```
+
+Each table is introspected through the information schema and written as a struct
+with `db:` tags and a `TableName()` method. SQL types are mapped to Go types:
+nullable columns become pointers, `JSON`/`JSONB` becomes `json.RawMessage`, and
+timestamp/date columns become `time.Time`. Review the result before use — the
+mapping is a starting point, not a substitute for modelling decisions (rich
+types, relations, soft-delete, optimistic locking).
+
+From an inline definition — no database needed:
+
+```bash
+quark model generate Product --fields "id:int64,name:string,price:float64" --out ./models
+```
+
+The `--out` directory is created if it does not exist, and a generation failure
+(malformed `--fields`, unreachable database, unwritable output) exits non-zero.
+Flags: `--from-table`, `--fields`, `--out` (default `./models`), `--package`
+(default `models`), `--dialect`, `--tags` (default `json`).
 
 Quark's internal tests use metadata inspection heavily; application tooling can
 also inspect Quark's interpretation of a model:

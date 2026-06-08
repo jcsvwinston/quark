@@ -44,23 +44,37 @@ var genCmd = &cobra.Command{
 	Use:     "generate [Name]",
 	Aliases: []string{"gen"},
 	Short:   "Generate models from tables or definition",
-	Run: func(cmd *cobra.Command, args []string) {
-		runModelGen(args)
+	// A generation failure must surface as a non-zero exit (main.go prints the
+	// returned error and exits 1). Silence cobra's own usage/error dump so the
+	// single error line from main is the only output.
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runModelGen(args)
 	},
 }
 
-func runModelGen(args []string) {
-	if modelFromTable != "" {
-		generateFromTables()
-	} else if len(args) > 0 && modelFields != "" {
-		generateFromDefinition(args[0])
-	} else {
-		color.Red("Error: specify either --from-table or a model name with --fields")
-		os.Exit(1)
+func runModelGen(args []string) error {
+	wantFromTable := modelFromTable != ""
+	wantFromFields := len(args) > 0 && modelFields != ""
+	if !wantFromTable && !wantFromFields {
+		return fmt.Errorf("specify either --from-table or a model name with --fields")
 	}
+
+	// Both paths write into modelOutDir; create it once here so they behave
+	// consistently (generateFromDefinition historically skipped this and failed
+	// silently when --out did not exist).
+	if err := os.MkdirAll(modelOutDir, 0o755); err != nil {
+		return fmt.Errorf("creating output directory %q: %w", modelOutDir, err)
+	}
+
+	if wantFromTable {
+		return generateFromTables()
+	}
+	return generateFromDefinition(args[0])
 }
 
-func generateFromTables() {
+func generateFromTables() error {
 	dialect := modelDialect
 	if dialect == "" {
 		dialect = viper.GetString("database.default.driver")
@@ -68,14 +82,12 @@ func generateFromTables() {
 	dsn := viper.GetString("database.default.dsn")
 
 	if dialect == "" || dsn == "" {
-		color.Red("Error: database configuration missing. Run 'quark init' or specify --dialect and configure DSN.")
-		return
+		return fmt.Errorf("database configuration missing: run 'quark init' or specify --dialect and configure DSN")
 	}
 
 	sqlDB, err := sql.Open(dialect, dsn)
 	if err != nil {
-		color.Red("Error connecting to database: %v", err)
-		return
+		return fmt.Errorf("connecting to database: %w", err)
 	}
 	defer sqlDB.Close()
 
@@ -83,20 +95,20 @@ func generateFromTables() {
 
 	generator, err := gen.NewModelGenerator(modelPackage, modelOutDir, modelTemplate)
 	if err != nil {
-		color.Red("Error initializing generator: %v", err)
-		return
+		return fmt.Errorf("initializing generator: %w", err)
 	}
 
-	if err := os.MkdirAll(modelOutDir, 0755); err != nil {
-		color.Red("Error creating output directory: %v", err)
-		return
-	}
-
+	// Process every requested table; a per-table failure is logged and skipped,
+	// but the first one is remembered so the command still exits non-zero.
+	var firstErr error
 	for _, tableName := range tables {
 		tableName = strings.TrimSpace(tableName)
 		info, err := internaldb.GetTableInfo(sqlDB, dialect, tableName)
 		if err != nil {
 			color.Red("Error introspecting table %s: %v", tableName, err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("introspecting table %s: %w", tableName, err)
+			}
 			continue
 		}
 
@@ -117,13 +129,17 @@ func generateFromTables() {
 
 		if err := generator.GenerateFromTable(genTable); err != nil {
 			color.Red("Error generating model for %s: %v", tableName, err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("generating model for %s: %w", tableName, err)
+			}
 			continue
 		}
 		fmt.Printf("Generated model for table: %s\n", tableName)
 	}
+	return firstErr
 }
 
-func generateFromDefinition(name string) {
+func generateFromDefinition(name string) error {
 	fields := strings.Split(modelFields, ",")
 	data := gen.ModelData{
 		Package:    modelPackage,
@@ -134,8 +150,7 @@ func generateFromDefinition(name string) {
 	for _, f := range fields {
 		parts := strings.Split(f, ":")
 		if len(parts) != 2 {
-			color.Red("Error: invalid field definition %s. Use name:type", f)
-			continue
+			return fmt.Errorf("invalid field definition %q: use name:type", f)
 		}
 
 		fieldName := parts[0]
@@ -156,13 +171,12 @@ func generateFromDefinition(name string) {
 
 	generator, err := gen.NewModelGenerator(modelPackage, modelOutDir, modelTemplate)
 	if err != nil {
-		color.Red("Error initializing generator: %v", err)
-		return
+		return fmt.Errorf("initializing generator: %w", err)
 	}
 
 	if err := generator.GenerateFromData(data); err != nil {
-		color.Red("Error generating model: %v", err)
-		return
+		return fmt.Errorf("generating model: %w", err)
 	}
 	fmt.Printf("Generated model from definition: %s\n", name)
+	return nil
 }
