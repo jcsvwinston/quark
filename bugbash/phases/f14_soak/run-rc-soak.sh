@@ -25,7 +25,8 @@
 #                        (set this if your local Oracle already owns port 1521)
 #
 # After a clean run every engine's REPORTS/run-rc-soak-<engine>/out.log ends in
-# `ok ... f14_soak` with `findings: 0`. Then: /release v1.1.0.
+# `ok ... f14_soak` with `findings: 0`. Otherwise triage the open findings in
+# TASKS.md § "Bug-bash hallazgos" (route through the bugbash-reporter subagent).
 
 set -u
 cd "$(dirname "$0")/../.." || exit 1   # -> bugbash module root
@@ -52,7 +53,10 @@ launch() {
 
   echo "Launching F14 RC soak: ${SOAK_SECONDS}s/engine, ${SOAK_WORKERS} workers, timeout ${timeout_h}, engines: ${ENGINES[*]}"
   for E in "${ENGINES[@]}"; do
-    local D="REPORTS/run-rc-soak-$E"; mkdir -p "$D"
+    # Fresh dir per launch: a stale failures.jsonl from a prior run would
+    # otherwise inflate `collect`'s findings count (bit us on 2026-06-08, where
+    # sqlite/oracle showed stale 2026-06-05 findings against a clean run).
+    local D="REPORTS/run-rc-soak-$E"; rm -rf "$D"; mkdir -p "$D"
     env BUGBASH_REPORT_DIR="$PWD/$D" \
         BUGBASH_DSN_POSTGRES="$PG_ALT_DSN" \
         ${BUGBASH_DSN_ORACLE:+BUGBASH_DSN_ORACLE="$BUGBASH_DSN_ORACLE"} \
