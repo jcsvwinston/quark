@@ -51,7 +51,8 @@
 > versionado MSSQL). F14 — soak — añadida 2026-06-03; **sin hallazgos** (versión
 > acotada; latencia/memoria estables, 0 errores/panics). **Bug-bash F0-F14
 > COMPLETO** — la pasada RC de 12h × 6 motores (F14 full) queda como paso de
-> release-candidate. Pendientes: ninguno (desbloquea v1.1.0).
+> release-candidate. La ventana RC se ejecutó el 2026-06-07→08: 5/6 limpios,
+> **BB-14 abierto** (mysql soak latency, no bloqueante — v1.1.0 ya taggeada).
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -155,6 +156,43 @@
 > Time-boxed: el spec pide 12h × 6 motores (72 engine-h) con snapshots OTel cada
 > 5 min → **pasada de ventana RC** (`-soak-seconds=43200 -engines=all`), no CI.
 > **Con F14, el set F0-F14 queda completo.**
+>
+> **Pasada F14 RC soak (2026-06-07→08, 12h × 6 motores, Docker, detached):**
+> ejecutada la ventana RC completa (`-soak-seconds=43200 -engines=all`, 8 workers;
+> Oracle vía el `quark-oracle` persistente + `BUGBASH_DSN_ORACLE`). Los 6 legs
+> corrieron las 12h enteras. **5/6 limpios** (PG/MariaDB/MSSQL/Oracle/SQLite `ok`,
+> sin hallazgos *de este run*). **mysql FAIL** por degradación de latencia
+> (37.8µs→737.5µs sobre 51.7M ops) → **BB-14**. Nota de higiene: los
+> `failures.jsonl` de sqlite/oracle que listó `collect` eran **stale del run del
+> 2026-06-05** (el script no limpiaba `REPORTS/` entre runs; corregido en el mismo
+> PR que registra esto).
+
+### BB-14 · mysql: degradación de latencia en el soak RC de 12h (37.8µs → 737.5µs)
+
+**Activo** (2026-06-08). Hallazgo del soak RC de 12h (`f14_soak`, P1/regression).
+
+- **Evidencia**: leg mysql, 51.702.935 ops en 12h; mediana de latencia 1ª mitad
+  37.833µs → 2ª mitad 737.5µs (≈19×, cruza el umbral `degradeFactor=4×`). Memoria
+  estable (HeapAlloc 2.76 MB → 3.56 MB, sin leak). Los otros 5 motores: latencia
+  plana/decreciente, `ok`.
+- **Reproducer**: `go test -tags=bugbash -run TestSoak ./phases/f14_soak/... -engines=mysql -soak-seconds=43200`
+- **Sin diagnóstico cerrado todavía**. Señales para el triage:
+  - **MariaDB (mismo driver Go `mysql`) NO degradó** con el mismo workload → no
+    apunta al code path driver/dialecto de Quark per se; más bien al servidor
+    MySQL 8 o al test.
+  - Hipótesis a descartar: (a) el JOIN del 10% de ops degradándose conforme
+    `soak_txns` crece a decenas de millones de filas (plan del optimizador de
+    MySQL 8 ≠ MariaDB 11); (b) estado server-side de MySQL 8 bajo carga sostenida
+    (buffer pool / temp tables / `performance_schema`); (c) throttling del
+    contenedor `mysql:8` a lo largo de 12h.
+  - **Precedente**: hallazgos previos del F14 soak resultaron ser artefactos de
+    entorno/harness (ORA-12516 churn de conexiones, SQLite BUSY), endurecidos en
+    #154 — no asumir que es bug de producto sin repro acotado.
+- **No bloquea v1.1.0** (ya taggeada; el soak RC es assurance, no gate).
+- **Follow-up**: repro acotado (`-soak-seconds=1800` mysql) para ver si degrada en
+  30 min (→ probable real/reproducible) o sólo a escala de 12h (→ crecimiento de
+  tabla/entorno). Si se confirma producto: perfilar el JOIN op + revisar pool /
+  prepared-stmt cache en el path mysql. Enrutar por `bugbash-reporter` al deepening.
 
 ### ~~BB-12 · Migraciones versionadas rotas en MSSQL (`CREATE TABLE IF NOT EXISTS`)~~
 
@@ -538,9 +576,11 @@ campo. Aislado porque las otras tres estrategias no usan `q.schema`.
 > GitHub Release Latest; docs versionadas live en
 > `jcsvwinston.github.io/quark/docs` (1.1.0 es ahora la versión por defecto;
 > 1.0.0 en `/docs/1.0.0/`). Release de hardening: **bug-bash F0-F14 completo**
-> (PRs #142-#155), con los fixes BB-5…BB-13 cerrados. El soak RC de 12h salió
-> limpio en los 4 motores de CI; SQLite/Oracle sólo dieron límites de entorno
-> del harness (no del ORM), endurecidos en #154.
+> (PRs #142-#155), con los fixes BB-5…BB-13 cerrados. Antes del tag, el soak
+> time-boxed salió limpio en los motores de CI (SQLite/Oracle sólo dieron
+> límites de entorno del harness, no del ORM, endurecidos en #154). La ventana
+> RC completa de 12h × 6 motores se corrió después (2026-06-07→08): 5/6 limpios,
+> **BB-14** abierto (mysql soak latency, no bloqueante) — ver § Bug-bash hallazgos.
 >
 > **✅ v1.0.0 publicado (2026-05-27).** Tag `v1.0.0` (PR #116, vía
 > release-please con trailer `Release-As: 1.0.0`); GitHub Release marcada
