@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/jcsvwinston/quark/internal/guard"
 )
 
 // Common errors returned by quark operations.
@@ -23,7 +25,11 @@ var (
 	ErrInvalidQuery = errors.New("invalid query")
 
 	// ErrInvalidIdentifier indicates that a table or column identifier is invalid.
-	ErrInvalidIdentifier = errors.New("invalid identifier")
+	// Re-exported from internal/guard, where ValidateIdentifier wraps it with %w,
+	// so errors.Is(err, ErrInvalidIdentifier) works for a rejected identifier from
+	// any call site (Where/OrderBy/GroupBy columns, table names, migration ops,
+	// CTEs, event channels…) — consistent with ErrInvalidJoin / ErrInvalidJSONPath.
+	ErrInvalidIdentifier = guard.ErrInvalidIdentifier
 
 	// ErrInvalidJSONPath indicates that a JSON path passed to WhereJSON is malformed
 	// or contains characters that could enable SQL injection. Quark accepts dotted

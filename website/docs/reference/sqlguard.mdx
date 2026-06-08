@@ -100,21 +100,32 @@ Quark additionally validates *identifiers* (column and table names) and *operato
 the API layer. `sqlx` provides no guard at all — the caller is responsible for sanitizing
 every string that enters a query.
 
-## ErrInvalidQuery
+## Error sentinels
 
-All SQLGuard violations return `quark.ErrInvalidQuery`. Check for it explicitly when
-you want to distinguish validation errors from database errors:
+SQLGuard violations are reported through specific sentinels, each reachable with
+`errors.Is`, so you can distinguish a rejected input from a database error and
+branch on the kind of violation:
+
+- **`quark.ErrInvalidIdentifier`** — a rejected table or column identifier
+  (a `Where`/`OrderBy`/`GroupBy` column, a table name, …).
+- **`quark.ErrInvalidJSONPath`** — a malformed `WhereJSON` path.
+- **`quark.ErrInvalidJoin`** — a `JOIN ... ON` clause outside the
+  identifier-only grammar.
 
 ```go
 users, err := quark.For[User](ctx, client).
     Where(untrustedColumn, "=", value).
     List()
 
-if errors.Is(err, quark.ErrInvalidQuery) {
+if errors.Is(err, quark.ErrInvalidIdentifier) {
     http.Error(w, "invalid query parameters", http.StatusBadRequest)
     return
 }
 ```
+
+`quark.ErrInvalidQuery` is separate: it signals a malformed *query structure*
+(client not initialised, limits exceeded, a raw subquery used without opting in),
+not an identifier/path/join validation failure.
 
 ## Design intent
 
