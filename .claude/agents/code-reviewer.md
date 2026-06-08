@@ -27,7 +27,7 @@ Te invocan tras un cambio. Pasos en orden:
 
 ## Checklist de anti-patterns por módulo
 
-> **Estado del proyecto al escribir esta checklist**: Fases 0-5 cerradas, Fase 6 abierta (codegen + HA + sharding + benchmarks → v1.0). Si una regla aquí contradice el estado actual de `TASKS.md` o de los playbooks, **prevalece el playbook**; abre una nota al final del veredicto para actualizar este agente.
+> **Estado del proyecto al escribir esta checklist**: v1.1.0 sobre la línea estable `v1.x` (Fases 0-6 cerradas; v1.0.0 tag 2026-05-27, v1.1.0 tag 2026-06-06; bug-bash F0-F14 completo). Si una regla aquí contradice el estado actual de `TASKS.md` o de los playbooks, **prevalece el playbook**; abre una nota al final del veredicto para actualizar este agente.
 
 ### `query_builder.go`, `query_exec.go`, `query_crud.go`
 
@@ -58,7 +58,7 @@ Te invocan tras un cambio. Pasos en orden:
 ### `tenant_router.go`, `rls_native.go`
 
 - [ ] **`RowLevelSecurityClient` vs `RowLevelSecurityNative`**: son **mutuamente excluyentes por router** en PG. Cualquier cambio en `tenant_router.go` que toque el switch de estrategias debe respetarlo. La modalidad Client inyecta `WHERE tenant_id = ?`; la Native delega en `set_config` + `CREATE POLICY` (PG-only, fail-fast con `ErrUnsupportedFeature` en otros motores).
-- [ ] **Alias `RowLevelSecurity` deprecado**: sigue vivo como alias de `RowLevelSecurityClient` hasta v1.0. No retirarlo antes — tests de backward-compat existen (`tenant_router_test.go:TestRowLevelSecurityAliasBackwardCompat`).
+- [ ] **Alias `RowLevelSecurity` deprecado** desde v1.0; se retira en v2.0. No retirarlo en la línea `v1.x` — tests de backward-compat existen (`tenant_router_test.go:TestRowLevelSecurityAliasBackwardCompat`).
 - [ ] **`nativeRLSExecutor` (rls_native.go)**: cualquier cambio en cómo se emite `set_config` o cómo se cierra la tx implícita (`context.AfterFunc`) debe mantener: (a) PG enforza vía policy, (b) `client.Raw()` / `client.Exec()` emiten warning estructurado `quark.tenant.raw_under_native_rls`. Caveats request-scoped vs long-lived ctx en el doc-comment.
 - [ ] **Factory de tenant nuevo no bloquea bajo `mu`.** Si tocas `routeTenant`, considera `singleflight`.
 
@@ -101,7 +101,7 @@ Te invocan tras un cambio. Pasos en orden:
 ### Tests
 
 - [ ] **El PR añade test de regresión específico** para el cambio.
-- [ ] **El test cubre los motores CI** si el cambio toca SQL (PG/MySQL/MariaDB/MSSQL + SQLite). Oracle queda fuera de CI mientras dure el image issue — si tu cambio toca SQL Oracle-specific, corre manualmente con DSN env-var y déjalo registrado en el PR.
+- [ ] **El test cubre los 6 motores de CI** si el cambio toca SQL (PG/MySQL/MariaDB/MSSQL/Oracle + SQLite). Oracle corre en la matriz `integration` bloqueante (vía `docker run gvenzl/oracle-free`, no testcontainers, cuyo ciclo de vida fallaba en los runners hosteados).
 - [ ] **Si tocas concurrencia, hay `t.Parallel()`** y assertions reales (no `fmt.Printf`).
 - [ ] **Si cambias hooks o transacciones, hay tests de transacción anidada / savepoint / panic-rollback / hook unwind**.
 - [ ] **No se introducen `t.Skip` por env var nuevos**. Usa testcontainers (`containers_test.go`) o build-tag `//go:build integration`.

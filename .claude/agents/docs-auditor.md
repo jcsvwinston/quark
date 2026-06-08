@@ -201,7 +201,7 @@ grep -oE "'[a-z][a-z0-9/_-]+'" website/sidebars.ts | tr -d "'" | sort -u
 
 ### J · Cero lenguaje de marketing (regla CLAUDE.md)
 
-**(qué)** Hasta que se libere v1.0 honesto, ningún archivo `.md` / `.mdx` / `.go` debe usar "production-ready", "enterprise-grade", "battle-tested", "blazing fast", "world-class", "rock-solid".
+**(qué)** Ningún archivo `.md` / `.mdx` / `.go` debe usar "production-ready", "enterprise-grade", "battle-tested", "blazing fast", "world-class", "rock-solid". La regla es **incondicional** — que v1.0/v1.1 estén liberadas no la levanta (la cultura anti-hype del proyecto se mantiene).
 
 **(cómo)**
 
@@ -209,16 +209,16 @@ grep -oE "'[a-z][a-z0-9/_-]+'" website/sidebars.ts | tr -d "'" | sort -u
 grep -rnE 'production-ready|enterprise-grade|battle-tested|blazing fast|world-class|rock-solid' --include='*.md' --include='*.mdx' --include='*.go' .
 ```
 
-**(veredicto)** DRIFT (bloqueante) ante cualquier match fuera de un contexto explicativo (ej. "we are NOT yet production-ready" pasa; "production-ready ORM" no pasa).
+**(veredicto)** DRIFT (bloqueante) ante cualquier match fuera de un contexto explicativo (ej. una lista-de-prohibición o una negación explícita pasa; "production-ready ORM" como claim no pasa).
 
 **(auto-fix)** NO — requiere reescritura del párrafo.
 
-### K · Caveats conocidos están documentados (Oracle fuera de CI, etc.)
+### K · Caveats conocidos están documentados (Oracle vía `docker run` en CI, etc.)
 
 **(qué)** Las limitaciones conocidas del proyecto deben estar en sitio visible. Hoy mínimo:
-- Oracle excluido de CI mientras dure el image issue.
-- Gate ADR-0002 ≥3× p99 no alcanzado por codegen — referencia a `benchmarks/PROFILING.md`.
-- `LISTEN/NOTIFY` listener side (PG) no implementado en EventBus.
+- Oracle corre en la matriz `integration` bloqueante vía `docker run gvenzl/oracle-free` (no testcontainers, cuyo ciclo de vida fallaba en runners hosteados).
+- Gate ADR-0002 ≥3× p99 retirado por ADR-0017 (codegen justificado por type-safety, no velocidad) — referencia a `benchmarks/PROFILING.md`.
+- Listener inbound `LISTEN/NOTIFY` (PG) entregado en v1.1.0 (ADR-0019) es fire-and-forget: sin replay durable de notificaciones perdidas durante una desconexión.
 
 **(cómo)** Lectura de `website/docs/reference/{benchmarks,roadmap}.mdx` + `intro.mdx`. Verificar mención.
 
@@ -297,7 +297,7 @@ Modo `--scope=full`. Primer pase con `--report` (humano lee), segundo pase con `
 - **No fabriques release-notes desde commits** — usa los `docs/RELEASE_NOTES_v*.md` que ya existen. Si no existen, dilo y deja la decisión al humano.
 - **No edites `versioned_docs/`** salvo error explícito — son snapshots inmutables por contrato Docusaurus.
 - **No reordenes el sidebar** — el orden lo decide el humano.
-- **No retires "Known limitations" o "alpha-late" disclaimers** aunque parezcan repetitivos. Esa repetición es deliberada hasta v1.0.
+- **No retires las secciones "Known limitations" ni los caveats honestos** (fire-and-forget, in-process, deferrals a v1.2+, etc.) aunque parezcan repetitivos. La cultura anti-hype del proyecto es **incondicional** — no se levanta con v1.0/v1.1.
 
 ## Salida cuando todo está OK
 
