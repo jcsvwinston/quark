@@ -154,6 +154,17 @@ func soakEngine(t *testing.T, ctx context.Context, conn tools.EngineConn, eng st
 	if err := client.Migrate(ctx, &soakAccount{}, &soakTxn{}); err != nil {
 		t.Fatalf("migrate on %s: %v", eng, err)
 	}
+	// Index the JOIN/WHERE column. Without it the 10% JOIN op full-scans
+	// soak_txns, which grows unbounded over the soak (30% of ops are INSERTs)
+	// — an O(n) cost that masquerades as a latency "regression" once the table
+	// is large enough (BB-14: mysql crossed the 4x degrade gate on the 12h RC
+	// run; EXPLAIN showed type=ALL, 261888 rows scanned → type=ref, 1309 with
+	// this index). Indexing it keeps the soak measuring engine/ORM overhead,
+	// not a self-inflicted table scan. CreateIndex is idempotent per dialect
+	// (IF NOT EXISTS / 1061 / ORA-01408 swallow), so a re-run is safe.
+	if err := client.CreateIndex(ctx, "soak_txns", "idx_soak_txns_acct", []string{"acct_id"}, false); err != nil {
+		t.Fatalf("create index on %s: %v", eng, err)
+	}
 
 	// Seed accounts (+ one txn each) so reads/joins have data.
 	accIDs := make([]int64, 0, seedAccounts)

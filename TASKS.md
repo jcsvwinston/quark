@@ -51,8 +51,9 @@
 > versionado MSSQL). F14 — soak — añadida 2026-06-03; **sin hallazgos** (versión
 > acotada; latencia/memoria estables, 0 errores/panics). **Bug-bash F0-F14
 > COMPLETO** — la pasada RC de 12h × 6 motores (F14 full) queda como paso de
-> release-candidate. La ventana RC se ejecutó el 2026-06-07→08: 5/6 limpios,
-> **BB-14 abierto** (mysql soak latency, no bloqueante — v1.1.0 ya taggeada).
+> release-candidate. La ventana RC se ejecutó el 2026-06-07→08: 5/6 limpios y
+> **BB-14 cerrado** (era el JOIN sin índice del propio soak, no un bug de Quark;
+> confirmado por EXPLAIN + soak con índice — ver § Bug-bash hallazgos).
 >
 > **Pasada F3 cross-engine (2026-05-31, Docker):** **verde 9/9 en los 6
 > motores** (SQLite + PG + MySQL + MariaDB + MSSQL + Oracle), sin hallazgos
@@ -167,54 +168,29 @@
 > 2026-06-05** (el script no limpiaba `REPORTS/` entre runs; corregido en el mismo
 > PR que registra esto).
 
-### BB-14 · mysql: degradación de latencia en el soak RC de 12h (37.8µs → 737.5µs)
+### ~~BB-14 · soak RC 12h: el JOIN sin índice full-scaneaba `soak_txns` (mysql cruzó el gate 4×)~~
 
-**Activo** (2026-06-08). Hallazgo del soak RC de 12h (`f14_soak`, P1/regression).
+**Resuelto** (2026-06-08). Root cause confirmado y arreglado; **no era bug de
+Quark** sino un artefacto de diseño del propio soak.
 
-- **Evidencia**: leg mysql, 51.702.935 ops en 12h; mediana de latencia 1ª mitad
-  37.833µs → 2ª mitad 737.5µs (≈19×, cruza el umbral `degradeFactor=4×`). Memoria
-  estable (HeapAlloc 2.76 MB → 3.56 MB, sin leak). Los otros 5 motores: latencia
-  plana/decreciente, `ok`.
-- **Reproducer**: `go test -tags=bugbash -run TestSoak ./phases/f14_soak/... -engines=mysql -soak-seconds=43200`
-- **Hipótesis principal: scan sin índice + divergencia de motor (NO Quark).** El
-  schema del soak es `soak_txns{id PK, acct_id, amount}` **sin índice en
-  `acct_id`**; la op JOIN (10%) hace `WHERE acct_id = ? JOIN soak_accounts` →
-  **full scan de `soak_txns`**, tabla que crece sin límite (30% de las ops son
-  INSERTs; sólo 200 cuentas, pero las txns no paran) durante 12h. Ese coste sube
-  en todos los motores; lo que difiere es **cómo lo ejecuta cada servidor**:
-  `mysql:8` y `mariadb:11` llevan 8+ años divergiendo (optimizadores distintos,
-  InnoDB bifurcado: purge / change buffer / adaptive hash). A nivel de Quark el
-  path es idéntico (mismo driver Go, mismo SQL para este workload) → si fuera bug
-  de Quark, MariaDB habría caído igual.
-- **Pista que lo delata**: a las 4h, **MariaDB llevaba ~14.8M txns y MySQL ~5.4M**
-  (≈2.7× más ops en MariaDB, tabla **mayor**) y **MariaDB NO degradó**. Eso
-  descarta "a MySQL se le hizo grande la tabla" — si fuera volumen, MariaDB (tabla
-  más grande) sufriría más. Es **cómo cada motor planifica/ejecuta el scan**, no
-  el tamaño.
-- **Por qué la mediana salta 37µs→737µs**: el 60% son lecturas cacheadas (L2 en
-  memoria, µs); mientras la caché aguanta, la mediana (p50) es un cache-hit
-  (~38µs). Para que suba a 737µs, las ops que tocan DB (scans del JOIN + writes,
-  con la caché invalidada por el 30% de writes) se hicieron tan lentas en MySQL
-  que **se comieron el p50**. En MariaDB siguieron baratas → su p50 se quedó en
-  territorio cache-hit. **Salvedad**: este razonamiento asume hit-rate de caché
-  alto en la 1ª mitad; con TTL=1s y la invalidación del 30% de writes eso no es
-  obvio, así que la *magnitud* es estimada — el paso 3 del repro (latencia por
-  tipo de op) lo confirma o lo refuta.
-- **Precedente**: hallazgos previos del F14 soak resultaron ser artefactos de
-  entorno/harness (ORA-12516 churn de conexiones, SQLite BUSY), endurecidos en
-  #154 — no asumir producto sin repro acotado. **No bloquea v1.1.0** (ya taggeada;
-  el soak RC es assurance, no gate).
-- **Plan de repro (próxima sesión, vía `bugbash-reporter`), en orden**:
-  1. **Añadir índice en `soak_txns.acct_id`** y re-correr un soak corto
-     (`-soak-seconds=1800 -engines=mysql,mariadb`). Si la degradación desaparece →
-     confirmado: era el scan sin índice + el plan de MySQL 8.
-  2. **`EXPLAIN` del JOIN en mysql al inicio vs al final** (¿el plan empeora al
-     crecer la tabla / al refrescarse las stats?).
-  3. **Medir latencia por tipo de op** (cached-read / write / JOIN) en vez de
-     agregada, para confirmar que es el JOIN quien dispara el p50.
-  - Sólo si tras 1-3 la degradación persiste con índice y plan estable: tratarlo
-    como posible issue de producto (perfilar pool / prepared-stmt cache del path
-    mysql). Hasta entonces, lean = entorno/diseño-de-test.
+- **Síntoma**: en el soak RC de 12h, mysql FAIL por degradación de latencia
+  (mediana 1ª mitad 37.833µs → 2ª mitad 737.5µs, ≈19×, cruza `degradeFactor=4×`;
+  51.7M ops). Memoria estable. Los otros 5 motores `ok`.
+- **Root cause (confirmado por `EXPLAIN`)**: la op JOIN (10%) hace
+  `WHERE acct_id = ? JOIN soak_accounts` sobre `soak_txns`, que **no tenía índice
+  en `acct_id`** y crece sin límite (30% de ops = INSERTs). EXPLAIN sobre 262K
+  filas: `type=ALL`, **261.888 filas escaneadas** → con índice `type=ref`, **1.309
+  filas** (200×). **Plan idéntico en mysql:8 y mariadb:11** → no es divergencia de
+  optimizador ni del dialecto de Quark. La diferencia "mysql degradó / mariadb no"
+  fue **velocidad de ejecución del scan** (mariadb ~2.5× más throughput, se mantuvo
+  bajo el umbral 4×), no un bug.
+- **Fix**: indexar `soak_txns.acct_id` en el harness del soak (`client.CreateIndex`
+  tras `Migrate`, `bugbash/phases/f14_soak/soak_test.go`). Mantiene el soak midiendo
+  overhead de motor/ORM, no un scan auto-infligido.
+- **Confirmación empírica** (soak 10min con índice): mysql 10.3µs→8.5µs y mariadb
+  7µs→6µs (latencia **plana/decreciente**), ambos `ok`, 0 findings — vs los
+  37.8µs→737.5µs sin índice.
+- No bloqueaba v1.1.0 (ya taggeada; soak RC = assurance, no gate).
 
 ### ~~BB-12 · Migraciones versionadas rotas en MSSQL (`CREATE TABLE IF NOT EXISTS`)~~
 
@@ -601,8 +577,9 @@ campo. Aislado porque las otras tres estrategias no usan `q.schema`.
 > (PRs #142-#155), con los fixes BB-5…BB-13 cerrados. Antes del tag, el soak
 > time-boxed salió limpio en los motores de CI (SQLite/Oracle sólo dieron
 > límites de entorno del harness, no del ORM, endurecidos en #154). La ventana
-> RC completa de 12h × 6 motores se corrió después (2026-06-07→08): 5/6 limpios,
-> **BB-14** abierto (mysql soak latency, no bloqueante) — ver § Bug-bash hallazgos.
+> RC completa de 12h × 6 motores se corrió después (2026-06-07→08): 5/6 limpios y
+> **BB-14 cerrado** (el JOIN sin índice del propio soak full-scaneaba `soak_txns`;
+> arreglado indexando la columna — no era bug de Quark) — ver § Bug-bash hallazgos.
 >
 > **✅ v1.0.0 publicado (2026-05-27).** Tag `v1.0.0` (PR #116, vía
 > release-please con trailer `Release-As: 1.0.0`); GitHub Release marcada
