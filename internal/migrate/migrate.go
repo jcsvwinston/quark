@@ -117,6 +117,67 @@ func SQLTypeWithOpts(dialectName string, t reflect.Type, opts TypeOptions) strin
 	return base
 }
 
+// IsBoolColumn reports whether t maps to a boolean column. It unwraps a pointer
+// (*bool) and the sql.Null[bool] / quark.Nullable[bool] wrapper the same way
+// SQLTypeWithOpts resolves the column's SQL type, so the default-normalization
+// decision stays consistent with the emitted column type. Callers use it to
+// gate NormalizeBoolDefault.
+func IsBoolColumn(t reflect.Type) bool {
+	if t == nil {
+		return false
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if isSQLNull(t) {
+		if vf, ok := t.FieldByName("V"); ok {
+			t = vf.Type
+			if t.Kind() == reflect.Ptr {
+				t = t.Elem()
+			}
+		}
+	}
+	return t != nil && t.Kind() == reflect.Bool
+}
+
+// NormalizeBoolDefault rewrites a boolean column's `default:"..."` literal to the
+// form the target dialect accepts in a DDL DEFAULT clause.
+//
+// Quark passes a column default through to DDL verbatim, but a boolean default
+// has NO single literal portable across the six engines: PostgreSQL's BOOLEAN
+// requires TRUE/FALSE and rejects 1/0 (SQLSTATE 42804), while MSSQL's BIT and
+// Oracle's NUMBER(1) require 1/0 and reject TRUE/FALSE. This recognizes the
+// documented bool literals 1/0/true/false (case-insensitive) and emits the
+// dialect-appropriate one (TRUE/FALSE for PostgreSQL, 1/0 for the rest).
+//
+// Input must be one of 1/0/true/false (case-insensitive); any other string —
+// a function call, a quoted literal, a non-bool value — is returned UNCHANGED,
+// so non-boolean columns and custom expressions are unaffected. Callers gate
+// this on IsBoolColumn; validating the default tag itself is the caller's job.
+func NormalizeBoolDefault(dialectName, def string) string {
+	var truthy bool
+	switch strings.ToLower(strings.TrimSpace(def)) {
+	case "1", "true":
+		truthy = true
+	case "0", "false":
+		truthy = false
+	default:
+		return def // not a recognized bool literal; leave verbatim
+	}
+	switch dialectName {
+	case "postgres", "postgresql":
+		if truthy {
+			return "TRUE"
+		}
+		return "FALSE"
+	default: // mysql, mariadb, sqlite, mssql, oracle
+		if truthy {
+			return "1"
+		}
+		return "0"
+	}
+}
+
 // isSQLNull reports whether t is database/sql's Null[T] generic struct (which
 // quark.Nullable[T] aliases). Identification is by package + name prefix
 // because the generic instantiation embeds the type parameter in
