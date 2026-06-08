@@ -151,6 +151,7 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 - **Arranque de sesión enfocado en pendiente**: `.claude/commands/next-session.md`.
 - **Anti-patterns codificados**: invoca el subagente `code-reviewer` (`.claude/agents/code-reviewer.md`) antes de cerrar cualquier PR.
 - **Auditoría docs↔código**: subagente `docs-auditor` (`.claude/agents/docs-auditor.md`); pasada periódica vía `/doc-sync`.
+- **Superapp de aceptación cross-engine (en construcción)**: arnés headless que ejerce toda la superficie pública en los 6 motores con cobertura demostrada por manifiesto. Instrucciones de continuación en [`examples/superapp/HANDOFF.md`](examples/superapp/HANDOFF.md) (+ blueprint `examples/superapp/README.md`); backlog en `TASKS.md` § "Superapp".
 
 ## Cómo arrancar una sesión productiva
 
