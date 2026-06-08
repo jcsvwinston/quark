@@ -1,11 +1,24 @@
 package guard_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/jcsvwinston/quark/internal/guard"
 )
+
+// TestValidateIdentifier_ErrorsIs pins the %w wrapping: every rejection branch
+// must be reachable via errors.Is(err, guard.ErrInvalidIdentifier) (re-exported
+// as quark.ErrInvalidIdentifier).
+func TestValidateIdentifier_ErrorsIs(t *testing.T) {
+	g := guard.New()
+	for _, name := range []string{"", "col; DROP", "DROP", strings.Repeat("x", 200)} {
+		if err := g.ValidateIdentifier(name); !errors.Is(err, guard.ErrInvalidIdentifier) {
+			t.Errorf("ValidateIdentifier(%q): errors.Is(ErrInvalidIdentifier)=false, err=%v", name, err)
+		}
+	}
+}
 
 // --- ValidateIdentifier ---
 

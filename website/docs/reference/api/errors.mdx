@@ -20,6 +20,15 @@ var (
 )
 ```
 
+`ErrInvalidIdentifier` is returned when a table or column identifier — a
+`Where`/`OrderBy`/`GroupBy` column, a table name, a CTE name, an event channel,
+a migration target — fails `internal/guard.ValidateIdentifier` (must match
+`^[a-zA-Z_][a-zA-Z0-9_]*$`, be at most 64 chars, and not be a reserved SQL
+keyword). Identifiers cannot be bound as parameters, so a rejected one never
+reaches the SQL. The sentinel is wrapped with `%w` at the guard, so
+`errors.Is(err, quark.ErrInvalidIdentifier)` holds regardless of which call site
+produced it.
+
 `ErrInvalidJSONPath` is returned when [`WhereJSON`](/docs/guides/querying#json-predicates)
 receives a path that does not match the dotted identifier grammar
 `^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$` (max 256 chars). Quark

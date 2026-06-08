@@ -3,6 +3,7 @@
 package guard
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -66,25 +67,33 @@ type Quoter interface {
 	Quote(identifier string) string
 }
 
+// ErrInvalidIdentifier is the sentinel for a rejected table/column identifier.
+// It lives here (not in the root package) so ValidateIdentifier can wrap it with
+// %w without an import cycle; the root package re-exports it as
+// quark.ErrInvalidIdentifier, so callers can errors.Is() the rejection
+// regardless of which call site (query, migrate, cte, events…) produced it —
+// consistent with ErrInvalidJoin / ErrInvalidJSONPath.
+var ErrInvalidIdentifier = errors.New("invalid identifier")
+
 // ValidateIdentifier checks if a table or column identifier is safe to use.
 func (g *SQLGuard) ValidateIdentifier(name string) error {
 	if len(name) == 0 {
-		return fmt.Errorf("ErrInvalidIdentifier: identifier is empty")
+		return fmt.Errorf("%w: identifier is empty", ErrInvalidIdentifier)
 	}
 
 	if len(name) > g.maxIdentifierLen {
-		return fmt.Errorf("ErrInvalidIdentifier: identifier %q exceeds maximum length of %d characters",
-			name, g.maxIdentifierLen)
+		return fmt.Errorf("%w: identifier %q exceeds maximum length of %d characters",
+			ErrInvalidIdentifier, name, g.maxIdentifierLen)
 	}
 
 	if !g.identifierPattern.MatchString(name) {
-		return fmt.Errorf("ErrInvalidIdentifier: identifier %q contains invalid characters. Only letters, numbers, and underscores allowed",
-			name)
+		return fmt.Errorf("%w: identifier %q contains invalid characters. Only letters, numbers, and underscores allowed",
+			ErrInvalidIdentifier, name)
 	}
 
 	upper := strings.ToUpper(name)
 	if g.reservedKeywords[upper] {
-		return fmt.Errorf("ErrInvalidIdentifier: identifier %q is a reserved SQL keyword", name)
+		return fmt.Errorf("%w: identifier %q is a reserved SQL keyword", ErrInvalidIdentifier, name)
 	}
 
 	return nil
