@@ -28,7 +28,10 @@ examples/superapp/
 │   ├── capability.go    ← matriz de capacidad por motor (qué espera ErrUnsupportedFeature)
 │   ├── report.go        ← status + matriz método×motor + gate
 │   └── manifest.go      ← manifiesto de superficie + allowlist + reconciliador
-├── recorder/            ← [pendiente] observer Quark → invocación por símbolo/motor
+├── recorder/            ← middleware+observer Quark → invocación por símbolo/motor + captura SQL
+│   ├── recorder.go
+│   ├── recorder_test.go ← e2e contra SQLite real
+│   └── infra_test.go    ← [tag superapp_infra] Docker: OTel→Jaeger + logger + caché Redis
 ├── engine/              ← [pendiente] runner de los 6 motores (DSN, Oracle docker-run, teardown)
 ├── exercise/            ← [pendiente] exercisers por área + oráculo de paridad + asserts
 ├── cmd/gen-apisurface/  ← [pendiente] genera apisurface.json con go/packages
@@ -81,7 +84,7 @@ matriz de `control/capability.go` lo codifica y el exerciser exige
 - [x] Blueprint + esqueleto (este drop)
 - [x] Núcleo de control: capability/report/manifest (stdlib)
 - [x] Dominio
-- [ ] recorder (necesita firmas de `WithQueryObserver`/`WithMiddleware`)
+- [x] recorder (`Middleware` símbolo→SQL por `context` + `QueryObserver` filas; `Mark`/`Note`/`Collect` → `control.Invoked`, `Statements` → snapshots; e2e SQLite verde)
 - [ ] cmd/gen-apisurface + apisurface.json + allowlist.json
 - [ ] engine matrix runner
 - [ ] exercisers + paridad + asserts

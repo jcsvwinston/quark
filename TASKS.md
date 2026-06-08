@@ -64,8 +64,8 @@
 > en el HANDOFF (headless, Oracle docker-run, capacidad desigual ≠ fallo, reglas
 > del repo, slices compilables).
 
-- [x] **S1** — esqueleto + núcleo de control (`control/{capability,report,manifest}.go`, stdlib) + `domain/models.go`. *Working tree, sin compilar en origen — el primer `go build ./examples/superapp/...` es de Code.*
-- [ ] **S2 · `recorder/`** — observer (`WithQueryObserver`/`WithMiddleware`) → `(símbolo, engine, sql, dur, rows)`; símbolo por `context`; alimenta `control.Invoked` + captura SQL. Lee firmas reales antes (`option.go`/`cache.go`/`errors.go`/root `For`/`ForTx`/`New`).
+- [x] **S1** — esqueleto + núcleo de control (`control/{capability,report,manifest}.go`, stdlib) + `domain/models.go`. *Compila con Go 1.25.7 (verificado al construir S2).*
+- [x] **S2 · `recorder/`** — `recorder.Recorder` implementa `quark.Middleware` (símbolo→SQL por `context`, duración, filas exactas en exec/query_row) **y** `quark.QueryObserver` (conteo de filas exacto incl. SELECT multi-fila + agregado por motor); alimenta `control.Invoked` vía `Mark`/`Note`/`Collect` y captura SQL parametrizado vía `Statements`. *Cerrado — `recorder/recorder.go` + e2e contra SQLite real (`recorder_test.go`): Create(INSERT…RETURNING→query_row)/List/First(LIMIT 1→query)/Delete(→exec) verdes, enriquecimiento de filas del observer verificado. `go build` + `go test ./examples/superapp/...` verdes.*
 - [ ] **S3 · `cmd/gen-apisurface/`** — `go/packages` sobre quark + subpaquetes públicos → `apisurface.json`; `allowlist.json` con diferidos v1.2 (F6-3b, scatter-gather, stampede cross-instancia).
 - [ ] **S4 · `engine/`** — runner SQLite + matriz; testcontainers PG/MySQL/MariaDB/MSSQL; Oracle docker-run (replica `ci.yml:138-172`); teardown + anti-leak (goroutines/`DBStats`).
 - [ ] **S5 · `exercise/`** — crud→builder→relations (confirmar m2m/poly vs `relations.mdx`)→tx→cache (query-count)→tenant→migrate (round-trip `Plan` vacío)→security (attack suite)→ha (replicas/sharding/deadlock)→observability (OTel in-mem). Asserts funcionales + oráculo de paridad.

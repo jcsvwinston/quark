@@ -37,22 +37,56 @@ Complementa, no sustituye, la suite del repo.
    el primer `go build ./examples/superapp/...` (Go 1.25.7) es tuyo — corrige
    firmas si algo no cuadra.
 
-## Hecho (slice 1 — working tree, sin compilar en origen)
+## Hecho
 
-- `README.md` (blueprint), `control/{capability,report,manifest}.go` (solo
-  stdlib, compila aislado), `domain/models.go` (tags verificados vs
-  `website/docs/guides/modeling.mdx`).
+- **S1** — `README.md` (blueprint), `control/{capability,report,manifest}.go`
+  (solo stdlib, compila aislado), `domain/models.go` (tags verificados vs
+  `website/docs/guides/modeling.mdx`). Compila con Go 1.25.7.
+- **S2 · `recorder/`** — `recorder.Recorder` engancha por las DOS vías de Quark:
+  `quark.Middleware` (tiene `context` → símbolo autoritativo por SQL, duración,
+  filas exactas en exec/query_row) y `quark.QueryObserver` (sin `context`, pero
+  da el conteo de filas exacto del SELECT multi-fila que el middleware no puede
+  contar sin consumir `*sql.Rows`). Cobertura por `Mark`/`Note` → `control.Invoked`
+  vía `Collect`/`ContributeTo`; captura SQL vía `Statements`; `Count`/`Reset` para
+  las aserciones de conteo. Asserts de compilación garantizan conformidad con la
+  API. e2e contra SQLite real verde (`recorder_test.go`).
+  - **Aprendido (vale para S5):** en SQLite `Create` es `INSERT … RETURNING`
+    (vía `query_row`, NO `exec`) y `First` es `SELECT … LIMIT 1` (vía `query`, NO
+    `query_row`). El `Op` del `Statement` es la VÍA de ejecución, no el verbo SQL;
+    los exercisers no deben asumir el verbo por el método. `Delete`/`Update` sí
+    van por `exec`. Otros dialectos divergirán — el `Op` por motor es justo lo que
+    los golden snapshots deben capturar.
+  - **Pendiente para S5 (anotado por `code-reviewer`):** el Recorder es
+    mutex-safe pero su test es secuencial. Cuando `exercise/ha.go` corra goroutines
+    concurrentes contra un mismo Recorder, añade un test `-race` con N goroutines y
+    verifica coherencia de `Count()`/`Statements()` al final.
+
+- **Verificación de infra (observabilidad + caché) — `recorder/infra_test.go`,
+  build tag `superapp_infra`.** Prueba Docker-backed que monta sobre un mismo
+  Client, A LA VEZ: el recorder (S2) + el `otel.Middleware` de Quark (spans →
+  Jaeger real vía OTLP/HTTP) + `WithLogger`+`WithSlowQueryThreshold(1ns)` (Quark
+  narra CADA query, SQL parametrizado **sin** valores de bind) + `WithCacheStore`
+  con `cache/redis` real. Verde contra `redis:7-alpine` + `jaegertracing/all-in-one`.
+  Asserts demostrados: **cache hit = 0 SQL** (2ª `List` idéntica no incrementa
+  `recorder.Count()`), **redacción** (el valor secreto del bind nunca aparece en
+  el log), y **export OTel** (4 spans `quark.query`/`quark.query_row` en Jaeger,
+  conteo idéntico a `recorder.Telemetry()`). Correr:
+  `go test -tags=superapp_infra -run TestObservabilityAndCacheInfra ./examples/superapp/recorder/`.
+  - **Aclaración de diseño (la pregunta del logger):** el Recorder NO usa el
+    logger de Quark, y es correcto que no lo haga. El logger/OTel/Redis son
+    superficie pública **bajo test** que el arnés EJERCE y ASERTA (mecanismos #4
+    caché y #8 observabilidad del README), no la captura del propio arnés: el
+    recorder es la vía máquina-legible (observer+middleware → cobertura + SQL)
+    para el gate, estrictamente más rica que el slog para ese fin. S5
+    `observability.go`/`cache.go` heredan este test como base; la pila real (2
+    middleware + observer + logger + redis) ya está probada compatible.
 
 ## Orden de trabajo
 
-**S2 · `recorder/`** — Lee primero las firmas reales: `option.go`
-(`WithQueryObserver`, `WithMiddleware`, tipo del observer), `cache.go`
-(`CacheStore`), el paquete raíz (`For`, `ForTx`, `New`, `Client.Tx`),
-`errors.go` (sentinels). Implementa un observer que registre `(símbolo, engine,
-sql, dur, rows)`; el símbolo se estampa por `context` en cada call-site del
-exerciser. Expón `control.Invoked` y la captura de SQL (para los snapshots).
+> Con S2 listo, `control.Invoked` ya tiene quién lo alimente (el recorder). El
+> siguiente paso es el DENOMINADOR (el manifiesto) — **S3**.
 
-**S3 · `cmd/gen-apisurface/`** — `go/packages`+`go/types` sobre `quark` y los
+**S3 · `cmd/gen-apisurface/`** (siguiente) — `go/packages`+`go/types` sobre `quark` y los
 subpaquetes públicos (`cache/memory`, `cache/redis`, `otel`, `migrate`,
 `quarkmigrate`, `quarktenant`) → `apisurface.json` (vía `go:generate`). Crea
 `allowlist.json` con los diferidos a v1.2 (claves exactas `Symbol.Key`): F6-3b
