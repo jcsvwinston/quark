@@ -43,10 +43,10 @@ examples/superapp/
 │   └── report.go        ← executive-report.md + metrics.json
 ├── cmd/
 │   ├── workload/        ← runnable: go run … → REPORTS/workload-<stamp>/{report,metrics,log}
-│   └── gen-apisurface/  ← [pendiente] genera apisurface.json con go/packages
+│   └── gen-apisurface/  ← go/packages+go/types → apisurface.json (determinista; go:generate)
 ├── REPORTS/             ← [generado, gitignored] artefactos de cada corrida del workload
-├── apisurface.json      ← [generado] denominador: todo lo que Quark expone
-├── allowlist.json       ← out-of-scope justificado (diferidos a v1.2)
+├── apisurface.json      ← [generado, versionado] denominador: 655 símbolos en 7 paquetes
+├── allowlist.json       ← out-of-scope justificado (Symbol.Key → motivo)
 └── main.go              ← [pendiente] wiring: corre exercisers, reconcilia, emite matriz, gatea
 ```
 
@@ -99,10 +99,15 @@ corre en proceso.
 
 ## Scope (honesto)
 
-"100% cobertura" = 100% de la superficie **in-scope**. Lo fuera de scope vive en
-`allowlist.json` con motivo: **F6-3b** (binder codegen UPDATE/partial/batch),
-**scatter-gather + shard-key-from-entity**, **stampede cross-instancia**
-(diferidos a v1.2 según `docs/ROADMAP.md`).
+"100% cobertura" = 100% de la superficie **in-scope** (655 símbolos hoy). Lo
+fuera de scope vive en `allowlist.json` con motivo (`Symbol.Key → razón`). Nota
+verificada al generar el manifiesto: los **diferidos a v1.2** (F6-3b binder
+codegen, scatter-gather + shard-key-from-entity, stampede cross-instancia) **no
+están en el denominador** —no son símbolos exportados hoy (el binder vive en
+internals de codegen; scatter-gather/stampede son features futuras sin símbolo)—
+así que **no necesitan entrada de allowlist**. La allowlist se reserva para
+símbolos que SÍ existen pero el exerciser no debe cubrir (p.ej. el alias
+deprecado `RowLevelSecurity`).
 
 Capacidad desigual por motor (no es fallo): `RowLevelSecurityNative` y
 `LISTEN/NOTIFY` son PG-only; el lock de migración no está en SQLite/Oracle. La
@@ -115,7 +120,7 @@ matriz de `control/capability.go` lo codifica y el exerciser exige
 - [x] Núcleo de control: capability/report/manifest (stdlib)
 - [x] Dominio
 - [x] recorder (`Middleware` símbolo→SQL por `context` + `QueryObserver` filas; `Mark`/`Note`/`Collect` → `control.Invoked`, `Statements` → snapshots; e2e SQLite verde)
-- [ ] cmd/gen-apisurface + apisurface.json + allowlist.json
+- [x] cmd/gen-apisurface + apisurface.json (655 símbolos, determinista) + allowlist.json (S3)
 - [ ] engine matrix runner
 - [ ] exercisers + paridad + asserts
 - [~] CLI `cmd/quark` (S9): exerciser SQLite verde (`cli/`, 20/21 comandos + `tenant provision` en allowlist; database-first `model generate --from-table` → compila); falta manifiesto enumerado de cobra + golden output + cross-engine

@@ -96,16 +96,22 @@ Complementa, no sustituye, la suite del repo.
 > Con S2 listo, `control.Invoked` ya tiene quién lo alimente (el recorder). El
 > siguiente paso es el DENOMINADOR (el manifiesto) — **S3**.
 
-**S3 · `cmd/gen-apisurface/`** (siguiente) — `go/packages`+`go/types` sobre `quark` y los
-subpaquetes públicos (`cache/memory`, `cache/redis`, `otel`, `migrate`,
-`quarkmigrate`, `quarktenant`) → `apisurface.json` (vía `go:generate`). Crea
-`allowlist.json` con los diferidos a v1.2 (claves exactas `Symbol.Key`): F6-3b
-(binder codegen UPDATE/partial/batch), scatter-gather + shard-key-from-entity,
-stampede cross-instancia.
+**S3 · `cmd/gen-apisurface/` — HECHO.** `go/packages`+`go/types` sobre `quark` y los
+6 subpaquetes públicos → `apisurface.json` (**655 símbolos**, determinista sin
+timestamp, vía `go:generate go run . -out=../../apisurface.json`). `allowlist.json`
+con `Symbol.Key→razón` (alias deprecado `RowLevelSecurity`). Cadena del gate
+verificada e2e (`LoadManifest`+`LoadAllowlist`+`Reconcile` → 654 MISSING − 1).
+- **Aprendido (para S5/S6):** los diferidos v1.2 (F6-3b binder, scatter-gather,
+  stampede x-instancia) **no son símbolos exportados** → no van en allowlist; la
+  allowlist es para símbolos que existen pero no se ejercen. El grueso del
+  denominador: `Query[T]` (65 métodos), `Client` (26), y los 6 dialectos (~21-26
+  c/u, ~135 métodos) — decidir en S5 si los métodos de dialecto se ejercen
+  transitivamente (vía cada query) o se allowlistean en bloque.
 
-**S4 · `engine/`** — Runner SQLite en proceso + matriz. Luego testcontainers
+**S4 · `engine/` (siguiente)** — Runner SQLite en proceso + matriz. Luego testcontainers
 (PG/MySQL/MariaDB/MSSQL) y Oracle docker-run. Teardown + chequeo de fugas
-(goroutines, `DBStats.InUse==0`).
+(goroutines, `DBStats.InUse==0`). Es el habilitador de S5 (los exercisers corren
+por motor) y de la matriz cross-engine del workload/CLI.
 
 **S5 · `exercise/`** — Empieza por `crud.go` como patrón canónico (asserts
 funcionales + hook de paridad), luego `builder.go` (CTE/window/setops/locking),

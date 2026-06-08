@@ -1,0 +1,5 @@
+{
+  "reasons": {
+    "github.com/jcsvwinston/quark.RowLevelSecurity": "alias deprecado de RowLevelSecurityClient (desde v1.0, se retira en v2.0); el exerciser cubre RowLevelSecurityClient en su lugar"
+  }
+}
