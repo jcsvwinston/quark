@@ -176,23 +176,45 @@
   estable (HeapAlloc 2.76 MB → 3.56 MB, sin leak). Los otros 5 motores: latencia
   plana/decreciente, `ok`.
 - **Reproducer**: `go test -tags=bugbash -run TestSoak ./phases/f14_soak/... -engines=mysql -soak-seconds=43200`
-- **Sin diagnóstico cerrado todavía**. Señales para el triage:
-  - **MariaDB (mismo driver Go `mysql`) NO degradó** con el mismo workload → no
-    apunta al code path driver/dialecto de Quark per se; más bien al servidor
-    MySQL 8 o al test.
-  - Hipótesis a descartar: (a) el JOIN del 10% de ops degradándose conforme
-    `soak_txns` crece a decenas de millones de filas (plan del optimizador de
-    MySQL 8 ≠ MariaDB 11); (b) estado server-side de MySQL 8 bajo carga sostenida
-    (buffer pool / temp tables / `performance_schema`); (c) throttling del
-    contenedor `mysql:8` a lo largo de 12h.
-  - **Precedente**: hallazgos previos del F14 soak resultaron ser artefactos de
-    entorno/harness (ORA-12516 churn de conexiones, SQLite BUSY), endurecidos en
-    #154 — no asumir que es bug de producto sin repro acotado.
-- **No bloquea v1.1.0** (ya taggeada; el soak RC es assurance, no gate).
-- **Follow-up**: repro acotado (`-soak-seconds=1800` mysql) para ver si degrada en
-  30 min (→ probable real/reproducible) o sólo a escala de 12h (→ crecimiento de
-  tabla/entorno). Si se confirma producto: perfilar el JOIN op + revisar pool /
-  prepared-stmt cache en el path mysql. Enrutar por `bugbash-reporter` al deepening.
+- **Hipótesis principal: scan sin índice + divergencia de motor (NO Quark).** El
+  schema del soak es `soak_txns{id PK, acct_id, amount}` **sin índice en
+  `acct_id`**; la op JOIN (10%) hace `WHERE acct_id = ? JOIN soak_accounts` →
+  **full scan de `soak_txns`**, tabla que crece sin límite (30% de las ops son
+  INSERTs; sólo 200 cuentas, pero las txns no paran) durante 12h. Ese coste sube
+  en todos los motores; lo que difiere es **cómo lo ejecuta cada servidor**:
+  `mysql:8` y `mariadb:11` llevan 8+ años divergiendo (optimizadores distintos,
+  InnoDB bifurcado: purge / change buffer / adaptive hash). A nivel de Quark el
+  path es idéntico (mismo driver Go, mismo SQL para este workload) → si fuera bug
+  de Quark, MariaDB habría caído igual.
+- **Pista que lo delata**: a las 4h, **MariaDB llevaba ~14.8M txns y MySQL ~5.4M**
+  (≈2.7× más ops en MariaDB, tabla **mayor**) y **MariaDB NO degradó**. Eso
+  descarta "a MySQL se le hizo grande la tabla" — si fuera volumen, MariaDB (tabla
+  más grande) sufriría más. Es **cómo cada motor planifica/ejecuta el scan**, no
+  el tamaño.
+- **Por qué la mediana salta 37µs→737µs**: el 60% son lecturas cacheadas (L2 en
+  memoria, µs); mientras la caché aguanta, la mediana (p50) es un cache-hit
+  (~38µs). Para que suba a 737µs, las ops que tocan DB (scans del JOIN + writes,
+  con la caché invalidada por el 30% de writes) se hicieron tan lentas en MySQL
+  que **se comieron el p50**. En MariaDB siguieron baratas → su p50 se quedó en
+  territorio cache-hit. **Salvedad**: este razonamiento asume hit-rate de caché
+  alto en la 1ª mitad; con TTL=1s y la invalidación del 30% de writes eso no es
+  obvio, así que la *magnitud* es estimada — el paso 3 del repro (latencia por
+  tipo de op) lo confirma o lo refuta.
+- **Precedente**: hallazgos previos del F14 soak resultaron ser artefactos de
+  entorno/harness (ORA-12516 churn de conexiones, SQLite BUSY), endurecidos en
+  #154 — no asumir producto sin repro acotado. **No bloquea v1.1.0** (ya taggeada;
+  el soak RC es assurance, no gate).
+- **Plan de repro (próxima sesión, vía `bugbash-reporter`), en orden**:
+  1. **Añadir índice en `soak_txns.acct_id`** y re-correr un soak corto
+     (`-soak-seconds=1800 -engines=mysql,mariadb`). Si la degradación desaparece →
+     confirmado: era el scan sin índice + el plan de MySQL 8.
+  2. **`EXPLAIN` del JOIN en mysql al inicio vs al final** (¿el plan empeora al
+     crecer la tabla / al refrescarse las stats?).
+  3. **Medir latencia por tipo de op** (cached-read / write / JOIN) en vez de
+     agregada, para confirmar que es el JOIN quien dispara el p50.
+  - Sólo si tras 1-3 la degradación persiste con índice y plan estable: tratarlo
+    como posible issue de producto (perfilar pool / prepared-stmt cache del path
+    mysql). Hasta entonces, lean = entorno/diseño-de-test.
 
 ### ~~BB-12 · Migraciones versionadas rotas en MSSQL (`CREATE TABLE IF NOT EXISTS`)~~
 
