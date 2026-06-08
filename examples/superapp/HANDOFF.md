@@ -81,6 +81,16 @@ Complementa, no sustituye, la suite del repo.
     `observability.go`/`cache.go` heredan este test como base; la pila real (2
     middleware + observer + logger + redis) ya está probada compatible.
 
+- **Workload de alto volumen + informe ejecutivo — `workload/` + `cmd/workload/`.**
+  `go run ./examples/superapp/cmd/workload [-scale -driver -dsn -out -slow-ms]`
+  siembra datos relacionados a volumen, ejerce queries/tx/cache, y el recorder
+  mide cada statement → `REPORTS/workload-<stamp>/{executive-report.md,metrics.json,quark.log}`.
+  SQLite ×10 = 310k filas / 0 errores / 8.1s / cache 100%. `REPORTS/` está
+  gitignored. Reusa `domain` + `recorder` + `cache/memory`. Cuando S4 (engine
+  runner) exista, este workload puede correr cross-engine reusando los DSN de la
+  matriz (ya acepta `-driver`/`-dsn`). Pendiente opcional: OTel real (hoy usa
+  slog + recorder; el OTLP→Jaeger ya está probado en `recorder/infra_test.go`).
+
 ## Orden de trabajo
 
 > Con S2 listo, `control.Invoked` ya tiene quién lo alimente (el recorder). El

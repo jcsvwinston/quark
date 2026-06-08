@@ -37,7 +37,13 @@ examples/superapp/
 ├── cli/                 ← cobertura del binario cmd/quark (manifiesto de comandos, no de símbolos)
 │   ├── doc.go
 │   └── cli_test.go      ← [tag superapp_cli] exerciser de los 21 comandos + database-first (SQLite)
-├── cmd/gen-apisurface/  ← [pendiente] genera apisurface.json con go/packages
+├── workload/            ← carga de alto volumen + informe ejecutivo (datos relacionados/tx/caché)
+│   ├── workload.go      ← seed masivo + mezcla de queries/tx/cache; métricas vía recorder
+│   └── report.go        ← executive-report.md + metrics.json
+├── cmd/
+│   ├── workload/        ← runnable: go run … → REPORTS/workload-<stamp>/{report,metrics,log}
+│   └── gen-apisurface/  ← [pendiente] genera apisurface.json con go/packages
+├── REPORTS/             ← [generado, gitignored] artefactos de cada corrida del workload
 ├── apisurface.json      ← [generado] denominador: todo lo que Quark expone
 ├── allowlist.json       ← out-of-scope justificado (diferidos a v1.2)
 └── main.go              ← [pendiente] wiring: corre exercisers, reconcilia, emite matriz, gatea
@@ -52,6 +58,25 @@ go run ./examples/superapp -engines=sqlite
 # todos (Oracle requiere el contenedor levantado + QUARK_TEST_ORACLE_DSN)
 go run ./examples/superapp -engines=all -gate=strict
 ```
+
+### Carga de alto volumen + informe ejecutivo (ya disponible)
+
+```bash
+# SQLite, ~93k filas relacionadas (escala ×3 por defecto)
+go run ./examples/superapp/cmd/workload
+
+# más volumen / otro motor
+go run ./examples/superapp/cmd/workload -scale=10
+go run ./examples/superapp/cmd/workload -driver=pgx -dsn="$QUARK_TEST_POSTGRES_DSN"
+```
+
+Siembra datos relacionados (accounts→projects→tasks, memberships con PK
+compuesta, attachments binarios), ejerce queries/paginación/preload, transacciones
+multi-entidad, updates/deletes y lecturas cacheadas; con el recorder midiendo cada
+statement. Emite a `REPORTS/workload-<stamp>/`: **`executive-report.md`** (volumen,
+perfil SQL, latencias p50/p95/p99, hit-rate de caché, throughput), `metrics.json`
+y `quark.log` (slog JSON: fases + slow-query WARN). Flags: `-scale`, `-driver`,
+`-dsn`, `-out`, `-slow-ms`.
 
 DSNs por env (igual que la suite del repo): `QUARK_TEST_POSTGRES_DSN`,
 `QUARK_TEST_MYSQL_DSN`, `QUARK_TEST_MSSQL_DSN`, `QUARK_TEST_ORACLE_DSN`. SQLite
@@ -93,6 +118,7 @@ matriz de `control/capability.go` lo codifica y el exerciser exige
 - [ ] engine matrix runner
 - [ ] exercisers + paridad + asserts
 - [~] CLI `cmd/quark` (S9): exerciser SQLite verde (`cli/`, 20/21 comandos + `tenant provision` en allowlist; database-first `model generate --from-table` → compila); falta manifiesto enumerado de cobra + golden output + cross-engine
+- [x] workload de alto volumen + informe ejecutivo (`workload/` + `cmd/workload/`): ~310k filas / 0 errores en SQLite ×10; report.md + metrics.json + quark.log
 - [ ] main + gate + CI
 
 > Nota: este andamiaje se escribió **sin compilador** en el entorno de la sesión;
