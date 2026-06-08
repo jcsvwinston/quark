@@ -18,6 +18,41 @@
 > Los fallos del bug-bash aparecen en la sección § "Bug-bash hallazgos"
 > de abajo (creada por `bugbash-reporter` al cerrar cada pasada).
 
+## Doc-sync — desfases auditoría pre-v1.2 (activos)
+
+> Auditoría docs↔código 2026-06-08. Los 4 desfases del encargo quedaron
+> reparados en esa sesión (cambios en working tree, **sin commit/PR aún**);
+> falta cerrar la verificación con el flujo del repo. **Foco para
+> `/next-session auto` (o `/next-session doc-sync`):** validar, pasar
+> `code-reviewer` + `docs-auditor`, commitear como `docs:` (release-please
+> genera el CHANGELOG) y resolver los ítems de propagación marcados abajo.
+> Ninguno es P0 — no gatean por la regla 4.
+
+### DS-1 · `installation.mdx` decía "v0.x" y negaba `cmd/quark` — REPARADO, verificar
+- Era `website/docs/guides/installation.mdx:28-32`: *"Quark is currently a v0.x library"* + *"a standalone `cmd/quark` binary is not part of the current module tree"*. Falso: estamos en v1.1.0 y `cmd/quark/main.go` es un CLI cobra completo. Se contradecía con `intro.mdx:9`.
+- Fix aplicado: reescrito a v1.1.0 + CLI presente (enlace a `guides/cli`).
+- Verificar: `cd website && npm run build` (config tiene `onBrokenLinks:'throw'`). Decidir si propagar al snapshot congelado `website/versioned_docs/version-1.1.0/guides/installation.mdx` (mismo texto stale) o dejar el histórico intacto.
+
+### DS-2 · `RELEASE_NOTES_v1.1.0.md` decía "Oracle no está en CI bloqueante" — REPARADO, verificar
+- Era `docs/RELEASE_NOTES_v1.1.0.md:53-58`. Contradecía `.github/workflows/ci.yml:101-124` (Oracle es entry de la matriz, sin `continue-on-error`; `ci.yml:97-100` "the matrix is now the canonical signal"), `README.md:23`, `intro.mdx:9` y `V1_GATE.md §A Item 1`.
+- Fix aplicado: bullet reescrito (Oracle en matriz bloqueante vía `docker run`; quirks DBMS_LOCK/ORA-12516 como límites de entorno) + §Tests "Oracle locally" → "Oracle via Docker, plus RC soak".
+- Verificar: que la página pública `website/docs/reference/release-notes.mdx` no arrastre el mismo claim.
+
+### DS-3 · `CLAUDE.md` apuntaba el deploy de docs a `quark-docs` (gh-pages) — REPARADO, verificar
+- Era `CLAUDE.md:25` (estructura) y `CLAUDE.md:69` (regla release paso 10). Realidad: `deploy.yml` usa `actions/deploy-pages` (Pages del repo `quark`); `docusaurus.config.ts` → `baseUrl:'/quark/'`, *"the legacy gh-pages branch is not used"*; el sitio se movió a `/quark/` en v0.3.0 (`docs/RELEASE_NOTES_v0.3.0.md:42`).
+- Fix aplicado: ambas referencias de `CLAUDE.md` corregidas.
+- Propagación pendiente (no editado, son docs congeladas): links stale a `quark-docs` en `docs/RELEASE_NOTES_v0.11.0.md:34`, `v0.12.0.md:44`, `v0.13.0.md:31`, `v0.4.0.md:52` (post-mudanza). La descripción del proyecto Claude (fuera del repo) aún enlaza `…/quark-docs/` → actualizar en Settings.
+
+### DS-4 · Versión de Go: docs "1.21+" vs `go.mod go 1.25.7` — REPARADO (docs→1.25), confirmar mínimo
+- Era `README.md:11` (badge) e `installation.mdx:16`. `ci.yml` usa `go-version-file: go.mod`.
+- Fix aplicado (decisión del owner: subir docs): badge y tabla → **Go 1.25+**.
+- Confirmar con compilador: ¿`1.25.7` es intencional o auto-bump? Si el código no usa features >1.21, valorar relajar `go.mod` a `go 1.25` (sin patch-pin) o al mínimo real y realinear docs. Recompilar `examples/*` + `go vet ./...`.
+
+### DS-5 · Stale adicional detectado al reparar (fuera del encargo; triar)
+- `CLAUDE.md:115` dice "8 ADRs" y lista 0001-0008, pero hay **19 ADRs** (0001-0019) en `docs/adr/`. Actualizar recuento/lista.
+- `CLAUDE.md:40` (regla 1): "los demás se levantan con testcontainers (… setup pendiente)" — la matriz por-motor ya es bloqueante en CI (F0-8 cerrado); "setup pendiente" es stale.
+- `CLAUDE.md:11` cita "BB-1…BB-13 cerrados" pero el bug-bash llegó a **BB-14** (cerrado 2026-06-08).
+
 ## Bug-bash hallazgos (activos)
 
 > Mantenido por `bugbash-reporter` tras cada pasada. F1 (smoke) y F2 (API

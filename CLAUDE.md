@@ -22,7 +22,7 @@ quark/
 ├── cache/, internal/, migrate/, otel/, cmd/quark/  ← subpaquetes
 ├── examples/                    ← ejemplos por motor (sqlite/postgres/mysql/mssql/oracle)
 ├── docs/                        ← markdown fuente (ROADMAP, ARCHITECTURE, ANALISIS_MADUREZ…)
-├── website/                     ← sitio Docusaurus que se publica a jcsvwinston.github.io/quark-docs
+├── website/                     ← sitio Docusaurus publicado en GitHub Pages del repo quark (jcsvwinston.github.io/quark/) vía .github/workflows/deploy.yml
 │   ├── docusaurus.config.ts
 │   ├── sidebars.ts
 │   ├── docs/                    ← contenido versionable del sitio
@@ -66,7 +66,7 @@ Cuando se taggea una nueva versión `vX.Y.Z`, **el mismo PR que bumpea la versi�
 7. Si la release tiene breaking changes, escribir/actualizar `docs/MIGRATION_vX.Y.Z.md` y enlazarlo desde el sidebar y el release.
 8. Escribir/actualizar `docs/RELEASE_NOTES_vX.Y.Z.md`. **No añadas marketing.** Lista features, fixes, breaking changes con referencia al issue/PR.
 9. Verificar que el badge de coverage en README refleja un reporte real (no un número hardcoded).
-10. Tras mergear, taggear `vX.Y.Z` y disparar la GitHub Action que publica `website/build/` al repo `quark-docs` (rama `gh-pages`).
+10. Tras mergear, taggear `vX.Y.Z`. La GitHub Action `.github/workflows/deploy.yml` (build de Docusaurus + `actions/deploy-pages`) publica `website/build/` a **GitHub Pages del repo `quark`** en https://jcsvwinston.github.io/quark/. No usa la rama `gh-pages` ni el repo `quark-docs` (el sitio se movió a este repo en v0.3.0).
 
 El comando `/release vX.Y.Z` (`.claude/commands/release.md`) automatiza el checklist y verifica cada paso. **Úsalo siempre.** No taggees a mano.
 

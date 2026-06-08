@@ -41,7 +41,7 @@ Docs (1.1.0 is the current version): <https://jcsvwinston.github.io/quark/docs/>
   relations, volume, multi-tenancy, migrations, cache, hooks/events/audit,
   codegen, sharding, replicas, resilience/concurrency, security, and a soak
   phase — exercised cross-engine (SQLite + PostgreSQL + MySQL + MariaDB + SQL
-  Server; Oracle locally). All bug-bash findings (BB-1…BB-13) are closed.
+  Server; Oracle via Docker, plus the 6-engine RC soak). All bug-bash findings (BB-1…BB-13) are closed.
 
 ## Documentation
 
@@ -51,11 +51,12 @@ Docs (1.1.0 is the current version): <https://jcsvwinston.github.io/quark/docs/>
 
 ## Known limitations
 
-- **Oracle is not in the blocking CI matrix** (container-image issue); it is
-  exercised manually/locally. The 12h RC soak ran clean on the four
-  production CI engines; Oracle soak surfaced only an environment-level
-  connection-pool limit (`ORA-12516` against the free-tier image), not an ORM
-  defect.
+- **Oracle runs in the blocking CI matrix via a plain `docker run` container**,
+  not testcontainers (whose lifecycle crashes the `gvenzl/oracle-free` image on
+  hosted runners — `ci.yml` boots it directly and hands the suite a DSN). Two
+  Oracle operational quirks remain, both environment-level rather than ORM
+  defects: the free-tier image needs `GRANT EXECUTE ON DBMS_LOCK` for the
+  migration lock (ADR-0018) and has a low connection-pool ceiling (`ORA-12516`).
 - Versioned-migration registry is still process-global (per-`Client` registry
   is deferred); `Sync` still does name-only column diff (use `PlanMigration`
   for structural diff).
