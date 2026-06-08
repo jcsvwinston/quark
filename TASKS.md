@@ -72,8 +72,9 @@
 - [ ] **S6 · `main.go`** — `-engines`/`-gate`; corre, `Reconcile`, `Render` matriz a `REPORTS/`, `Gate`.
 - [ ] **S7 · CI** — job 6-motores (patrón `integration`; Oracle docker-run); gate estricto bloqueante.
 - [ ] **S8 · cierre** — snapshots SQL golden, paridad completa, página pública si el sidebar lo pide.
+- [~] **S9 · `cli/` — cobertura del binario `cmd/quark`** — el CLI es superficie pública (v1.1.0) pero NO encaja en el gate de símbolos de S3 (`package main`; su contrato es la interfaz de COMANDOS cobra, no símbolos Go). Mecanismo paralelo: build del binario → exec por comando → assert exit-code + golden output, con manifiesto-de-comandos + allowlist. *Smoke entregado (`cli/cli_smoke_test.go`, tag `superapp_cli`): build de `cmd/quark` + help/inspect schema/validate (±)/migrate status+create contra SQLite, verde; el binario abre SQLite (drivers transitivos) y la config va por env `QUARK_DATABASE_DEFAULT_{DRIVER,DSN}`. **Pendiente para cerrar S9:** manifiesto de comandos enumerado de cobra (denominador), golden output por comando, cobertura de los diferidos (`gen/init/model/seed/sync/tenant`, logueados por el smoke), y matriz cross-engine.*
 
-**Hecho (gate):** `apisurface.json` reconciliado 100% in-scope en los 6 (o allowlist justificada), asserts verdes, matriz emitida a `REPORTS/`, CI verde.
+**Hecho (gate):** `apisurface.json` reconciliado 100% in-scope en los 6 (o allowlist justificada), asserts verdes, matriz emitida a `REPORTS/`, CI verde. **El gate del CLI (S9) es a nivel comando**, paralelo al de símbolos.
 
 ## Bug-bash hallazgos (activos)
 

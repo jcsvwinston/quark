@@ -34,6 +34,9 @@ examples/superapp/
 │   └── infra_test.go    ← [tag superapp_infra] Docker: OTel→Jaeger + logger + caché Redis
 ├── engine/              ← [pendiente] runner de los 6 motores (DSN, Oracle docker-run, teardown)
 ├── exercise/            ← [pendiente] exercisers por área + oráculo de paridad + asserts
+├── cli/                 ← cobertura del binario cmd/quark (manifiesto de comandos, no de símbolos)
+│   ├── doc.go
+│   └── cli_smoke_test.go ← [tag superapp_cli] build→exec→assert exit+salida (SQLite)
 ├── cmd/gen-apisurface/  ← [pendiente] genera apisurface.json con go/packages
 ├── apisurface.json      ← [generado] denominador: todo lo que Quark expone
 ├── allowlist.json       ← out-of-scope justificado (diferidos a v1.2)
@@ -66,6 +69,7 @@ corre en proceso.
 8. **Observabilidad** — `exercise/observability.go` (exporter OTel en memoria: counter + histogramas + redacción por defecto).
 9. **Fugas/teardown** — `engine/` (goroutines + `sql.DBStats.InUse==0`, contenedores sin residuo).
 10. **Reporte y gate** — `control/report.go` + `main.go` (matriz método×motor a REPORTS; falla si <100% in-scope o cualquier assert rojo).
+11. **CLI (`cmd/quark`)** — `cli/` (cobertura del binario por manifiesto de COMANDOS, no de símbolos: build→exec→assert exit-code + golden output; allowlist para comandos diferidos). El gate de símbolos de S3 no aplica al `package main`; el contrato público del CLI es su interfaz cobra.
 
 ## Scope (honesto)
 
@@ -88,6 +92,7 @@ matriz de `control/capability.go` lo codifica y el exerciser exige
 - [ ] cmd/gen-apisurface + apisurface.json + allowlist.json
 - [ ] engine matrix runner
 - [ ] exercisers + paridad + asserts
+- [~] CLI `cmd/quark` (S9): smoke SQLite verde (`cli/`); falta manifiesto de comandos + golden + cross-engine
 - [ ] main + gate + CI
 
 > Nota: este andamiaje se escribió **sin compilador** en el entorno de la sesión;

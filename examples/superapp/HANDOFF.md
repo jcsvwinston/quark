@@ -114,6 +114,25 @@ hit=0 SQL, N+1 acotado), `tenant.go`, `migrate.go` (round-trip
 **S8 · cierre** — snapshots SQL golden estables, paridad completa, página
 pública si el sidebar lo pide (regla 3: docs en el mismo PR).
 
+**S9 · `cli/` — cobertura del binario `cmd/quark` (smoke entregado).** El CLI es
+superficie pública (v1.1.0) y el charter dice "ejerce TODA la superficie", pero
+NO encaja en el gate de símbolos de S3: `cmd/quark` es `package main` y su
+contrato público es la interfaz de COMANDOS cobra, no símbolos Go. Mecanismo
+paralelo, a nivel comando:
+- **denominador** = árbol de comandos cobra (enumerable de `Use:`).
+- **numerador** = comandos ejercidos: build del binario → exec → assert.
+- **gate** = exit-code + golden output; allowlist para comandos diferidos.
+- **Hecho:** `cli/doc.go` (diseño) + `cli/cli_smoke_test.go` (tag `superapp_cli`):
+  build de `cmd/quark` una vez, y help / inspect schema / validate (camino OK y
+  el negativo exit≠0) / migrate status+create contra SQLite. Verde. Aprendido: el
+  binario abre SQLite/PG/MySQL por drivers transitivos (no hace falta tocar
+  `cmd/quark`); la config va por env `QUARK_DATABASE_DEFAULT_{DRIVER,DSN}` (viper
+  AutomaticEnv) o `.quark.yml`. El smoke loguea los comandos NO cubiertos.
+- **Pendiente S9 full:** manifiesto de comandos enumerado de cobra (no hardcoded),
+  golden output por comando, los diferidos (`gen/init/model/seed/sync/tenant`,
+  varios necesitan fixtures: modelos Go para `gen`, ficheros de migración para
+  `migrate up/down`), y la matriz cross-engine (reusa el runner de S4).
+
 ## Definición de hecho (gate)
 
 `apisurface.json` reconciliado al **100% in-scope** en los 6 motores (o
