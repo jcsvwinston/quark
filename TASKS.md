@@ -53,6 +53,31 @@
 - `CLAUDE.md:40` (regla 1): "los demás se levantan con testcontainers (… setup pendiente)" — la matriz por-motor ya es bloqueante en CI (F0-8 cerrado); "setup pendiente" es stale.
 - `CLAUDE.md:11` cita "BB-1…BB-13 cerrados" pero el bug-bash llegó a **BB-14** (cerrado 2026-06-08).
 
+## Superapp — arnés de aceptación cross-engine (en construcción)
+
+> Plan e instrucciones de continuación en [`examples/superapp/HANDOFF.md`](examples/superapp/HANDOFF.md)
+> (para Code) y blueprint en [`examples/superapp/README.md`](examples/superapp/README.md).
+> **Objetivo:** arnés headless que ejerce TODA la superficie pública de Quark en
+> los 6 motores y **demuestra** la cobertura por manifiesto (gate estricto +
+> allowlist). Versión permanente del bug-bash F1–F14 vía capa servicio→Quark.
+> **Foco válido para `/next-session auto`** — no es P0. Premisas no negociables
+> en el HANDOFF (headless, Oracle docker-run, capacidad desigual ≠ fallo, reglas
+> del repo, slices compilables).
+
+- [x] **S1** — esqueleto + núcleo de control (`control/{capability,report,manifest}.go`, stdlib) + `domain/models.go`. *Compila con Go 1.25.7 (verificado al construir S2).*
+- [x] **S2 · `recorder/`** — `recorder.Recorder` implementa `quark.Middleware` (símbolo→SQL por `context`, duración, filas exactas en exec/query_row) **y** `quark.QueryObserver` (conteo de filas exacto incl. SELECT multi-fila + agregado por motor); alimenta `control.Invoked` vía `Mark`/`Note`/`Collect` y captura SQL parametrizado vía `Statements`. *Cerrado — `recorder/recorder.go` + e2e contra SQLite real (`recorder_test.go`): Create(INSERT…RETURNING→query_row)/List/First(LIMIT 1→query)/Delete(→exec) verdes, enriquecimiento de filas del observer verificado. `go build` + `go test ./examples/superapp/...` verdes.*
+- [ ] **S3 · `cmd/gen-apisurface/`** — `go/packages` sobre quark + subpaquetes públicos → `apisurface.json`; `allowlist.json` con diferidos v1.2 (F6-3b, scatter-gather, stampede cross-instancia).
+- [ ] **S4 · `engine/`** — runner SQLite + matriz; testcontainers PG/MySQL/MariaDB/MSSQL; Oracle docker-run (replica `ci.yml:138-172`); teardown + anti-leak (goroutines/`DBStats`).
+- [ ] **S5 · `exercise/`** — crud→builder→relations (confirmar m2m/poly vs `relations.mdx`)→tx→cache (query-count)→tenant→migrate (round-trip `Plan` vacío)→security (attack suite)→ha (replicas/sharding/deadlock)→observability (OTel in-mem). Asserts funcionales + oráculo de paridad.
+- [ ] **S6 · `main.go`** — `-engines`/`-gate`; corre, `Reconcile`, `Render` matriz a `REPORTS/`, `Gate`.
+- [ ] **S7 · CI** — job 6-motores (patrón `integration`; Oracle docker-run); gate estricto bloqueante.
+- [ ] **S8 · cierre** — snapshots SQL golden, paridad completa, página pública si el sidebar lo pide.
+- [~] **S9 · `cli/` — cobertura del binario `cmd/quark`** — el CLI es superficie pública (v1.1.0) pero NO encaja en el gate de símbolos de S3 (`package main`; su contrato es la interfaz de COMANDOS cobra, no símbolos Go). Mecanismo paralelo: build del binario → exec por comando → assert exit-code + (golden) output, con inventario-de-comandos + allowlist + gate de reconciliación. *Exerciser entregado (`cli/cli_test.go`, tag `superapp_cli`): build de `cmd/quark` una vez (`TestMain`) y los **21 paths de comando** contra SQLite real — help/init/inspect{schema,table,sql}/validate(±)/sync/migrate{create,up,down,status,version}/seed{create,list,run}/tenant{list,migrate,migrate-all}/model generate{--fields,--from-table}/gen. **Flujo database-first ejercido y verificado:** `model generate --from-table` introspecciona la BD → emite modelos Go que **COMPILAN** (`go build`), y `gen --dry-run` corre el codegen forward sobre ellos. Gate de reconciliación: 20/21 cubiertos, `tenant provision` en allowlist (necesita CREATE DATABASE/SCHEMA + DSN admin; no SQLite). Config por env `QUARK_DATABASE_DEFAULT_{DRIVER,DSN}`; drivers transitivos. **Bug encontrado:** `model generate <Name> --fields` no hace `MkdirAll` del `--out` (a diferencia de `--from-table`) y sale 0 aunque falle → tarea spawn `task_657121df`. **Pendiente para cerrar S9 full:** inventario de comandos enumerado de cobra (no hardcoded), golden output por comando, y matriz cross-engine (reusa runner S4).*
+
+- [x] **Workload de alto volumen + informe ejecutivo** (`examples/superapp/workload/` + `cmd/workload/`) — runnable (`go run ./examples/superapp/cmd/workload [-scale -driver -dsn -out -slow-ms]`) que siembra datos relacionados a volumen (accounts→projects→tasks, memberships PK-compuesta, attachments binarios), ejerce queries/paginación/preload, transacciones multi-entidad, updates/deletes y lecturas cacheadas (caché in-memory), con el recorder midiendo cada statement. Emite a `REPORTS/workload-<stamp>/` (gitignored): `executive-report.md` (volumen, perfil SQL, latencias p50/p95/p99, cache hit-rate, throughput), `metrics.json` y `quark.log` (slog: fases + slow-query WARN). *Verificado: SQLite ×10 → 310,520 filas / 7,897 statements / 500 tx / 0 errores / 8.1s / cache hit 99.95% (1999/2000; 1er ciclo miss en frío). Para alto volumen se sube `MaxResults` y `SafeMigrations=false`. Las filas devueltas por `… RETURNING` (CreateBatch) se contabilizan aparte de las leídas por SELECT.*
+
+**Hecho (gate):** `apisurface.json` reconciliado 100% in-scope en los 6 (o allowlist justificada), asserts verdes, matriz emitida a `REPORTS/`, CI verde. **El gate del CLI (S9) es a nivel comando**, paralelo al de símbolos.
+
 ## Bug-bash hallazgos (activos)
 
 > Mantenido por `bugbash-reporter` tras cada pasada. F1 (smoke) y F2 (API

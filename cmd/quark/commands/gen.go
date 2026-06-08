@@ -28,6 +28,10 @@ Drive it from a model package with:
 This is the F6-1 scaffolding: the generated scanner/binder are inert stubs
 today; the typed fast path lands in later phases.`,
 	Args: cobra.ArbitraryArgs,
+	// main.go prints the returned error and exits 1; silence cobra's own
+	// error/usage dump so that single line is the only output (matches genCmd).
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		patterns := args
 		if len(patterns) == 0 {
