@@ -56,7 +56,7 @@ not repeatedly reflect over the same struct shape.
 | `pk:"true"` | CRUD, migrations | Marks the primary key or a composite-key member. |
 | `quark:"not_null"` | `Migrate` | Emits `NOT NULL`. |
 | `nullable:"false"` | `Migrate` | Also emits `NOT NULL`. |
-| `default:"value"` | `Migrate` | Emits `DEFAULT value` exactly as written. |
+| `default:"value"` | `Migrate` | Emits `DEFAULT value` as written; **bool fields are normalized per dialect** (see Default values below). |
 | `quark:"unique"` | `Migrate` | Emits `UNIQUE`. |
 | `quark:"version"` | `Update`, `UpdateFields`, `Tracked.Save` | Optimistic-locking column. SET `version = version + 1`, WHERE `version = <loaded>`. Conflict → `ErrStaleEntity`. |
 | `quark:"rename:old_col"` | `Sync` | Renames `old_col` to the current `db` column. |
@@ -247,12 +247,17 @@ or already be supported by the underlying driver, for `Create` / `Find`
 to work with it.
 
 `default` is inserted into DDL without quoting. Use the form your database
-expects:
+expects — with one exception: **boolean defaults are normalized per dialect.**
+A `bool` field whose default is `1`, `0`, `true`, or `false` (case-insensitive)
+is rewritten to the literal each engine accepts — `TRUE`/`FALSE` on PostgreSQL,
+`1`/`0` on the others — so the same tag is portable across all six engines.
+There is otherwise no bool-default literal that works everywhere: PostgreSQL's
+`BOOLEAN` rejects `1`, while MSSQL's `BIT` and Oracle's `NUMBER(1)` reject `TRUE`.
 
 ```go
 Status    string    `db:"status" default:"'draft'"`
 CreatedAt time.Time `db:"created_at" default:"CURRENT_TIMESTAMP"`
-Active    bool      `db:"active" default:"1"`
+Active    bool      `db:"active" default:"1"`   // portable: normalized to TRUE / 1 per dialect
 ```
 
 ### Timezones

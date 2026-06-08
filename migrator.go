@@ -67,9 +67,16 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 		if !isPK && field.NotNull {
 			colDef += " NOT NULL"
 		}
-		// Append DEFAULT value
+		// Append DEFAULT value. A boolean default is normalized to the literal
+		// the dialect accepts (TRUE/FALSE on PostgreSQL, 1/0 elsewhere) — no raw
+		// bool literal is portable across all six engines, so passing the tag
+		// through verbatim would break the migration on PG/MSSQL/Oracle.
 		if field.Default != "" {
-			colDef += " DEFAULT " + field.Default
+			def := field.Default
+			if migrate.IsBoolColumn(field.Type) {
+				def = migrate.NormalizeBoolDefault(c.dialect.Name(), def)
+			}
+			colDef += " DEFAULT " + def
 		}
 		// Append UNIQUE constraint
 		if field.Unique && !isPK {

@@ -85,6 +85,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testUpdateZeroValues(ctx, t, client)
 	})
 
+	t.Run("BoolDefault", func(t *testing.T) {
+		testBoolDefault(ctx, t, client)
+	})
+
 	t.Run("JoinOnSecurity", func(t *testing.T) {
 		testJoinOnSecurity(ctx, t, client)
 	})

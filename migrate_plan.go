@@ -182,6 +182,19 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 			}
 			if f.Default != "" {
 				s := f.Default
+				// Normalize boolean defaults to the dialect literal here too:
+				// the plan/ApplyPlan DDL path (applyCreateTable) emits
+				// col.Default verbatim, so an un-normalized "1" on a BOOLEAN
+				// column would fail on PostgreSQL just like the direct Migrate
+				// path. (Round-trip note: the desired default is now the
+				// dialect literal, e.g. "TRUE" on PG; a PlanMigration diff
+				// against an introspected catalog may still report a cosmetic
+				// default difference until defaultsEqual learns bool-literal
+				// equivalence — that's a diff refinement, not a migration
+				// failure, and is tracked separately.)
+				if migrate.IsBoolColumn(f.Type) {
+					s = migrate.NormalizeBoolDefault(c.dialect.Name(), s)
+				}
 				col.Default = &s
 			}
 			columns = append(columns, col)
