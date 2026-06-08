@@ -33,7 +33,11 @@ examples/superapp/
 │   ├── recorder.go
 │   ├── recorder_test.go ← e2e contra SQLite real
 │   └── infra_test.go    ← [tag superapp_infra] Docker: OTel→Jaeger + logger + caché Redis
-├── engine/              ← [pendiente] runner de los 6 motores (DSN, Oracle docker-run, teardown)
+├── engine/              ← runner por motor (docker-run, no testcontainers) + anti-fugas (goroutines/pool)
+│   ├── engine.go        ← Up/Down/waitReady (espeja bugbash); SUPERAPP_DSN_<ENGINE> override
+│   ├── leak.go          ← Run(): client por motor → fn → Close → verifica pool=0 + goroutines
+│   ├── engine_test.go   ← SQLite in-process, sin Docker
+│   └── engine_docker_test.go ← [tag superapp_engine] Postgres docker-run real
 ├── exercise/            ← [pendiente] exercisers por área + oráculo de paridad + asserts
 ├── cli/                 ← cobertura del binario cmd/quark (manifiesto de comandos, no de símbolos)
 │   ├── doc.go
@@ -121,7 +125,7 @@ matriz de `control/capability.go` lo codifica y el exerciser exige
 - [x] Dominio
 - [x] recorder (`Middleware` símbolo→SQL por `context` + `QueryObserver` filas; `Mark`/`Note`/`Collect` → `control.Invoked`, `Statements` → snapshots; e2e SQLite verde)
 - [x] cmd/gen-apisurface + apisurface.json (655 símbolos, determinista) + allowlist.json (S3)
-- [ ] engine matrix runner
+- [x] engine matrix runner (`engine/`, S4): docker-run + anti-fugas; verde en SQLite in-process + Postgres docker-run (pool 0/0, goroutines estables)
 - [ ] exercisers + paridad + asserts
 - [~] CLI `cmd/quark` (S9): exerciser SQLite verde (`cli/`, 20/21 comandos + `tenant provision` en allowlist; database-first `model generate --from-table` → compila); falta manifiesto enumerado de cobra + golden output + cross-engine
 - [x] workload de alto volumen + informe ejecutivo (`workload/` + `cmd/workload/`): ~310k filas / 0 errores en SQLite ×10; report.md + metrics.json + quark.log

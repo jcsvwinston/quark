@@ -27,7 +27,7 @@ type Account struct {
 	Email     string                    `db:"email" quark:"unique,not_null" validate:"required,email"`
 	Name      string                    `db:"name" quark:"not_null"`
 	Role      string                    `db:"role" default:"'member'" validate:"oneof=admin member viewer"`
-	Active    bool                      `db:"active" default:"1"`
+	Active    bool                      `db:"active"` // sin DEFAULT: no hay literal de bool portable a los 6 motores (PG exige true/false, MSSQL 1/0); el caller fija el valor
 	Bio       quark.Nullable[string]    `db:"bio,size=512"`
 	Settings  quark.JSON[AccountPrefs]  `db:"settings"`
 	Tags      quark.Array[string]       `db:"tags"`
@@ -78,7 +78,7 @@ type Task struct {
 	ID         int64                     `db:"id" pk:"true"`
 	ProjectID  int64                     `db:"project_id" quark:"not_null"`
 	Title      string                    `db:"title" quark:"not_null"`
-	Done       bool                      `db:"done" default:"0"`
+	Done       bool                      `db:"done"`        // sin DEFAULT (idem Account.Active); false es el zero-value de Go
 	AssigneeID *int64                    `db:"assignee_id"` // FK nullable (BB-5)
 	DueAt      quark.Nullable[time.Time] `db:"due_at"`
 	Priority   int                       `db:"priority" default:"0"`

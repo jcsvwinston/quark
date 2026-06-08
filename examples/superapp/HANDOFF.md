@@ -108,12 +108,34 @@ verificada e2e (`LoadManifest`+`LoadAllowlist`+`Reconcile` → 654 MISSING − 1
   c/u, ~135 métodos) — decidir en S5 si los métodos de dialecto se ejercen
   transitivamente (vía cada query) o se allowlistean en bloque.
 
-**S4 · `engine/` (siguiente)** — Runner SQLite en proceso + matriz. Luego testcontainers
-(PG/MySQL/MariaDB/MSSQL) y Oracle docker-run. Teardown + chequeo de fugas
-(goroutines, `DBStats.InUse==0`). Es el habilitador de S5 (los exercisers corren
-por motor) y de la matriz cross-engine del workload/CLI.
+**S4 · `engine/` — HECHO.** `Up`/`Down`/`waitReady` + `Run()` con anti-fugas.
+Decisión clave: **docker-run, NO testcontainers** (el comentario de
+`bugbash/tools/docker.go` lo justifica: el reaper de testcontainers tumba Oracle
+en runners; ADR-0018) — el HANDOFF original decía testcontainers para 4 motores,
+pero la experiencia probada del repo es docker-run para todos. Contenedores
+`superapp-*` en puertos propios (5435/3310/3311/1435/1523); override
+`SUPERAPP_DSN_<ENGINE>`. `leak.go` abre client por motor → corre fn → `Close` →
+verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
+(suite normal) y **Postgres docker-run real** (tag `superapp_engine`).
+- **Hallazgo (flageado `task_cb2e7d92`):** el dominio no migraba en PG —
+  `Account.Active bool default:"1"` → el migrator emite `DEFAULT 1` verbatim y PG
+  rechaza un bool con default int. No hay literal de bool portable a los 6.
+  Workaround: el dominio quitó el DEFAULT de los bools (Active/Done); el caller
+  fija el valor. El fix real del migrator (normalizar bool defaults por dialecto)
+  es la tarea spawn.
+- **Para S5:** `engine.Run(conns, tol, newClient, fn)` es el harness por-motor que
+  los exercisers reusan; `newClient` instala recorder+cache+logger; cada
+  `exercise/*.go` es un `fn`. La paridad cross-engine compara resultados de `fn`
+  entre los `conns`. Empieza ejerciendo SQLite+PG (los que ya validan), añade el
+  resto cuando levantes sus contenedores.
+  - **Tolerancia por-motor (anotado por `code-reviewer`):** `tol` es hoy un único
+    int para todos. Cuando S5 corra los 6 a la vez, un `tol` alto (p.ej. 4 para
+    pgx) esconde fugas de 1-3 goroutines en SQLite (sin driver). Cambiar a
+    `map[control.Engine]int` con fallback antes de correr la matriz completa.
+  - El check de fugas ya estabiliza (`Settle()`) ANTES de leer el pool, así que es
+    fiable aunque `fn` devuelva error con conexiones en cierre asíncrono.
 
-**S5 · `exercise/`** — Empieza por `crud.go` como patrón canónico (asserts
+**S5 · `exercise/` (siguiente)** — Empieza por `crud.go` como patrón canónico (asserts
 funcionales + hook de paridad), luego `builder.go` (CTE/window/setops/locking),
 `relations.go` (**confirma tags m2m/polimórfica vs
 `website/docs/guides/relations.mdx`**), `tx.go`, `cache.go` (query-count:
