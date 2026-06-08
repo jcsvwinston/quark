@@ -130,7 +130,7 @@ matriz de `control/capability.go` lo codifica y el exerciser exige
 - [x] recorder (`Middleware` símbolo→SQL por `context` + `QueryObserver` filas; `Mark`/`Note`/`Collect` → `control.Invoked`, `Statements` → snapshots; e2e SQLite verde)
 - [x] cmd/gen-apisurface + apisurface.json (655 símbolos, determinista) + allowlist.json (S3)
 - [x] engine matrix runner (`engine/`, S4): docker-run + anti-fugas; verde en SQLite in-process + Postgres docker-run (pool 0/0, goroutines estables)
-- [~] exercisers (S5, en curso): harness `suite.go` + `crud` + `tx` + `builder` verdes en SQLite y PG real (31 símbolos); faltan relations/cache/tenant/migrate/security/ha/observability + oráculo de paridad
+- [~] exercisers (S5, en curso): harness `suite.go` + `crud` + `tx` + `builder` + `relations` verdes en SQLite y PG real (32 símbolos); faltan cache/tenant/migrate/security/ha/observability + oráculo de paridad
 - [~] CLI `cmd/quark` (S9): exerciser SQLite verde (`cli/`, 20/21 comandos + `tenant provision` en allowlist; database-first `model generate --from-table` → compila); falta manifiesto enumerado de cobra + golden output + cross-engine
 - [x] workload de alto volumen + informe ejecutivo (`workload/` + `cmd/workload/`): ~310k filas / 0 errores en SQLite ×10; report.md + metrics.json + quark.log
 - [ ] main + gate + CI
