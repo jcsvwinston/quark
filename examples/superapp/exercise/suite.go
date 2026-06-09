@@ -31,8 +31,13 @@ func QM(method string) string { return qpkg + ".(*Query[T])." + method }
 // CM es la key de un método de *Client.
 func CM(method string) string { return qpkg + ".(*Client)." + method }
 
-// QF es la key de una func a nivel paquete (For, ForTx, New…).
+// QF es la key de una func/tipo/const a nivel paquete (For, ForTx, New,
+// NewTenantRouter, RowLevelSecurityClient…).
 func QF(name string) string { return qpkg + "." + name }
+
+// TRM es la key de un método de *TenantRouter: TRM("Tx") →
+// "github.com/jcsvwinston/quark.(*TenantRouter).Tx".
+func TRM(method string) string { return qpkg + ".(*TenantRouter)." + method }
 
 // Exerciser ejerce un área de la API: marca los símbolos que toca (rec.Mark /
 // rec.Note) y aserta el resultado funcional, devolviendo error al primer fallo.
