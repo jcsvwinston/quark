@@ -95,7 +95,10 @@
 > añadida 2026-05-31; halló y **cerró BB-8** (SchemaPerTenant write routing).
 > F7 — caché — añadida 2026-05-31; **sin hallazgos** (singleflight,
 > invalidación granular y caching de resultado vacío sólidos en los 6 motores
-> + Redis). F8 — hooks/eventos/audit — añadida 2026-05-31; halló y **cerró
+> + Redis). **Corrección 2026-06-09**: F7 no cubrió el table-tag-tras-INSERT
+> end-to-end en los motores RETURNING; el exerciser `cache` de la superapp (S5)
+> destapó **BB-15** ahí (`Create` no invalidaba el table tag en
+> PG/SQLite/MariaDB/MSSQL → caché stale; ver § Bug-bash hallazgos). F8 — hooks/eventos/audit — añadida 2026-05-31; halló y **cerró
 > BB-9** (savepoints no dialect-aware → tx anidadas rotas en MSSQL/Oracle).
 > F4 — volumen — añadida 2026-06-01; halló y **cerró BB-10** (`CreateBatch`
 > no chunkeaba → reventaba el techo de bind-params, fatal en MSSQL a unos
@@ -231,6 +234,39 @@
 > `failures.jsonl` de sqlite/oracle que listó `collect` eran **stale del run del
 > 2026-06-05** (el script no limpiaba `REPORTS/` entre runs; corregido en el mismo
 > PR que registra esto).
+
+### ~~BB-15 · `Create` no invalidaba el table tag en motores RETURNING/OUTPUT (caché L2 servía lecturas stale)~~
+
+**Resuelto** (2026-06-09, PR #175). **Bug real de Quark**, surfaced por el
+exerciser `cache` de la superapp (S5) — el primero que *asierta* la
+invalidación end-to-end en vez de imprimirla.
+
+- **Síntoma**: con caché L2 instalada (`WithCacheStore`), un `Create` de fila
+  única invalidaba sólo el row tag `<tabla>:<pk>`, **no el table tag** desnudo,
+  en los motores cuyo INSERT pasa por `executeQueryRow` en vez de `executeExec`:
+  **Postgres, SQLite, MariaDB** (RETURNING) y **MSSQL** (OUTPUT/SCOPE_IDENTITY).
+  Resultado: una lectura cacheada a nivel de tabla (un `List`, un query filtrado,
+  un agregado — auto-tagueados con el nombre de tabla) seguía sirviendo el
+  resultado **stale** tras un INSERT en **4 de los 6 motores**. MySQL y Oracle
+  insertan vía `executeExec` (que sí invalida el table tag) y no estaban
+  afectados. Los inserts con PK compuesta eran peores: sin row tag escalar, el
+  helper post-insert era no-op completo → invalidación cero.
+- **Contrato violado**: `website/docs/reference/api/caching.mdx` ya documentaba
+  el comportamiento correcto ("Successful write executions invalidate the model
+  table tag"; "`Create` … **also** invalidates the `<table>:<pk>` tag in the same
+  `InvalidateTags` call"). Era una divergencia doc↔código silenciosa; el fix
+  alinea el código a la doc (sin cambio de doc).
+- **Por qué se coló**: `cache_all_engines_test.go` sólo hacía `Printf` del
+  conteo post-`Create`, nunca lo aserteaba; y el bug-bash **F7 (caché) marcó el
+  área "sin hallazgos"** (cubrió singleflight + invalidación granular + caching
+  de resultado vacío, pero no el table-tag-tras-INSERT end-to-end en los motores
+  RETURNING). El exerciser de la superapp lo destapó al asertar.
+- **Fix**: `invalidateRowTag` → `invalidateInsert` (invalida table tag + row tag
+  en una sola llamada `InvalidateTags`, desde el paso post-insert de `saveAny`;
+  idempotente en los paths `executeExec`; PK compuesta sigue invalidando el table
+  tag). Regresión cross-engine `testCacheInsertInvalidation` en el SharedSuite +
+  unit tests de `invalidateInsert`. Validado local en SQLite y Postgres (ambos
+  motores RETURNING afectados); CI cubre los 6.
 
 ### ~~BB-14 · soak RC 12h: el JOIN sin índice full-scaneaba `soak_txns` (mysql cruzó el gate 4×)~~
 
