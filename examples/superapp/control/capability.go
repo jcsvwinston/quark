@@ -33,19 +33,43 @@ const (
 	FeatListenNotify  Feature = "listen_notify"  // listener inbound LISTEN/NOTIFY
 	FeatMigrationLock Feature = "migration_lock" // lock de migración distribuido
 	FeatSkipLocked    Feature = "skip_locked"    // SELECT ... FOR UPDATE SKIP LOCKED
+
+	// FeatSchemaPerTenant marca los motores con schemas reales dentro de una
+	// base (CREATE SCHEMA + qualificación schema.table). A diferencia de las
+	// features de arriba, Quark NO gatea esta estrategia con
+	// ErrUnsupportedFeature (el builder emite el SQL cualificado y es el motor
+	// quien lo acepta o no): en un motor no soportado el exerciser SALTA el
+	// path funcional (SkippedExpected), no aserta un error. Fuente:
+	// docs/playbooks/tenant.md ("sólo PG y MSSQL real, MySQL no tiene schemas").
+	FeatSchemaPerTenant Feature = "schema_per_tenant"
+
+	// FeatDBPerTenantProvision marca los motores donde el ARNÉS puede
+	// aprovisionar una base de datos por tenant (la estrategia DatabasePerTenant
+	// en sí es agnóstica del motor — sólo necesita DSNs distintos). SQLite usa
+	// ficheros; PG/MySQL/MariaDB/MSSQL un CREATE DATABASE vía admin. Oracle
+	// queda fuera: una "database" por tenant ahí es un PDB (operación
+	// administrativa pesada, fuera del alcance del harness) y el equivalente
+	// ligero (CREATE USER = schema) es la otra estrategia.
+	FeatDBPerTenantProvision Feature = "db_per_tenant_provision"
 )
 
-// supported mapea cada feature limitada a los motores que la soportan. Un motor
-// ausente para una feature DEBE devolver quark.ErrUnsupportedFeature; el
-// exerciser lo afirma y la celda se marca SkippedExpected (no Failed).
+// supported mapea cada feature limitada a los motores que la soportan. Para las
+// features gateadas por Quark (RLSNative, ListenNotify, MigrationLock,
+// SkipLocked) un motor ausente DEBE devolver quark.ErrUnsupportedFeature; el
+// exerciser lo afirma y la celda se marca SkippedExpected (no Failed). Para las
+// features de capacidad del motor/arnés (SchemaPerTenant, DBPerTenantProvision)
+// no hay error sentinel: el exerciser salta el path funcional.
 //
 // Fuentes: rls_native.go (PG-only), docs/ROADMAP.md F3-1 (lock: SQLite/Oracle
-// devuelven ErrUnsupportedFeature), ADR-0019 (LISTEN/NOTIFY PG-only).
+// devuelven ErrUnsupportedFeature), ADR-0019 (LISTEN/NOTIFY PG-only),
+// docs/playbooks/tenant.md (schemas: PG/MSSQL).
 var supported = map[Feature]map[Engine]bool{
-	FeatRLSNative:     {Postgres: true},
-	FeatListenNotify:  {Postgres: true},
-	FeatMigrationLock: {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true},
-	FeatSkipLocked:    {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true, Oracle: true},
+	FeatRLSNative:            {Postgres: true},
+	FeatListenNotify:         {Postgres: true},
+	FeatMigrationLock:        {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true},
+	FeatSkipLocked:           {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true, Oracle: true},
+	FeatSchemaPerTenant:      {Postgres: true, MSSQL: true},
+	FeatDBPerTenantProvision: {SQLite: true, Postgres: true, MySQL: true, MariaDB: true, MSSQL: true},
 }
 
 // Supports indica si el motor e soporta la feature f. Si devuelve false, el
