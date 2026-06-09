@@ -16,7 +16,7 @@ var txSeq int64
 // TX ejerce transacciones: un commit multi-entidad atómico (account + project) y
 // un rollback (la closure devuelve error → nada persiste). Marca Client.Tx y
 // ForTx.
-var TX = Exerciser{Name: "tx", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error {
+var TX = Exerciser{Name: "tx", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder, _ Conn) error {
 	rec.Note(CM("Tx"), QF("ForTx"))
 	n := atomic.AddInt64(&txSeq, 1)
 

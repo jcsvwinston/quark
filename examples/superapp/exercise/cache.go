@@ -28,7 +28,7 @@ import (
 //     no M: el delta de Count() queda en 2 (padres + IN), no en 1+M.
 var CACHE = Exerciser{Name: "cache", Fn: runCache}
 
-func runCache(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error {
+func runCache(ctx context.Context, client *quark.Client, rec *recorder.Recorder, _ Conn) error {
 	rec.Note(QF("For"), QM("Cache"), QM("Where"), QM("List"), QM("Preload"), QM("Create"))
 
 	// Semilla aislada (prefijo único, no choca con crud/relations).

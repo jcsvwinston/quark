@@ -16,7 +16,7 @@ var crudSeq int64
 
 // CRUD es el patrón canónico: Create → First → Count → Update → Delete(soft) →
 // List, con un assert funcional por paso y marcando cada símbolo invocado.
-var CRUD = Exerciser{Name: "crud", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error {
+var CRUD = Exerciser{Name: "crud", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder, _ Conn) error {
 	rec.Note(QF("For"))
 	email := fmt.Sprintf("crud%d@superapp.test", atomic.AddInt64(&crudSeq, 1))
 

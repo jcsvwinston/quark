@@ -39,11 +39,20 @@ func QF(name string) string { return qpkg + "." + name }
 // "github.com/jcsvwinston/quark.(*TenantRouter).Tx".
 func TRM(method string) string { return qpkg + ".(*TenantRouter)." + method }
 
+// Conn re-exporta engine.Conn para que los exercisers que necesitan el driver/DSN
+// del motor lo reciban sin importar el paquete engine. Lo usan los que abren
+// clientes propios además del client del harness: RLSNative deriva un rol
+// no-superuser y aplica CREATE POLICY; DBPerTenant abre un *Client por tenant. El
+// resto lo ignora (_ Conn).
+type Conn = engine.Conn
+
 // Exerciser ejerce un área de la API: marca los símbolos que toca (rec.Mark /
-// rec.Note) y aserta el resultado funcional, devolviendo error al primer fallo.
+// rec.Note) y aserta el resultado funcional, devolviendo error al primer fallo. El
+// Conn da acceso al driver/DSN del motor a los exercisers que abren sus propios
+// clientes; los que sólo usan el client del harness lo ignoran.
 type Exerciser struct {
 	Name string
-	Fn   func(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error
+	Fn   func(ctx context.Context, client *quark.Client, rec *recorder.Recorder, conn Conn) error
 }
 
 // EngineResult reúne el resultado por motor.
@@ -93,7 +102,7 @@ func Run(conns map[control.Engine]engine.Conn, tol int, exercisers []Exerciser) 
 			return fmt.Errorf("migrate: %w", err)
 		}
 		for _, ex := range exercisers {
-			if err := ex.Fn(ctx, client, rec); err != nil {
+			if err := ex.Fn(ctx, client, rec, conns[e]); err != nil {
 				return fmt.Errorf("%s: %w", ex.Name, err)
 			}
 		}

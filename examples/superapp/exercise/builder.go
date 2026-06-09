@@ -16,7 +16,7 @@ var builderSeq int64
 // deterministas: agregados, group/having, filtrado (WhereIn/Or), orden/paginado,
 // streaming (Iter/Cursor), Find. Setops/locking/CTE quedan para exercisers
 // posteriores (necesitan matriz de capacidad por motor).
-var BUILDER = Exerciser{Name: "builder", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error {
+var BUILDER = Exerciser{Name: "builder", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder, _ Conn) error {
 	rec.Note(QF("For"))
 	n := atomic.AddInt64(&builderSeq, 1)
 
