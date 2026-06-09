@@ -87,11 +87,16 @@ de tabla** — el comportamiento histórico, seguro como fallback.
 demanda usar un encoding estable de PK compuesta para tag granular.
 
 Cobertura: `cache_invalidation_test.go` (3 grupos:
-`TestRowTag_Format` con 5 cases, `TestInvalidateRowTag_*` con 4
+`TestRowTag_Format` con 5 cases, `TestInvalidateInsert_*` con 5
 cases, `TestExecuteExec_PassesRowTagAlongTable` con 3 cases verifica
 que la wire-up `executeExec(..., rowTag)` → `InvalidateTags(table,
 row)` funciona, sin tag → fallback al tag de tabla, tag vacío
-filtrado).
+filtrado). **BB-15 (PR #175)**: el helper post-insert `invalidateInsert`
+(antes `invalidateRowTag`) invalida el table tag **además** del row tag —
+los paths INSERT…RETURNING/OUTPUT (PG/SQLite/MariaDB/MSSQL) pasan por
+`executeQueryRow`, que no invalida nada, así que sin esto una lectura
+cacheada a nivel de tabla quedaba stale tras un `Create`. Regresión
+cross-engine en el SharedSuite: `testCacheInsertInvalidation`.
 
 ### ~~Cache key serializa args con `%v`~~ — cerrado (F4-4)
 

@@ -60,6 +60,11 @@ func testCacheInsertInvalidation(ctx context.Context, t *testing.T, baseClient *
 	}
 
 	// Warm a table-level cached query (auto-tagged with the table name).
+	// The 1-minute TTL is far longer than the few milliseconds this test
+	// runs, so neither the memory store's background eviction nor the
+	// default XFetch probabilistic early-refresh (β≈1.0) can turn the
+	// re-query into a recompute for the wrong reason — the only way it
+	// recomputes is the table-tag invalidation under test.
 	first, err := quark.For[cacheInvModel](ctx, client).
 		Where("tag", "=", "x").Cache(time.Minute).List()
 	if err != nil {
