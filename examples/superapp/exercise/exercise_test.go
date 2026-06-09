@@ -25,7 +25,7 @@ func TestExercisersSQLite(t *testing.T) {
 		_ = os.Remove(conns[control.SQLite].DSN)
 	}()
 
-	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE})
+	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT})
 	r := results[control.SQLite]
 	if r.Err != nil {
 		t.Fatalf("exerciser: %v", r.Err)
@@ -42,6 +42,8 @@ func TestExercisersSQLite(t *testing.T) {
 		QM("Sum"), QM("Avg"), QM("Min"), QM("Max"), QM("GroupBy"), QM("WhereIn"), QM("Or"),
 		QM("OrderBy"), QM("Offset"), QM("Distinct"), QM("Find"), QM("Iter"), QM("Cursor"), QM("Paginate"),
 		QM("Preload"), QM("Cache"),
+		QF("NewTenantRouter"), QF("DefaultTenantConfig"), QF("RowLevelSecurityClient"),
+		TRM("ResolveTenant"), TRM("GetClient"),
 	} {
 		if !seen[k] {
 			t.Errorf("cobertura: falta el símbolo %s", k)
