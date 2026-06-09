@@ -141,8 +141,12 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   `control.Invoked` (vía `recorder.Collect`). Reusa `engine.Run` (lifecycle +
   anti-fugas). Helpers de key `QM`/`CM`/`QF` que casan EXACTO con `apisurface.json`
   (`QM("Create")` → `…quark.(*Query[T]).Create`).
-- `crud.go`, `tx.go`, `builder.go`, `relations.go`, `security.go` entregados — verdes en SQLite **y PG real**
-  (`-tags=superapp_engine`, **34 símbolos**). **Para añadir un exerciser:** copia la
+- `crud.go`, `tx.go`, `builder.go`, `relations.go`, `security.go`, `cache.go` entregados — verdes en SQLite **y PG real**
+  (`-tags=superapp_engine`, **35 símbolos**). El `cache` exerciser **destapó BB-15** (un `Create`
+  no invalidaba el table tag en los motores RETURNING/OUTPUT → caché L2 stale; fix #175). El suite
+  instala `WithCacheStore(memory.New())` por motor y **cierra la goroutine `cleanupLoop` en `fn`
+  antes del leak-check** (`Client.Close()` no cierra el store; `WithOptions` descarta el recorder).
+  **Para añadir un exerciser:** copia la
   forma de `crud.go` — un `Exerciser{Name, Fn}` que `rec.Mark(ctx, QM("X"))` antes
   de cada llamada terminal (atribuye el SQL al símbolo) y `rec.Note(QM("Y"))` para
   builders/funcs sin SQL propio, con asserts funcionales que devuelven error.
@@ -153,8 +157,7 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   y no encodea int→bool (SQLite sí lo tolera). En general: escribe SQL portable y
   pasa los tipos exactos; el motor laxo (SQLite) esconde lo que el estricto (PG)
   rechaza. No son bugs de Quark — son del query mal escrito.
-- **Falta (orden sugerido):** `cache.go` (query-count: hit=0 SQL vía `rec.Count()`
-  diff, N+1 acotado — reusa el patrón de `recorder/infra_test.go`), `tenant.go`
+- **Falta (orden sugerido):** `tenant.go`
   (DBPerTenant/SchemaPerTenant/RLSClient; RLSNative PG-only vía la matriz de
   `control/capability.go`), `migrate.go` (round-trip `Migrate`→`PlanMigration`
   vacío, `Sync`, `Backfill`), `ha.go` (replicas/sharding/deadlock + el test
@@ -165,6 +168,10 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   paridad**: hoy los asserts son por-motor; falta comparar el RESULTADO de cada
   `fn` entre motores (normalizando Oracle `''`→NULL, MSSQL uuid, UTC) para
   detectar divergencias silenciosas.
+  - **Patrón cache reusable** (para `tenant`/`observability` que también necesitan
+    conteo de statements): diff de `rec.Count()` alrededor de la operación — un hit
+    no incrementa; una invalidación-por-mutación sí; un Preload de N hijos suma 1
+    (IN), no N. El store por-motor lo provee el suite, no el exerciser.
 - **Follow-up trivial:** endurecer el assert de identificador en
   `exercise/security.go` de `strings.Contains(...,"identifier")` a
   `errors.Is(err, quark.ErrInvalidIdentifier)` (ya posible tras el fix #173).

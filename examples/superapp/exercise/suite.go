@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	"github.com/jcsvwinston/quark"
+	"github.com/jcsvwinston/quark/cache/memory"
 	"github.com/jcsvwinston/quark/examples/superapp/control"
 	"github.com/jcsvwinston/quark/examples/superapp/domain"
 	"github.com/jcsvwinston/quark/examples/superapp/engine"
@@ -51,6 +52,11 @@ type EngineResult struct {
 // anti-fugas), instalando un recorder por motor y migrando el dominio primero.
 func Run(conns map[control.Engine]engine.Conn, tol int, exercisers []Exerciser) map[control.Engine]EngineResult {
 	recs := map[control.Engine]*recorder.Recorder{}
+	// Caché L2 in-memory por motor: el CacheExerciser la usa vía .Cache(); para
+	// el resto dormita (sólo .Cache() la consulta). memory.New() arranca una
+	// goroutine cleanupLoop que Client.Close() NO cierra — la cerramos en fn,
+	// antes de que engine.Run haga el leak-check.
+	stores := map[control.Engine]*memory.Store{}
 
 	newClient := func(c engine.Conn) (*quark.Client, error) {
 		rec := recorder.New(c.Engine)
@@ -58,10 +64,23 @@ func Run(conns map[control.Engine]engine.Conn, tol int, exercisers []Exerciser) 
 		l := quark.DefaultLimits()
 		l.SafeMigrations = false
 		l.MaxResults = 1_000_000
-		return quark.New(c.Driver, c.DSN, append(rec.Options(), quark.WithLimits(l))...)
+		store := memory.New()
+		client, err := quark.New(c.Driver, c.DSN, append(rec.Options(), quark.WithCacheStore(store), quark.WithLimits(l))...)
+		if err != nil {
+			store.Close() // no leak la goroutine si New falla
+			return nil, err
+		}
+		stores[c.Engine] = store
+		return client, nil
 	}
 
 	fn := func(e control.Engine, client *quark.Client) error {
+		// Cierra la goroutine de la caché antes de devolver el control a
+		// engine.Run (que hace Close(client) + leak-check). defer cubre también
+		// el path de error de un exerciser.
+		if s := stores[e]; s != nil {
+			defer s.Close()
+		}
 		ctx := context.Background()
 		rec := recs[e]
 		rec.Note(QF("New"), QF("DefaultLimits"), CM("Close")) // los usa el harness
