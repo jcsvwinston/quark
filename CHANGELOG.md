@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1](https://github.com/jcsvwinston/quark/compare/v1.1.0...v1.1.1) (2026-06-09)
+
+
+### Added
+
+* **superapp:** add cache exerciser (S5) — hit / invalidation / N+1 by query-count ([8707d67](https://github.com/jcsvwinston/quark/commit/8707d67baee93cd7599e85eac3cc32d5c6542b0e))
+* **superapp:** add cache exerciser (S5) — hit / invalidation / N+1 by query-count ([ea9ada3](https://github.com/jcsvwinston/quark/commit/ea9ada3002168143b6f339a1224c8da0eb49eb22))
+* **superapp:** add RLSNative tenant exerciser (S5) ([23ea358](https://github.com/jcsvwinston/quark/commit/23ea3585a0c7ab83f82b828e6be02a5f74a7c7f6))
+* **superapp:** add RLSNative tenant exerciser (S5) ([90ac143](https://github.com/jcsvwinston/quark/commit/90ac14319435e65c372a9ed1ee4b17dc7dfc227a))
+* **superapp:** add SchemaPerTenant + DatabasePerTenant exercisers (S5) ([6cca23c](https://github.com/jcsvwinston/quark/commit/6cca23c47abf881272b10a86f58e6df7a8cb2114))
+* **superapp:** add SchemaPerTenant + DatabasePerTenant exercisers (S5) ([854bd64](https://github.com/jcsvwinston/quark/commit/854bd643a1908caec59f528ec9f107e4cbfaf9d3))
+* **superapp:** add tenant exerciser (S5) — RowLevelSecurityClient isolation ([a454b97](https://github.com/jcsvwinston/quark/commit/a454b973bf5238eca98190e7019e3bba1f112199))
+* **superapp:** add tenant exerciser (S5) — RowLevelSecurityClient isolation ([bacfae2](https://github.com/jcsvwinston/quark/commit/bacfae25b0a48589c57995d2da8656902aac433d))
+
+
+### Fixed
+
+* **bugbash:** index the soak JOIN column — resolves BB-14 ([#164](https://github.com/jcsvwinston/quark/issues/164)) ([a8d2a0a](https://github.com/jcsvwinston/quark/commit/a8d2a0a79eb633966e951217cb1b5f67767a3d57))
+* **cache:** invalidate the table tag on Create across all insert paths ([574e82d](https://github.com/jcsvwinston/quark/commit/574e82d36f024214dab2b804189002be4639b79a))
+* **cache:** invalidate the table tag on Create across all insert paths ([984475e](https://github.com/jcsvwinston/quark/commit/984475e86e3ac90c265df5f747c38caa5fddf7c8))
+* **cli:** model generate creates --out and reports failures as non-zero exit ([002d996](https://github.com/jcsvwinston/quark/commit/002d996f5b1c9088a08a8134f0bc5f6769fd9d90))
+* **migrator:** normalize boolean column defaults per dialect ([1e497de](https://github.com/jcsvwinston/quark/commit/1e497dee35ebff0a0bd43b6c74e88e21a620263f))
+* **migrator:** normalize boolean column defaults per dialect ([03170a4](https://github.com/jcsvwinston/quark/commit/03170a4b89279b4038c61e85049ea9e1b84405b4))
+* **security:** make ErrInvalidIdentifier reachable via errors.Is ([31cf4df](https://github.com/jcsvwinston/quark/commit/31cf4dfe2582e784663e71603620ad6016b7d22f))
+* **security:** make ErrInvalidIdentifier reachable via errors.Is ([10a91a7](https://github.com/jcsvwinston/quark/commit/10a91a763f37b84d069722cf6a9c166c6fd0a3cc))
+
+
+### Documentation
+
+* **cache:** refresh playbook test names + note XFetch assumption in regression ([add1c71](https://github.com/jcsvwinston/quark/commit/add1c719bee7878c7aeb8988e8f1dc27b474f56d))
+* close doc-sync tail (DS-5 + DS-1/DS-2/DS-4 propagation) ([0d3ae31](https://github.com/jcsvwinston/quark/commit/0d3ae3171e5bf500e84fbf637d11a7132d119816))
+* close doc-sync tail (DS-5 + DS-1/DS-2/DS-4 propagation) ([4fbb1d2](https://github.com/jcsvwinston/quark/commit/4fbb1d20432f26fb7f776d14af6a9b605e8e3a1d))
+* **contributing:** note version-neutral harness scopes ([7735fdf](https://github.com/jcsvwinston/quark/commit/7735fdfa04da2ffc3588685bbc0184f3e6e287ff))
+* corregir desfases docs↔código detectados en auditoría pre-v1.2 ([0d2d6d5](https://github.com/jcsvwinston/quark/commit/0d2d6d54bdaa363f50a49e01618de662abac75f2))
+* pasada de saneamiento post-v1.1.0 ([#159](https://github.com/jcsvwinston/quark/issues/159)) ([13e2915](https://github.com/jcsvwinston/quark/commit/13e2915993ce4deea35db1cf5bc949fb8294bfba))
+* **tasks:** enrich BB-14 with root-cause hypothesis + repro plan ([#162](https://github.com/jcsvwinston/quark/issues/162)) ([32f960b](https://github.com/jcsvwinston/quark/commit/32f960ba873bff25bd262b3209fc0eaf3a12df60))
+* **tasks:** record BB-15 (Create table-tag cache invalidation) + F7 correction ([8f37825](https://github.com/jcsvwinston/quark/commit/8f37825d300d281051666fe827c4eda67990b5d4))
+* **tasks:** register superapp harness + Code handoff ([9545da1](https://github.com/jcsvwinston/quark/commit/9545da18086d27da062f84219d545e7fa039e06a))
+* type convention is the effective version-neutral barrier, not exclude-paths ([c2bd3d9](https://github.com/jcsvwinston/quark/commit/c2bd3d906737009e6cdd090f3047572730cfb533))
+* type convention is the effective version-neutral barrier, not exclude-paths ([2a4656c](https://github.com/jcsvwinston/quark/commit/2a4656c38a36b47ea84f2c865c7a72b019a25d93))
+* v1.1.0 post-release — fix release-notes site URL + TASKS release marker ([#157](https://github.com/jcsvwinston/quark/issues/157)) ([c04dde4](https://github.com/jcsvwinston/quark/commit/c04dde43594e832303f144632ce4c2d97a8a1ed9))
+* v1.1.0 release DoD — Docusaurus version snapshot + release notes ([#155](https://github.com/jcsvwinston/quark/issues/155)) ([4fb4547](https://github.com/jcsvwinston/quark/commit/4fb4547c14137abd9ccb084036aaf6ec54318974))
+* **website:** add v1.1.0 to the public release-notes page ([#158](https://github.com/jcsvwinston/quark/issues/158)) ([44c9eab](https://github.com/jcsvwinston/quark/commit/44c9eab02b4c1f709d6422b193b76f210053579c))
+
+
+### Tests
+
+* **examples:** builder exerciser (superapp S5, part 2) ([9afff40](https://github.com/jcsvwinston/quark/commit/9afff40b1ab1fc2ed01fc0f8f9f415f8d840e4e0))
+* **examples:** builder exerciser (superapp S5, part 2) ([74e08e7](https://github.com/jcsvwinston/quark/commit/74e08e7ddd487eda1ae4e558dfa9150f65296a40))
+* **examples:** CLI (cmd/quark) coverage smoke for the harness (superapp S9) ([e7b6c4e](https://github.com/jcsvwinston/quark/commit/e7b6c4e1c8800983f915187e03caca4585e7a068))
+* **examples:** engine matrix runner + leak check (superapp S4) ([f969de0](https://github.com/jcsvwinston/quark/commit/f969de0f42305ee11f777103136b75be10f8f6b9))
+* **examples:** engine matrix runner + leak check (superapp S4) ([d75f236](https://github.com/jcsvwinston/quark/commit/d75f2367feae53f21700dc72d5d3eaa9026dd75c))
+* **examples:** exercise harness + crud/tx exercisers (superapp S5, part 1) ([4cd1d2a](https://github.com/jcsvwinston/quark/commit/4cd1d2a64405c34143edfe4761a3d2ba856caab6))
+* **examples:** exercise harness + crud/tx exercisers (superapp S5, part 1) ([739fdab](https://github.com/jcsvwinston/quark/commit/739fdabacc099f205166555fcf853d22807f9468))
+* **examples:** full CLI exerciser, incl. database-first model gen (superapp S9) ([57dda22](https://github.com/jcsvwinston/quark/commit/57dda225c23d233a2df9ebe2996c73d3505e1e0d))
+* **examples:** gen-apisurface — coverage denominator (superapp S3) ([fc110d4](https://github.com/jcsvwinston/quark/commit/fc110d4e99a80c2165fbb5ba3523b434d5334e5e))
+* **examples:** gen-apisurface — generate the coverage denominator (superapp S3) ([a570c6b](https://github.com/jcsvwinston/quark/commit/a570c6b05cd5c8dcc52e02d884af88fe40353513))
+* **examples:** high-volume workload + executive report for the superapp ([a0c5fba](https://github.com/jcsvwinston/quark/commit/a0c5fbaaea983dcf8c717bde58d577414234cde0))
+* **examples:** recorder package for the acceptance harness (superapp S2) ([a9729f1](https://github.com/jcsvwinston/quark/commit/a9729f114d1f138f3b6a09be5a4b0c452be3cdc2))
+* **examples:** relations exerciser + restore portable bool defaults (superapp S5, part 3) ([4e612a4](https://github.com/jcsvwinston/quark/commit/4e612a48f58c7f135e020717efee379a144f8754))
+* **examples:** relations exerciser + restore portable bool defaults (superapp S5, part 3) ([5ede622](https://github.com/jcsvwinston/quark/commit/5ede622060037b976e4f5f47d86c0d34420bf8a1))
+* **examples:** security exerciser — SQLGuard attack suite (superapp S5, part 4) ([008c3cc](https://github.com/jcsvwinston/quark/commit/008c3ccff742fe9e81492753ad35fd51a80ff543))
+* **examples:** security exerciser — SQLGuard attack suite (superapp S5, part 4) ([46f9230](https://github.com/jcsvwinston/quark/commit/46f9230a46734dcc0b395550a06c9e45fe2fc915))
+
+
+### Chore
+
+* **release:** exclude harness paths from version calc + retarget v1.1.1 ([21278cb](https://github.com/jcsvwinston/quark/commit/21278cbbd62a6ef85011b7ba5f83ff704f1617f1))
+
 ## [1.1.0](https://github.com/jcsvwinston/quark/compare/v1.0.0...v1.1.0) (2026-06-06)
 
 
