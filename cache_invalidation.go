@@ -44,20 +44,29 @@ func (q *BaseQuery) rowTag(pkValue any) string {
 	return q.table + ":" + fmt.Sprintf("%v", pkValue)
 }
 
-// invalidateRowTag emits a single InvalidateTags call carrying just the
-// row tag for an already-executed mutation whose PK was only revealed
-// after the exec (typically Create, where the database assigns the
-// auto-increment ID via RETURNING / LastInsertId). The table tag has
-// already been invalidated by executeExec; this call adds the row tag.
+// invalidateInsert emits the cache invalidation for a just-completed INSERT
+// whose PK was only revealed after the exec (Create assigns the auto-increment
+// ID via RETURNING / LastInsertId). It invalidates the TABLE tag — so cached
+// table-level reads (lists, filtered queries, aggregates) see the new row —
+// plus the new row's row tag when the PK is a usable scalar.
 //
-// No-op when there's no cache, no table, or no usable rowTag.
-func (q *BaseQuery) invalidateRowTag(ctx context.Context, pkValue any) {
-	if q.client == nil || q.client.cacheStore == nil {
+// Why the table tag is invalidated HERE and not only in executeExec: the
+// RETURNING / OUTPUT insert paths (Postgres, SQLite, MariaDB, MSSQL) run the
+// INSERT through executeQueryRow, which invalidates nothing. Only the
+// LastInsertId paths (MySQL, Oracle) go through executeExec, which already
+// invalidates the table tag. Doing it here makes invalidation uniform across
+// every dialect; re-invalidating the table tag on the executeExec paths is an
+// idempotent no-op.
+//
+// No-op only when there's no cache or no table. A composite-PK insert (no
+// scalar rowTag) still invalidates the table tag.
+func (q *BaseQuery) invalidateInsert(ctx context.Context, pkValue any) {
+	if q.client == nil || q.client.cacheStore == nil || q.table == "" {
 		return
 	}
-	tag := q.rowTag(pkValue)
-	if tag == "" {
+	if tag := q.rowTag(pkValue); tag != "" {
+		_ = q.client.cacheStore.InvalidateTags(ctx, q.table, tag)
 		return
 	}
-	_ = q.client.cacheStore.InvalidateTags(ctx, tag)
+	_ = q.client.cacheStore.InvalidateTags(ctx, q.table)
 }
