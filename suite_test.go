@@ -93,6 +93,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testBoolDefault(ctx, t, client)
 	})
 
+	t.Run("CacheInsertInvalidation", func(t *testing.T) {
+		testCacheInsertInvalidation(ctx, t, client)
+	})
+
 	t.Run("JoinOnSecurity", func(t *testing.T) {
 		testJoinOnSecurity(ctx, t, client)
 	})

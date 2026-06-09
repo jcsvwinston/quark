@@ -95,51 +95,62 @@ func TestRowTag_Format(t *testing.T) {
 	}
 }
 
-// TestInvalidateRowTag_EmitsRowTagOnly checks the helper that runs
-// post-Create: it emits the row tag alone, leaving the table tag for
-// executeExec's own InvalidateTags call.
-func TestInvalidateRowTag_EmitsRowTagOnly(t *testing.T) {
+// TestInvalidateInsert_EmitsTableAndRowTag checks the helper that runs
+// post-Create: it invalidates BOTH the table tag (so cached table-level
+// reads see the new row across the RETURNING/OUTPUT dialects, which run
+// through executeQueryRow and invalidate nothing) AND the new row's row tag.
+func TestInvalidateInsert_EmitsTableAndRowTag(t *testing.T) {
 	rec := newInvalidationRecorder()
 	c := &Client{cacheStore: rec}
 	q := &BaseQuery{client: c, table: "users"}
 
-	q.invalidateRowTag(context.Background(), int64(7))
+	q.invalidateInsert(context.Background(), int64(7))
 
 	if rec.callCount() != 1 {
 		t.Fatalf("want 1 InvalidateTags call, got %d", rec.callCount())
 	}
 	got := rec.lastTags()
-	if len(got) != 1 || got[0] != "users:7" {
-		t.Errorf("tags = %v, want [users:7]", got)
+	if len(got) != 2 || got[0] != "users" || got[1] != "users:7" {
+		t.Errorf("tags = %v, want [users users:7]", got)
 	}
 }
 
-// TestInvalidateRowTag_NoopWhenTagEmpty: no client / no table / nil pk /
-// composite PK all skip the InvalidateTags call entirely.
-func TestInvalidateRowTag_NoopWhenTagEmpty(t *testing.T) {
+// TestInvalidateInsert_TableTagWhenNoRowTag: a composite-PK or nil-PK insert
+// has no scalar row tag, but the TABLE tag must still be invalidated (a
+// composite-PK insert via RETURNING would otherwise leave table-level cached
+// reads stale). Only a missing cache / missing table skips entirely.
+func TestInvalidateInsert_TableTagWhenNoRowTag(t *testing.T) {
 	rec := newInvalidationRecorder()
 	c := &Client{cacheStore: rec}
 
-	t.Run("composite pk skips", func(t *testing.T) {
+	t.Run("composite pk still invalidates table tag", func(t *testing.T) {
 		rec.calls = nil
 		q := &BaseQuery{client: c, table: "users", meta: &ModelMeta{HasCompositePK: true}}
-		q.invalidateRowTag(context.Background(), []any{1, 2})
-		if rec.callCount() != 0 {
-			t.Errorf("composite PK should skip; got %v", rec.calls)
+		q.invalidateInsert(context.Background(), []any{1, 2})
+		if got := rec.lastTags(); rec.callCount() != 1 || len(got) != 1 || got[0] != "users" {
+			t.Errorf("composite PK should invalidate the table tag alone; got %v", rec.calls)
 		}
 	})
-	t.Run("nil pk skips", func(t *testing.T) {
+	t.Run("nil pk still invalidates table tag", func(t *testing.T) {
 		rec.calls = nil
 		q := &BaseQuery{client: c, table: "users"}
-		q.invalidateRowTag(context.Background(), nil)
-		if rec.callCount() != 0 {
-			t.Errorf("nil pk should skip; got %v", rec.calls)
+		q.invalidateInsert(context.Background(), nil)
+		if got := rec.lastTags(); rec.callCount() != 1 || len(got) != 1 || got[0] != "users" {
+			t.Errorf("nil pk should invalidate the table tag alone; got %v", rec.calls)
 		}
 	})
 	t.Run("no cache store skips", func(t *testing.T) {
 		q := &BaseQuery{client: &Client{}, table: "users"}
-		q.invalidateRowTag(context.Background(), int64(1))
+		q.invalidateInsert(context.Background(), int64(1))
 		// Doesn't panic, doesn't emit anywhere.
+	})
+	t.Run("no table skips", func(t *testing.T) {
+		rec.calls = nil
+		q := &BaseQuery{client: c, table: ""}
+		q.invalidateInsert(context.Background(), int64(1))
+		if rec.callCount() != 0 {
+			t.Errorf("empty table should skip; got %v", rec.calls)
+		}
 	})
 }
 

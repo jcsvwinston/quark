@@ -420,14 +420,14 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		}
 	}
 
-	// 3. F4-6: for Inserts the PK was only revealed AFTER executeExec
-	// populated it (RETURNING, LastInsertId or scanReturning above).
-	// The historical executeExec already invalidated the table tag,
-	// but not the row tag — emit it now so cached Find-by-PK entries
-	// for this fresh row's id (e.g. a follow-up read in the same
-	// transaction) hit a cold cache rather than a stale one.
+	// 3. For Inserts the PK was only revealed AFTER the exec populated it
+	// (RETURNING, LastInsertId or scanReturning above). Invalidate the table
+	// tag AND the fresh row tag here: the RETURNING / OUTPUT paths run through
+	// executeQueryRow, which (unlike executeExec) invalidates nothing, so a
+	// table-level cached read would otherwise go stale on Postgres / SQLite /
+	// MariaDB / MSSQL. Idempotent on the executeExec (MySQL / Oracle) paths.
 	if !actualUpdate && rowsAffected > 0 {
-		dq.invalidateRowTag(ctx, getPKValue(elem, meta.PK))
+		dq.invalidateInsert(ctx, getPKValue(elem, meta.PK))
 	}
 
 	// 4. Save HasOne/HasMany associations AFTER
