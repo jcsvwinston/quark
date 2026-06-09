@@ -8,7 +8,7 @@ ORM en Go pensado para el ecosistema **Nucleus** (framework MVC/REST), pero tamb
 
 ## Estado real del proyecto (importante)
 
-Quark está en **v1.1.0**, sobre la línea estable `v1.x` (SemVer). v1.0.0 (tag 2026-05-27) fue el primer release estable — gateado contra el checklist cualitativo de [`docs/V1_GATE.md`](docs/V1_GATE.md) (cerrado 5/5), no contra una métrica de rendimiento — y v1.1.0 (tag 2026-06-06) es un release de **hardening**: salida del bug-bash post-v1.0 (fases F0–F14 completas, BB-1…BB-13 cerrados). `v1.x` mantiene compatibilidad de API; los breaking changes van a `v2.x` con guía de migración.
+Quark está en **v1.1.0**, sobre la línea estable `v1.x` (SemVer). v1.0.0 (tag 2026-05-27) fue el primer release estable — gateado contra el checklist cualitativo de [`docs/V1_GATE.md`](docs/V1_GATE.md) (cerrado 5/5), no contra una métrica de rendimiento — y v1.1.0 (tag 2026-06-06) es un release de **hardening**: salida del bug-bash post-v1.0 (fases F0–F14 completas, BB-1…BB-15 cerrados). `v1.x` mantiene compatibilidad de API; los breaking changes van a `v2.x` con guía de migración.
 
 Para el estado **vivo** trabaja desde [`TASKS.md`](TASKS.md) (backlog táctico + hallazgos de bug-bash) y [`docs/ROADMAP.md`](docs/ROADMAP.md) (fases entregadas + deferrals a v1.2+). [`docs/ANALISIS_MADUREZ.md`](docs/ANALISIS_MADUREZ.md) es la referencia narrativa de fondo (análisis crítico, comparativa, el plan de fases que llevó a v1.0); léela en onboarding, no para consulta operativa.
 
@@ -37,7 +37,7 @@ quark/
 
 ## Reglas duras
 
-1. **Tests deben pasar en los 6 motores antes de mergear a `main`.** SQLite corre por defecto; los demás se levantan con testcontainers (ver `TASKS.md` para el setup pendiente). Si tu cambio toca SQL, abre PR sólo cuando los 6 estén verdes.
+1. **Tests deben pasar en los 6 motores antes de mergear a `main`.** SQLite corre in-process; PostgreSQL/MySQL/MariaDB/MSSQL vía testcontainers y Oracle vía `docker run` (`gvenzl/oracle-free`; ver `.github/workflows/ci.yml`). La matriz por-motor ya es bloqueante en CI (F0-8 cerrado). Si tu cambio toca SQL, abre PR sólo cuando los 6 estén verdes.
 2. **Conventional Commits obligatorio** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `BREAKING CHANGE:` en el footer). Ya está documentado en `CONTRIBUTING.md`. No mezcles tipos en un commit.
 3. **API y docs se modifican en el mismo PR.** Cualquier cambio que añada/cambie/elimine API pública requiere su entrada en `website/docs/` y en `CHANGELOG.md` dentro del mismo PR. PRs sin esto los rechaza el `code-reviewer` (`.claude/agents/code-reviewer.md`).
 4. **Bugs P0 antes que features.** Mientras `TASKS.md` tenga items en `## Bugs P0`, no se trabaja en Fase 1+ del plan. Cualquier feature con un P0 abierto se rechaza.
@@ -87,7 +87,7 @@ Si encuentras una sesión abriendo PRs que tocan API pero no `website/docs/`, re
 # Tests
 go test -count=1 -short ./...                         # SQLite + unit tests
 QUARK_TEST_POSTGRES_DSN=... go test -count=1 ./...    # añade postgres
-make test-all                                         # los 6 motores con testcontainers (cuando esté setup)
+make test-all                                         # los 6 motores (testcontainers; Oracle vía docker run)
 
 # Docs site (durante desarrollo)
 cd website && npm install && npm run start            # localhost:3000
@@ -112,17 +112,28 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 
 ### Capa 1 — Decisiones arquitectónicas (`docs/adr/`)
 
-8 ADRs en formato MADR. Léelos cuando necesites **justificar o cuestionar** un patrón de Quark. Una decisión aceptada no se reabre sin un ADR sucesor.
+19 ADRs en formato MADR. Léelos cuando necesites **justificar o cuestionar** un patrón de Quark. Una decisión aceptada no se reabre sin un ADR sucesor.
 
-- [`docs/adr/README.md`](docs/adr/README.md) — índice.
+- [`docs/adr/README.md`](docs/adr/README.md) — índice (19 ADRs, 0001-0019).
 - ADR 0001 — Active Record, no Data Mapper.
-- ADR 0002 — Reflect default, codegen opt-in (entregado en Fase 6, v1.0.0).
-- ADR 0003 — RLS hoy es WHERE-injection cliente; motor real en Fase 5.
+- ADR 0002 — Reflect default, codegen opt-in (Fase 6, v1.0.0; gate ≥3× retirado por 0017).
+- ADR 0003 — RLS cliente vía WHERE-injection (superseded por 0012).
 - ADR 0004 — Caché L2 integrada (no plugin externo).
 - ADR 0005 — Sólo relacional (no NoSQL).
 - ADR 0006 — Sin GraphQL ni admin auto-generado.
 - ADR 0007 — Multi-tenancy: tres estrategias coexisten.
 - ADR 0008 — Documentación se modifica en el mismo PR que la API.
+- ADR 0009 — Migrations: diff por introspección, no sólo ficheros versionados.
+- ADR 0010 — Timezones por columna (Client default + tag, wire UTC).
+- ADR 0011 — Cache stampede protection vía wrapper sobre CacheStore.
+- ADR 0012 — RLS real Postgres (`SET LOCAL app.tenant_id` + `CREATE POLICY`).
+- ADR 0013 — Hooks transaccionales + EventBus síncrono en commit-phase.
+- ADR 0014 — Codegen coexiste vía registry tipado con fallback a reflect.
+- ADR 0015 — Read replicas: routing en ejecución, opt-in, sticky read-your-writes.
+- ADR 0016 — Sharding: ShardRouter por shard key, sin cross-shard implícito.
+- ADR 0017 — Codegen es type-safety, no velocidad; retira el gate ≥3× p99.
+- ADR 0018 — Lock de migración Oracle vía `DBMS_LOCK` (session-scoped).
+- ADR 0019 — Inbound LISTEN/NOTIFY (PG) sobre `*sql.Conn` dedicada del pool.
 
 ### Capa 2 — Playbooks operativos por módulo (`docs/playbooks/`)
 

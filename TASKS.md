@@ -18,40 +18,39 @@
 > Los fallos del bug-bash aparecen en la sección § "Bug-bash hallazgos"
 > de abajo (creada por `bugbash-reporter` al cerrar cada pasada).
 
-## Doc-sync — desfases auditoría pre-v1.2 (activos)
+## Doc-sync — desfases auditoría pre-v1.2 (~~cerrado 2026-06-09~~)
 
-> Auditoría docs↔código 2026-06-08. Los 4 desfases del encargo quedaron
-> reparados en esa sesión (cambios en working tree, **sin commit/PR aún**);
-> falta cerrar la verificación con el flujo del repo. **Foco para
-> `/next-session auto` (o `/next-session doc-sync`):** validar, pasar
-> `code-reviewer` + `docs-auditor`, commitear como `docs:` (release-please
-> genera el CHANGELOG) y resolver los ítems de propagación marcados abajo.
-> Ninguno es P0 — no gatean por la regla 4.
+> Auditoría docs↔código 2026-06-08 → cierre del tail 2026-06-09. DS-1…DS-4
+> (los 4 desfases del encargo) se commitearon en `0d2d6d54` ("docs: corregir
+> desfases docs↔código detectados en auditoría pre-v1.2"). El **tail**
+> (DS-5 + propagaciones DS-1/DS-2/DS-4) se cerró en la sesión `/next-session
+> auto` del 2026-06-09 — `docs-auditor --scope=full` re-verificó DS-1…DS-4 OK,
+> confirmó DS-5, y levantó DS-6 (ver abajo). Ninguno fue P0.
 
-### DS-1 · `installation.mdx` decía "v0.x" y negaba `cmd/quark` — REPARADO, verificar
-- Era `website/docs/guides/installation.mdx:28-32`: *"Quark is currently a v0.x library"* + *"a standalone `cmd/quark` binary is not part of the current module tree"*. Falso: estamos en v1.1.0 y `cmd/quark/main.go` es un CLI cobra completo. Se contradecía con `intro.mdx:9`.
-- Fix aplicado: reescrito a v1.1.0 + CLI presente (enlace a `guides/cli`).
-- Verificar: `cd website && npm run build` (config tiene `onBrokenLinks:'throw'`). Decidir si propagar al snapshot congelado `website/versioned_docs/version-1.1.0/guides/installation.mdx` (mismo texto stale) o dejar el histórico intacto.
+### ~~DS-1 · `installation.mdx` decía "v0.x" y negaba `cmd/quark`~~ — CERRADO
+- Era `website/docs/guides/installation.mdx:28-32`: *"Quark is currently a v0.x library"* + *"a standalone `cmd/quark` binary is not part of the current module tree"*.
+- Fix `0d2d6d54`: reescrito a v1.1.0 + CLI presente (enlace a `guides/cli`).
+- **Propagación cerrada 2026-06-09:** el snapshot congelado `website/versioned_docs/version-1.1.0/guides/installation.mdx:28-32` + `:16` (Go 1.21+) arrastraba el mismo texto stale — corregido (es la doc user-facing de la versión estable actual, no historia). `cd website && npm run build` verde (`[SUCCESS]`, `onBrokenLinks:'throw'`; el link `cli` resuelve).
 
-### DS-2 · `RELEASE_NOTES_v1.1.0.md` decía "Oracle no está en CI bloqueante" — REPARADO, verificar
-- Era `docs/RELEASE_NOTES_v1.1.0.md:53-58`. Contradecía `.github/workflows/ci.yml:101-124` (Oracle es entry de la matriz, sin `continue-on-error`; `ci.yml:97-100` "the matrix is now the canonical signal"), `README.md:23`, `intro.mdx:9` y `V1_GATE.md §A Item 1`.
-- Fix aplicado: bullet reescrito (Oracle en matriz bloqueante vía `docker run`; quirks DBMS_LOCK/ORA-12516 como límites de entorno) + §Tests "Oracle locally" → "Oracle via Docker, plus RC soak".
-- Verificar: que la página pública `website/docs/reference/release-notes.mdx` no arrastre el mismo claim.
+### ~~DS-2 · `RELEASE_NOTES_v1.1.0.md` decía "Oracle no está en CI bloqueante"~~ — CERRADO
+- Fix `0d2d6d54`: bullet reescrito (Oracle en matriz bloqueante vía `docker run`).
+- **Propagación verificada 2026-06-09:** la página pública `website/docs/reference/release-notes.mdx` **no** arrastra el claim (dice "four production CI engines", sin "testcontainers" ni negar Oracle en CI). Sin cambios necesarios.
 
-### DS-3 · `CLAUDE.md` apuntaba el deploy de docs a `quark-docs` (gh-pages) — REPARADO, verificar
-- Era `CLAUDE.md:25` (estructura) y `CLAUDE.md:69` (regla release paso 10). Realidad: `deploy.yml` usa `actions/deploy-pages` (Pages del repo `quark`); `docusaurus.config.ts` → `baseUrl:'/quark/'`, *"the legacy gh-pages branch is not used"*; el sitio se movió a `/quark/` en v0.3.0 (`docs/RELEASE_NOTES_v0.3.0.md:42`).
-- Fix aplicado: ambas referencias de `CLAUDE.md` corregidas.
-- Propagación pendiente (no editado, son docs congeladas): links stale a `quark-docs` en `docs/RELEASE_NOTES_v0.11.0.md:34`, `v0.12.0.md:44`, `v0.13.0.md:31`, `v0.4.0.md:52` (post-mudanza). La descripción del proyecto Claude (fuera del repo) aún enlaza `…/quark-docs/` → actualizar en Settings.
+### ~~DS-3 · `CLAUDE.md` apuntaba el deploy de docs a `quark-docs` (gh-pages)~~ — CERRADO
+- Fix `0d2d6d54`: ambas referencias de `CLAUDE.md` (`:25`, `:69`) corregidas a `actions/deploy-pages` (Pages del repo `quark`).
+- **Decisión propagación 2026-06-09:** links stale a `quark-docs` en `docs/RELEASE_NOTES_v0.{4,11,12,13}.0.md` + `docs/adr/0008` → **se dejan** (son docs congeladas/históricas; las URLs son registro fiel de lo publicado entonces). La descripción del proyecto Claude (fuera del repo) sigue enlazando `…/quark-docs/` → **acción manual del owner en Settings** (no editable desde el repo).
 
-### DS-4 · Versión de Go: docs "1.21+" vs `go.mod go 1.25.7` — REPARADO (docs→1.25), confirmar mínimo
-- Era `README.md:11` (badge) e `installation.mdx:16`. `ci.yml` usa `go-version-file: go.mod`.
-- Fix aplicado (decisión del owner: subir docs): badge y tabla → **Go 1.25+**.
-- Confirmar con compilador: ¿`1.25.7` es intencional o auto-bump? Si el código no usa features >1.21, valorar relajar `go.mod` a `go 1.25` (sin patch-pin) o al mínimo real y realinear docs. Recompilar `examples/*` + `go vet ./...`.
+### ~~DS-4 · Versión de Go: docs "1.21+" vs `go.mod go 1.25.7`~~ — CERRADO
+- Fix `0d2d6d54` (decisión del owner: subir docs): `README.md` badge + `installation.mdx` tabla → **Go 1.25+**. Snapshot congelado realineado 2026-06-09 (ver DS-1).
+- **Confirmación 2026-06-09:** `go.mod go 1.25.7` se mantiene tal cual; relajar el patch-pin es un cambio de `go.mod` (fuera de un PR `docs:`) y no aporta — los docs ya están alineados a "Go 1.25+". Si en v1.2 se quiere relajar a `go 1.25`, abrir item de código aparte.
 
-### DS-5 · Stale adicional detectado al reparar (fuera del encargo; triar)
-- `CLAUDE.md:115` dice "8 ADRs" y lista 0001-0008, pero hay **19 ADRs** (0001-0019) en `docs/adr/`. Actualizar recuento/lista.
-- `CLAUDE.md:40` (regla 1): "los demás se levantan con testcontainers (… setup pendiente)" — la matriz por-motor ya es bloqueante en CI (F0-8 cerrado); "setup pendiente" es stale.
-- `CLAUDE.md:11` cita "BB-1…BB-13 cerrados" pero el bug-bash llegó a **BB-14** (cerrado 2026-06-08).
+### ~~DS-5 · Stale adicional detectado al reparar~~ — CERRADO 2026-06-09
+- `CLAUDE.md:115` "8 ADRs" (lista 0001-0008) → **19 ADRs** (0001-0019), lista completa con supersesiones (0003→0012, gate de 0002→0017).
+- `CLAUDE.md:40` (regla 1) "testcontainers (… setup pendiente)" → reescrito: SQLite in-process / PG·MySQL·MariaDB·MSSQL testcontainers / Oracle `docker run`; matriz bloqueante (F0-8 cerrado). También `CLAUDE.md:90` (`make test-all`).
+- `CLAUDE.md:11` "BB-1…BB-13 cerrados" → **BB-1…BB-15** (BB-14 cerrado 2026-06-08; BB-15 cerrado vía PR #175).
+
+### DS-6 · NEW — `roadmap.mdx` "four testcontainers CI engines" (levantado por docs-auditor 2026-06-09) — BAJO, abierto
+- `website/docs/reference/roadmap.mdx:202` describe el soak RC como "four testcontainers CI engines (PG/MySQL/MariaDB/MSSQL); SQLite y Oracle hit harness-level limits". La frase es sobre el **soak**, no sobre membresía de CI, y la sección "Known current boundaries" justo debajo (`:210`) ya aclara que Oracle está en la matriz bloqueante — así que un lector no queda engañado. **No se editó:** el conteo de motores del soak entra en conflicto entre fuentes (MEMORY `reference_f14-rc-soak-pending` dice soak 6-motores, mysql FAIL) y editar un claim factual de test-run sin ground-truth es arriesgado. Decisión del owner: aclarar redacción o dejar. Mismo aplica al snapshot congelado `versioned_docs/version-1.1.0/reference/roadmap.mdx:188` y a release-notes.mdx:28 ("four production CI engines").
 
 ## Superapp — arnés de aceptación cross-engine (en construcción)
 
