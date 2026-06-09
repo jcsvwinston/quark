@@ -79,6 +79,9 @@ func runCache(ctx context.Context, client *quark.Client, rec *recorder.Recorder)
 	}
 
 	// --- 3) N+1 acotado: M padres con Preload → 2 statements, no 1+M ---
+	// Las siembras van con `ctx` desnudo (sin rec.Mark) a propósito: ocurren
+	// ANTES de `beforePreload`, fuera de la ventana de medición del delta, así
+	// que no contaminan el conteo aunque queden en rec.Count() acumulado.
 	const parents, kids = 3, 2
 	for i := 0; i < parents; i++ {
 		o := &domain.Account{Email: fmt.Sprintf("cache-n1-%d@superapp.test", i), Name: "cache-n1", Role: "member", Active: true}
@@ -109,7 +112,10 @@ func runCache(ctx context.Context, client *quark.Client, rec *recorder.Recorder)
 	if loaded != parents*kids {
 		return fmt.Errorf("N+1: el Preload trajo %d proyectos, esperaba %d", loaded, parents*kids)
 	}
-	if delta > 3 { // 2 esperado (padres + IN hijos); >3 delata 1-query-por-padre
+	// 2 esperado (padres + 1 IN para todos los hijos). Umbral en >3 (no ==2)
+	// con +1 de holgura por si algún motor emite un statement de sesión extra
+	// (p.ej. un SET); >3 ya delata el patrón 1-query-por-padre (1+M = 4 con M=3).
+	if delta > 3 {
 		return fmt.Errorf("N+1: Preload de %d padres disparó %d statements (esperaba 2: padres + IN hijos)", parents, delta)
 	}
 	return nil
