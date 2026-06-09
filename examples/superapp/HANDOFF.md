@@ -142,7 +142,7 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   anti-fugas). Helpers de key `QM`/`CM`/`QF` que casan EXACTO con `apisurface.json`
   (`QM("Create")` → `…quark.(*Query[T]).Create`).
 - `crud.go`, `tx.go`, `builder.go`, `relations.go`, `security.go` entregados — verdes en SQLite **y PG real**
-  (`-tags=superapp_engine`, 31 símbolos). **Para añadir un exerciser:** copia la
+  (`-tags=superapp_engine`, **34 símbolos**). **Para añadir un exerciser:** copia la
   forma de `crud.go` — un `Exerciser{Name, Fn}` que `rec.Mark(ctx, QM("X"))` antes
   de cada llamada terminal (atribuye el SQL al símbolo) y `rec.Note(QM("Y"))` para
   builders/funcs sin SQL propio, con asserts funcionales que devuelven error.
@@ -153,16 +153,21 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   y no encodea int→bool (SQLite sí lo tolera). En general: escribe SQL portable y
   pasa los tipos exactos; el motor laxo (SQLite) esconde lo que el estricto (PG)
   rechaza. No son bugs de Quark — son del query mal escrito.
-- **Falta:** `builder.go` (CTE/window/setops/locking — `Join`/`GroupBy`/`Having`/
-  `ForUpdate`/`Distinct`/setops, hay ~65 métodos de `Query[T]` que cubrir),
-  `relations.go` (**confirma tags m2m/polimórfica vs
-  `website/docs/guides/relations.mdx`** antes), `cache.go` (query-count: hit=0 SQL
-  vía `rec.Count()` diff, N+1 acotado), `tenant.go`, `migrate.go` (round-trip
-  `Migrate`→`PlanMigration` vacío), `security.go` (attack suite SQLGuard →
-  `ErrInvalid*`), `ha.go` (replicas/sharding/deadlock), `observability.go` (OTel
-  in-memory). Y el **oráculo de paridad**: hoy los asserts son por-motor; falta
-  comparar el RESULTADO de cada `fn` entre motores (normalizando Oracle `''`→NULL,
-  MSSQL uuid, UTC) para detectar divergencias silenciosas.
+- **Falta (orden sugerido):** `cache.go` (query-count: hit=0 SQL vía `rec.Count()`
+  diff, N+1 acotado — reusa el patrón de `recorder/infra_test.go`), `tenant.go`
+  (DBPerTenant/SchemaPerTenant/RLSClient; RLSNative PG-only vía la matriz de
+  `control/capability.go`), `migrate.go` (round-trip `Migrate`→`PlanMigration`
+  vacío, `Sync`, `Backfill`), `ha.go` (replicas/sharding/deadlock + el test
+  `-race` de concurrencia del recorder que `code-reviewer` pidió en S2),
+  `observability.go` (OTel in-memory + redacción), y **builder-avanzado**
+  (CTE/window/setops/locking — los ~30 métodos de `Query[T]` que el builder común
+  no cubre; varios necesitan la matriz de capacidad por motor). Y el **oráculo de
+  paridad**: hoy los asserts son por-motor; falta comparar el RESULTADO de cada
+  `fn` entre motores (normalizando Oracle `''`→NULL, MSSQL uuid, UTC) para
+  detectar divergencias silenciosas.
+- **Follow-up trivial:** endurecer el assert de identificador en
+  `exercise/security.go` de `strings.Contains(...,"identifier")` a
+  `errors.Is(err, quark.ErrInvalidIdentifier)` (ya posible tras el fix #173).
 
 **S6 · `main.go`** — flags `-engines`, `-gate`; corre exercisers por motor,
 `Reconcile`, `Render` la matriz a `REPORTS/`, `Gate`.
