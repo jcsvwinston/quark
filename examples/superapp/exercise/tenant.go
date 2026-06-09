@@ -57,7 +57,7 @@ func tenantResolver(c context.Context) string {
 // y DatabasePerTenant (factory de *Client por tenant con DSN propio).
 var TENANT = Exerciser{Name: "tenant", Fn: runTenant}
 
-func runTenant(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error {
+func runTenant(ctx context.Context, client *quark.Client, rec *recorder.Recorder, _ Conn) error {
 	rec.Note(QF("NewTenantRouter"), QF("DefaultTenantConfig"), QF("TenantConfig"),
 		QF("TenantRouter"), QF("TenantStrategy"), QF("RowLevelSecurityClient"),
 		TRM("ResolveTenant"), TRM("GetClient"), QM("Or"), QM("Where"), QM("WhereIn"))

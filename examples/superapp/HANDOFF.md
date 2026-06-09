@@ -141,8 +141,8 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   `control.Invoked` (vía `recorder.Collect`). Reusa `engine.Run` (lifecycle +
   anti-fugas). Helpers de key `QM`/`CM`/`QF` que casan EXACTO con `apisurface.json`
   (`QM("Create")` → `…quark.(*Query[T]).Create`).
-- `crud.go`, `tx.go`, `builder.go`, `relations.go`, `security.go`, `cache.go`, `tenant.go` entregados — verdes en SQLite **y PG real**
-  (`-tags=superapp_engine`, **40 símbolos**). `tenant.go` cubre **sólo la modalidad RowLevelSecurityClient**
+- `crud.go`, `tx.go`, `builder.go`, `relations.go`, `security.go`, `cache.go`, `tenant.go`, `tenant_rls_native.go` entregados — verdes en SQLite **y PG real**
+  (`-tags=superapp_engine`, **45 símbolos**). `tenant.go` cubre **la modalidad RowLevelSecurityClient**
   (aislamiento cross-tenant no-leak + propagación a Or-groups [regresión P0-1] + el aislamiento es del
   router [client base ve todo, como `Raw()`/`Exec()`] + rechazo de tenant_id inválido/ausente); builder-only →
   portable 6 motores; añadió el helper de key `TRM` (métodos de `*TenantRouter`). El `cache` exerciser **destapó BB-15** (un `Create`
@@ -160,18 +160,21 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   y no encodea int→bool (SQLite sí lo tolera). En general: escribe SQL portable y
   pasa los tipos exactos; el motor laxo (SQLite) esconde lo que el estricto (PG)
   rechaza. No son bugs de Quark — son del query mal escrito.
-- **Falta (orden sugerido):** `tenant.go` **3 estrategias restantes** (el usuario
-  pidió full scope; RLSClient ya entregado). Patrones canónicos en el repo:
-  - **RLSNative** (PG-only, `control.Supports(FeatRLSNative, rec.Engine())`): mirror
-    `rls_native_postgres_test.go` — necesita un **rol no-superuser** (los superusers
-    saltan RLS) + DSN URL-form para hacer `SET ROLE` + `ALTER TABLE … ENABLE ROW
-    LEVEL SECURITY` + `CREATE POLICY` vía un admin client, luego `router.Tx(ctx, fn)`
-    (`TRM("Tx")`) y `For[T](ctx, router)` ven sólo las filas del tenant — enforced
-    por el motor incluso desde `Raw()`. En no-PG, `For[T](ctx, nativeRouter)` debe
-    rechazar (mirror `rls_native_test.go:TestRowLevelSecurityNativeRejectsNonPostgresViaForT`).
-    El admin/non-super client necesita el DSN → pasar `engine.Conn` al exerciser
-    (cambio de firma de `Exerciser.Fn` o un campo en el suite) **o** derivar roles
-    del client base por `Raw()`.
+- **Falta (orden sugerido):** `tenant.go` **2 estrategias restantes** (el usuario
+  pidió full scope; RLSClient y RLSNative ya entregados). Patrones canónicos en el repo:
+  - **RLSNative** — ✅ **HECHO** en `tenant_rls_native.go` (var `RLSNATIVE`, PR pendiente).
+    Decisión de firma: se pasó `engine.Conn` al exerciser (alias `Conn` en `suite.go`;
+    los 6 exercisers previos lo ignoran con `_ Conn`) — más limpio que derivar roles por
+    `Raw()`. En PG: admin client (`AllowRawQueries`) crea rol no-superuser + `CREATE
+    POLICY` + `FORCE ROW LEVEL SECURITY`, el sujeto es un client no-superuser, y el
+    aislamiento forzado por el motor se aserta vía `router.Tx`; en no-PG: rechazo con
+    `ErrUnsupportedFeature` (mirror `rls_native_test.go`). **Gotcha (vale para `ha.go` y
+    cualquier exerciser que abra tx con ctx propio):** NO uses el path implicit-tx de
+    `For[T]` bajo Native con un ctx no-cancelable — `nativeRLSExecutor` deja la tx abierta
+    y el commit depende de `context.AfterFunc(ctx, …)`, que nunca dispara con un ctx
+    Background → conexión retenida + goroutine `awaitDone` parada → cuelga el leak-check
+    (timeout). Usa `router.Tx` (commit síncrono, camino recomendado por `rls_native.go`)
+    con ctx cancelable + `defer cancel`.
   - **SchemaPerTenant** (PG/MSSQL, `control.Supports`?): mirror
     `schema_per_tenant_write_test.go` — `CREATE SCHEMA` por tenant; `q.schema=tenantID`
     enruta. MySQL no tiene schemas → rechazo/skip por capability.
@@ -244,7 +247,6 @@ verde, matriz emitida a `REPORTS/`, y CI verde.
 
 ## No te dejes
 
-- Los desfases **Doc-sync DS-1..DS-5** (`TASKS.md` § "Doc-sync") siguen
-  pendientes de verificación: `cd website && npm run build`, confirmar el mínimo
-  real de Go con compilador (DS-4), y la propagación de `quark-docs` en
-  release-notes históricas (DS-3). Ciérralos.
+- ~~Doc-sync DS-1..DS-5~~ — cerrados (PR #178, 2026-06-09). Queda **DS-6** (BAJO,
+  decisión del owner): `roadmap.mdx` "four testcontainers CI engines" — ver
+  `TASKS.md` § "Doc-sync". No bloquea la superapp.

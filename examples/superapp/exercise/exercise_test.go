@@ -25,7 +25,7 @@ func TestExercisersSQLite(t *testing.T) {
 		_ = os.Remove(conns[control.SQLite].DSN)
 	}()
 
-	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT})
+	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE})
 	r := results[control.SQLite]
 	if r.Err != nil {
 		t.Fatalf("exerciser: %v", r.Err)
@@ -44,6 +44,7 @@ func TestExercisersSQLite(t *testing.T) {
 		QM("Preload"), QM("Cache"),
 		QF("NewTenantRouter"), QF("DefaultTenantConfig"), QF("RowLevelSecurityClient"),
 		TRM("ResolveTenant"), TRM("GetClient"),
+		QF("RowLevelSecurityNative"), TRM("Tx"), // RLSNATIVE (rechazo en sqlite vía Note)
 	} {
 		if !seen[k] {
 			t.Errorf("cobertura: falta el símbolo %s", k)

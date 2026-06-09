@@ -15,7 +15,7 @@ import (
 // deben rechazarse ANTES de tocar la BD. Verifica que la inyección se ataja
 // (err != nil, query no ejecutada) y, donde Quark envuelve el sentinel con %w,
 // que errors.Is lo alcanza.
-var SECURITY = Exerciser{Name: "security", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error {
+var SECURITY = Exerciser{Name: "security", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder, _ Conn) error {
 	rec.Note(QF("For"), QM("Where"), QM("WhereJSON"), QM("Join"))
 
 	// --- 1. Identificadores hostiles en Where → ValidateIdentifier rechaza ---

@@ -16,7 +16,7 @@ var relSeq int64
 // FK nullable que NO debe cargar basura), has_many, y many_to_many con
 // persistencia de asociación (Create de un Project con Tags inserta en la tabla
 // join).
-var RELATIONS = Exerciser{Name: "relations", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error {
+var RELATIONS = Exerciser{Name: "relations", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder, _ Conn) error {
 	rec.Note(QF("For"), QM("Preload"), QM("Where"))
 	n := atomic.AddInt64(&relSeq, 1)
 
