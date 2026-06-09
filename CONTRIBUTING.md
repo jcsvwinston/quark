@@ -74,11 +74,13 @@ fix(batch): prevent off-by-one in chunk size calculation
 docs: add comparison table justifications
 ```
 
-> **Version-neutral scopes:** commits that only touch the test-harness areas
-> (`examples/superapp/`, `bugbash/`, `benchmarks/`, `TASKS.md`) are listed in
-> `exclude-paths` of `release-please-config.json` — a `feat(superapp):` does
-> **not** bump the library version nor appear in its CHANGELOG. The released
-> version reflects library changes only.
+> **Version-neutral scopes:** PRs that only touch the test-harness areas
+> (`examples/superapp/`, `bugbash/`, `benchmarks/`, `TASKS.md`) must use the
+> `test` or `chore` types — a `feat`/`fix` there bumps the library version and
+> enters the library CHANGELOG, which records library-level changes only.
+> (`release-please-config.json` also lists these paths under `exclude-paths`
+> as a second barrier, but the bundled release-please does not currently apply
+> it to the root package, so the type convention is the effective one.)
 
 Breaking changes must include `BREAKING CHANGE:` in the commit body and a `!` after the type:
 
