@@ -29,7 +29,8 @@ func TestExerciseDockerPostgres(t *testing.T) {
 	}
 	defer engine.Down(engines...)
 
-	results := Run(conns, 4, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE})
+	results := Run(conns, 4, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT})
+	cov := Coverage(results)
 	for e, r := range results {
 		if r.Err != nil {
 			t.Errorf("%s: %v", e, r.Err)
@@ -38,7 +39,21 @@ func TestExerciseDockerPostgres(t *testing.T) {
 		if !r.Leak.OK() {
 			t.Errorf("%s fuga: %s", e, r.Leak)
 		}
+		// Cobertura por símbolo de las 4 estrategias de tenant — en PG todas
+		// corren su path funcional completo; un skip accidental (p.ej. un return
+		// nil antes del Note) se delataría aquí, no sólo en el conteo total.
+		if e == control.Postgres {
+			for _, k := range []string{
+				QF("RowLevelSecurityClient"), QF("RowLevelSecurityNative"),
+				QF("SchemaPerTenant"), QF("DatabasePerTenant"),
+				TRM("Tx"), TRM("ActiveTenants"), TRM("ResolveTenant"), TRM("GetClient"),
+			} {
+				if !cov[e][k] {
+					t.Errorf("%s cobertura: falta el símbolo %s", e, k)
+				}
+			}
+		}
 		t.Logf("%s: %d símbolos cubiertos, %d statements, leak %s",
-			e, len(Coverage(results)[e]), r.Rec.Count(), r.Leak)
+			e, len(cov[e]), r.Rec.Count(), r.Leak)
 	}
 }

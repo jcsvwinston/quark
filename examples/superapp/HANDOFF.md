@@ -141,8 +141,8 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   `control.Invoked` (vía `recorder.Collect`). Reusa `engine.Run` (lifecycle +
   anti-fugas). Helpers de key `QM`/`CM`/`QF` que casan EXACTO con `apisurface.json`
   (`QM("Create")` → `…quark.(*Query[T]).Create`).
-- `crud.go`, `tx.go`, `builder.go`, `relations.go`, `security.go`, `cache.go`, `tenant.go`, `tenant_rls_native.go` entregados — verdes en SQLite **y PG real**
-  (`-tags=superapp_engine`, **45 símbolos**). `tenant.go` cubre **la modalidad RowLevelSecurityClient**
+- `crud.go`, `tx.go`, `builder.go`, `relations.go`, `security.go`, `cache.go`, `tenant.go`, `tenant_rls_native.go`, `tenant_schema_per.go`, `tenant_db_per.go` (+`tenant_dsn.go` rewriters) entregados — verdes en SQLite **y PG real**
+  (`-tags=superapp_engine`, **48 símbolos / 88 statements**). **Tenant: 4/4 estrategias cubiertas.** `tenant.go` cubre **la modalidad RowLevelSecurityClient**
   (aislamiento cross-tenant no-leak + propagación a Or-groups [regresión P0-1] + el aislamiento es del
   router [client base ve todo, como `Raw()`/`Exec()`] + rechazo de tenant_id inválido/ausente); builder-only →
   portable 6 motores; añadió el helper de key `TRM` (métodos de `*TenantRouter`). El `cache` exerciser **destapó BB-15** (un `Create`
@@ -160,9 +160,9 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   y no encodea int→bool (SQLite sí lo tolera). En general: escribe SQL portable y
   pasa los tipos exactos; el motor laxo (SQLite) esconde lo que el estricto (PG)
   rechaza. No son bugs de Quark — son del query mal escrito.
-- **Falta (orden sugerido):** `tenant.go` **2 estrategias restantes** (el usuario
-  pidió full scope; RLSClient y RLSNative ya entregados). Patrones canónicos en el repo:
-  - **RLSNative** — ✅ **HECHO** en `tenant_rls_native.go` (var `RLSNATIVE`, PR pendiente).
+- **Tenant — las 4 estrategias HECHAS** (full scope pedido por el usuario).
+  Decisiones y gotchas por estrategia:
+  - **RLSNative** — ✅ **HECHO** en `tenant_rls_native.go` (var `RLSNATIVE`, PR #179).
     Decisión de firma: se pasó `engine.Conn` al exerciser (alias `Conn` en `suite.go`;
     los 6 exercisers previos lo ignoran con `_ Conn`) — más limpio que derivar roles por
     `Raw()`. En PG: admin client (`AllowRawQueries`) crea rol no-superuser + `CREATE
@@ -175,12 +175,30 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
     Background → conexión retenida + goroutine `awaitDone` parada → cuelga el leak-check
     (timeout). Usa `router.Tx` (commit síncrono, camino recomendado por `rls_native.go`)
     con ctx cancelable + `defer cancel`.
-  - **SchemaPerTenant** (PG/MSSQL, `control.Supports`?): mirror
-    `schema_per_tenant_write_test.go` — `CREATE SCHEMA` por tenant; `q.schema=tenantID`
-    enruta. MySQL no tiene schemas → rechazo/skip por capability.
-  - **DBPerTenant**: factory `func(tenantID) (*Client, error)` que abre un `*Client`
-    por tenant con DSN propio (SQLite: ficheros distintos; servers: CREATE DATABASE +
-    DSN admin). Necesita el `engine.Conn`/DSN → mismo cambio de firma que RLSNative.
+  - **SchemaPerTenant** — ✅ **HECHO** en `tenant_schema_per.go` (var `SCHEMAPERTENANT`).
+    Admin `CREATE SCHEMA` ×2 + onboarding caller-side (el playbook: no se auto-crea):
+    un client efímero con `search_path=<schema>` en el DSN (pgx pasa los query-params
+    desconocidos como runtime params) migra la tabla DENTRO de cada schema. El DML va
+    por el BaseClient del harness (instrumentado) → la **regresión BB-8 se aserta sobre
+    el SQL emitido** (`rec.Statements()`: el INSERT debe mencionar el schema). Capability
+    nueva `FeatSchemaPerTenant` {PG,MSSQL} — OJO: **no gateada por Quark** con
+    `ErrUnsupportedFeature` (el exerciser SALTA donde no hay schemas, no aserta error;
+    capability.go documenta las dos semánticas). **MSSQL es TODO ruidoso**: soporta
+    schemas pero no hay `search_path` por DSN — al habilitar MSSQL en la matriz, el
+    exerciser falla con el error TODO hasta implementar su migrate-into-schema (DDL
+    cualificado vía admin, o default_schema por usuario). No es skip: no infla cobertura.
+  - **DBPerTenant** — ✅ **HECHO** en `tenant_db_per.go` (var `DBPERTENANT`) +
+    `tenant_dsn.go` (rewriters de DSN **puros**, unit test en `tenant_dsn_test.go` sin
+    motor). Factory instrumentado con `rec.Options()` y **tracking de clients abiertos**
+    (el router NO tiene `Close()`; el exerciser cierra todo antes del leak-check; el
+    doble-Close con la evicción del LRU es inocuo). `MaxCachedPools=1` prueba el contrato
+    LRU determinista: 2 tenants alternados → factory ×4 (sin evicción serían 2),
+    `ActiveTenants()` == el pool vivo, y los datos persisten tras evicción→re-open
+    (aislamiento físico). Aprovisionamiento: SQLite ficheros derivados del DSN base;
+    PG `CREATE DATABASE` vía `admin.Exec` (va directo a `db.ExecContext`, sin tx — PG lo
+    exige); MySQL/MariaDB/MSSQL rewriters listos sin ejercitar (la matriz aún no los
+    bootea); Oracle skip documentado (`FeatDBPerTenantProvision`: un PDB queda fuera del
+    alcance del harness).
   - Luego: `migrate.go` (round-trip `Migrate`→`PlanMigration`
   vacío, `Sync`, `Backfill`), `ha.go` (replicas/sharding/deadlock + el test
   `-race` de concurrencia del recorder que `code-reviewer` pidió en S2),
