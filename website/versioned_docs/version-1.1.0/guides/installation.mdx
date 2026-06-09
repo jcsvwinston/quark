@@ -13,7 +13,7 @@ once, then add the driver package for the database engine your application uses.
 
 | Requirement | Notes |
 | --- | --- |
-| Go 1.21+ | Quark uses generics and the modern module-aware Go toolchain. |
+| Go 1.25+ | Quark declares `go 1.25.7` in `go.mod`; build with Go 1.25 or newer. Uses generics and the modern module-aware toolchain. |
 | A `database/sql` driver | The driver owns the wire protocol and DSN format. Imported with the blank-import idiom. |
 | Driver name passed to `quark.New` | Quark auto-detects the dialect from the driver name; override with `WithDialect` when registering a custom dialect. |
 
@@ -25,11 +25,13 @@ go get github.com/jcsvwinston/quark
 import "github.com/jcsvwinston/quark"
 ```
 
-Quark is currently a v0.x library. The query builder, CRUD methods, transactions,
-batch operations, schema helpers, cache abstraction, and tenant router are present
-in the public package. A standalone `cmd/quark` binary is not part of the current
-module tree, so migration workflows should use the Go APIs documented in
-[Migrations and Sync](migrations).
+Quark is at **v1.1.0** on the stable `v1.x` line. The query builder, CRUD methods,
+transactions, batch operations, schema helpers, cache abstraction, and tenant
+router are part of the public package. A standalone `cmd/quark` binary ships in the
+module tree — install it with `go install github.com/jcsvwinston/quark/cmd/quark@latest`
+for migrations, model generation, schema inspection, and tenant operations (see
+[Operational Workflows](cli)). The Go APIs in [Migrations and Sync](migrations) stay
+available for in-process workflows.
 
 ## Driver Packages
 
