@@ -463,6 +463,19 @@ Cross-dialect awareness baked into the equality functions:
   catalog labelling diverges (see [`ForeignKey`](#schema-introspection))
   but the semantics are identical in immediate-check mode (the only
   mode either engine supports), so no spurious DROP+ADD on every plan.
+- **Type aliases per catalog**: PG `timestamp without time zone` ≡
+  `TIMESTAMP` (and `with time zone` ≡ `TIMESTAMPTZ`); MySQL/MariaDB
+  `tinyint(1)` ≡ `BOOLEAN` (the storage form of the bool type — a
+  real `tinyint(4)` stays distinct); Oracle `TIMESTAMP(6)` ≡
+  `TIMESTAMP` (the engine's *default* fractional-seconds precision
+  baked into the reported name — an explicit `TIMESTAMP(3)` stays
+  distinct).
+- **Default-expression equivalence**: defaults compare modulo the
+  catalog's decoration — MSSQL's paren wrapping (`((1))` ≡ `1`,
+  `('member')` ≡ `'member'`), PG's cast suffix (`'member'::text` ≡
+  `'member'`), MySQL's unquoted string form (`member` ≡ `'member'`),
+  and bool-literal case (`true` ≡ `TRUE`). String *content* stays
+  case-sensitive: `'Active'` ≠ `'active'`.
 - **SQLite `Checks=nil`** is respected. When either side has
   `Checks=nil` for a table, the check comparison for that table is
   skipped entirely. Empty `[]Check{}` is different (it means
@@ -491,6 +504,15 @@ expression equivalence is out of scope for F3-3-core.
 `Client.PlanMigration(ctx, models...)` is the convenience entrypoint
 that builds the desired Schema from Go model structs, introspects
 the current DB, runs `Diff`, and returns a `Plan{Ops []Operation}`.
+
+The desired Schema includes the **m2m join tables** the models
+declare (`rel:"many_to_many"` + `m2m:"join:fk:ref_fk"` tags), with
+the same shape `Migrate` creates them — two integer FK columns
+forming a composite primary key. Join tables declared from both
+sides dedupe by name, and an explicit model mapping the join-table
+name takes precedence over the synthetic shape. Without this, the
+diff would propose `DROP TABLE` on a table Quark itself created —
+and applying that plan would destroy the association rows.
 
 ```go
 plan, err := client.PlanMigration(ctx, &User{}, &Order{})

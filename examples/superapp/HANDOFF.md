@@ -215,11 +215,12 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
     tablas SIN PK~~ — **RESUELTO** (F3-2-pk: `Column.PrimaryKey` end-to-end;
     el paso 2 del exerciser volvió al diseño original — crea la tabla vía
     `ApplyPlan` y el INSERT con id autogenerado es el assert);
-    (B) `PlanMigration` propone drift falso sobre BD recién migrada (drop de
-    join tables m2m — destructivo — + alters cosméticos de defaults con cast
-    PG y de alias `timestamp without time zone`) — **sigue abierto**. El
-    arnés filtra B con `filterKnownDrift` (quirúrgico); al cerrar cada
-    clase, retirar su filtro y endurecer a `IsEmpty()`. **Gotchas para los siguientes:** el
+    (B) ~~`PlanMigration` propone drift falso sobre BD recién migrada~~ —
+    **RESUELTO** (join tables m2m sintetizadas en el desired + equivalencias
+    de tipo/default por catálogo en el diff; `RoundTrip_RichFixture` lo
+    pinnea en la SharedSuite de los 6 motores). **El arnés quedó estricto**:
+    `filterKnownDrift` eliminado, asserts a `IsEmpty()` a secas, converge
+    aplica el plan crudo. **Gotchas para los siguientes:** el
     exerciser converge al entrar (re-entrante en motores persistentes; deja
     la BD canónica al salir), las columnas añadidas a tablas con filas van
     `Nullable[T]` (el Scan de un NULL en `string` revienta), y las

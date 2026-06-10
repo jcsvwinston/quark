@@ -123,6 +123,26 @@ fragmento `PRIMARY KEY`/identity. Reglas al tocar este pipeline:
    `ClassifyPKType` lo trata como entero→identity a propósito (espejo del
    `oracleBareNumberMatch` del diff). No "arregles" eso sin leer el godoc.
 
+### El diff compara módulo la decoración de cada catálogo (task_b03f2155)
+
+`normalizeType` y `canonicalDefault` (`migrate_diff.go`) absorben la forma
+propia con que cada catálogo devuelve tipos y defaults. Si añades un tipo o
+tocas un introspector, el invariante a preservar es: **`Migrate(models)` →
+`PlanMigration(models)` devuelve plan VACÍO en los 6 motores** (lo pinnea
+`RoundTrip_RichFixture` en la SharedSuite con m2m + defaults bool/string +
+`time.Time`). Equivalencias vivas:
+
+- Tipos: PG `timestamp without time zone`≡`TIMESTAMP`; MySQL/MariaDB
+  `tinyint(1)`≡`BOOLEAN` (sólo el marcador bool; `tinyint(4)` es int real);
+  Oracle `TIMESTAMP(6)`≡`TIMESTAMP` (sólo la precisión POR DEFECTO).
+- Defaults: parens de MSSQL (`((1))`≡`1`), cast de PG (`'x'::text`≡`'x'`),
+  unquote de MySQL (`member`≡`'member'`), case de bools (`true`≡`TRUE`).
+  El CONTENIDO string sigue case-sensitive (`'Active'`≠`'active'`).
+- Las join tables m2m van EN el desired (`modelsToSchema` las sintetiza con
+  la forma exacta de `createJoinTables`); un modelo explícito de la join
+  table gana sobre la síntesis. Sin esto el diff proponía DROPearlas
+  (pérdida de datos vía el flujo documentado de drift-check).
+
 ### `fmt.Sprintf` con nombre de tabla en SQL crudo
 
 `migrate/migrate.go:43,55,102,166,197` usa `Sprintf` con `m.tableName`. Hoy `tableName` está hardcoded a `quark_migrations` en el constructor, así que no es inyectable, pero el patrón es feo. Si refactorizas para soportar nombre custom de tabla de migrations, debe pasar por validación de identifier.
