@@ -100,6 +100,29 @@ Plan Fase 1: extender con `RegisterTypeMapper(reflect.Type, dialect, fn)` y perm
 
 ## Anti-patterns a vigilar
 
+### PK en el pipeline de planes: el flag viaja aparte del tipo (F3-2-pk)
+
+`Column.PrimaryKey` transporta la pertenencia al PK (true en cada miembro de
+una clave compuesta); `Column.Type` es SIEMPRE el tipo desnudo, sin el
+fragmento `PRIMARY KEY`/identity. Reglas al tocar este pipeline:
+
+1. **El render del constraint tiene UNA fuente de verdad**:
+   `internal/migrate.PKColumnSQL` (+ `ClassifyPKType` para clasificar desde el
+   string de catálogo). El migrator (`SQLType(isPK:true)`) y
+   `applyCreateTable` (executor de `OpCreateTable`) delegan ahí. No dupliques
+   los fragmentos por dialecto.
+2. **Los 6 introspectores deben poblar `PrimaryKey`** (SQLite `PRAGMA pk>0`,
+   MySQL/MariaDB `COLUMN_KEY='PRI'`, PG `table_constraints`+`key_column_usage`,
+   MSSQL `sys.indexes is_primary_key=1`, Oracle `USER_CONSTRAINTS 'P'`). Si
+   añades un introspector y no lo pueblas, TODO plan propondrá un
+   `OpAlterColumn` de PK falso en cada tabla.
+3. **`Diff` compara el flag; `ApplyPlan` rechaza cambios de PK** con
+   `ErrUnsupportedFeature` (table rebuild) — el guard va ANTES del check de
+   tipo para que un delta tipo+PK no emita un ALTER TYPE que ignore el PK.
+4. **Oracle**: el catálogo reporta los identity PK como `NUMBER` pelado;
+   `ClassifyPKType` lo trata como entero→identity a propósito (espejo del
+   `oracleBareNumberMatch` del diff). No "arregles" eso sin leer el godoc.
+
 ### `fmt.Sprintf` con nombre de tabla en SQL crudo
 
 `migrate/migrate.go:43,55,102,166,197` usa `Sprintf` con `m.tableName`. Hoy `tableName` está hardcoded a `quark_migrations` en el constructor, así que no es inyectable, pero el patrón es feo. Si refactorizas para soportar nombre custom de tabla de migrations, debe pasar por validación de identifier.
