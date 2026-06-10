@@ -678,9 +678,9 @@ Type-string normalisation (F3-3-types): the diff's column comparison
 applies a case-fold + trim, a PG `character varying` → `varchar`
 alias, and a MySQL display-width strip (`int(11)` → `int`) so the
 migrator's canonical UPPERCASE compares equal to the catalog's
-lowercase. **Round-trip is clean on all 5 supported dialects** —
+lowercase. **Round-trip is clean on all six dialects** —
 `PlanMigration(model)` after `Migrate(model)` returns an empty
-Plan on PG, MySQL, MariaDB, MSSQL, and SQLite.
+Plan on PG, MySQL, MariaDB, MSSQL, SQLite, and Oracle.
 
 ## Backfill
 

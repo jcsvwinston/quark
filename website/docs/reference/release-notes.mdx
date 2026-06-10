@@ -6,16 +6,61 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is **v1.1.0** — a hardening release on the stable `v1.x` line. `v1.x`
-keeps API compatibility; breaking changes go to `v2.x`.
+Quark is **v1.1.2** on the stable `v1.x` line (v1.1.0 was the hardening
+minor). `v1.x` keeps API compatibility; breaking changes go to `v2.x`.
 
-Per-version release notes live in the main repository under
-[`docs/RELEASE_NOTES_*.md`](https://github.com/jcsvwinston/quark/tree/main/docs).
-The current tag is documented at
+Narrative release notes for each **minor** live in the main repository under
+[`docs/RELEASE_NOTES_*.md`](https://github.com/jcsvwinston/quark/tree/main/docs)
+— the current line is documented at
 [`docs/RELEASE_NOTES_v1.1.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.1.0.md).
-Migration steps for the most recent breaking changes are at
+Patch releases are recorded in the
+[CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and
+the [GitHub Releases](https://github.com/jcsvwinston/quark/releases), with a
+short summary below. Migration steps for the most recent breaking changes are
+at
 [`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
-v0.10 through v1.1 introduced **no breaking changes**.
+v0.10 through v1.1.x introduced **no breaking changes**.
+
+## v1.1.2
+
+Patch release: two schema-as-code correctness fixes surfaced by the
+cross-engine acceptance harness (`examples/superapp/`).
+
+- `ApplyPlan` now renders the **primary key** when creating a table from a
+  plan — auto-increment for a single integer PK, a table-level constraint for
+  composite keys — so a plan-created table is functionally interchangeable
+  with one created by `Migrate`. `Column` gains a `PrimaryKey` field,
+  populated by introspection on all six engines and compared by the diff
+  (a PK change is reported but refused by the executor: it needs a table
+  rebuild).
+- `PlanMigration` returns an **empty plan on a freshly migrated database**,
+  as documented: m2m join tables are now part of the desired schema (the
+  diff no longer proposes a destructive `DROP` of a table Quark itself
+  created), and catalog-decorated defaults (`'x'::text`, `((1))`, unquoted
+  MySQL strings, bool-literal case) and type aliases (`timestamp without
+  time zone`, `tinyint(1)`, Oracle `TIMESTAMP(6)`) no longer produce
+  cosmetic alter ops.
+
+No breaking changes.
+
+## v1.1.1
+
+Patch release: four correctness fixes, three of them surfaced by the
+acceptance harness.
+
+- Caché L2: `Create` now invalidates the model **table tag** on every insert
+  path — on PostgreSQL/SQLite/MariaDB (RETURNING) and SQL Server
+  (OUTPUT/SCOPE_IDENTITY), a cached table-level read no longer serves stale
+  results after an insert (BB-15).
+- The migrator normalizes **boolean column defaults** per dialect
+  (`default:"1"` on a `bool` field now migrates on all six engines;
+  PostgreSQL gets `TRUE`/`FALSE`).
+- `ErrInvalidIdentifier` is reachable via `errors.Is` on every validation
+  path.
+- `quark model generate --fields` creates the `--out` directory and reports
+  failures with a non-zero exit.
+
+No breaking changes.
 
 ## v1.1.0
 
