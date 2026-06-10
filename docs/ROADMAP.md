@@ -65,7 +65,7 @@ With this, Phase 1's Bloque B is closed entire (`Array[T]` shipped in v0.6.0).
 
 Schema-as-code migrations. Closes the F3-1 through F3-7 backlog:
 
-- [x] **F3-1** — Distributed migration lock (`Client.AcquireMigrationLock`). PG `pg_advisory_lock` + `lock_timeout`; MySQL / MariaDB `GET_LOCK` / `RELEASE_LOCK`; MSSQL `sp_getapplock @LockOwner='Session'`. Optional `MigrationLocker` interface on Dialect; SQLite / Oracle return `ErrUnsupportedFeature`.
+- [x] **F3-1** — Distributed migration lock (`Client.AcquireMigrationLock`). PG `pg_advisory_lock` + `lock_timeout`; MySQL / MariaDB `GET_LOCK` / `RELEASE_LOCK`; MSSQL `sp_getapplock @LockOwner='Session'`; Oracle `DBMS_LOCK` (added after F3-1 via ADR-0018; requires `GRANT EXECUTE ON DBMS_LOCK`). Optional `MigrationLocker` interface on Dialect; SQLite returns `ErrUnsupportedFeature`.
 - [x] **F3-2** — Neutral schema introspection (`Client.IntrospectSchema`). `Schema{Tables[]Table{Columns, Indexes, ForeignKeys, Checks}}` populated across SQLite / PostgreSQL / MySQL / MariaDB / MSSQL. Oracle deferred pending CI image fix; SQLite `Checks` deferred (no catalog).
 - [x] **F3-3** — Pure-Go schema diff (`Diff`) + models→Plan pipeline (`Client.PlanMigration`) + executor (`Client.ApplyPlan`) + cross-dialect type / default normalisation. Round-trip identity contract: `Migrate(model)` followed by `PlanMigration(model)` returns an empty `Plan` on all five CI motors.
 - [x] **F3-4** — Transactional `ApplyPlan` on PG / MSSQL / SQLite; resumable `ApplyPlan` on MySQL / MariaDB / Oracle via `quark_migration_state(plan_hash, op_index)` checkpoints. `Plan.Hash()` exposes the deterministic plan identity for CI gates.
