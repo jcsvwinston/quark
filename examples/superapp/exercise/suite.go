@@ -39,6 +39,10 @@ func QF(name string) string { return qpkg + "." + name }
 // "github.com/jcsvwinston/quark.(*TenantRouter).Tx".
 func TRM(method string) string { return qpkg + ".(*TenantRouter)." + method }
 
+// MIG es la key de un símbolo del paquete de migraciones versionadas:
+// MIG("(*Migrator).Up") → "github.com/jcsvwinston/quark/migrate.(*Migrator).Up".
+func MIG(name string) string { return qpkg + "/migrate." + name }
+
 // Conn re-exporta engine.Conn para que los exercisers que necesitan el driver/DSN
 // del motor lo reciban sin importar el paquete engine. Lo usan los que abren
 // clientes propios además del client del harness: RLSNative deriva un rol
