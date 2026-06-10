@@ -29,7 +29,7 @@ func TestExerciseDockerPostgres(t *testing.T) {
 	}
 	defer engine.Down(engines...)
 
-	results := Run(conns, 4, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, MIGRATE})
+	results := Run(conns, 4, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, REPLICAS, SHARDING, DEADLOCK, MIGRATE})
 	cov := Coverage(results)
 	for e, r := range results {
 		if r.Err != nil {
@@ -52,6 +52,10 @@ func TestExerciseDockerPostgres(t *testing.T) {
 				CM("PlanMigration"), CM("ApplyPlan"), CM("Sync"), CM("Backfill"),
 				CM("AcquireMigrationLock"), QF("ErrLockTimeout"), QF("(MigrationLock).Release"),
 				MIG("(*Migrator).Up"), MIG("(*Migrator).Down"),
+				// HA en PG: réplicas/shards con CREATE DATABASE real y el
+				// deadlock con recuperación de la víctima (FeatDeadlock).
+				QF("WithReplicas"), QF("Sticky"), QF("NewShardRouter"),
+				SRM("GetClient"), QF("WithDeadlockRetry"),
 			} {
 				if !cov[e][k] {
 					t.Errorf("%s cobertura: falta el símbolo %s", e, k)

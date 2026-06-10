@@ -43,6 +43,10 @@ func TRM(method string) string { return qpkg + ".(*TenantRouter)." + method }
 // MIG("(*Migrator).Up") → "github.com/jcsvwinston/quark/migrate.(*Migrator).Up".
 func MIG(name string) string { return qpkg + "/migrate." + name }
 
+// SRM es la key de un método de *ShardRouter: SRM("GetClient") →
+// "github.com/jcsvwinston/quark.(*ShardRouter).GetClient".
+func SRM(method string) string { return qpkg + ".(*ShardRouter)." + method }
+
 // Conn re-exporta engine.Conn para que los exercisers que necesitan el driver/DSN
 // del motor lo reciban sin importar el paquete engine. Lo usan los que abren
 // clientes propios además del client del harness: RLSNative deriva un rol

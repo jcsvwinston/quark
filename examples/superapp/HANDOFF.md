@@ -226,9 +226,23 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
     `Nullable[T]` (el Scan de un NULL en `string` revienta), y las
     mutaciones de un client secundario NO invalidan la caché del client del
     harness — los asserts de conteo van por el client que mutó.
-  - Luego: `ha.go` (replicas/sharding/deadlock + el test `-race` de
-  concurrencia del recorder que `code-reviewer` pidió en S2),
-  `observability.go` (OTel in-memory + redacción), y **builder-avanzado**
+  - **`ha.go` — ✅ HECHO** (vars `REPLICAS`/`SHARDING`/`DEADLOCK`; verde
+    SQLite + PG real, 101 símbolos / 161 statements). Réplicas por
+    presencia-de-dato (marcadores distintos por base; round-robin/Sticky/
+    tx-pin/write-solo-primary/Count ruteado), sharding con shards
+    aprovisionados (`provisionHADBs` reusa los rewriters de
+    `tenant_dsn.go`; Oracle skip vía `FeatDBPerTenantProvision`), deadlock
+    real con barrera F12 en servidores (capability nueva `FeatDeadlock`;
+    SQLite ejercita la opción en camino feliz). El test `-race` del
+    recorder pedido en S2 vive en `recorder/recorder_race_test.go` (OJO:
+    `:memory:` da una BD vacía por conexión del pool — usa fichero; y los
+    workers hacen Counts, no writes, para no contender en SQLite).
+    Failover/cooldown de réplicas citado a `replicas_postgres_test.go` +
+    bug-bash F11 (necesita tumbar instancias). **Gotcha S7/Oracle:** el
+    exerciser DEADLOCK abre un client propio con `WithMaxOpenConns(8)`;
+    con el techo de sesiones de gvenzl (ORA-12516, vísto en el soak F14),
+    bajarlo a ≤4 al encender Oracle en la matriz.
+  - Luego: `observability.go` (OTel in-memory + redacción), y **builder-avanzado**
   (CTE/window/setops/locking — los ~30 métodos de `Query[T]` que el builder común
   no cubre; varios necesitan la matriz de capacidad por motor). Y el **oráculo de
   paridad**: hoy los asserts son por-motor; falta comparar el RESULTADO de cada
