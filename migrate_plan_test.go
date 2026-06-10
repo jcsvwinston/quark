@@ -186,3 +186,116 @@ func TestPlanMigration_NonStructErrors(t *testing.T) {
 		}
 	})
 }
+
+// --- m2m join tables in the desired schema (task_b03f2155, clase 1) ---
+
+// planM2MLeft / planM2MRight declare the SAME join table from both
+// sides — the synthesis must dedupe by name.
+type planM2MLeft struct {
+	ID     int64          `db:"id" pk:"true"`
+	Rights []planM2MRight `rel:"many_to_many" m2m:"plan_m2m_links:left_id:right_id"`
+}
+
+func (planM2MLeft) TableName() string { return "plan_m2m_lefts" }
+
+type planM2MRight struct {
+	ID    int64         `db:"id" pk:"true"`
+	Lefts []planM2MLeft `rel:"many_to_many" m2m:"plan_m2m_links:right_id:left_id"`
+}
+
+func (planM2MRight) TableName() string { return "plan_m2m_rights" }
+
+// planM2MLink is an EXPLICIT model for the same join table — when the
+// user maps it, the model's richer shape must win over the synthetic
+// two-column one.
+type planM2MLink struct {
+	LeftID  int64  `db:"left_id" pk:"true"`
+	RightID int64  `db:"right_id" pk:"true"`
+	Note    string `db:"note"`
+}
+
+func (planM2MLink) TableName() string { return "plan_m2m_links" }
+
+// TestPlanMigration_M2MJoinTableInDesired is the regression for the
+// destructive half of the superapp finding task_b03f2155: Migrate
+// creates m2m join tables (createJoinTables) but the desired schema
+// omitted them, so every post-Migrate plan proposed DROP TABLE on a
+// table Quark itself needs — applying it destroyed the join rows.
+func TestPlanMigration_M2MJoinTableInDesired(t *testing.T) {
+	ctx := context.Background()
+	c := newSQLitePlanClient(t)
+
+	// Empty DB: the plan must CREATE the join table exactly once
+	// (declared from both sides), with both FK columns as composite PK.
+	plan, err := c.PlanMigration(ctx, &planM2MLeft{}, &planM2MRight{})
+	if err != nil {
+		t.Fatalf("PlanMigration: %v", err)
+	}
+	var linkCreates int
+	for _, op := range plan.Ops {
+		create, ok := op.(quark.OpCreateTable)
+		if !ok || create.Table.Name != "plan_m2m_links" {
+			continue
+		}
+		linkCreates++
+		if got := len(create.Table.Columns); got != 2 {
+			t.Errorf("synthetic join table should have 2 columns, got %d", got)
+		}
+		for _, col := range create.Table.Columns {
+			if !col.PrimaryKey {
+				t.Errorf("join column %s should be part of the composite PK", col.Name)
+			}
+			if col.Nullable {
+				t.Errorf("join column %s should be NOT NULL", col.Name)
+			}
+		}
+	}
+	if linkCreates != 1 {
+		t.Fatalf("expected exactly 1 OpCreateTable for plan_m2m_links (deduped), got %d:\n%s", linkCreates, plan.String())
+	}
+
+	// THE headline: after Migrate, the plan is EMPTY — no DROP TABLE
+	// proposal for the join table Quark just created.
+	if err := c.Migrate(ctx, &planM2MLeft{}, &planM2MRight{}); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	plan2, err := c.PlanMigration(ctx, &planM2MLeft{}, &planM2MRight{})
+	if err != nil {
+		t.Fatalf("PlanMigration after Migrate: %v", err)
+	}
+	if !plan2.IsEmpty() {
+		t.Fatalf("post-Migrate plan should be empty (m2m join table in desired), got:\n%s", plan2.String())
+	}
+}
+
+// TestPlanMigration_ExplicitJoinModelWins: an explicit model mapping
+// the join-table name takes precedence over the synthetic shape.
+func TestPlanMigration_ExplicitJoinModelWins(t *testing.T) {
+	ctx := context.Background()
+	c := newSQLitePlanClient(t)
+
+	plan, err := c.PlanMigration(ctx, &planM2MLeft{}, &planM2MRight{}, &planM2MLink{})
+	if err != nil {
+		t.Fatalf("PlanMigration: %v", err)
+	}
+	var creates int
+	for _, op := range plan.Ops {
+		create, ok := op.(quark.OpCreateTable)
+		if !ok || create.Table.Name != "plan_m2m_links" {
+			continue
+		}
+		creates++
+		var hasNote bool
+		for _, col := range create.Table.Columns {
+			if col.Name == "note" {
+				hasNote = true
+			}
+		}
+		if !hasNote {
+			t.Errorf("explicit join model should win (note column expected), got columns: %v", create.Table.Columns)
+		}
+	}
+	if creates != 1 {
+		t.Fatalf("expected exactly 1 OpCreateTable for plan_m2m_links, got %d:\n%s", creates, plan.String())
+	}
+}

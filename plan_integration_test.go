@@ -7,6 +7,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jcsvwinston/quark"
 )
@@ -22,6 +23,29 @@ type planFixture struct {
 	ID   int64  `db:"id" pk:"true"`
 	Name string `db:"name" quark:"not_null"`
 }
+
+// planRichA / planRichB pin the three false-drift classes of
+// task_b03f2155 cross-engine: an m2m join table (Migrate creates it,
+// the desired schema must account for it), string/bool defaults (PG
+// catalog returns `'member'::text` / lowercase `false`), and a
+// time.Time column (PG catalog returns `timestamp without time
+// zone`). Before the fixes, PlanMigration on a freshly migrated DB
+// produced 14 false ops on PG with a model set like this.
+type planRichA struct {
+	ID     int64       `db:"id" pk:"true"`
+	Active bool        `db:"active" default:"1"`
+	Role   string      `db:"role" default:"'member'"`
+	SeenAt time.Time   `db:"seen_at"`
+	Bs     []planRichB `rel:"many_to_many" m2m:"plan_rich_links:a_id:b_id"`
+}
+
+func (planRichA) TableName() string { return "plan_rich_as" }
+
+type planRichB struct {
+	ID int64 `db:"id" pk:"true"`
+}
+
+func (planRichB) TableName() string { return "plan_rich_bs" }
 
 // opTouchesTable reports whether an Operation's String() format
 // references the given table name. Used by the round-trip test
@@ -127,6 +151,32 @@ func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		for _, op := range plan.Ops {
 			if opTouchesTable(op, "plan_fixtures") {
 				t.Errorf("plan after Migrate should NOT touch plan_fixtures, got: %s", op.String())
+			}
+		}
+	})
+
+	t.Run("RoundTrip_RichFixture", func(t *testing.T) {
+		// task_b03f2155: the round-trip contract with the features
+		// that used to drift — m2m join table, bool/string defaults,
+		// time.Time column. Scoped to the fixture's three tables for
+		// the same shared-DB reason as RoundTripScopedToFixture.
+		for _, tbl := range []string{"plan_rich_links", "plan_rich_as", "plan_rich_bs"} {
+			dropTable(baseClient, tbl)
+			defer dropTable(baseClient, tbl)
+		}
+
+		if err := baseClient.Migrate(ctx, &planRichA{}, &planRichB{}); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+		plan, err := baseClient.PlanMigration(ctx, &planRichA{}, &planRichB{})
+		if err != nil {
+			t.Fatalf("PlanMigration after Migrate: %v", err)
+		}
+		for _, op := range plan.Ops {
+			for _, tbl := range []string{"plan_rich_as", "plan_rich_bs", "plan_rich_links"} {
+				if opTouchesTable(op, tbl) {
+					t.Errorf("[%s] post-Migrate plan should NOT touch %s, got: %s", dialect, tbl, op.String())
+				}
 			}
 		}
 	})

@@ -83,7 +83,8 @@ func (p Plan) String() string {
 //   - **Indexes / FKs / CHECK** declared on the model: struct tags
 //     don't yet carry index or FK metadata (CreateIndex /
 //     AddForeignKey are explicit calls). PlanMigration's `desired`
-//     Schema is column-only — indexes and FKs present in the
+//     Schema carries columns plus the synthesised m2m join tables
+//     (see below) — indexes and FKs present in the
 //     database but not in the model would show up as OpDropIndex /
 //     OpDropForeignKey if Diff were left to its own devices. To
 //     avoid that, PlanMigration **copies** the indexes / FKs / checks
@@ -91,6 +92,15 @@ func (p Plan) String() string {
 //     diffing, on the assumption that schema-level objects not
 //     declared in models are managed manually. A future
 //     F3-3-plan-indexes follow-up will let struct tags drive these.
+//   - **m2m join tables ARE part of the desired schema**: for every
+//     `rel:"many_to_many"` + `m2m:"join:fk:ref_fk"` tag, the desired
+//     Schema includes the join table with the same shape
+//     [Client.Migrate]'s createJoinTables emits (two int FK columns,
+//     composite PK). Without this, the diff would propose DROPping a
+//     table Quark itself created — destroying the join rows if the
+//     plan were applied (superapp finding, task_b03f2155). An
+//     explicit model mapping the join-table name takes precedence
+//     over the synthetic shape.
 //
 // SQLite quirk: same Checks=nil handling as the rest of F3-3-core —
 // no spurious drops when the database doesn't introspect checks.
@@ -128,6 +138,12 @@ func (c *Client) PlanMigration(ctx context.Context, models ...any) (Plan, error)
 // PlanMigration godoc.
 func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 	tables := make([]Table, 0, len(models))
+	// m2m join tables declared by the models' rel tags. Collected during
+	// the model walk and synthesised AFTER it, so an explicit join-table
+	// MODEL (a user struct mapping the same table name) always wins over
+	// the synthetic two-column shape.
+	type joinSpec struct{ table, fk, refFK string }
+	var joins []joinSpec
 	for _, model := range models {
 		t := reflect.TypeOf(model)
 		// `reflect.TypeOf(nil)` returns `nil`, which would panic on
@@ -204,6 +220,46 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 			return Schema{}, fmt.Errorf("no database columns for model %s", t.Name())
 		}
 		tables = append(tables, Table{Name: meta.Table, Columns: columns})
+		for _, rel := range meta.Relations {
+			if rel.Type != "many_to_many" || rel.JoinTable == "" {
+				continue
+			}
+			joins = append(joins, joinSpec{table: rel.JoinTable, fk: rel.JoinFK, refFK: rel.JoinRefFK})
+		}
+	}
+
+	// Synthesise the m2m join tables (superapp finding, task_b03f2155):
+	// Migrate creates them via createJoinTables, so a desired schema that
+	// omits them makes Diff propose DROPping a table Quark itself needs —
+	// and applying that plan destroys the join rows. The synthetic shape
+	// mirrors createJoinTables exactly: two int64 FK columns forming a
+	// composite primary key (PK implies NOT NULL). Declared-from-both-
+	// sides m2m (Project.Tags and Tag.Projects naming the same table)
+	// dedupes by name; a table already produced by an explicit model is
+	// skipped (the model's richer column set wins).
+	//
+	// TODO: two specs naming the same join table with DIFFERENT FK
+	// columns (a typo in one side's m2m tag) dedupe silently — first one
+	// wins, same as createJoinTables' CREATE IF NOT EXISTS. A warning
+	// would help surface the typo; deferred until the logger is plumbed
+	// through this path.
+	declared := make(map[string]bool, len(tables))
+	for _, t := range tables {
+		declared[t.Name] = true
+	}
+	fkType := migrate.SQLTypeWithOpts(c.dialect.Name(), reflect.TypeOf(int64(0)), migrate.TypeOptions{})
+	for _, j := range joins {
+		if declared[j.table] {
+			continue
+		}
+		declared[j.table] = true
+		tables = append(tables, Table{
+			Name: j.table,
+			Columns: []Column{
+				{Name: j.fk, Type: fkType, Nullable: false, PrimaryKey: true},
+				{Name: j.refFK, Type: fkType, Nullable: false, PrimaryKey: true},
+			},
+		})
 	}
 	return Schema{Tables: tables}, nil
 }
