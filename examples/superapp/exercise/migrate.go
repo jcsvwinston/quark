@@ -77,19 +77,20 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 	eng := rec.Engine()
 
 	// --- 0. Converge: sana restos de un run anterior abortado. -------------
-	// ApplyPlan(plan-de-drift FILTRADO) devuelve la BD al estado canónico
-	// (dropea un migrate_ledgers/migrate_v_notes huérfano, columnas
-	// sobrantes…); las dos DELETE limpian el estado persistente que NO sale en
-	// planes (las tablas quark_* están filtradas de la introspección). Sus
-	// errores se toleran: en una BD fresca esas tablas aún no existen. El
-	// filtro de drift conocido es OBLIGATORIO aquí: el plan crudo dropearía
-	// project_tags y trae alters cosméticos inaplicables (ver filterKnownDrift).
+	// ApplyPlan(plan-de-drift) devuelve la BD al estado canónico (dropea un
+	// migrate_ledgers/migrate_v_notes huérfano, columnas sobrantes…); las dos
+	// DELETE limpian el estado persistente que NO sale en planes (las tablas
+	// quark_* están filtradas de la introspección). Sus errores se toleran:
+	// en una BD fresca esas tablas aún no existen. El plan se aplica CRUDO:
+	// con los findings A (task_20d5f912) y B (task_b03f2155) cerrados, un
+	// plan post-Migrate limpio es vacío de verdad — el diff ya no propone
+	// drops de join tables m2m ni alters cosméticos.
 	p0, err := client.PlanMigration(rec.Mark(ctx, CM("PlanMigration")), domain.AllModels()...)
 	if err != nil {
 		return fmt.Errorf("plan converge: %w", err)
 	}
-	if f0 := filterKnownDrift(p0); len(f0.Ops) > 0 {
-		if err := client.ApplyPlan(rec.Mark(ctx, CM("ApplyPlan")), f0); err != nil {
+	if !p0.IsEmpty() {
+		if err := client.ApplyPlan(rec.Mark(ctx, CM("ApplyPlan")), p0); err != nil {
 			return fmt.Errorf("converge (restos de un run anterior): %w", err)
 		}
 	}
@@ -101,21 +102,20 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 		client.Dialect().Placeholder(1), client.Dialect().Placeholder(2)), migVNotesID, migVSeedID)
 
 	// --- 1. Round-trip: tras Migrate (el suite ya migró), plan VACÍO. ------
-	// "Vacío" módulo el drift conocido (m2m + alter cosmético): cualquier OTRA
-	// op es un round-trip roto de verdad (la clase de bug de BB-11). El drift
-	// conocido puede estar (gaps vivos) o no estar (los fixes aterrizaron);
-	// ambos estados pasan — al cerrar cada finding, endurecer hacia IsEmpty().
+	// IsEmpty() a secas — el invariante documentado ("did anything drift?").
+	// Era módulo-drift-conocido mientras los findings A/B estuvieron vivos;
+	// con sus fixes en core el assert quedó estricto.
 	p1, err := client.PlanMigration(ctx, domain.AllModels()...)
 	if err != nil {
 		return fmt.Errorf("plan round-trip: %w", err)
 	}
 	rec.Note(QF("(Plan).IsEmpty"), QF("(Plan).String"), QF("Plan"))
-	if f1 := filterKnownDrift(p1); len(f1.Ops) > 0 {
-		return fmt.Errorf("round-trip roto: el plan post-Migrate trae %d op(s) fuera del drift conocido:\n%s", len(f1.Ops), f1.String())
+	if !p1.IsEmpty() {
+		return fmt.Errorf("round-trip roto: el plan post-Migrate no es vacío:\n%s", p1.String())
 	}
 	// El render del plan vacío es el literal documentado.
-	if empty := (quark.Plan{}); !empty.IsEmpty() || empty.String() != "(no changes)" {
-		return fmt.Errorf("Plan vacío: IsEmpty=%v String=%q, esperaba true/\"(no changes)\"", empty.IsEmpty(), empty.String())
+	if got := p1.String(); got != "(no changes)" {
+		return fmt.Errorf("Plan.String() de plan vacío = %q, esperaba \"(no changes)\"", got)
 	}
 
 	// --- 2. Plan→ApplyPlan crea la tabla — CON su PK (regresión F3-2-pk). --
@@ -130,26 +130,25 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 	if err != nil {
 		return fmt.Errorf("plan con ledger: %w", err)
 	}
-	f2 := filterKnownDrift(p2)
-	if len(f2.Ops) == 0 {
+	if p2.IsEmpty() {
 		return fmt.Errorf("el plan con el modelo nuevo debería contener su CREATE TABLE")
 	}
-	if !strings.Contains(f2.String(), ledgerTable) {
-		return fmt.Errorf("el plan no menciona %s:\n%s", ledgerTable, f2.String())
+	if !strings.Contains(p2.String(), ledgerTable) {
+		return fmt.Errorf("el plan no menciona %s:\n%s", ledgerTable, p2.String())
 	}
 	rec.Note(QF("(Plan).Hash"))
 	if h := p2.Hash(); h == "" || h != p2.Hash() {
 		return fmt.Errorf("Plan.Hash() debe ser determinista y no-vacío (got %q)", h)
 	}
-	if err := client.ApplyPlan(rec.Mark(ctx, CM("ApplyPlan")), f2); err != nil {
+	if err := client.ApplyPlan(rec.Mark(ctx, CM("ApplyPlan")), p2); err != nil {
 		return fmt.Errorf("apply ledger: %w", err)
 	}
 	p3, err := client.PlanMigration(ctx, models2...)
 	if err != nil {
 		return fmt.Errorf("plan post-apply: %w", err)
 	}
-	if f3 := filterKnownDrift(p3); len(f3.Ops) > 0 {
-		return fmt.Errorf("round-trip post-ApplyPlan del ledger roto:\n%s", f3.String())
+	if !p3.IsEmpty() {
+		return fmt.Errorf("round-trip post-ApplyPlan del ledger roto:\n%s", p3.String())
 	}
 	// La tabla es real Y tiene PK: el INSERT confía en el id autogenerado
 	// (con el finding A vivo esto reventaba con NOT NULL constraint).
@@ -170,8 +169,8 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 	if err != nil {
 		return fmt.Errorf("plan post-índice: %w", err)
 	}
-	if f4 := filterKnownDrift(p4); len(f4.Ops) > 0 {
-		return fmt.Errorf("el índice manual generó drift en el plan (mergeNonColumnSurface roto):\n%s", f4.String())
+	if !p4.IsEmpty() {
+		return fmt.Errorf("el índice manual generó drift en el plan (mergeNonColumnSurface roto):\n%s", p4.String())
 	}
 
 	// --- 3. Registry per-Client (F3-7). -------------------------------------
@@ -197,8 +196,8 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 	if err != nil {
 		return fmt.Errorf("PlanMigrationRegistered: %w", err)
 	}
-	if fr := filterKnownDrift(pr); len(fr.Ops) > 0 {
-		return fmt.Errorf("PlanMigrationRegistered trae ops fuera del drift conocido:\n%s", fr.String())
+	if !pr.IsEmpty() {
+		return fmt.Errorf("PlanMigrationRegistered no-vacío con todo migrado:\n%s", pr.String())
 	}
 
 	// --- 4. Sync: dry-run no toca, add real añade, vuelta a V1 dropea. -----
@@ -255,11 +254,10 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 	if err != nil {
 		return fmt.Errorf("plan add-column: %w", err)
 	}
-	fAdd := filterKnownDrift(pAdd)
-	if len(fAdd.Ops) == 0 || !strings.Contains(fAdd.String(), "note") {
+	if pAdd.IsEmpty() || !strings.Contains(pAdd.String(), "note") {
 		return fmt.Errorf("el plan V2 debía proponer la columna note:\n%s", pAdd.String())
 	}
-	if err := client.ApplyPlan(rec.Mark(ctx, CM("ApplyPlan")), fAdd); err != nil {
+	if err := client.ApplyPlan(rec.Mark(ctx, CM("ApplyPlan")), pAdd); err != nil {
 		return fmt.Errorf("apply add-column: %w", err)
 	}
 	if has, err := hasColumn(ctx, client, ledgerTable, "note"); err != nil {
@@ -271,11 +269,10 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 	if err != nil {
 		return fmt.Errorf("plan drop-column: %w", err)
 	}
-	fDropCol := filterKnownDrift(pDropCol)
-	if len(fDropCol.Ops) == 0 {
+	if pDropCol.IsEmpty() {
 		return fmt.Errorf("el plan de vuelta a V1 debía proponer el drop de note")
 	}
-	if err := client.ApplyPlan(rec.Mark(ctx, CM("ApplyPlan")), fDropCol); err != nil {
+	if err := client.ApplyPlan(rec.Mark(ctx, CM("ApplyPlan")), pDropCol); err != nil {
 		return fmt.Errorf("apply drop-column: %w", err)
 	}
 	if has, err := hasColumn(ctx, client, ledgerTable, "note"); err != nil {
@@ -482,19 +479,18 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 	if err != nil {
 		return fmt.Errorf("plan drop: %w", err)
 	}
-	fDrop := filterKnownDrift(pDrop)
-	if len(fDrop.Ops) == 0 || !strings.Contains(fDrop.String(), ledgerTable) {
+	if pDrop.IsEmpty() || !strings.Contains(pDrop.String(), ledgerTable) {
 		return fmt.Errorf("el plan de cleanup debía proponer el drop de %s:\n%s", ledgerTable, pDrop.String())
 	}
-	if err := client.ApplyPlan(ctx, fDrop); err != nil {
+	if err := client.ApplyPlan(ctx, pDrop); err != nil {
 		return fmt.Errorf("apply drop: %w", err)
 	}
 	pFinal, err := client.PlanMigration(ctx, domain.AllModels()...)
 	if err != nil {
 		return fmt.Errorf("plan final: %w", err)
 	}
-	if fFinal := filterKnownDrift(pFinal); len(fFinal.Ops) > 0 {
-		return fmt.Errorf("la BD no quedó canónica tras el cleanup:\n%s", fFinal.String())
+	if !pFinal.IsEmpty() {
+		return fmt.Errorf("la BD no quedó canónica tras el cleanup:\n%s", pFinal.String())
 	}
 	// El estado del backfill ya no apunta a nada (la tabla se dropeó): fuera,
 	// para que el próximo run arranque de cero.
@@ -502,86 +498,6 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 		"DELETE FROM quark_backfill_state WHERE name = "+client.Dialect().Placeholder(1), backfillName)
 	return nil
 }}
-
-// Drift conocido de PlanMigration sobre una BD recién migrada — DOS clases,
-// ambas hallazgos del exerciser trazados en TASKS § findings. Mientras los
-// fixes de core no aterricen, TODO ApplyPlan del arnés pasa por
-// filterKnownDrift y los asserts de "plan vacío" son módulo estas clases. Al
-// cerrar cada finding: retirar su filtro y endurecer a IsEmpty() a secas.
-//
-//  1. knownM2MJoinTables: join tables m2m que Migrate crea (createJoinTables)
-//     pero que modelsToSchema NO declara — no son modelos. El diff las ve en
-//     current-no-en-desired y propone DROPearlas; aplicar ese plan crudo
-//     destruiría la tabla (y sus datos).
-//  2. OpAlterColumn cosmético: el catálogo devuelve el default con forma
-//     propia (PG: cast `'member'::text`, case de literales) y defaultsEqual
-//     (migrate_diff.go) compara strings crudos → op permanente en columnas
-//     con default; además ApplyPlan no ejecuta alters de sólo-default
-//     (ErrUnsupportedFeature, "F3-3-execute-alter"). SQLite no lo enseña (su
-//     catálogo devuelve el default tal cual); PG sí.
-var knownM2MJoinTables = map[string]bool{"project_tags": true}
-
-// filterKnownDrift separa del plan las ops del drift conocido (ver arriba).
-// Todo lo demás se conserva: el filtro es quirúrgico, no ciega el round-trip.
-func filterKnownDrift(p quark.Plan) quark.Plan {
-	kept := make([]quark.Operation, 0, len(p.Ops))
-	for _, op := range p.Ops {
-		switch o := op.(type) {
-		case quark.OpDropTable:
-			if knownM2MJoinTables[o.Table] {
-				continue
-			}
-		case quark.OpAlterColumn:
-			if isCosmeticAlter(o) {
-				continue
-			}
-		}
-		kept = append(kept, op)
-	}
-	return quark.Plan{Ops: kept}
-}
-
-// isCosmeticAlter detecta la clase 2: nullable idéntico, tipo equivalente
-// módulo forma del catálogo, y defaults iguales tras canonicalizar (cortar el
-// cast `::tipo` de PG y case-fold). Un delta real de tipo/nullable/default NO
-// es cosmético y se conserva.
-func isCosmeticAlter(o quark.OpAlterColumn) bool {
-	if o.Old.Nullable != o.New.Nullable {
-		return false
-	}
-	if canonType(o.Old.Type) != canonType(o.New.Type) {
-		return false
-	}
-	if o.Old.Default == nil || o.New.Default == nil {
-		return o.Old.Default == o.New.Default
-	}
-	return canonDefault(*o.Old.Default) == canonDefault(*o.New.Default)
-}
-
-// canonType reproduce la parte de normalizeType (migrate_diff.go, no exportada)
-// que el dominio necesita — case-fold + alias de PG (varchar, timestamp). Los
-// alias de timestamp NO los colapsa el normalizeType de core (por eso el diff
-// emite ops de sólo-tipo en PG); parte del mismo finding.
-func canonType(t string) string {
-	s := strings.ToLower(strings.TrimSpace(t))
-	s = strings.ReplaceAll(s, "character varying", "varchar")
-	s = strings.ReplaceAll(s, "timestamp without time zone", "timestamp")
-	s = strings.ReplaceAll(s, "timestamp with time zone", "timestamptz")
-	return s
-}
-
-// canonDefault canonicaliza un default de catálogo: corta el cast de PG
-// (`'member'::text` → `'member'`) y case-folds (TRUE/true). El case-fold es
-// intencional para literales bool; NO es apto para defaults string con
-// semántica case-sensitive ('Active' vs 'active' se verían iguales) — los
-// defaults del dominio del arnés no entran en ese caso.
-func canonDefault(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.Index(s, "::"); i >= 0 {
-		s = s[:i]
-	}
-	return strings.ToLower(s)
-}
 
 // execRaw ejecuta DDL/DML crudo dentro de una migración versionada (los cuerpos
 // Up/Down son código del usuario; Raw() es la vía documentada para DDL que el
