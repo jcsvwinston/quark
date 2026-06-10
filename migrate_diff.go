@@ -540,7 +540,108 @@ func defaultsEqual(a, b *string) bool {
 	if b == nil {
 		return isAutoincrementDefault(*a)
 	}
-	return *a == *b
+	if *a == *b {
+		return true
+	}
+	return canonicalDefault(*a) == canonicalDefault(*b)
+}
+
+// canonicalDefault reduces a Column.Default expression to a
+// comparable form, closing the catalog asymmetries the engines
+// introduce (superapp finding, task_b03f2155). Steps, in order:
+//
+//   - Paren wrapping (MSSQL): `sys.default_constraints` stores the
+//     definition wrapped in parens — `((1))` for DEFAULT 1,
+//     `('member')` for DEFAULT 'member'. Balanced OUTER pairs are
+//     stripped repeatedly; anything whose first paren doesn't close
+//     at the very end (`(a),(b)`) is left intact.
+//   - Cast suffix (PG): the catalog stores string defaults with an
+//     explicit cast — `'member'::text`, `'draft'::character varying`
+//     — while the model side declares the bare `'member'`. The cast
+//     is stripped, but only when the `::` sits OUTSIDE a quoted
+//     literal: a pathological `DEFAULT 'a::b'` stays intact.
+//   - Quote stripping (MySQL): MySQL's INFORMATION_SCHEMA returns
+//     string defaults UNQUOTED (`member` for DEFAULT 'member');
+//     MariaDB/SQLite keep the quotes. A default fully wrapped in
+//     single quotes is reduced to its content (un-doubling escaped
+//     quotes), so `'member'` ≡ `member`. Comparison stays
+//     case-SENSITIVE for string content — `'Active'` ≠ `'active'`.
+//   - Bool literal case: the migrator normalises bool defaults to the
+//     dialect literal `TRUE`/`FALSE` (PR #170) while PG's catalog
+//     returns lowercase `true`/`false`. Bool keywords compare
+//     case-insensitively (after unquoting this also makes a string
+//     column's `'true'` match MySQL's unquoted `true` — correct,
+//     since defaultsEqual only ever compares the two sides of the
+//     SAME column, already type-gated by columnsEqual).
+func canonicalDefault(s string) string {
+	s = strings.TrimSpace(s)
+	for parenWrapped(s) {
+		s = strings.TrimSpace(s[1 : len(s)-1])
+	}
+	if i := castIndex(s); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
+		// Unquote ONLY when the whole string is a single literal: after
+		// collapsing escaped quotes (''), no bare quote may remain in the
+		// inner content. This keeps an expression like `'a' || 'b'`
+		// intact (its "inner" would be `a' || 'b`) instead of mangling
+		// it — expressions compare raw, literals compare unquoted.
+		inner := s[1 : len(s)-1]
+		if !strings.Contains(strings.ReplaceAll(inner, "''", ""), "'") {
+			s = strings.ReplaceAll(inner, "''", "'")
+		}
+	}
+	switch strings.ToLower(s) {
+	case "true":
+		return "true"
+	case "false":
+		return "false"
+	}
+	return s
+}
+
+// parenWrapped reports whether s is a single balanced paren group —
+// the first '(' closes exactly at the final byte. `(a),(b)` is NOT
+// wrapped (its first group closes mid-string). The scan does NOT
+// track quoted content — a paren inside a string literal would
+// miscount the depth — but a miscount only ever means "don't strip",
+// falling back to raw comparison; MSSQL's catalog (the producer of
+// this wrapping) only wraps bare numbers and simple literals.
+func parenWrapped(s string) bool {
+	if len(s) < 2 || s[0] != '(' || s[len(s)-1] != ')' {
+		return false
+	}
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 && i != len(s)-1 {
+				return false
+			}
+		}
+	}
+	return depth == 0
+}
+
+// castIndex returns the position of the first `::` outside single
+// quotes, or -1. PG renders the cast outside the literal; the quote
+// scan (SQL doubles quotes to escape them, which simply toggles
+// twice) keeps quoted contents out of consideration.
+func castIndex(s string) int {
+	inQuote := false
+	for i := 0; i+1 < len(s); i++ {
+		switch {
+		case s[i] == '\'':
+			inQuote = !inQuote
+		case !inQuote && s[i] == ':' && s[i+1] == ':':
+			return i
+		}
+	}
+	return -1
 }
 
 // isAutoincrementDefault reports whether a Column.Default string is
@@ -580,7 +681,24 @@ func isAutoincrementDefault(s string) bool {
 //     grammar; we collapse to `varchar` since that's what every
 //     other engine uses.
 //  4. PG alias: `character(` → `char(`. Same rationale.
-//  5. MySQL display widths: `int(11)` → `int`, `bigint(20)` →
+//  5. PG alias: `timestamp without time zone` → `timestamp` and
+//     `timestamp with time zone` → `timestamptz`. PG's
+//     information_schema spells out the verbose SQL-standard form
+//     for what the migrator emits as `TIMESTAMP` — without this
+//     collapse, every `time.Time` column generated a spurious
+//     type-only OpAlterColumn on PG round-trips (superapp finding,
+//     task_b03f2155).
+//  6. MySQL/MariaDB bool storage: `tinyint(1)` → `boolean`. Both
+//     engines implement BOOLEAN as tinyint(1) and report the storage
+//     form in the catalog; the model side emits BOOLEAN and never a
+//     bare tinyint. Exact-matched BEFORE the display-width strip so
+//     `tinyint(4)` (a real small int) is unaffected.
+//  7. Oracle default timestamp precision: `timestamp(6)` →
+//     `timestamp`. Oracle bakes its DEFAULT fractional-seconds
+//     precision into the reported type name for columns declared as
+//     bare TIMESTAMP. Explicit non-default precisions
+//     (`timestamp(3)`) carry real information and stay distinct.
+//  8. MySQL display widths: `int(11)` → `int`, `bigint(20)` →
 //     `bigint`, etc. Older MySQL versions (5.7) emit display widths
 //     in `INFORMATION_SCHEMA.COLUMNS.COLUMN_TYPE`; MySQL 8.0+
 //     dropped them but a mixed-version cluster could still surface
@@ -606,6 +724,23 @@ func normalizeType(t string) string {
 	s := strings.ToLower(strings.TrimSpace(t))
 	s = strings.ReplaceAll(s, "character varying", "varchar")
 	s = strings.ReplaceAll(s, "character(", "char(")
+	s = strings.ReplaceAll(s, "timestamp without time zone", "timestamp")
+	s = strings.ReplaceAll(s, "timestamp with time zone", "timestamptz")
+	// MySQL/MariaDB store BOOLEAN as tinyint(1) and report exactly that
+	// in the catalog; the model side emits BOOLEAN and never a bare
+	// tinyint. Exact match BEFORE the display-width strip — `tinyint(1)`
+	// is the bool marker, `tinyint(4)`/`tinyint` are real small ints.
+	if s == "tinyint(1)" {
+		s = "boolean"
+	}
+	// Oracle reports a bare-TIMESTAMP column as TIMESTAMP(6) — the
+	// engine's DEFAULT fractional-seconds precision baked into the type
+	// name. The migrator never declares a precision, so only the
+	// default form collapses; an explicit non-default precision
+	// (timestamp(3)) is real information and stays distinct.
+	if s == "timestamp(6)" {
+		s = "timestamp"
+	}
 	s = stripMySQLDisplayWidth(s)
 	// `int` ≡ `integer` — SQL standard `INTEGER` vs engine-
 	// vernacular `INT`. The migrator emits `INTEGER` for int kinds

@@ -39,6 +39,17 @@ func TestNormalizeType(t *testing.T) {
 		{"different decimal widths stay different", "decimal(10,2)", "decimal(12,4)", false},
 		{"PG numeric reassembly vs migrator NUMERIC",
 			"numeric(10,2)", "NUMERIC(10,2)", true},
+		{"PG timestamp without tz ≡ migrator TIMESTAMP",
+			"timestamp without time zone", "TIMESTAMP", true},
+		{"PG timestamp with tz ≡ timestamptz",
+			"timestamp with time zone", "TIMESTAMPTZ", true},
+		{"timestamp tz-ness stays distinct",
+			"timestamp without time zone", "timestamp with time zone", false},
+		{"MySQL bool storage tinyint(1) ≡ BOOLEAN", "tinyint(1)", "BOOLEAN", true},
+		{"tinyint(4) is a real small int, not boolean", "tinyint(4)", "boolean", false},
+		{"bare tinyint is not boolean", "tinyint", "boolean", false},
+		{"Oracle default-precision TIMESTAMP(6) ≡ TIMESTAMP", "TIMESTAMP(6)", "TIMESTAMP", true},
+		{"explicit non-default timestamp precision stays distinct", "timestamp(3)", "timestamp", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -117,6 +128,29 @@ func TestDefaultsEqual(t *testing.T) {
 		{"nil vs Oracle user sequence .nextval", nil, str("app_seq.nextval"), true},
 		{"literal default ending in word nextval stays literal",
 			str("'pending_nextval'"), nil, false},
+		// canonicalDefault (task_b03f2155): cast de PG, quotes de MySQL,
+		// case de bools.
+		{"PG cast suffix vs bare literal", str("'member'::text"), str("'member'"), true},
+		{"PG cast character varying vs bare", str("'draft'::character varying"), str("'draft'"), true},
+		{"different literals with same cast still differ", str("'x'::text"), str("'y'::text"), false},
+		{"MySQL unquoted catalog vs quoted model", str("member"), str("'member'"), true},
+		{"bool literal case TRUE ≡ true", str("TRUE"), str("true"), true},
+		{"bool literal case FALSE ≡ false", str("FALSE"), str("false"), true},
+		{"string content stays case-sensitive", str("'Active'"), str("'active'"), false},
+		{"unquoted vs quoted, different case, still differ", str("Active"), str("'active'"), false},
+		{"string 'true' matches MySQL's unquoted true", str("'true'"), str("true"), true},
+		{"cast inside quotes is preserved", str("'a::b'"), str("'a'"), false},
+		{"identical quoted cast-looking literals equal", str("'a::b'"), str("'a::b'"), true},
+		{"escaped quote then cast still strips", str("'it''s'::text"), str("'it''s'"), true},
+		{"escaped quote unquotes symmetrically", str("'it''s'"), str("it's"), true},
+		{"MSSQL paren-wrapped numeric", str("((1))"), str("1"), true},
+		{"MSSQL paren-wrapped string", str("('member')"), str("'member'"), true},
+		{"MSSQL paren-wrapped bool vs PG literal", str("((1))"), str("1"), true},
+		{"adjacent paren groups are not stripped", str("(a),(b)"), str("a),(b"), false},
+		// Centinela del guard de unquote: una EXPRESIÓN que empieza y
+		// acaba en comilla no es un literal único y NO se desenvuelve.
+		{"expression of two literals is not unquoted", str("'a' || 'b'"), str("a' || 'b"), false},
+		{"identical expressions still compare equal raw", str("'a' || 'b'"), str("'a' || 'b'"), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
