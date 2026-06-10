@@ -49,8 +49,19 @@ const (
 	// ficheros; PG/MySQL/MariaDB/MSSQL un CREATE DATABASE vía admin. Oracle
 	// queda fuera: una "database" por tenant ahí es un PDB (operación
 	// administrativa pesada, fuera del alcance del harness) y el equivalente
-	// ligero (CREATE USER = schema) es la otra estrategia.
+	// ligero (CREATE USER = schema) es la otra estrategia. Los exercisers de
+	// HA (réplicas/sharding) reusan esta misma capacidad: sus réplicas y
+	// shards son DSNs aprovisionados con idéntico mecanismo.
 	FeatDBPerTenantProvision Feature = "db_per_tenant_provision"
+
+	// FeatDeadlock marca los motores donde un deadlock por orden de locks
+	// invertido puede MANIFESTARSE (los 5 con servidor). SQLite serializa
+	// escrituras (SQLITE_BUSY no es un código de deadlock), así que el
+	// exerciser invoca igualmente WithDeadlockRetry (el símbolo se ejerce en
+	// los 6) pero la RECUPERACIÓN sólo se asierta donde el deadlock existe.
+	// Semántica de capacidad (como SchemaPerTenant): skip del path funcional,
+	// no error sentinel. Fuente: bugbash F12 + tx_deadlock_integration_test.go.
+	FeatDeadlock Feature = "deadlock"
 )
 
 // supported mapea cada feature limitada a los motores que la soportan. Para las
@@ -71,6 +82,7 @@ var supported = map[Feature]map[Engine]bool{
 	FeatSkipLocked:           {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true, Oracle: true},
 	FeatSchemaPerTenant:      {Postgres: true, MSSQL: true},
 	FeatDBPerTenantProvision: {SQLite: true, Postgres: true, MySQL: true, MariaDB: true, MSSQL: true},
+	FeatDeadlock:             {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true, Oracle: true},
 }
 
 // Supports indica si el motor e soporta la feature f. Si devuelve false, el

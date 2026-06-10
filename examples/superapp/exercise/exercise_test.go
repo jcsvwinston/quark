@@ -25,7 +25,7 @@ func TestExercisersSQLite(t *testing.T) {
 		_ = os.Remove(conns[control.SQLite].DSN)
 	}()
 
-	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, MIGRATE})
+	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, REPLICAS, SHARDING, DEADLOCK, MIGRATE})
 	r := results[control.SQLite]
 	if r.Err != nil {
 		t.Fatalf("exerciser: %v", r.Err)
@@ -57,6 +57,12 @@ func TestExercisersSQLite(t *testing.T) {
 		MIG("Register"), MIG("Reset"), MIG("NewMigrator"),
 		MIG("(*Migrator).Init"), MIG("(*Migrator).UpDryRun"), MIG("(*Migrator).Up"),
 		MIG("(*Migrator).GetApplied"), MIG("(*Migrator).Down"),
+		// HA: réplicas (full en sqlite vía ficheros), sharding (full en sqlite),
+		// deadlock (camino feliz en sqlite; recuperación en servidores).
+		QF("WithReplicas"), QF("WithReplicaStrategy"), QF("Sticky"), QF("ReplicaRoundRobin"),
+		QF("NewShardRouter"), QF("HashShardFunc"), QF("WithShardKey"), QF("ShardKeyFromContext"),
+		SRM("GetClient"), SRM("ShardNames"),
+		QF("WithDeadlockRetry"), QM("UpdateMap"),
 	} {
 		if !seen[k] {
 			t.Errorf("cobertura: falta el símbolo %s", k)
