@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2](https://github.com/jcsvwinston/quark/compare/v1.1.1...v1.1.2) (2026-06-10)
+
+
+### Fixed
+
+* **migrate:** make PlanMigration round-trip clean on a freshly migrated database ([bdc78a4](https://github.com/jcsvwinston/quark/commit/bdc78a46d6436195dfaef51fa934d1ba6ca4f98b))
+* **migrate:** make PlanMigration round-trip clean on a freshly migrated database (re-target [#186](https://github.com/jcsvwinston/quark/issues/186)) ([3d26be0](https://github.com/jcsvwinston/quark/commit/3d26be0ce95aa1647bf53f553b6cdf5fc4a19b3b))
+* **migrate:** render the primary key in plan-created tables (F3-2-pk) ([0f60b2a](https://github.com/jcsvwinston/quark/commit/0f60b2a8b6d43a10cf565102c7154cbe1385a95c))
+* **migrate:** render the primary key in plan-created tables (F3-2-pk) ([6f9346f](https://github.com/jcsvwinston/quark/commit/6f9346fa1704d7028c6b017f68278a2d07f93b7b))
+
+
+### Documentation
+
+* correct ROADMAP F3-1 — Oracle migration lock landed via ADR-0018 ([81efa95](https://github.com/jcsvwinston/quark/commit/81efa95f0e8b9a3a054b1e14b8df3335307f11c2))
+
+
+### Tests
+
+* **superapp:** add migrate exerciser (S5) — plan/apply, sync, backfill, lock, versioned cycle ([b1dd5f4](https://github.com/jcsvwinston/quark/commit/b1dd5f4716b3634c3bfb89bea01e3fee01cdb289))
+* **superapp:** create the migrate exerciser ledger via ApplyPlan ([23ac6b1](https://github.com/jcsvwinston/quark/commit/23ac6b13df9d5f2e273fd5b529f541904f7cfe2c))
+* **superapp:** harden migrate exerciser asserts to strict IsEmpty ([7885a7f](https://github.com/jcsvwinston/quark/commit/7885a7f5f4c89c11dbd11c05c5f8c026ed8bd62c))
+* **superapp:** migrate exerciser (S5) — plan/apply, sync, backfill, lock, versioned cycle ([9783729](https://github.com/jcsvwinston/quark/commit/97837298f7c22ce4a68ca32f6e6263844a978949))
+
 ## [1.1.1](https://github.com/jcsvwinston/quark/compare/v1.1.0...v1.1.1) (2026-06-09)
 
 
