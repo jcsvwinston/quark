@@ -141,8 +141,8 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   `control.Invoked` (vía `recorder.Collect`). Reusa `engine.Run` (lifecycle +
   anti-fugas). Helpers de key `QM`/`CM`/`QF` que casan EXACTO con `apisurface.json`
   (`QM("Create")` → `…quark.(*Query[T]).Create`).
-- `crud.go`, `tx.go`, `builder.go`, `relations.go`, `security.go`, `cache.go`, `tenant.go`, `tenant_rls_native.go`, `tenant_schema_per.go`, `tenant_db_per.go` (+`tenant_dsn.go` rewriters) entregados — verdes en SQLite **y PG real**
-  (`-tags=superapp_engine`, **48 símbolos / 88 statements**). **Tenant: 4/4 estrategias cubiertas.** `tenant.go` cubre **la modalidad RowLevelSecurityClient**
+- `crud.go`, `tx.go`, `builder.go`, `relations.go`, `security.go`, `cache.go`, `tenant.go`, `tenant_rls_native.go`, `tenant_schema_per.go`, `tenant_db_per.go` (+`tenant_dsn.go` rewriters), `migrate.go` entregados — verdes en SQLite **y PG real**
+  (`-tags=superapp_engine`, **79 símbolos / 99 statements**). **Tenant: 4/4 estrategias cubiertas.** `tenant.go` cubre **la modalidad RowLevelSecurityClient**
   (aislamiento cross-tenant no-leak + propagación a Or-groups [regresión P0-1] + el aislamiento es del
   router [client base ve todo, como `Raw()`/`Exec()`] + rechazo de tenant_id inválido/ausente); builder-only →
   portable 6 motores; añadió el helper de key `TRM` (métodos de `*TenantRouter`). El `cache` exerciser **destapó BB-15** (un `Create`
@@ -199,9 +199,32 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
     exige); MySQL/MariaDB/MSSQL rewriters listos sin ejercitar (la matriz aún no los
     bootea); Oracle skip documentado (`FeatDBPerTenantProvision`: un PDB queda fuera del
     alcance del harness).
-  - Luego: `migrate.go` (round-trip `Migrate`→`PlanMigration`
-  vacío, `Sync`, `Backfill`), `ha.go` (replicas/sharding/deadlock + el test
-  `-race` de concurrencia del recorder que `code-reviewer` pidió en S2),
+  - **`migrate.go` — ✅ HECHO** (var `MIGRATE`; verde SQLite + PG real, 79
+    símbolos / 99 statements). Cubre: round-trip `Migrate`→`PlanMigration`
+    **módulo drift conocido**, diff de tabla faltante + `Plan.Hash`,
+    `ApplyPlan` (add/drop column + drop table), `mergeNonColumnSurface`
+    (índice manual sin drops), registry per-Client, `Sync`
+    (dry-run/add/uso-end-to-end/drop), `Backfill` (resume tras fallo
+    inyectado), lock por capability (contención→`ErrLockTimeout`;
+    `ErrUnsupportedFeature` en SQLite — y OJO: `capability.go` ganó
+    `Oracle: true` en `FeatMigrationLock`, estaba stale vs ADR-0018), y el
+    ciclo versionado completo sobre un client dedicado `AllowRawQueries:true`
+    (requisito documentado en `migrations.mdx` § "Raw SQL Requirement" — el
+    exerciser es su regresión e2e). **Destapó 2 findings de core** (TASKS §
+    findings, tasks `task_20d5f912`/`task_b03f2155`): (A) `ApplyPlan` crea
+    tablas SIN PK (por eso el create-table del exerciser va por `Migrate`);
+    (B) `PlanMigration` propone drift falso sobre BD recién migrada (drop de
+    join tables m2m — destructivo — + alters cosméticos de defaults con cast
+    PG y de alias `timestamp without time zone`). El arnés los filtra con
+    `filterKnownDrift` (quirúrgico); al cerrar cada finding, retirar su
+    filtro y endurecer a `IsEmpty()`. **Gotchas para los siguientes:** el
+    exerciser converge al entrar (re-entrante en motores persistentes; deja
+    la BD canónica al salir), las columnas añadidas a tablas con filas van
+    `Nullable[T]` (el Scan de un NULL en `string` revienta), y las
+    mutaciones de un client secundario NO invalidan la caché del client del
+    harness — los asserts de conteo van por el client que mutó.
+  - Luego: `ha.go` (replicas/sharding/deadlock + el test `-race` de
+  concurrencia del recorder que `code-reviewer` pidió en S2),
   `observability.go` (OTel in-memory + redacción), y **builder-avanzado**
   (CTE/window/setops/locking — los ~30 métodos de `Query[T]` que el builder común
   no cubre; varios necesitan la matriz de capacidad por motor). Y el **oráculo de

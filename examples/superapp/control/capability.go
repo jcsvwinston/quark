@@ -60,13 +60,14 @@ const (
 // features de capacidad del motor/arnés (SchemaPerTenant, DBPerTenantProvision)
 // no hay error sentinel: el exerciser salta el path funcional.
 //
-// Fuentes: rls_native.go (PG-only), docs/ROADMAP.md F3-1 (lock: SQLite/Oracle
-// devuelven ErrUnsupportedFeature), ADR-0019 (LISTEN/NOTIFY PG-only),
-// docs/playbooks/tenant.md (schemas: PG/MSSQL).
+// Fuentes: rls_native.go (PG-only), migration_lock.go + dialect_migration_lock.go
+// (lock: PG/MySQL/MariaDB/MSSQL/Oracle lo implementan — Oracle vía DBMS_LOCK,
+// ADR-0018; sólo SQLite devuelve ErrUnsupportedFeature), ADR-0019
+// (LISTEN/NOTIFY PG-only), docs/playbooks/tenant.md (schemas: PG/MSSQL).
 var supported = map[Feature]map[Engine]bool{
 	FeatRLSNative:            {Postgres: true},
 	FeatListenNotify:         {Postgres: true},
-	FeatMigrationLock:        {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true},
+	FeatMigrationLock:        {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true, Oracle: true},
 	FeatSkipLocked:           {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true, Oracle: true},
 	FeatSchemaPerTenant:      {Postgres: true, MSSQL: true},
 	FeatDBPerTenantProvision: {SQLite: true, Postgres: true, MySQL: true, MariaDB: true, MSSQL: true},

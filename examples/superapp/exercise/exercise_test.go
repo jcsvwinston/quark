@@ -25,7 +25,7 @@ func TestExercisersSQLite(t *testing.T) {
 		_ = os.Remove(conns[control.SQLite].DSN)
 	}()
 
-	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT})
+	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, MIGRATE})
 	r := results[control.SQLite]
 	if r.Err != nil {
 		t.Fatalf("exerciser: %v", r.Err)
@@ -47,6 +47,16 @@ func TestExercisersSQLite(t *testing.T) {
 		QF("RowLevelSecurityNative"), TRM("Tx"), // RLSNATIVE (rechazo en sqlite vía Note)
 		QF("SchemaPerTenant"),                         // SCHEMAPERTENANT (skip en sqlite vía Note)
 		QF("DatabasePerTenant"), TRM("ActiveTenants"), // DBPERTENANT (full en sqlite: ficheros)
+		// MIGRATE: schema-as-code + registry + sync + backfill + lock (rechazo
+		// en sqlite) + migraciones versionadas (paquete migrate).
+		CM("PlanMigration"), CM("ApplyPlan"), CM("CreateIndex"), CM("IntrospectSchema"),
+		CM("RegisterModel"), CM("RegisteredModels"), CM("MigrateRegistered"), CM("PlanMigrationRegistered"),
+		CM("Sync"), CM("Backfill"), CM("AcquireMigrationLock"), QM("CreateBatch"),
+		QF("(Plan).IsEmpty"), QF("(Plan).String"), QF("(Plan).Hash"),
+		QF("ErrUnsupportedFeature"),
+		MIG("Register"), MIG("Reset"), MIG("NewMigrator"),
+		MIG("(*Migrator).Init"), MIG("(*Migrator).UpDryRun"), MIG("(*Migrator).Up"),
+		MIG("(*Migrator).GetApplied"), MIG("(*Migrator).Down"),
 	} {
 		if !seen[k] {
 			t.Errorf("cobertura: falta el símbolo %s", k)

@@ -19,7 +19,7 @@ import (
 )
 
 func TestExerciseDockerPostgres(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	engines := []control.Engine{control.Postgres}
@@ -29,7 +29,7 @@ func TestExerciseDockerPostgres(t *testing.T) {
 	}
 	defer engine.Down(engines...)
 
-	results := Run(conns, 4, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT})
+	results := Run(conns, 4, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, MIGRATE})
 	cov := Coverage(results)
 	for e, r := range results {
 		if r.Err != nil {
@@ -47,6 +47,11 @@ func TestExerciseDockerPostgres(t *testing.T) {
 				QF("RowLevelSecurityClient"), QF("RowLevelSecurityNative"),
 				QF("SchemaPerTenant"), QF("DatabasePerTenant"),
 				TRM("Tx"), TRM("ActiveTenants"), TRM("ResolveTenant"), TRM("GetClient"),
+				// MIGRATE en PG corre el path completo del lock (contención →
+				// ErrLockTimeout → release → re-acquire), no el rechazo de SQLite.
+				CM("PlanMigration"), CM("ApplyPlan"), CM("Sync"), CM("Backfill"),
+				CM("AcquireMigrationLock"), QF("ErrLockTimeout"), QF("(MigrationLock).Release"),
+				MIG("(*Migrator).Up"), MIG("(*Migrator).Down"),
 			} {
 				if !cov[e][k] {
 					t.Errorf("%s cobertura: falta el símbolo %s", e, k)
