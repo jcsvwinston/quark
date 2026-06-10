@@ -211,13 +211,15 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
     ciclo versionado completo sobre un client dedicado `AllowRawQueries:true`
     (requisito documentado en `migrations.mdx` § "Raw SQL Requirement" — el
     exerciser es su regresión e2e). **Destapó 2 findings de core** (TASKS §
-    findings, tasks `task_20d5f912`/`task_b03f2155`): (A) `ApplyPlan` crea
-    tablas SIN PK (por eso el create-table del exerciser va por `Migrate`);
+    findings, tasks `task_20d5f912`/`task_b03f2155`): (A) ~~`ApplyPlan` crea
+    tablas SIN PK~~ — **RESUELTO** (F3-2-pk: `Column.PrimaryKey` end-to-end;
+    el paso 2 del exerciser volvió al diseño original — crea la tabla vía
+    `ApplyPlan` y el INSERT con id autogenerado es el assert);
     (B) `PlanMigration` propone drift falso sobre BD recién migrada (drop de
     join tables m2m — destructivo — + alters cosméticos de defaults con cast
-    PG y de alias `timestamp without time zone`). El arnés los filtra con
-    `filterKnownDrift` (quirúrgico); al cerrar cada finding, retirar su
-    filtro y endurecer a `IsEmpty()`. **Gotchas para los siguientes:** el
+    PG y de alias `timestamp without time zone`) — **sigue abierto**. El
+    arnés filtra B con `filterKnownDrift` (quirúrgico); al cerrar cada
+    clase, retirar su filtro y endurecer a `IsEmpty()`. **Gotchas para los siguientes:** el
     exerciser converge al entrar (re-entrante en motores persistentes; deja
     la BD canónica al salir), las columnas añadidas a tablas con filas van
     `Nullable[T]` (el Scan de un NULL en `string` revienta), y las

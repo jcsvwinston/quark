@@ -63,13 +63,14 @@ const (
 )
 
 // MIGRATE ejerce el área de migraciones: el round-trip Migrate→PlanMigration
-// vacío (el invariante que BB-11 rompía), detección de tabla faltante por el
-// diff + ApplyPlan sobre ops de columna y drop de tabla, el contrato "índice
-// manual no genera drops" de mergeNonColumnSurface, el registry per-Client
-// (F3-7), Sync (dry-run, add y drop de columna), Backfill con resume tras
-// fallo (F3-6), el lock de migración distribuido por capability
-// (F3-1/ADR-0018), y el ciclo completo de migraciones versionadas (paquete
-// migrate: Init/UpDryRun/Up/GetApplied/Down).
+// vacío (el invariante que BB-11 rompía), el ciclo schema-as-code completo
+// (diff detecta la tabla faltante → ApplyPlan la CREA con su PK [regresión
+// F3-2-pk] → ops de columna → drop de tabla), el contrato "índice manual no
+// genera drops" de mergeNonColumnSurface, el registry per-Client (F3-7),
+// Sync (dry-run, add y drop de columna), Backfill con resume tras fallo
+// (F3-6), el lock de migración distribuido por capability (F3-1/ADR-0018),
+// y el ciclo completo de migraciones versionadas (paquete migrate:
+// Init/UpDryRun/Up/GetApplied/Down).
 // Deja la BD como la encontró (cleanup vía OpDropTable real) y es idempotente
 // entre runs (converge + limpieza de estado al entrar).
 var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder, conn Conn) error {
@@ -117,17 +118,13 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 		return fmt.Errorf("Plan vacío: IsEmpty=%v String=%q, esperaba true/\"(no changes)\"", empty.IsEmpty(), empty.String())
 	}
 
-	// --- 2. El diff detecta una tabla que falta; Migrate la crea. ----------
-	// NOTA (hallazgo del exerciser, trazado en TASKS § findings): la tabla NO
-	// se crea aquí vía ApplyPlan a propósito. modelsToSchema pasa IsPK:false
-	// (el Column neutral aún no transporta PK — gap "F3-2-pk" del godoc de
-	// migrate_plan.go), así que applyCreateTable emite el CREATE TABLE sin
-	// constraint de PK ni autoincrement: la tabla resultante rechaza INSERTs
-	// con id autogenerado y diverge silenciosamente de la que emite Migrate
-	// (el diff tampoco compara PK, por lo que el plan posterior sale vacío).
-	// Hasta que el fix de core aterrice, el contrato que el arnés pinnea es:
-	// diff detecta (aquí), ApplyPlan ejecuta ops de columna (paso 4b) y de
-	// drop de tabla (paso 8) — los paths que el bug-bash F6 dejó probados.
+	// --- 2. Plan→ApplyPlan crea la tabla — CON su PK (regresión F3-2-pk). --
+	// El finding A (task_20d5f912, cerrado) era exactamente esto: la tabla
+	// creada por ApplyPlan salía sin constraint de PK ni autoincrement y el
+	// primer INSERT con id autogenerado reventaba. Desde el fix,
+	// applyCreateTable renderiza el PK con los mismos fragmentos por dialecto
+	// que Migrate, así que el create va por el plan y el INSERT de abajo es
+	// el assert end-to-end.
 	models2 := append(domain.AllModels(), &migrateLedger{})
 	p2, err := client.PlanMigration(ctx, models2...)
 	if err != nil {
@@ -144,19 +141,20 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 	if h := p2.Hash(); h == "" || h != p2.Hash() {
 		return fmt.Errorf("Plan.Hash() debe ser determinista y no-vacío (got %q)", h)
 	}
-	if err := client.Migrate(ctx, &migrateLedger{}); err != nil {
-		return fmt.Errorf("migrate ledger: %w", err)
+	if err := client.ApplyPlan(rec.Mark(ctx, CM("ApplyPlan")), f2); err != nil {
+		return fmt.Errorf("apply ledger: %w", err)
 	}
 	p3, err := client.PlanMigration(ctx, models2...)
 	if err != nil {
-		return fmt.Errorf("plan post-migrate: %w", err)
+		return fmt.Errorf("plan post-apply: %w", err)
 	}
 	if f3 := filterKnownDrift(p3); len(f3.Ops) > 0 {
-		return fmt.Errorf("round-trip post-Migrate del ledger roto:\n%s", f3.String())
+		return fmt.Errorf("round-trip post-ApplyPlan del ledger roto:\n%s", f3.String())
 	}
-	// La tabla es real: una fila entra y se cuenta.
+	// La tabla es real Y tiene PK: el INSERT confía en el id autogenerado
+	// (con el finding A vivo esto reventaba con NOT NULL constraint).
 	if err := quark.For[migrateLedger](rec.Mark(ctx, QM("Create")), client).Create(&migrateLedger{Ref: "r-1", Amount: 10}); err != nil {
-		return fmt.Errorf("create en ledger: %w", err)
+		return fmt.Errorf("create en tabla creada por plan: %w", err)
 	}
 	if n, err := quark.For[migrateLedger](ctx, client).Count(); err != nil || n != 1 {
 		return fmt.Errorf("count en ledger: n=%d err=%v", n, err)
