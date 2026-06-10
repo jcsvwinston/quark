@@ -298,3 +298,176 @@ func hasColumn(schema quark.Schema, tableName, colName string) bool {
 	}
 	return false
 }
+
+// columnIsPK reports whether the introspected schema marks
+// `tableName.colName` as part of the primary key.
+func columnIsPK(schema quark.Schema, tableName, colName string) bool {
+	for _, t := range schema.Tables {
+		if t.Name != tableName {
+			continue
+		}
+		for _, c := range t.Columns {
+			if c.Name == colName {
+				return c.PrimaryKey
+			}
+		}
+	}
+	return false
+}
+
+// pkRepro is the fixture for the F3-2-pk regression: a plan-created
+// table must carry the PK constraint + auto-increment, exactly like
+// the table Client.Migrate would emit for the same model.
+type pkRepro struct {
+	ID   int64  `db:"id" pk:"true"`
+	Name string `db:"name" quark:"not_null"`
+}
+
+func (pkRepro) TableName() string { return "pk_repros" }
+
+// TestApplyPlan_CreateTableHasPrimaryKey is the regression for the
+// superapp finding (task_20d5f912): before F3-2-pk, a table created
+// via PlanMigration→ApplyPlan had NO primary-key constraint — an
+// INSERT relying on an auto-generated id failed with a NOT NULL
+// violation, and the follow-up plan came back empty because the diff
+// didn't compare PK status either (silent divergence from Migrate).
+func TestApplyPlan_CreateTableHasPrimaryKey(t *testing.T) {
+	ctx := context.Background()
+	c := newSQLitePlanClient(t)
+
+	plan, err := c.PlanMigration(ctx, &pkRepro{})
+	if err != nil {
+		t.Fatalf("PlanMigration: %v", err)
+	}
+	// The models→Schema pipeline must mark the PK column.
+	var sawCreate bool
+	for _, op := range plan.Ops {
+		create, ok := op.(quark.OpCreateTable)
+		if !ok || create.Table.Name != "pk_repros" {
+			continue
+		}
+		sawCreate = true
+		for _, col := range create.Table.Columns {
+			if col.Name == "id" && !col.PrimaryKey {
+				t.Errorf("desired schema should mark id as PrimaryKey")
+			}
+			if col.Name == "name" && col.PrimaryKey {
+				t.Errorf("desired schema should NOT mark name as PrimaryKey")
+			}
+		}
+	}
+	if !sawCreate {
+		t.Fatalf("plan should include OpCreateTable{pk_repros}, got:\n%s", plan.String())
+	}
+	if err := c.ApplyPlan(ctx, plan); err != nil {
+		t.Fatalf("ApplyPlan: %v\nPlan was:\n%s", err, plan.String())
+	}
+
+	// THE finding: an insert with an auto-generated id must work.
+	row := &pkRepro{Name: "first"}
+	if err := quark.For[pkRepro](ctx, c).Create(row); err != nil {
+		t.Fatalf("Create on plan-created table: %v", err)
+	}
+	if row.ID == 0 {
+		t.Fatalf("plan-created table did not auto-assign the id")
+	}
+
+	// The catalog agrees, and the round-trip stays empty.
+	schema, err := c.IntrospectSchema(ctx)
+	if err != nil {
+		t.Fatalf("introspect: %v", err)
+	}
+	if !columnIsPK(schema, "pk_repros", "id") {
+		t.Errorf("introspection should mark pk_repros.id as PrimaryKey")
+	}
+	plan2, err := c.PlanMigration(ctx, &pkRepro{})
+	if err != nil {
+		t.Fatalf("PlanMigration after apply: %v", err)
+	}
+	if !plan2.IsEmpty() {
+		t.Errorf("plan after apply should be empty, got:\n%s", plan2.String())
+	}
+}
+
+// pkComposite exercises the composite-key path: the plan-created
+// table renders a table-level PRIMARY KEY (a, b) constraint.
+type pkComposite struct {
+	A int64  `db:"a" pk:"true"`
+	B int64  `db:"b" pk:"true"`
+	V string `db:"v"`
+}
+
+func (pkComposite) TableName() string { return "pk_composites" }
+
+func TestApplyPlan_CreateTableCompositePK(t *testing.T) {
+	ctx := context.Background()
+	c := newSQLitePlanClient(t)
+
+	plan, err := c.PlanMigration(ctx, &pkComposite{})
+	if err != nil {
+		t.Fatalf("PlanMigration: %v", err)
+	}
+	if err := c.ApplyPlan(ctx, plan); err != nil {
+		t.Fatalf("ApplyPlan: %v\nPlan was:\n%s", err, plan.String())
+	}
+
+	if err := quark.For[pkComposite](ctx, c).Create(&pkComposite{A: 1, B: 1, V: "x"}); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	// The constraint is real: a duplicate (a, b) pair must be rejected…
+	if err := quark.For[pkComposite](ctx, c).Create(&pkComposite{A: 1, B: 1, V: "dup"}); err == nil {
+		t.Errorf("duplicate composite key should violate the PRIMARY KEY constraint")
+	}
+	// …while a different pair is fine.
+	if err := quark.For[pkComposite](ctx, c).Create(&pkComposite{A: 1, B: 2, V: "y"}); err != nil {
+		t.Fatalf("distinct composite key insert: %v", err)
+	}
+
+	schema, err := c.IntrospectSchema(ctx)
+	if err != nil {
+		t.Fatalf("introspect: %v", err)
+	}
+	for _, col := range []string{"a", "b"} {
+		if !columnIsPK(schema, "pk_composites", col) {
+			t.Errorf("introspection should mark pk_composites.%s as PrimaryKey", col)
+		}
+	}
+	if columnIsPK(schema, "pk_composites", "v") {
+		t.Errorf("introspection should NOT mark pk_composites.v as PrimaryKey")
+	}
+	plan2, err := c.PlanMigration(ctx, &pkComposite{})
+	if err != nil {
+		t.Fatalf("PlanMigration after apply: %v", err)
+	}
+	if !plan2.IsEmpty() {
+		t.Errorf("composite round-trip should be empty, got:\n%s", plan2.String())
+	}
+}
+
+// TestApplyPlan_RejectsPrimaryKeyChange pins the executor's refusal:
+// a PK delta can't be expressed as ALTER COLUMN (it needs a table
+// rebuild), so it must fail loudly — and BEFORE the type check, so a
+// combined type+PK delta can't sneak through as a bare ALTER TYPE.
+func TestApplyPlan_RejectsPrimaryKeyChange(t *testing.T) {
+	ctx := context.Background()
+	c := newSQLitePlanClient(t)
+
+	if _, err := c.Raw().ExecContext(ctx,
+		`CREATE TABLE pk_change_probe (id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	plan := quark.Plan{Ops: []quark.Operation{
+		quark.OpAlterColumn{
+			Table: "pk_change_probe",
+			Old:   quark.Column{Name: "v", Type: "TEXT", Nullable: true},
+			New:   quark.Column{Name: "v", Type: "BIGINT", Nullable: true, PrimaryKey: true},
+		},
+	}}
+	err := c.ApplyPlan(ctx, plan)
+	if !errors.Is(err, quark.ErrUnsupportedFeature) {
+		t.Fatalf("expected ErrUnsupportedFeature for a PK change, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "primary-key") {
+		t.Errorf("error should name the primary-key gap, got %q", err)
+	}
+}

@@ -161,10 +161,10 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 			// etc.). That's correct for DDL but wrong here — Column.Type
 			// is meant to carry the bare data type (`INTEGER`,
 			// `bigint`) so it can compare 1:1 against what the
-			// introspector reads from the catalog. The PK status will
-			// live in a future PrimaryKey field on Column once F3-2-pk
-			// adds it; until then, the diff layer doesn't need to see
-			// PK status in Type to do its job.
+			// introspector reads from the catalog. PK status travels in
+			// Column.PrimaryKey instead (F3-2-pk): the diff compares it
+			// and ApplyPlan's CREATE TABLE renders the constraint from
+			// it, so a plan-created table matches Migrate's output.
 			sqlType := migrate.SQLTypeWithOpts(c.dialect.Name(), f.Type, migrate.TypeOptions{
 				Size:      f.Size,
 				Precision: f.Precision,
@@ -178,7 +178,8 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 				// nor the PK marker forbid it. The catalog readers
 				// surface PK columns as Nullable=false too, so this
 				// matches the introspector.
-				Nullable: !f.NotNull && !f.IsPK,
+				Nullable:   !f.NotNull && !f.IsPK,
+				PrimaryKey: f.IsPK,
 			}
 			if f.Default != "" {
 				s := f.Default

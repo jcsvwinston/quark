@@ -32,7 +32,7 @@ type Table struct {
 
 // Index is one secondary (non-primary-key) index on a table. The PK
 // is a constraint rather than an index in the diff model and lives on
-// the Column (via Default / future PrimaryKey field), not here. The
+// the Column (via [Column.PrimaryKey]), not here. The
 // introspector deliberately filters PK-backing indexes per dialect so
 // `Table.Indexes` only carries what F3-3 diffs need to add/drop.
 //
@@ -131,11 +131,22 @@ type Check struct {
 // "default is the empty string". The value is the raw dialect-native
 // expression: a literal, a function call (`CURRENT_TIMESTAMP`,
 // `gen_random_uuid()`), or `NULL`.
+//
+// `PrimaryKey` reports whether the column is part of the table's
+// primary key (true for every member of a composite key). Populated by
+// [Client.IntrospectSchema] on all six engines and by the models→Schema
+// pipeline behind [Client.PlanMigration], and compared by [Diff] — a PK
+// mismatch surfaces as an OpAlterColumn, which the executor rejects
+// loudly (changing a PK needs a table rebuild, out of ApplyPlan's
+// scope). `Type` stays the BARE data type even when PrimaryKey is set:
+// the constraint rendering (PRIMARY KEY, auto-increment) is the
+// executor's job at CREATE TABLE time, mirroring [Client.Migrate].
 type Column struct {
-	Name     string
-	Type     string
-	Nullable bool
-	Default  *string
+	Name       string
+	Type       string
+	Nullable   bool
+	Default    *string
+	PrimaryKey bool
 }
 
 // SchemaIntrospector is the optional Dialect interface for retrieving
@@ -186,7 +197,8 @@ func (c *Client) mapColumnType(t string) string {
 // A dialect that doesn't implement [SchemaIntrospector] returns
 // `ErrUnsupportedFeature`.
 //
-// Surface: tables, columns, non-PK indexes, foreign keys, and CHECK
+// Surface: tables, columns (primary-key membership included via
+// [Column.PrimaryKey]), non-PK indexes, foreign keys, and CHECK
 // constraints. SQLite returns `Checks=nil` (the only catalog read it
 // doesn't implement; see the [Check] godoc for the rationale).
 //

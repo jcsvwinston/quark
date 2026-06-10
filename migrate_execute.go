@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jcsvwinston/quark/internal/migrate"
 )
 
 // ApplyPlan executes the operations in `plan` against the database
@@ -267,6 +269,15 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 		if err := c.guard.ValidateIdentifier(o.New.Name); err != nil {
 			return fmt.Errorf("alter column: %w", err)
 		}
+		// A PRIMARY KEY delta can't be expressed as a column ALTER —
+		// it needs dropping/adding the table-level constraint (and on
+		// several engines a full table rebuild). Refuse loudly BEFORE
+		// the type check so a combined type+PK delta doesn't emit a
+		// bare ALTER TYPE that silently ignores the PK half.
+		if o.Old.PrimaryKey != o.New.PrimaryKey {
+			return fmt.Errorf("%w: OpAlterColumn for %s.%s: primary-key changes need a table rebuild (not expressible as ALTER COLUMN)",
+				ErrUnsupportedFeature, o.Table, o.New.Name)
+		}
 		// F3-3-execute only emits DDL for Type changes. Nullable
 		// and Default deltas need per-dialect ALTER syntax that
 		// we don't expose via Dialect yet. Rather than silently
@@ -363,6 +374,16 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 // already-neutralised Table, so column types and nullable flags
 // come from the catalog or from `modelsToSchema` directly.
 //
+// PRIMARY KEY rendering mirrors the migrator (F3-2-pk): a single PK
+// column of an integer family renders as the dialect's auto-increment
+// fragment (the same `migrate.PKColumnSQL` the migrator uses — SERIAL,
+// AUTO_INCREMENT, IDENTITY, AUTOINCREMENT…), any other single PK keeps
+// its own type plus `PRIMARY KEY`, and a composite key renders as a
+// table-level `PRIMARY KEY (a, b)` constraint. PK columns skip NOT NULL
+// (implied) and — on the auto-increment path — skip DEFAULT too: the
+// generation clause owns the value (a catalog-sourced `nextval(...)`
+// default would conflict with SERIAL).
+//
 // Index / FK / check creation are NOT folded into the CREATE TABLE
 // emitted here; they come from subsequent ops in the plan
 // (OpCreateIndex / OpAddForeignKey / OpAddCheck). This keeps the
@@ -375,6 +396,13 @@ func (c *Client) applyCreateTable(ctx context.Context, exec Executor, t Table) e
 	if err := c.guard.ValidateIdentifier(t.Name); err != nil {
 		return fmt.Errorf("create table: %w", err)
 	}
+	var pkCols []string
+	for _, col := range t.Columns {
+		if col.PrimaryKey {
+			pkCols = append(pkCols, col.Name)
+		}
+	}
+	singlePK := len(pkCols) == 1
 	cols := make([]string, 0, len(t.Columns))
 	for _, col := range t.Columns {
 		if err := c.guard.ValidateIdentifier(col.Name); err != nil {
@@ -387,8 +415,19 @@ func (c *Client) applyCreateTable(ctx context.Context, exec Executor, t Table) e
 		// constructed Plan with adversarial Type/Default strings is
 		// out of scope — the same caveat applies to AddForeignKey's
 		// OnDelete/OnUpdate.
+		if col.PrimaryKey && singlePK {
+			class := migrate.ClassifyPKType(col.Type)
+			piece := c.dialect.Quote(col.Name) + " " + migrate.PKColumnSQL(c.dialect.Name(), class, c.mapColumnType(col.Type))
+			// PRIMARY KEY implies NOT NULL; auto-increment owns the
+			// value, so only a non-auto PK keeps a declared default.
+			if class != migrate.PKInteger && col.Default != nil && !isAutoincrementDefault(*col.Default) {
+				piece += " DEFAULT " + *col.Default
+			}
+			cols = append(cols, piece)
+			continue
+		}
 		piece := c.dialect.Quote(col.Name) + " " + c.mapColumnType(col.Type)
-		if !col.Nullable {
+		if !col.Nullable || col.PrimaryKey {
 			// The catalog-side Type may already include NOT NULL
 			// in the dialect-native form (PG's `bigint NOT NULL`
 			// for a PK reassembly). We only append when the Type
@@ -402,6 +441,14 @@ func (c *Client) applyCreateTable(ctx context.Context, exec Executor, t Table) e
 			piece += " DEFAULT " + *col.Default
 		}
 		cols = append(cols, piece)
+	}
+	// Composite key → table-level constraint, mirroring the migrator.
+	if len(pkCols) > 1 {
+		quoted := make([]string, len(pkCols))
+		for i, n := range pkCols {
+			quoted[i] = c.dialect.Quote(n)
+		}
+		cols = append(cols, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(quoted, ", ")))
 	}
 	ddl := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", c.dialect.Quote(t.Name), strings.Join(cols, ",\n  "))
 	_, err := exec.ExecContext(ctx, ddl)

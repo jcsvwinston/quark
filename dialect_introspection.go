@@ -134,6 +134,9 @@ func sqliteListColumns(ctx context.Context, exec Executor, table string) ([]Colu
 			Name:     name,
 			Type:     typ,
 			Nullable: notnull == 0 && pk == 0,
+			// `pk` is the column's 1-based rank inside the PK (0 = not
+			// part of it), so this covers composite keys too.
+			PrimaryKey: pk > 0,
 		}
 		if dflt.Valid {
 			s := dflt.String
@@ -434,7 +437,8 @@ func mysqlListColumns(ctx context.Context, exec Executor, table, dialectName str
 		SELECT COLUMN_NAME,
 		       COLUMN_TYPE,
 		       IS_NULLABLE,
-		       COLUMN_DEFAULT
+		       COLUMN_DEFAULT,
+		       COLUMN_KEY
 		  FROM INFORMATION_SCHEMA.COLUMNS
 		 WHERE TABLE_SCHEMA = DATABASE()
 		   AND TABLE_NAME = ?
@@ -450,14 +454,18 @@ func mysqlListColumns(ctx context.Context, exec Executor, table, dialectName str
 			colType  string
 			nullable string
 			dflt     sql.NullString
+			colKey   string
 		)
-		if err := rows.Scan(&name, &colType, &nullable, &dflt); err != nil {
+		if err := rows.Scan(&name, &colType, &nullable, &dflt, &colKey); err != nil {
 			return nil, err
 		}
 		col := Column{
 			Name:     name,
 			Type:     colType,
 			Nullable: nullable == "YES",
+			// COLUMN_KEY = 'PRI' marks every member of the PK,
+			// composite keys included.
+			PrimaryKey: colKey == "PRI",
 		}
 		// MariaDB's INFORMATION_SCHEMA.COLUMN_DEFAULT reports a nullable,
 		// no-default column as the literal string "NULL" (MySQL reports a real
@@ -762,7 +770,42 @@ func mssqlListTables(ctx context.Context, exec Executor) ([]string, error) {
 	return out, rows.Err()
 }
 
+// mssqlListPrimaryKey returns the set of column names that form the
+// table's PRIMARY KEY. In MSSQL the PK is backed by an index flagged
+// `is_primary_key = 1` in sys.indexes; sys.index_columns lists its
+// members (composite keys included).
+func mssqlListPrimaryKey(ctx context.Context, exec Executor, table string) (map[string]bool, error) {
+	d := &MSSQLDialect{}
+	q := fmt.Sprintf(`
+		SELECT c.name
+		  FROM sys.indexes i
+		  JOIN sys.index_columns ic
+		    ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+		  JOIN sys.columns c
+		    ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+		 WHERE i.object_id = OBJECT_ID(%s)
+		   AND i.is_primary_key = 1`, d.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pk := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		pk[name] = true
+	}
+	return pk, rows.Err()
+}
+
 func mssqlListColumns(ctx context.Context, exec Executor, table string) ([]Column, error) {
+	pk, err := mssqlListPrimaryKey(ctx, exec, table)
+	if err != nil {
+		return nil, err
+	}
 	// Placeholder via Dialect rather than hardcoded `@p1`. The query
 	// body is MSSQL-specific (sys.* catalog), but using the dialect's
 	// Placeholder() keeps the call site honest — a future driver change
@@ -803,9 +846,10 @@ func mssqlListColumns(ctx context.Context, exec Executor, table string) ([]Colum
 			return nil, err
 		}
 		col := Column{
-			Name:     name,
-			Type:     mssqlReassembleType(typeName, maxLength, precision, scale),
-			Nullable: isNullable,
+			Name:       name,
+			Type:       mssqlReassembleType(typeName, maxLength, precision, scale),
+			Nullable:   isNullable,
+			PrimaryKey: pk[name],
 		}
 		if dflt.Valid {
 			s := dflt.String
@@ -1129,7 +1173,41 @@ func pgListTables(ctx context.Context, exec Executor) ([]string, error) {
 	return out, rows.Err()
 }
 
+// pgListPrimaryKey returns the set of column names that form the
+// table's PRIMARY KEY (every member of a composite key). Uses the
+// standard information_schema pairing — table_constraints names the PK
+// constraint, key_column_usage lists its columns.
+func pgListPrimaryKey(ctx context.Context, exec Executor, table string) (map[string]bool, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT kcu.column_name
+		  FROM information_schema.table_constraints tc
+		  JOIN information_schema.key_column_usage kcu
+		    ON kcu.constraint_name = tc.constraint_name
+		   AND kcu.table_schema = tc.table_schema
+		   AND kcu.table_name = tc.table_name
+		 WHERE tc.table_schema = current_schema()
+		   AND tc.table_name = $1
+		   AND tc.constraint_type = 'PRIMARY KEY'`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pk := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		pk[name] = true
+	}
+	return pk, rows.Err()
+}
+
 func pgListColumns(ctx context.Context, exec Executor, table string) ([]Column, error) {
+	pk, err := pgListPrimaryKey(ctx, exec, table)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := exec.QueryContext(ctx, `
 		SELECT column_name,
 		       data_type,
@@ -1178,9 +1256,10 @@ func pgListColumns(ctx context.Context, exec Executor, table string) ([]Column, 
 			}
 		}
 		col := Column{
-			Name:     name,
-			Type:     displayed,
-			Nullable: nullable == "YES",
+			Name:       name,
+			Type:       displayed,
+			Nullable:   nullable == "YES",
+			PrimaryKey: pk[name],
 		}
 		if dflt.Valid {
 			s := dflt.String
@@ -1528,7 +1607,40 @@ func oracleListTables(ctx context.Context, exec Executor) ([]string, error) {
 	return out, rows.Err()
 }
 
+// oracleListPrimaryKey returns the set of column names (lowercased,
+// mirroring oracleListColumns) that form the table's PRIMARY KEY.
+// USER_CONSTRAINTS names the PK constraint (CONSTRAINT_TYPE = 'P');
+// USER_CONS_COLUMNS lists its members, composite keys included.
+func oracleListPrimaryKey(ctx context.Context, exec Executor, table string) (map[string]bool, error) {
+	o := &OracleDialect{}
+	q := fmt.Sprintf(`
+		SELECT acc.column_name
+		  FROM user_constraints ac
+		  JOIN user_cons_columns acc
+		    ON acc.constraint_name = ac.constraint_name
+		 WHERE ac.constraint_type = 'P'
+		   AND ac.table_name = %s`, o.Placeholder(1))
+	rows, err := exec.QueryContext(ctx, q, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pk := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		pk[strings.ToLower(name)] = true
+	}
+	return pk, rows.Err()
+}
+
 func oracleListColumns(ctx context.Context, exec Executor, table string) ([]Column, error) {
+	pk, err := oracleListPrimaryKey(ctx, exec, table)
+	if err != nil {
+		return nil, err
+	}
 	o := &OracleDialect{}
 	q := fmt.Sprintf(`
 		SELECT column_name,
@@ -1561,9 +1673,10 @@ func oracleListColumns(ctx context.Context, exec Executor, table string) ([]Colu
 			return nil, err
 		}
 		col := Column{
-			Name:     strings.ToLower(name),
-			Type:     oracleReassembleType(dataType, charLen, precision, scale),
-			Nullable: nullable == "Y",
+			Name:       strings.ToLower(name),
+			Type:       oracleReassembleType(dataType, charLen, precision, scale),
+			Nullable:   nullable == "Y",
+			PrimaryKey: pk[strings.ToLower(name)],
 		}
 		if dflt.Valid {
 			// Oracle pads DATA_DEFAULT with trailing whitespace/newline.

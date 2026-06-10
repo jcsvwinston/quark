@@ -354,7 +354,7 @@ if err != nil {
 for _, table := range schema.Tables {
     fmt.Println(table.Name)
     for _, col := range table.Columns {
-        fmt.Printf("  %s %s nullable=%v\n", col.Name, col.Type, col.Nullable)
+        fmt.Printf("  %s %s nullable=%v pk=%v\n", col.Name, col.Type, col.Nullable, col.PrimaryKey)
     }
 }
 ```
@@ -370,8 +370,18 @@ Dialect coverage (F3-2 progress):
 | SQL Server | ✅ supported — `sys.tables` / `sys.columns` / `sys.types` + `sys.default_constraints` LEFT JOIN; type reassembly from `max_length` / `precision` / `scale` with nvarchar byte→char halving and `MAX` for `max_length = -1` |
 | Oracle | ✅ supported — `USER_TABLES` / `USER_TAB_COLUMNS` / `USER_INDEXES` / `USER_CONSTRAINTS`; identifiers lowercased, `NUMBER`/`VARCHAR2` reassembly, NOT-NULL system checks filtered, `SEARCH_CONDITION_VC` for CHECK predicates |
 
-Schema surface currently covers **tables, columns, non-primary-key
-indexes, and foreign keys**:
+Schema surface currently covers **tables, columns (primary-key
+membership included), non-primary-key indexes, and foreign keys**:
+
+- **Primary keys** (`Column.PrimaryKey`, true for every member of a
+  composite key) — SQLite `PRAGMA table_info`'s `pk` rank; PostgreSQL
+  `information_schema.table_constraints` + `key_column_usage`
+  (`constraint_type = 'PRIMARY KEY'`); MySQL/MariaDB
+  `COLUMN_KEY = 'PRI'`; MSSQL `sys.indexes` (`is_primary_key = 1`) +
+  `sys.index_columns`; Oracle `USER_CONSTRAINTS`
+  (`CONSTRAINT_TYPE = 'P'`) + `USER_CONS_COLUMNS`. `Type` stays the
+  bare data type — the PK constraint travels in the flag, not the
+  type string.
 
 - **Indexes** (`Index{Name, Columns, Unique}`) — SQLite
   `PRAGMA index_list` / `PRAGMA index_info` (origin `pk` filtered);
@@ -457,6 +467,12 @@ Cross-dialect awareness baked into the equality functions:
   `Checks=nil` for a table, the check comparison for that table is
   skipped entirely. Empty `[]Check{}` is different (it means
   "introspected and found none") and compares normally.
+- **Primary-key membership is compared** (`Column.PrimaryKey`): a
+  column that is part of the PK on one side but not the other
+  surfaces as an `OpAlterColumn` with a `primary key true→false`
+  delta. The executor refuses to apply it (see below) — the point is
+  making the drift *visible*, since a PK change needs a table
+  rebuild.
 
 **Op ordering** follows dependency rules: CREATE TABLE first; per
 shared table, ADD COLUMN → ALTER COLUMN → DROP CHECK → DROP FK →
@@ -505,6 +521,17 @@ if !plan.IsEmpty() {
 ApplyPlan walks the ops in order and dispatches each to the
 per-dialect DDL.
 
+**CREATE TABLE renders the primary key** exactly like
+`Client.Migrate` would for the same model: a single integer PK
+becomes the dialect's auto-increment form (`INTEGER PRIMARY KEY
+AUTOINCREMENT`, `SERIAL PRIMARY KEY`, `AUTO_INCREMENT`,
+`IDENTITY(1,1)`, `GENERATED ALWAYS AS IDENTITY`), any other single
+PK keeps its declared type plus `PRIMARY KEY`, and a composite key
+renders as a table-level `PRIMARY KEY (a, b)` constraint. A table
+created from a plan is functionally interchangeable with one created
+by `Migrate` — inserts that rely on the auto-generated id work on
+both.
+
 **Transactional behaviour** (F3-4-tx):
 
 - **PostgreSQL, MSSQL, SQLite** — DDL is transactional on these
@@ -537,8 +564,14 @@ per-dialect DDL.
 
 **Known limitations**:
 - **OpAlterColumn** today only emits DDL for the Type change;
-  Nullable / Default deltas are silently skipped (TODO
+  a Nullable- or Default-only delta fails loudly with
+  `ErrUnsupportedFeature` rather than silently no-op-ing (TODO
   F3-3-execute-alter).
+- **Primary-key changes are refused** with `ErrUnsupportedFeature`:
+  a PK delta isn't expressible as `ALTER COLUMN` — it needs
+  dropping/adding the table-level constraint and, on several
+  engines, a full table rebuild. The diff still *reports* it so the
+  drift is visible.
 - **OpDropForeignKey** and **OpDropCheck** on SQLite return
   `ErrUnsupportedFeature` — SQLite has no `ALTER TABLE DROP
   CONSTRAINT`, the workaround is the 12-step table-rebuild

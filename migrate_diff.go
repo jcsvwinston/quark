@@ -109,6 +109,9 @@ func (o OpAlterColumn) String() string {
 	if o.Old.Nullable != o.New.Nullable {
 		parts = append(parts, fmt.Sprintf("nullable %v→%v", o.Old.Nullable, o.New.Nullable))
 	}
+	if o.Old.PrimaryKey != o.New.PrimaryKey {
+		parts = append(parts, fmt.Sprintf("primary key %v→%v", o.Old.PrimaryKey, o.New.PrimaryKey))
+	}
 	if !stringPtrEqual(o.Old.Default, o.New.Default) {
 		parts = append(parts, fmt.Sprintf("default %s→%s", stringPtrPretty(o.Old.Default), stringPtrPretty(o.New.Default)))
 	}
@@ -480,6 +483,7 @@ func columnsEqual(a, b Column) bool {
 	return a.Name == b.Name &&
 		typesEqual(a.Type, b.Type) &&
 		a.Nullable == b.Nullable &&
+		a.PrimaryKey == b.PrimaryKey &&
 		defaultsEqual(a.Default, b.Default)
 }
 

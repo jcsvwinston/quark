@@ -277,6 +277,91 @@ func applyPrecisionScale(base, dialectName string, precision, scale int) string 
 
 // SQLType maps Go types to SQL types for the given dialect name.
 //
+// PKClass classifies a single-column primary key for DDL rendering.
+// Two callers funnel into [PKColumnSQL] so the PRIMARY KEY fragments
+// live in exactly one place: the migrator (which classifies from the
+// model's reflect.Kind inside [SQLType]) and ApplyPlan's CREATE TABLE
+// executor (which classifies from the neutral type STRING via
+// [ClassifyPKType] — the Go type is gone by then).
+type PKClass int
+
+const (
+	// PKOther appends a plain PRIMARY KEY to the column's own type
+	// (composite-key members never get here — they render as a
+	// table-level constraint).
+	PKOther PKClass = iota
+	// PKInteger renders the dialect's auto-increment integer PK.
+	PKInteger
+	// PKString renders the dialect's fixed-width string PK (UUID/ULID).
+	PKString
+)
+
+// PKColumnSQL returns the full column-type fragment for a single-column
+// primary key of the given class. `fallback` is the bare type to use
+// for PKOther; it is ignored for the other classes.
+func PKColumnSQL(dialectName string, class PKClass, fallback string) string {
+	switch class {
+	case PKString:
+		switch dialectName {
+		case "oracle":
+			return "VARCHAR2(36) PRIMARY KEY"
+		case "mssql":
+			return "NVARCHAR(36) PRIMARY KEY"
+		default:
+			return "VARCHAR(36) PRIMARY KEY"
+		}
+	case PKInteger:
+		switch dialectName {
+		case "sqlite":
+			return "INTEGER PRIMARY KEY AUTOINCREMENT"
+		case "postgres":
+			return "SERIAL PRIMARY KEY"
+		case "mysql", "mariadb":
+			return "INT AUTO_INCREMENT PRIMARY KEY"
+		case "mssql":
+			return "INT IDENTITY(1,1) PRIMARY KEY"
+		case "oracle":
+			return "NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY"
+		default:
+			return "INTEGER PRIMARY KEY"
+		}
+	default:
+		return fallback + " PRIMARY KEY"
+	}
+}
+
+// ClassifyPKType maps a bare column-type string (catalog- or
+// migrator-emitted) to its [PKClass]. Integer-family types get the
+// auto-increment treatment — mirroring the reflect-side rule "integer
+// PK → auto-increment" so a table created from a Plan matches the one
+// [SQLType] would emit for the same model. Everything else renders as
+// `<own type> PRIMARY KEY`; notably a string column keeps its declared
+// type (TEXT/VARCHAR(n)) instead of being coerced to the reflect-side
+// VARCHAR(36) — PKString is reachable only from the reflect path.
+//
+// Bare `NUMBER` (no precision) is classified as integer on purpose:
+// Oracle's catalog reports identity PK columns as precision-less
+// NUMBER (the same asymmetry typesEqual's oracleBareNumberMatch
+// handles on the diff side), so a Plan built from introspection of a
+// Migrate-created table re-renders the identity clause instead of
+// silently dropping it. A hand-made non-identity bare-NUMBER PK would
+// be coerced — accepted trade-off, mirroring the diff layer's "the
+// catalog only emits bare NUMBER for identity columns" assumption.
+func ClassifyPKType(bareType string) PKClass {
+	t := strings.ToLower(strings.TrimSpace(bareType))
+	switch t {
+	case "integer", "int", "bigint", "smallint", "mediumint", "tinyint", "number", "number(19)":
+		return PKInteger
+	}
+	// MySQL catalog display-width forms: int(11), bigint(20), …
+	for _, p := range []string{"int(", "bigint(", "smallint(", "mediumint(", "tinyint("} {
+		if strings.HasPrefix(t, p) {
+			return PKInteger
+		}
+	}
+	return PKOther
+}
+
 // When isPK is true the column DDL includes the PRIMARY KEY constraint.
 // The exact type depends on the Go field kind:
 //
@@ -294,34 +379,14 @@ func SQLType(dialectName string, t reflect.Type, isPK bool) string {
 		switch base.Kind() {
 		case reflect.String:
 			// UUID / ULID / KSUID — caller supplies the value, no auto-generation.
-			switch dialectName {
-			case "oracle":
-				return "VARCHAR2(36) PRIMARY KEY"
-			case "mssql":
-				return "NVARCHAR(36) PRIMARY KEY"
-			default:
-				return "VARCHAR(36) PRIMARY KEY"
-			}
+			return PKColumnSQL(dialectName, PKString, "")
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			// Integer PK → auto-increment
-			switch dialectName {
-			case "sqlite":
-				return "INTEGER PRIMARY KEY AUTOINCREMENT"
-			case "postgres":
-				return "SERIAL PRIMARY KEY"
-			case "mysql", "mariadb":
-				return "INT AUTO_INCREMENT PRIMARY KEY"
-			case "mssql":
-				return "INT IDENTITY(1,1) PRIMARY KEY"
-			case "oracle":
-				return "NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY"
-			default:
-				return "INTEGER PRIMARY KEY"
-			}
+			return PKColumnSQL(dialectName, PKInteger, "")
 		default:
 			// Composite-PK columns, bool, float, etc. — just append PRIMARY KEY.
-			return SQLType(dialectName, t, false) + " PRIMARY KEY"
+			return PKColumnSQL(dialectName, PKOther, SQLType(dialectName, t, false))
 		}
 	}
 

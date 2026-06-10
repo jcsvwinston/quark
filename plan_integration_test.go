@@ -131,6 +131,83 @@ func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		}
 	})
 
+	t.Run("ApplyPlan_CreateTableIsInsertable", func(t *testing.T) {
+		// F3-2-pk contract (superapp finding, task_20d5f912): a table
+		// created from a Plan must be functionally equivalent to the
+		// one Migrate emits — PRIMARY KEY constraint included, with
+		// auto-increment for the single integer PK. Before the fix the
+		// plan-created table had NO PK: an insert relying on the
+		// auto-generated id failed, and the follow-up plan reported
+		// empty because the diff didn't compare PK status either.
+		//
+		// We apply ONLY the fixture's OpCreateTable — the full plan
+		// legitimately wants to drop every other table in the shared
+		// suite DB.
+		dropTable(baseClient, "plan_fixtures")
+		defer dropTable(baseClient, "plan_fixtures")
+
+		plan, err := baseClient.PlanMigration(ctx, &planFixture{})
+		if err != nil {
+			t.Fatalf("PlanMigration: %v", err)
+		}
+		var scoped quark.Plan
+		for _, op := range plan.Ops {
+			if create, ok := op.(quark.OpCreateTable); ok && create.Table.Name == "plan_fixtures" {
+				scoped.Ops = append(scoped.Ops, op)
+			}
+		}
+		if len(scoped.Ops) != 1 {
+			t.Fatalf("expected exactly the fixture's OpCreateTable, got:\n%s", plan.String())
+		}
+		if err := baseClient.ApplyPlan(ctx, scoped); err != nil {
+			t.Fatalf("ApplyPlan: %v", err)
+		}
+
+		row := &planFixture{Name: "via-plan"}
+		if err := quark.For[planFixture](ctx, baseClient).Create(row); err != nil {
+			t.Fatalf("[%s] Create on plan-created table: %v", dialect, err)
+		}
+		if row.ID == 0 {
+			t.Fatalf("[%s] plan-created table did not auto-assign the id", dialect)
+		}
+
+		schema, err := baseClient.IntrospectSchema(ctx)
+		if err != nil {
+			t.Fatalf("IntrospectSchema: %v", err)
+		}
+		var checked bool
+		for _, tbl := range schema.Tables {
+			if tbl.Name != "plan_fixtures" {
+				continue
+			}
+			for _, col := range tbl.Columns {
+				if col.Name == "id" {
+					checked = true
+					if !col.PrimaryKey {
+						t.Errorf("[%s] introspection should mark plan_fixtures.id as PrimaryKey", dialect)
+					}
+				} else if col.PrimaryKey {
+					t.Errorf("[%s] %s should not be PrimaryKey", dialect, col.Name)
+				}
+			}
+		}
+		if !checked {
+			t.Fatalf("[%s] introspection did not surface plan_fixtures.id", dialect)
+		}
+
+		// Round-trip, scoped to the fixture: applying the plan-created
+		// table leaves nothing for the differ to say about it.
+		plan2, err := baseClient.PlanMigration(ctx, &planFixture{})
+		if err != nil {
+			t.Fatalf("PlanMigration after apply: %v", err)
+		}
+		for _, op := range plan2.Ops {
+			if opTouchesTable(op, "plan_fixtures") {
+				t.Errorf("[%s] plan after apply should NOT touch plan_fixtures, got: %s", dialect, op.String())
+			}
+		}
+	})
+
 	t.Run("ApplyPlan_TransactionalRollback", func(t *testing.T) {
 		// F3-4-tx contract: when a plan fails mid-execution on a
 		// transactional-DDL engine (PG / MSSQL / SQLite), the whole
