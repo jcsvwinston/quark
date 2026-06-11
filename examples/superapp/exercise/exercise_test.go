@@ -25,7 +25,7 @@ func TestExercisersSQLite(t *testing.T) {
 		_ = os.Remove(conns[control.SQLite].DSN)
 	}()
 
-	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, REPLICAS, SHARDING, DEADLOCK, MIGRATE})
+	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, REPLICAS, SHARDING, DEADLOCK, OBSERVABILITY, MIGRATE})
 	r := results[control.SQLite]
 	if r.Err != nil {
 		t.Fatalf("exerciser: %v", r.Err)
@@ -63,6 +63,11 @@ func TestExercisersSQLite(t *testing.T) {
 		QF("NewShardRouter"), QF("HashShardFunc"), QF("WithShardKey"), QF("ShardKeyFromContext"),
 		SRM("GetClient"), SRM("ShardNames"),
 		QF("WithDeadlockRetry"), QM("UpdateMap"),
+		// OBSERVABILITY: otel in-memory + redacción + logger (los 6 motores).
+		OTL("New"), OTL("WithDBSystem"), OTL("WithSpanRedaction"),
+		OTL("IncludeArgs"), OTL("RedactArgs"),
+		OTL("(*Middleware).WrapExec"), OTL("(*Middleware).WrapQuery"), OTL("(*Middleware).WrapQueryRow"),
+		QF("WithMiddleware"), QF("WithLogger"), QF("WithSlowQueryThreshold"),
 	} {
 		if !seen[k] {
 			t.Errorf("cobertura: falta el símbolo %s", k)

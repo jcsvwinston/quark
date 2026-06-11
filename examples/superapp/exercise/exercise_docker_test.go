@@ -29,7 +29,7 @@ func TestExerciseDockerPostgres(t *testing.T) {
 	}
 	defer engine.Down(engines...)
 
-	results := Run(conns, 4, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, REPLICAS, SHARDING, DEADLOCK, MIGRATE})
+	results := Run(conns, 4, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, REPLICAS, SHARDING, DEADLOCK, OBSERVABILITY, MIGRATE})
 	cov := Coverage(results)
 	for e, r := range results {
 		if r.Err != nil {
@@ -56,6 +56,8 @@ func TestExerciseDockerPostgres(t *testing.T) {
 				// deadlock con recuperación de la víctima (FeatDeadlock).
 				QF("WithReplicas"), QF("Sticky"), QF("NewShardRouter"),
 				SRM("GetClient"), QF("WithDeadlockRetry"),
+				// OBSERVABILITY también corre completo en PG.
+				OTL("New"), OTL("WithSpanRedaction"), QF("WithLogger"),
 			} {
 				if !cov[e][k] {
 					t.Errorf("%s cobertura: falta el símbolo %s", e, k)
