@@ -47,6 +47,10 @@ func MIG(name string) string { return qpkg + "/migrate." + name }
 // "github.com/jcsvwinston/quark.(*ShardRouter).GetClient".
 func SRM(method string) string { return qpkg + ".(*ShardRouter)." + method }
 
+// OTL es la key de un símbolo del paquete otel: OTL("New") →
+// "github.com/jcsvwinston/quark/otel.New".
+func OTL(name string) string { return qpkg + "/otel." + name }
+
 // Conn re-exporta engine.Conn para que los exercisers que necesitan el driver/DSN
 // del motor lo reciban sin importar el paquete engine. Lo usan los que abren
 // clientes propios además del client del harness: RLSNative deriva un rol

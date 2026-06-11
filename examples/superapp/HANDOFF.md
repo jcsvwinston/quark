@@ -242,7 +242,17 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
     exerciser DEADLOCK abre un client propio con `WithMaxOpenConns(8)`;
     con el techo de sesiones de gvenzl (ORA-12516, vísto en el soak F14),
     bajarlo a ≤4 al encender Oracle en la matriz.
-  - Luego: `observability.go` (OTel in-memory + redacción), y **builder-avanzado**
+  - **`observability.go` — ✅ HECHO** (var `OBSERVABILITY`; verde SQLite +
+    PG real, 115 símbolos / 166 statements). OTel in-memory vía providers
+    GLOBALES del SDK (tracetest + ManualReader, restore con defer — el
+    middleware resuelve tracer por llamada e instrumentos por sync.Once).
+    Redacción asertada por ambos lados (RedactArgs default / IncludeArgs
+    opt-in), db.system, codes.Error y quark.queries.total. **Gotchas:** el
+    error portable va por List/QUERY (query_row difiere el error al Scan y
+    su span no puede marcarse — limitación de database/sql); y una columna
+    inexistente NO falla en SQLite (DQS degrada `"col"` a literal string) —
+    usa tabla inexistente como trigger.
+  - Luego: **builder-avanzado**
   (CTE/window/setops/locking — los ~30 métodos de `Query[T]` que el builder común
   no cubre; varios necesitan la matriz de capacidad por motor). Y el **oráculo de
   paridad**: hoy los asserts son por-motor; falta comparar el RESULTADO de cada
