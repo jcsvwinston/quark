@@ -25,7 +25,7 @@ func TestExercisersSQLite(t *testing.T) {
 		_ = os.Remove(conns[control.SQLite].DSN)
 	}()
 
-	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, REPLICAS, SHARDING, DEADLOCK, OBSERVABILITY, MIGRATE})
+	results := Run(conns, 2, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, REPLICAS, SHARDING, DEADLOCK, OBSERVABILITY, BUILDERADV, MIGRATE})
 	r := results[control.SQLite]
 	if r.Err != nil {
 		t.Fatalf("exerciser: %v", r.Err)
@@ -68,6 +68,18 @@ func TestExercisersSQLite(t *testing.T) {
 		OTL("IncludeArgs"), OTL("RedactArgs"),
 		OTL("(*Middleware).WrapExec"), OTL("(*Middleware).WrapQuery"), OTL("(*Middleware).WrapQueryRow"),
 		QF("WithMiddleware"), QF("WithLogger"), QF("WithSlowQueryThreshold"),
+		// BUILDERADV: los ~35 métodos avanzados de Query[T].
+		QM("WhereBetween"), QM("WhereNot"), QM("WhereP"), QM("WhereExpr"), QM("Apply"),
+		QM("UpdateFields"), QM("Track"), QM("LeftJoin"), QM("RightJoin"),
+		QM("HavingAggregate"), QM("HavingExpr"), QM("SelectExpr"),
+		QM("AsSubquery"), QM("MustAsSubquery"), QM("With"), QM("WithRecursive"), QM("WhereSubquery"),
+		QM("Union"), QM("UnionAll"), QM("Intersect"), QM("Except"),
+		QM("ForUpdate"), QM("ForShare"), QM("SkipLocked"), QM("NoWait"),
+		QM("WithTrashed"), QM("OnlyTrashed"), QM("Unscoped"), QM("Restore"), QM("HardDelete"),
+		QM("Upsert"), QM("UpsertBatch"), QM("UpdateBatch"), QM("DeleteBatch"), QM("DeleteBy"),
+		QF("NewTypedColumn"), QF("Col"), QF("Lit"), QF("Eq"), QF("NewWindow"), QF("Over"), QF("RowNumber"),
+		QF("(*JoinBuilder[T]).On"), QF("(*JoinBuilder[T]).OnRaw"),
+		QF("(*TrackedQuery[T]).Find"), QF("(*Tracked[T]).Save"),
 	} {
 		if !seen[k] {
 			t.Errorf("cobertura: falta el símbolo %s", k)

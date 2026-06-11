@@ -252,7 +252,19 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
     su span no puede marcarse — limitación de database/sql); y una columna
     inexistente NO falla en SQLite (DQS degrada `"col"` a literal string) —
     usa tabla inexistente como trigger.
-  - Luego: **builder-avanzado**
+  - **`builder_advanced.go` — ✅ HECHO** (var `BUILDERADV`; verde SQLite +
+    PG real, 168 símbolos / 217 statements — los 65 métodos de Query[T]
+    cubiertos). **Gotchas:** Where/Select NO aceptan identificadores
+    cualificados (sólo la grammar del ON los acepta; con JOIN quark emite
+    las columnas del modelo cualificadas — usa List() plano, patrón
+    cte_test.go); Tracked.Save corre BeforeUpdate ANTES del diff, así que
+    "sin cambios → sin SQL" no aplica a modelos que mutan UpdatedAt en el
+    hook; WhereSubquery está gateado por AllowRawQueries (asertar AMBOS
+    lados); UpsertBatch sigue sin chunkear (lotes pequeños); ForShare no
+    existe en MSSQL (tolerar ErrUnsupportedFeature); los counts del
+    exerciser van SIEMPRE scoped al marcador badv- (el dominio lleva
+    residuo de otros exercisers).
+  - Luego: ~~builder-avanzado~~
   (CTE/window/setops/locking — los ~30 métodos de `Query[T]` que el builder común
   no cubre; varios necesitan la matriz de capacidad por motor). Y el **oráculo de
   paridad**: hoy los asserts son por-motor; falta comparar el RESULTADO de cada

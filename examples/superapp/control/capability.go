@@ -54,6 +54,12 @@ const (
 	// shards son DSNs aprovisionados con idéntico mecanismo.
 	FeatDBPerTenantProvision Feature = "db_per_tenant_provision"
 
+	// FeatIntersectExcept marca los motores cuyo dialecto renderiza INTERSECT
+	// y EXCEPT (Oracle vía MINUS). MySQL/MariaDB no los modelan en quark
+	// (setop.go devuelve ErrUnsupportedFeature) — feature gateada por Quark:
+	// el exerciser ASERTA el sentinel donde falta, como con el migration lock.
+	FeatIntersectExcept Feature = "intersect_except"
+
 	// FeatDeadlock marca los motores donde un deadlock por orden de locks
 	// invertido puede MANIFESTARSE (los 5 con servidor). SQLite serializa
 	// escrituras (SQLITE_BUSY no es un código de deadlock), así que el
@@ -83,6 +89,7 @@ var supported = map[Feature]map[Engine]bool{
 	FeatSchemaPerTenant:      {Postgres: true, MSSQL: true},
 	FeatDBPerTenantProvision: {SQLite: true, Postgres: true, MySQL: true, MariaDB: true, MSSQL: true},
 	FeatDeadlock:             {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true, Oracle: true},
+	FeatIntersectExcept:      {SQLite: true, Postgres: true, MSSQL: true, Oracle: true},
 }
 
 // Supports indica si el motor e soporta la feature f. Si devuelve false, el
