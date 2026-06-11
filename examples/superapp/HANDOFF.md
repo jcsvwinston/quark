@@ -264,7 +264,20 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
     existe en MSSQL (tolerar ErrUnsupportedFeature); los counts del
     exerciser van SIEMPRE scoped al marcador badv- (el dominio lleva
     residuo de otros exercisers).
-  - Luego: ~~builder-avanzado~~
+  - **`parity.go` — ✅ HECHO (cierra S5)**: el oráculo de paridad.
+    `RunParity(conns, tol)` → payload canónico por motor (9 sondas sobre
+    dataset determinista de claves naturales) + `CompareParity` → lista de
+    divergencias byte-a-byte. Canonicalización: `''`≡NULL (Oracle) → `∅`,
+    tiempos UTC truncados al segundo, floats %.6f, nunca IDs autoincrement.
+    Paridad SQLite↔PG verificada 9/9 (`TestParityDockerSQLiteVsPostgres`).
+    Para sumar motores: añadirlos al slice de engines del test. El
+    determinismo run-a-run está pinneado en `parity_test.go` — si una sonda
+    nueva no es determinista, el oráculo da falsos positivos: ordena SIEMPRE
+    por clave natural y canoniza tiempos/floats. Al encender MySQL en S7,
+    verificar el scan de `flag bool` (TINYINT del driver — el struct tipado
+    de quark lo coerce, pero es el gotcha bool conocido de builder.go).
+  - ~~Luego: builder-avanzado~~ — S5 COMPLETO; siguiente: **S6** (main.go:
+    Reconcile/Render/Gate + decisión de allowlist de dialectos).
   (CTE/window/setops/locking — los ~30 métodos de `Query[T]` que el builder común
   no cubre; varios necesitan la matriz de capacidad por motor). Y el **oráculo de
   paridad**: hoy los asserts son por-motor; falta comparar el RESULTADO de cada
