@@ -276,8 +276,8 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
     por clave natural y canoniza tiempos/floats. Al encender MySQL en S7,
     verificar el scan de `flag bool` (TINYINT del driver — el struct tipado
     de quark lo coerce, pero es el gotcha bool conocido de builder.go).
-  - ~~Luego: builder-avanzado~~ — S5 COMPLETO; siguiente: **S6** (main.go:
-    Reconcile/Render/Gate + decisión de allowlist de dialectos).
+  - ~~Luego: builder-avanzado~~ — S5 COMPLETO; ~~siguiente: **S6**~~ — S6 HECHO
+    (main.go: Reconcile/Render/Gate); siguiente: **S7** (CI 6-motores).
   (CTE/window/setops/locking — los ~30 métodos de `Query[T]` que el builder común
   no cubre; varios necesitan la matriz de capacidad por motor). Y el **oráculo de
   paridad**: hoy los asserts son por-motor; falta comparar el RESULTADO de cada
@@ -291,8 +291,42 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   `exercise/security.go` de `strings.Contains(...,"identifier")` a
   `errors.Is(err, quark.ErrInvalidIdentifier)` (ya posible tras el fix #173).
 
-**S6 · `main.go`** — flags `-engines`, `-gate`; corre exercisers por motor,
-`Reconcile`, `Render` la matriz a `REPORTS/`, `Gate`.
+**S6 · `main.go` — ✅ HECHO.** `examples/superapp/main.go` (root, `package main`)
++ `main_test.go`. Flags `-engines` (lista por comas o `all`), `-gate` (`strict`/
+`off`), `-out`, `-manifest`, `-allowlist`, `-keep`. Blank-importa los 5 drivers
+(engine.Up sólo entrega driver+DSN). Flujo: `parseEngines` → `engine.Up` (defer
+`Down` salvo `-keep`) → `exercise.Run(conns, tol, exercise.AllExercisers())` →
+`exercise.Coverage` → `LoadManifest`/`LoadAllowlist` → `buildReport` → matriz a
+`REPORTS/superapp-<stamp>/matrix.txt` (vía `control.Report.Render`) + `summary.json`
+máquina-legible → `Report.Gate`. **`AllExercisers()` es ahora la única fuente de
+verdad** de la lista de 16 exercisers (extraída a `suite.go`; los dos tests la
+consumen — antes estaba duplicada literal en `exercise_test.go:28` y
+`exercise_docker_test.go:32`). **Decisiones de diseño:**
+- **Fila de salud sintética** `!! engine-run` (ordena la primera; no es un
+  símbolo): PASS si el motor terminó sin error funcional ni fuga, FAIL si no. Hace
+  que `Report.Gate` cuente los errores funcionales (que no son celdas de método) →
+  un assert rojo o una fuga fallan el gate aunque no sea estricto.
+- **Filtrado a motores corridos**: `Manifest.Reconcile` recorre los 6 motores
+  internamente; `buildReport` se queda sólo con las celdas de los motores de
+  `-engines`, para no marcar como gap un motor no pedido. Con `-engines=all` no
+  filtra nada (el caso del gate real, S7).
+- **Partición exacta** en `summary.json`/stdout: cada símbolo es covered |
+  gating-missing | allowlisted (suman Total); `missing` excluye allowlisted →
+  coincide byte a byte con lo que cuenta `Report.Gate`. Las claves invocadas
+  fuera del manifiesto (typos de key-helper) se cuentan como `stray` y se avisan
+  (su consecuencia —el símbolo real queda MISSING— ya aflora en la matriz).
+- **tol**: 2 si sólo SQLite, 4 si hay algún motor con servidor (mismo criterio que
+  los tests). El follow-up `map[Engine]int` de S4 sigue pendiente para la matriz
+  completa.
+
+Verificado en SQLite: `go run ./examples/superapp -engines=sqlite` → 167/655
+cubiertos, gate `off` exit 0; `-gate=strict` exit 1 (lista los gaps de sqlite);
+motor desconocido / manifiesto ausente → exit 1; `main_test.go` cubre
+`parseEngines`, `buildReport` (partición + filtrado + gate), `perEngine` y la
+fila de salud con fuga. **Para S7:** el `summary.json` ya da el veredicto
+máquina-legible; el job CI corre `go run ./examples/superapp -engines=all
+-gate=strict` con Oracle docker-run (bajar `WithMaxOpenConns` del exerciser
+DEADLOCK a ≤4 por ORA-12516, ver `ha.go`).
 
 **S7 · CI** — job que corre la superapp en los 6 (patrón `integration` de
 `ci.yml`; Oracle docker-run). Gate estricto bloqueante.
