@@ -29,7 +29,7 @@ func TestExerciseDockerPostgres(t *testing.T) {
 	}
 	defer engine.Down(engines...)
 
-	results := Run(conns, 4, []Exerciser{CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE, TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT, REPLICAS, SHARDING, DEADLOCK, OBSERVABILITY, BUILDERADV, MIGRATE})
+	results := Run(conns, 4, AllExercisers())
 	cov := Coverage(results)
 	for e, r := range results {
 		if r.Err != nil {

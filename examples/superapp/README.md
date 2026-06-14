@@ -55,18 +55,28 @@ examples/superapp/
 ├── REPORTS/             ← [generado, gitignored] artefactos de cada corrida del workload
 ├── apisurface.json      ← [generado, versionado] denominador: 655 símbolos en 7 paquetes
 ├── allowlist.json       ← out-of-scope justificado (Symbol.Key → motivo)
-└── main.go              ← [pendiente] wiring: corre exercisers, reconcilia, emite matriz, gatea
+└── main.go              ← [S6] wiring: corre exercisers, reconcilia, emite matriz a REPORTS/, gatea
 ```
 
-## Ejecución (cuando estén los slices pendientes)
+## Ejecución
 
 ```bash
-# un motor
+# un motor (gate off por defecto: sólo falla con asserts rojos / fugas)
 go run ./examples/superapp -engines=sqlite
 
-# todos (Oracle requiere el contenedor levantado + QUARK_TEST_ORACLE_DSN)
+# todos, gate estricto (falla si queda símbolo in-scope sin cubrir fuera de allowlist)
+# Oracle requiere el contenedor levantado + SUPERAPP_DSN_ORACLE
 go run ./examples/superapp -engines=all -gate=strict
 ```
+
+Emite a `REPORTS/superapp-<stamp>/`: **`matrix.txt`** (matriz método×motor con
+estados PASS/MISSING/FAIL + una fila de salud por motor) y **`summary.json`**
+(cobertura/missing/allowlisted/strays + error funcional o fuga por motor, para
+consumir desde CI). Flags: `-engines`, `-gate`, `-out`, `-manifest`,
+`-allowlist`, `-keep`. **Nota:** los motores fuera de `-engines` aparecen MISSING
+en la matriz y quedan fuera del gate; el 100% in-scope sólo es alcanzable con
+`-engines=all` (cada símbolo debe invocarse en cada motor, capability-gated
+incluidos vía su sentinel). Lo pendiente para cerrar el gate vive en S7 (CI) y S8.
 
 ### Carga de alto volumen + informe ejecutivo (ya disponible)
 

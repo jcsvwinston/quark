@@ -129,6 +129,19 @@ func Run(conns map[control.Engine]engine.Conn, tol int, exercisers []Exerciser) 
 	return out
 }
 
+// AllExercisers devuelve los exercisers en su orden canónico de ejecución. Es la
+// ÚNICA fuente de verdad de la lista: main.go (S6) y los tests la consumen, de
+// modo que añadir un exerciser sea un solo cambio aquí. El orden importa —
+// algunos dejan residuo en el dominio que otros cuentan scoped a su marcador (ver
+// builder_advanced.go).
+func AllExercisers() []Exerciser {
+	return []Exerciser{
+		CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE,
+		TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT,
+		REPLICAS, SHARDING, DEADLOCK, OBSERVABILITY, BUILDERADV, MIGRATE,
+	}
+}
+
 // Coverage pliega la cobertura de todos los motores en un control.Invoked, listo
 // para control.Manifest.Reconcile.
 func Coverage(results map[control.Engine]EngineResult) control.Invoked {
