@@ -88,4 +88,30 @@ func testCacheInsertInvalidation(ctx context.Context, t *testing.T, baseClient *
 	if len(second) != 2 {
 		t.Errorf("Create did not invalidate the table-level cache: re-query returned %d rows, want 2 (served a stale cache hit)", len(second))
 	}
+
+	// CreateBatch must invalidate the table tag too. Its RETURNING scan path
+	// (executeQueryPrimary) invalidates nothing on its own — the batch sibling of
+	// the single-Create gap above — so before the fix PostgreSQL/SQLite/MariaDB
+	// served a stale cached list after a batch insert.
+	warm, err := quark.For[cacheInvModel](ctx, client).
+		Where("tag", "=", "x").Cache(time.Minute).List()
+	if err != nil {
+		t.Fatalf("warm cached query before CreateBatch: %v", err)
+	}
+	if len(warm) != 2 {
+		t.Fatalf("warm before batch: want 2 rows, got %d", len(warm))
+	}
+	if err := quark.For[cacheInvModel](ctx, client).CreateBatch([]*cacheInvModel{
+		{Tag: "x"}, {Tag: "x"},
+	}); err != nil {
+		t.Fatalf("CreateBatch: %v", err)
+	}
+	afterBatch, err := quark.For[cacheInvModel](ctx, client).
+		Where("tag", "=", "x").Cache(time.Minute).List()
+	if err != nil {
+		t.Fatalf("re-query after CreateBatch: %v", err)
+	}
+	if len(afterBatch) != 4 {
+		t.Errorf("CreateBatch did not invalidate the table-level cache: re-query returned %d rows, want 4 (served a stale cache hit)", len(afterBatch))
+	}
 }

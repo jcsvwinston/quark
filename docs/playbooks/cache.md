@@ -97,6 +97,14 @@ los paths INSERT…RETURNING/OUTPUT (PG/SQLite/MariaDB/MSSQL) pasan por
 `executeQueryRow`, que no invalida nada, así que sin esto una lectura
 cacheada a nivel de tabla quedaba stale tras un `Create`. Regresión
 cross-engine en el SharedSuite: `testCacheInsertInvalidation`.
+**Finding E (hermano batch de BB-15)**: `CreateBatch` tenía el mismo gap —
+su path RETURNING scanea los PKs vía `executeQueryPrimary`, que no invalida
+nada. El helper `invalidateBatchInsert` (hermano batch de `invalidateInsert`)
+dropea el table tag + los row tags rellenados en UNA `InvalidateTags` por
+chunk; lo llama el path RETURNING de `createBatchStmt` y el path Oracle de
+`CreateBatch`. La regresión añade un caso `CreateBatch` a
+`testCacheInsertInvalidation`. **OJO**: el exerciser `cache` del superapp sólo
+cubre `Create` single — extenderlo a `CreateBatch` es follow-up de harness.
 
 ### ~~Cache key serializa args con `%v`~~ — cerrado (F4-4)
 

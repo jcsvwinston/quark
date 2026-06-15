@@ -160,6 +160,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   untouched. Covered by a cross-engine `PlanMigration`-after-`Migrate` assertion
   in `testJSONField` (SharedSuite). Surfaced by the superapp acceptance harness.
 
+- **cache:** `CreateBatch` now invalidates the L2 table tag (and the inserted
+  row tags) on the RETURNING dialects (PostgreSQL/SQLite/MariaDB). Those
+  dialects scan generated primary keys through a query path that, unlike
+  `executeExec`, invalidates nothing — so a cached list / filtered-query /
+  aggregate read went stale after a batch insert, the batch sibling of the
+  single-`Create` table-tag fix in v1.1.1. The fix drops the table tag plus the
+  back-filled row tags in one `InvalidateTags` call per chunk (Oracle's per-row
+  path batches the same way). Cross-engine regression in
+  `testCacheInsertInvalidation` (SharedSuite). Surfaced while reviewing the
+  Oracle `CreateBatch` fix.
+
 ### Security
 
 - **guard:** `ValidateRawQuery` now rejects the SQL line-comment tail `--` in

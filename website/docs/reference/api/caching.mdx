@@ -80,6 +80,9 @@ Mutations whose affected rows aren't known up front (`DeleteBatch` with
 a complex WHERE, raw `Exec`, `Upsert`/`UpsertBatch`) emit only the table
 tag — the historical fallback. `UpdateBatch` and `Update` / `UpdateFields`
 / `Tracked.Save` / `Create` / by-PK `Delete` all DO emit per-row tags.
+`CreateBatch` emits per-row tags for the rows whose PKs it back-fills (the
+RETURNING dialects) plus the table tag, so a cached listing reflects the
+batch.
 **Composite-primary-key** models fall back to the table tag; a follow-up
 may add a stable encoding of composite keys for per-row invalidation if
 demand surfaces.
