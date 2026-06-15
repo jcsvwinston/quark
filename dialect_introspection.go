@@ -404,6 +404,9 @@ func mysqlLikeIntrospect(ctx context.Context, exec Executor, dialectName string)
 		if err != nil {
 			return Schema{}, fmt.Errorf("%s introspect: list checks for %q: %w", dialectName, name, err)
 		}
+		if dialectName == "mariadb" {
+			relabelMariaDBJSONColumns(cols, checks)
+		}
 		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks, Checks: checks})
 	}
 	return Schema{Tables: tables}, nil
@@ -483,6 +486,45 @@ func mysqlListColumns(ctx context.Context, exec Executor, table, dialectName str
 		out = append(out, col)
 	}
 	return out, rows.Err()
+}
+
+// relabelMariaDBJSONColumns rewrites a MariaDB LONGTEXT column's type to "json"
+// when the table carries the `json_valid(col)` CHECK that MariaDB auto-adds to
+// every JSON column. MariaDB implements JSON as a LONGTEXT alias and
+// INFORMATION_SCHEMA reports the column type as "longtext", so without this a
+// model's desired JSON column drifts to a spurious ALTER on every PlanMigration
+// (Finding D). The auto-CHECK is the only catalog signal that distinguishes a
+// JSON column from a genuine LONGTEXT, so a real LONGTEXT (no such CHECK) is left
+// untouched. MySQL 8 has a native JSON type (reports "json") and never gets here.
+func relabelMariaDBJSONColumns(cols []Column, checks []Check) {
+	for i := range cols {
+		if strings.EqualFold(cols[i].Type, "longtext") && hasJSONValidCheck(checks, cols[i].Name) {
+			cols[i].Type = "json"
+		}
+	}
+}
+
+// hasJSONValidCheck reports whether any CHECK is MariaDB's auto-generated
+// `json_valid(col)` predicate for the given column. MariaDB emits exactly
+// `json_valid(`col`)` as the whole clause for a JSON column (verified against
+// mariadb:11), so after stripping backticks/whitespace and lowercasing we match
+// the WHOLE expression by equality, not substring. Equality is deliberate: a
+// substring match would also fire on a hand-written compound CHECK such as
+// `json_valid(`body`) OR body IS NULL` over a genuine LONGTEXT column, which
+// would mis-relabel it and produce reverse drift. Older MariaDB (<10.2.1) has no
+// CHECK_CONSTRAINTS catalog (mysqlListChecks degrades to nil there), so nothing
+// is relabelled — the correct answer absent the signal.
+func hasJSONValidCheck(checks []Check, col string) bool {
+	needle := "json_valid(" + strings.ToLower(col) + ")"
+	for _, c := range checks {
+		e := strings.ToLower(c.Expression)
+		e = strings.ReplaceAll(e, "`", "")
+		e = strings.ReplaceAll(e, " ", "")
+		if e == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // mysqlListIndexes reads `INFORMATION_SCHEMA.STATISTICS`, the

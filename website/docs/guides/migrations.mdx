@@ -470,6 +470,12 @@ Cross-dialect awareness baked into the equality functions:
   `TIMESTAMP` (the engine's *default* fractional-seconds precision
   baked into the reported name — an explicit `TIMESTAMP(3)` stays
   distinct).
+- **MariaDB JSON columns** introspect as `json`, not `longtext`. MariaDB
+  implements `JSON` as a `LONGTEXT` alias and the catalog reports
+  `longtext`; the introspector relabels such a column to `json` when it
+  carries the `json_valid(col)` CHECK that MariaDB auto-adds to every JSON
+  column, so a model's `JSON` column doesn't drift to a spurious ALTER. A
+  genuine `LONGTEXT` column (no such CHECK) stays `longtext`.
 - **Default-expression equivalence**: defaults compare modulo the
   catalog's decoration — MSSQL's paren wrapping (`((1))` ≡ `1`,
   `('member')` ≡ `'member'`), PG's cast suffix (`'member'::text` ≡

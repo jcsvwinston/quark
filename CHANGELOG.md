@@ -150,6 +150,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cross-engine regression in `testBatchOps` (SharedSuite) asserts every PK is
   populated on RETURNING dialects. Surfaced by the superapp acceptance harness.
 
+- **migrate:** `PlanMigration` no longer reports spurious `longtext → JSON`
+  drift for JSON columns on MariaDB. MariaDB implements the JSON type as a
+  LONGTEXT alias and `INFORMATION_SCHEMA` reports the column as `longtext`, so a
+  model's desired `JSON` column diffed to an ALTER on every plan over a freshly
+  migrated database. The MariaDB introspector now relabels a `longtext` column
+  to `json` when it carries the `json_valid(col)` CHECK that MariaDB auto-adds
+  to JSON columns — a genuine `longtext` column (no such CHECK) is left
+  untouched. Covered by a cross-engine `PlanMigration`-after-`Migrate` assertion
+  in `testJSONField` (SharedSuite). Surfaced by the superapp acceptance harness.
+
 ### Security
 
 - **guard:** `ValidateRawQuery` now rejects the SQL line-comment tail `--` in
