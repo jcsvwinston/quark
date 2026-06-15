@@ -138,6 +138,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **query:** `CreateBatch` now back-fills generated primary keys into every
+  entity on Oracle. Oracle falls back to per-row inserts (the multi-row
+  `VALUES` form conflicts with `GENERATED ALWAYS AS IDENTITY`), and that path
+  issued a plain `INSERT` without `RETURNING … INTO`, so entities came back with
+  `ID == 0` while the rows inserted fine — a silent divergence from the other
+  RETURNING dialects (PostgreSQL/SQLite/MariaDB). The per-row loop now wraps the
+  insert in a PL/SQL `RETURNING … INTO` bind, matching single `Create`. A
+  cross-engine regression in `testBatchOps` (SharedSuite) asserts every PK is
+  populated on RETURNING dialects. Surfaced by the superapp acceptance harness.
+
 ### Security
 
 - **guard:** `ValidateRawQuery` now rejects the SQL line-comment tail `--` in

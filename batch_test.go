@@ -405,6 +405,24 @@ func testBatchOps(ctx context.Context, t *testing.T, client *quark.Client) {
 		t.Fatalf("CreateBatch seed: %v", err)
 	}
 
+	// Finding C regression: on RETURNING dialects (PG/SQLite/Oracle/MariaDB),
+	// CreateBatch must back-fill the generated PK into EVERY entity — not just
+	// the last one. Oracle's per-row INSERT path previously left them all 0
+	// while the rows inserted fine, a silent divergence the chunk test (which
+	// only checks the last row, SQLite-only) never caught.
+	if client.Dialect().SupportsReturning() {
+		pkSeen := make(map[int64]bool, len(seed))
+		for i, e := range seed {
+			switch {
+			case e.ID == 0:
+				t.Errorf("CreateBatch: seed[%d] (%s) PK not back-filled (ID==0)", i, e.Email)
+			case pkSeen[e.ID]:
+				t.Errorf("CreateBatch: seed[%d] PK %d duplicated — PKs not distinct", i, e.ID)
+			}
+			pkSeen[e.ID] = true
+		}
+	}
+
 	// Re-fetch to get real PKs.
 	allRows, err := quark.For[BSOp](ctx, client).OrderBy("score", "ASC").List()
 	if err != nil || len(allRows) != 5 {
