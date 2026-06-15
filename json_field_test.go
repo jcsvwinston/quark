@@ -34,6 +34,25 @@ func testJSONField(ctx context.Context, t *testing.T, baseClient *quark.Client) 
 	}
 	defer dropTable(baseClient, "rich_docs")
 
+	t.Run("PlanMigrationCleanAfterMigrate", func(t *testing.T) {
+		// Finding D regression: a JSON-column model must not drift on
+		// PlanMigration right after a fresh Migrate. MariaDB stores JSON as
+		// LONGTEXT (plus an auto `json_valid` CHECK) and the catalog reports
+		// "longtext", which previously produced a spurious longtext→JSON ALTER
+		// on rich_docs every plan. The MariaDB introspector now relabels such
+		// columns to "json". Scoped to rich_docs for the same shared-DB reason
+		// as RoundTrip_RichFixture (other suites' tables get DROP ops we ignore).
+		plan, err := baseClient.PlanMigration(ctx, &RichDoc{})
+		if err != nil {
+			t.Fatalf("PlanMigration: %v", err)
+		}
+		for _, op := range plan.Ops {
+			if opTouchesTable(op, "rich_docs") {
+				t.Errorf("post-Migrate plan should NOT touch rich_docs, got: %s", op.String())
+			}
+		}
+	})
+
 	t.Run("StructValueRoundTrip", func(t *testing.T) {
 		d := &RichDoc{
 			Name:     "alice",
