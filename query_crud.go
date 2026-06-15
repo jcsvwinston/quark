@@ -1713,6 +1713,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 			execSQL = "BEGIN " + insertSQL + " " + q.dialect.Returning(q.pk.Column) + " INTO :ret_id; END;"
 		}
 
+		pks := make([]any, 0, len(entities))
 		for _, entity := range entities {
 			v := reflect.ValueOf(entity)
 			if v.Kind() == reflect.Ptr {
@@ -1729,13 +1730,16 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 					return err
 				}
 				setPKValue(v, q.pk, id)
-				// executeExec already dropped the table tag; also drop the fresh
-				// row tag so a cached read by this PK can't go stale — parity with
-				// single Create (~line 430). Idempotent; no-op without a cache store.
-				q.invalidateInsert(ctx, id)
+				pks = append(pks, id)
 			} else if _, err := q.executeExec(ctx, execSQL, rowArgs); err != nil {
 				return err
 			}
+		}
+		// executeExec already dropped the table tag per row; also drop the fresh
+		// row tags (one call for the whole batch) so a cached read by PK can't go
+		// stale — parity with single Create. No-op without a cache store.
+		if returnPK {
+			q.invalidateBatchInsert(ctx, pks)
 		}
 		return nil
 	}
@@ -1820,6 +1824,7 @@ func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns [
 			return err
 		}
 		defer rows.Close()
+		pks := make([]any, 0, len(entities))
 		for i := 0; rows.Next(); i++ {
 			if i >= len(entities) {
 				break
@@ -1833,9 +1838,18 @@ func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns [
 				if err := rows.Scan(pkField.Addr().Interface()); err != nil {
 					return wrapDBError(err)
 				}
+				pks = append(pks, pkField.Interface())
 			}
 		}
-		return wrapDBError(rows.Err())
+		if err := rows.Err(); err != nil {
+			return wrapDBError(err)
+		}
+		// executeQueryPrimary (the RETURNING scan path) invalidates nothing,
+		// unlike executeExec, so drop the table tag + the fresh row tags here or
+		// a cached table-level read goes stale after the batch insert (the batch
+		// sibling of BB-15).
+		q.invalidateBatchInsert(ctx, pks)
+		return nil
 	}
 
 	_, err := q.executeExec(ctx, sqlBuf.String(), args)

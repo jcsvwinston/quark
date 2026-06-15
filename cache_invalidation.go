@@ -70,3 +70,26 @@ func (q *BaseQuery) invalidateInsert(ctx context.Context, pkValue any) {
 	}
 	_ = q.client.cacheStore.InvalidateTags(ctx, q.table)
 }
+
+// invalidateBatchInsert is the batch sibling of invalidateInsert: it drops the
+// TABLE tag plus every inserted row's row tag in a SINGLE InvalidateTags call,
+// for a CreateBatch chunk that back-filled its PKs. The RETURNING scan path
+// (executeQueryPrimary) invalidates nothing — same gap as single Create's
+// RETURNING path — so without this a cached table-level read (list, filtered
+// query, aggregate) goes stale after a batch insert on the RETURNING dialects
+// (the batch sibling of BB-15). One call rather than one per row keeps a remote
+// cache to a single round-trip on large batches. PKs without a scalar row tag
+// (composite) contribute only the table tag. No-op without a cache or table.
+func (q *BaseQuery) invalidateBatchInsert(ctx context.Context, pkValues []any) {
+	if q.client == nil || q.client.cacheStore == nil || q.table == "" {
+		return
+	}
+	tags := make([]string, 0, len(pkValues)+1)
+	tags = append(tags, q.table)
+	for _, pk := range pkValues {
+		if t := q.rowTag(pk); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	_ = q.client.cacheStore.InvalidateTags(ctx, tags...)
+}
