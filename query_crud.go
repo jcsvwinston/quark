@@ -1698,7 +1698,21 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		for j := range colIndexes {
 			phs[j] = q.dialect.Placeholder(j + 1)
 		}
-		sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", tableName, colList, strings.Join(phs, ", "))
+		insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", tableName, colList, strings.Join(phs, ", "))
+
+		// Backfill the generated PK per row when it's a single auto-generated key.
+		// Oracle's RETURNING is an OUT bind inside a PL/SQL block (mirrors single
+		// Create above); the multi-row VALUES path that other dialects use can't
+		// carry it, so without this the per-row loop leaves entity.ID == 0 on
+		// Oracle while the rows insert fine — a silent divergence from every other
+		// engine (Finding C). The condition matches the column loop's PK skip
+		// above: a single, non-composite PK that was zero on the first entity.
+		returnPK := q.pk.Column != "" && !q.meta.HasCompositePK && isZeroPKValue(first.Field(q.pk.Index))
+		execSQL := insertSQL
+		if returnPK {
+			execSQL = "BEGIN " + insertSQL + " " + q.dialect.Returning(q.pk.Column) + " INTO :ret_id; END;"
+		}
+
 		for _, entity := range entities {
 			v := reflect.ValueOf(entity)
 			if v.Kind() == reflect.Ptr {
@@ -1709,7 +1723,17 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 			for j, ci := range colIndexes {
 				rowArgs[j] = q.bindColumnArg(colTags[j], v.Field(ci).Interface())
 			}
-			if _, err := q.executeExec(ctx, sqlStr, rowArgs); err != nil {
+			if returnPK {
+				var id int64
+				if _, err := q.executeExec(ctx, execSQL, append(rowArgs, sql.Named("ret_id", sql.Out{Dest: &id}))); err != nil {
+					return err
+				}
+				setPKValue(v, q.pk, id)
+				// executeExec already dropped the table tag; also drop the fresh
+				// row tag so a cached read by this PK can't go stale — parity with
+				// single Create (~line 430). Idempotent; no-op without a cache store.
+				q.invalidateInsert(ctx, id)
+			} else if _, err := q.executeExec(ctx, execSQL, rowArgs); err != nil {
 				return err
 			}
 		}

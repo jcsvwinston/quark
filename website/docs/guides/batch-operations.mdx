@@ -54,7 +54,9 @@ if err := quark.For[User](ctx, client).CreateBatch(users); err != nil {
 ```
 
 Oracle limitation: multi-row insert forms conflict with `GENERATED ALWAYS AS IDENTITY`
-columns, so Oracle falls back to individual single-row inserts automatically.
+columns, so Oracle falls back to individual single-row inserts automatically. Each
+single-row insert still uses `RETURNING … INTO`, so generated primary keys are
+written back to every entity, the same as the other RETURNING dialects.
 
 ---
 
