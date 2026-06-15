@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3](https://github.com/jcsvwinston/quark/compare/v1.1.2...v1.1.3) (2026-06-15)
+
+
+### Fixed
+
+* **cache:** invalidate L2 table tag on CreateBatch for RETURNING dialects ([b28a608](https://github.com/jcsvwinston/quark/commit/b28a608dba821dc4addb2bf459d5d70549c5a285))
+* **cache:** invalidate L2 table tag on CreateBatch for RETURNING dialects ([0d64b49](https://github.com/jcsvwinston/quark/commit/0d64b496ae9e1c6986be6cb7ba62cc184aed5cc8))
+* **migrate:** stop MariaDB JSON columns drifting to longtext-&gt;JSON ([b6d7089](https://github.com/jcsvwinston/quark/commit/b6d7089927764adca26b48025b8a9fcbb989dabc))
+* **migrate:** stop MariaDB JSON columns drifting to longtext→JSON ([d845f71](https://github.com/jcsvwinston/quark/commit/d845f710ef1634cec55c96d00849a11f1cb4f08f))
+* **query:** back-fill generated PK in Oracle CreateBatch ([572b972](https://github.com/jcsvwinston/quark/commit/572b972af6f1691c2882f09fa496061d1833866e))
+* **query:** back-fill generated PK in Oracle CreateBatch ([824b338](https://github.com/jcsvwinston/quark/commit/824b338396ef6cbb309cb586e780616b2551beb2))
+
+
+### Documentation
+
+* close the post-release audit gaps (docs-auditor report) ([5a935b7](https://github.com/jcsvwinston/quark/commit/5a935b74d5adb9b7e5bcfbcd3e9e8a5c4a1e5dae))
+* mirror the patch release notes into the served 1.1.0 snapshot ([83ef6c5](https://github.com/jcsvwinston/quark/commit/83ef6c5aa583e35345f9c9a9fbd02a8724eece00))
+* mirror the patch release notes into the served 1.1.0 snapshot ([04d2775](https://github.com/jcsvwinston/quark/commit/04d27756505b06c9359ec2fc5633fe6f0d4d2b37))
+* v1.1.2 post-release — version bumps + patch notes on the public site ([4225030](https://github.com/jcsvwinston/quark/commit/422503096329acb2df0db587d1d0e6a67b35b772))
+* v1.1.2 post-release — version bumps + patch notes on the public site ([87d4e5e](https://github.com/jcsvwinston/quark/commit/87d4e5e89c062769d44f176dba43b142c9213cc1))
+
+
+### Tests
+
+* **superapp:** add builder-advanced exerciser (S5) — the remaining 35 Query methods ([5005ad8](https://github.com/jcsvwinston/quark/commit/5005ad8a5f51f7b377753c840d2e9e493f9d6884))
+* **superapp:** add cross-engine parity oracle — closes S5 ([ba4a801](https://github.com/jcsvwinston/quark/commit/ba4a80125a2a73a202d3b601641bc4097e8a6431))
+* **superapp:** add HA exercisers (S5) — replicas, sharding, deadlock retry ([8e0429a](https://github.com/jcsvwinston/quark/commit/8e0429a5ec98ebe04b37668c3a96508a254115e0))
+* **superapp:** add main.go entrypoint (S6) — run, reconcile, render matrix, gate ([d8d4281](https://github.com/jcsvwinston/quark/commit/d8d4281366983d627571b6cf22998d707aa36c8d))
+* **superapp:** add observability exerciser (S5) — in-memory OTel + redaction ([ee9f532](https://github.com/jcsvwinston/quark/commit/ee9f5321cdc61c2359572e963142980be0b6e00c))
+* **superapp:** builder-advanced exerciser (S5) — the remaining 35 Query methods ([b8fdd66](https://github.com/jcsvwinston/quark/commit/b8fdd66631236043e2d1eb96e9e3024a945c8519))
+* **superapp:** cross-engine parity oracle — closes S5 ([b143e97](https://github.com/jcsvwinston/quark/commit/b143e979fbf5169b90b09cc8c8dc4670d95f9221))
+* **superapp:** HA exercisers (S5) — replicas, sharding, deadlock retry ([77bc140](https://github.com/jcsvwinston/quark/commit/77bc140e0c4316d1ad2f36affe7dd41a3e18732c))
+* **superapp:** observability exerciser (S5) — in-memory OTel + redaction ([c4ef9e8](https://github.com/jcsvwinston/quark/commit/c4ef9e897616297f613a71e9cd883dcde1480dcd))
+
 ## [1.1.2](https://github.com/jcsvwinston/quark/compare/v1.1.1...v1.1.2) (2026-06-10)
 
 
