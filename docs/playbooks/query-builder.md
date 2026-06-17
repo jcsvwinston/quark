@@ -20,11 +20,9 @@ phase: 1
 
 Quark tiene un **query builder reflect-based con clones inmutables**, no un AST componible. `Query[T]` lleva un `BaseQuery` con slices de `condition`, `join`, `orderBy`, etc. Cada método (`Where`, `Join`, `Limit`) clona el query y devuelve uno nuevo. Los generics tipan T pero el núcleo opera con `reflect.Value`.
 
-**Lo que SÍ se puede expresar**: WHERE/IN/BETWEEN/NOT/JSON/Or, Joins (Inner/Left/Right), GroupBy+Having, Distinct, Select cols, OrderBy, Limit/Offset, Apply(scopes), agregados Sum/Avg/Min/Max, Count, Find, First, List, Iter, Cursor, Paginate, eager loading via Preload.
+**Lo que SÍ se puede expresar** (toda la superficie la ejerce el exerciser `builder-advanced` del superapp): WHERE/IN/BETWEEN/NOT/JSON/Or + el AST componible `WhereExpr`/`HavingExpr` (Col/Lit/Eq/And/Or/Not/In/Func), Joins (Inner/Left/Right) con On/OnRaw, GroupBy+Having(Aggregate/Expr), Distinct, Select/SelectExpr, OrderBy, Limit/Offset, Apply(scopes), agregados Sum/Avg/Min/Max, Count, Find, First, List, Iter, Cursor, Paginate, Preload, scopes de soft-delete (WithTrashed/OnlyTrashed/Unscoped/Restore/HardDelete), CTEs `With`/`WithRecursive`, set-ops `Union`/`UnionAll`/`Intersect`/`Except` (cobertura por motor en §dialects), window functions (`SelectExpr`+`Over`/`RowNumber`/`NewWindow`), locking pesimista `ForUpdate`/`ForShare`/`SkipLocked`/`NoWait` (por capability), `Upsert`/`UpsertBatch`, y el CRUD por lotes (`CreateBatch`/`UpdateBatch`/`DeleteBatch`/`DeleteBy`).
 
-**Lo que NO se puede expresar (cae en RawQuery, ver §Roadmap)**: CTEs (`WITH`), recursive CTEs, window functions (`OVER`), `UNION`/`INTERSECT`/`EXCEPT`, `FOR UPDATE`/`FOR SHARE`/`SKIP LOCKED`, subqueries componibles tipadas (sólo hay un `WhereSubquery` raw gateado por flag de seguridad), nested preload (`Orders.Items` no es expresable; sólo `Orders` plano).
-
-Esto es deuda conocida; el plan es introducir un AST en Fase 2 (ver `docs/ANALISIS_MADUREZ.md` §4).
+**Lo que NO se puede expresar**: subqueries componibles tipadas (sólo hay un `WhereSubquery` raw gateado por `AllowRawQueries`) y nested preload (`Orders.Items` no es expresable; sólo `Orders` plano). El AST de predicados `WhereExpr`/`HavingExpr` cubre el grueso de la composición; lo que falta vive en `Raw()`/`RawQuery` con flag de seguridad.
 
 ## Bugs P0 vivos
 
