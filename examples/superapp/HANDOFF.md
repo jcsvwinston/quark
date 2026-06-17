@@ -340,16 +340,26 @@ DEADLOCK a ≤4 por ORA-12516, ver `ha.go`).
   que es lo que el exerciser ASERTA: la cualificación schema.table del router, no el
   migrator); (4) Oracle conns del exerciser DEADLOCK 8→4 (ORA-12516). Resultado:
   **mariadb 142❌→168✅**; mysql/mssql/oracle avanzaron a builder-advanced.
-- **S7-fix-harness destapó 3 bugs de CORE** (TASKS § findings F/G/H) — todos en
-  `builder-advanced`, todos `fix:` con regresión 6-motores en la SharedSuite:
-  **F** `WithRecursive` emite `WITH RECURSIVE` en Oracle (ORA-02000; `query_exec.go:728`);
-  **G** `CreateBatch` no rellena PKs en MySQL/MSSQL (hermano de Finding C, `query_crud.go:1814`);
-  **H** `CreateBatch`/`UpdateBatch` no corren hooks (decisión owner: que los corran).
-  Van antes de S7-coverage/S7-ci. Tras F/G/H, el harness queda estricto (revierte el
-  workaround de timestamps del seed si se hubiera necesitado) y la fila funcional verde
-  en los 6 desbloquea el cableado de CI.
+- **S7-fix-harness destapó 3 bugs de CORE — F/G/H, los 3 RESUELTOS** (PRs #201/#203/#204,
+  mergeados 2026-06-17; cada uno `fix:` con regresión 6-motores en la SharedSuite):
+  **F** `WithRecursive` emitía `WITH RECURSIVE` en Oracle/MSSQL (ORA-02000) → keyword
+  dialect-aware (`recursiveCTEKeyword`); **G** `CreateBatch` no rellenaba PKs en
+  MySQL/MSSQL (hermano de Finding C) → `createBatchBackfillPerRow`; **H**
+  `CreateBatch`/`UpdateBatch` no corrían hooks → corren `Before*` por entidad (decisión
+  owner). El run limpio post-F/G/H confirma: sqlite/postgres/mariadb plenos; mysql 82→130,
+  mssql 83→117 (pasaron sus fallos originales).
+- **El run profundo destapó 2 findings de core NUEVOS + un harness-gap** (TASKS § findings I/J):
+  **I** `Upsert` single no corre `BeforeCreate` (zero-time en mysql) — misma ambigüedad de
+  hook que UpsertBatch (insert-or-update → ¿qué hook?), **necesita decisión del owner**;
+  **J** MSSQL `Union`+`Limit` genera un ORDER BY inválido bajo UNION (Quark dialecto).
+  Más el **harness-gap**: los exercisers `cache`/`crud` no convergen sobre un contenedor
+  persistente sucio (sólo `migrate` lo hace) → colisión de unique en reuso local (NO afecta
+  CI, contenedores frescos). Ninguno es regresión de F/G/H. Alcance pendiente de decidir.
 - **Reusar Oracle persistente:** `SUPERAPP_DSN_ORACLE=oracle://system:quark@localhost:1521/FREEPDB1`
   (el grant `DBMS_LOCK` se hace a mano como SYS — el path override salta `grantOracleLock`).
+  **OJO reuso:** tras un run `-keep`, las BD quedan sucias; el `cache` exerciser colisiona en
+  la 2ª corrida (harness-gap arriba) — tira los contenedores docker (`docker rm -f superapp-*`)
+  para un run limpio mientras el gap no se cierre.
 
 **S8 · cierre** — snapshots SQL golden estables, paridad completa, página
 pública si el sidebar lo pide (regla 3: docs en el mismo PR).
