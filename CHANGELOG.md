@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4](https://github.com/jcsvwinston/quark/compare/v1.1.3...v1.1.4) (2026-06-17)
+
+
+### Fixed
+
+* **query:** back-fill generated PKs in CreateBatch on MySQL and SQL Server ([49c4abd](https://github.com/jcsvwinston/quark/commit/49c4abd82e501f3ed36952eb6cfcf4a6ec6df301))
+* **query:** back-fill generated PKs in CreateBatch on MySQL and SQL Server ([753106f](https://github.com/jcsvwinston/quark/commit/753106fdf1d3cd54045c2b6b9a5cacf6c76fcfa9))
+* **query:** omit RECURSIVE keyword for Oracle and SQL Server CTEs ([1f4044f](https://github.com/jcsvwinston/quark/commit/1f4044fd29c8be342dce64f1ae409b9972bfc7a7))
+* **query:** omit the RECURSIVE keyword for Oracle and SQL Server CTEs ([8b04484](https://github.com/jcsvwinston/quark/commit/8b04484e2f48da39957c4bd83a83f22ca1ff921b))
+* **query:** run BeforeCreate in Upsert and UpsertBatch ([b1ab7b2](https://github.com/jcsvwinston/quark/commit/b1ab7b205c8fff79b7d85f3d94ba804bca06c1f1))
+* **query:** run BeforeCreate/BeforeUpdate per entity in CreateBatch/UpdateBatch ([c9a081c](https://github.com/jcsvwinston/quark/commit/c9a081cc821ae0bab9374a752449a24b62579f31))
+* **query:** run BeforeCreate/BeforeUpdate per entity in CreateBatch/UpdateBatch ([02554a0](https://github.com/jcsvwinston/quark/commit/02554a02614707c46731480271e13e812ce3ecdf))
+* **query:** set-op Limit ORDER BY (J) + Upsert/UpsertBatch BeforeCreate (I) ([fac4524](https://github.com/jcsvwinston/quark/commit/fac45240f679b79c3f12a8fc411e86858aacd7d4))
+* **query:** use positional ORDER BY for set-op pagination on MSSQL/Oracle ([c66175e](https://github.com/jcsvwinston/quark/commit/c66175e79d4a90c67e309528b2fa6bd62d439170))
+
+
+### Documentation
+
+* **playbooks:** refresh query-builder can/can't-express list ([7c221c8](https://github.com/jcsvwinston/quark/commit/7c221c8c1b61833a57fc6453d0557d2841a7723b))
+
+
+### Tests
+
+* **superapp:** fix the 4 harness-side gate failures (S7-fix-harness) ([6031cd1](https://github.com/jcsvwinston/quark/commit/6031cd1134edafd50941e3fc7f1ea03ded8a722c))
+* **superapp:** fix the 4 harness-side gate failures (S7-fix-harness) ([f74284a](https://github.com/jcsvwinston/quark/commit/f74284aaabcfbd62c716baf3f4fe602db0ebe7f3))
+
 ## [1.1.3](https://github.com/jcsvwinston/quark/compare/v1.1.2...v1.1.3) (2026-06-15)
 
 
