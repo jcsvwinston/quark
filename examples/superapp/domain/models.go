@@ -72,6 +72,17 @@ type Project struct {
 	Tags []Tag `rel:"many_to_many" m2m:"project_tags:project_id:tag_id"`
 }
 
+// BeforeCreate rellena created_at si el caller no lo fijó. Es obligatorio para los
+// motores con strict mode (MySQL 8 rechaza el zero-time '0000-00-00' en una
+// columna NOT NULL DATETIME); el guard IsZero preserva un valor explícito (p.ej.
+// el base time determinista del oráculo de paridad). Espeja Account.BeforeCreate.
+func (p *Project) BeforeCreate(ctx context.Context) error {
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = time.Now().UTC()
+	}
+	return nil
+}
+
 // Task ejerce belongs_to + una FK NULLABLE (*int64) que Preload debe seguir sin
 // cargar basura — el caso del fix BB-5.
 type Task struct {
@@ -102,6 +113,15 @@ type Membership struct {
 }
 
 func (Membership) TableName() string { return "account_project_memberships" }
+
+// BeforeCreate rellena joined_at si el caller no lo fijó — misma razón que
+// Project.BeforeCreate (strict mode rechaza el zero-time en la columna NOT NULL).
+func (m *Membership) BeforeCreate(ctx context.Context) error {
+	if m.JoinedAt.IsZero() {
+		m.JoinedAt = time.Now().UTC()
+	}
+	return nil
+}
 
 // Attachment ejerce binario []byte y Nullable[[]byte] (el caso del fix BB-6 de
 // MSSQL: NULL []byte sobre nvarchar/varbinary).

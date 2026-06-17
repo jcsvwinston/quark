@@ -41,8 +41,23 @@ type spec struct {
 	containerPort string
 	env           []string
 	dsn           func(hostPort string) string
-	readyTimeout  time.Duration
+	// serverDSN, si no es nil, es el DSN de nivel-servidor contra el que se hace
+	// el ping de readiness y se crea la base dedicada (ensureDBSQL). Para los
+	// motores que NO deben operar sobre su base de sistema (MySQL/MariaDB → `mysql`,
+	// MSSQL → `master`): el migrator del arnés introspecciona y borra dentro de la
+	// base conectada, y sobre la base de sistema eso intentaría tocar tablas del
+	// catálogo. Si es nil, el ping va contra dsn (PG sobre `postgres` está bien).
+	serverDSN    func(hostPort string) string
+	ensureDBSQL  string
+	readyTimeout time.Duration
 }
+
+// appDB es la base de datos dedicada del arnés en los motores cuyo DSN por defecto
+// caería en una base de sistema. Aislada del catálogo → el migrator/cleanup de los
+// exercisers nunca toca tablas de sistema. Las bases por-tenant (DBPerTenant) y los
+// schemas (SchemaPerTenant) usan sufijos propios (`superapp_dbt_*`/`superapp_spt_*`)
+// y no colisionan con este nombre.
+const appDB = "superapp"
 
 // specs: imágenes idénticas a las de la CI/bugbash; puertos host PROPIOS del
 // superapp para coexistir con bugbash y con el postgres de Lantia (5432).
@@ -59,8 +74,10 @@ var specs = map[control.Engine]spec{
 		image: "mysql:8", hostPort: "3310", containerPort: "3306",
 		env: []string{"MYSQL_ROOT_PASSWORD=quark"},
 		dsn: func(p string) string {
-			return "root:quark@tcp(localhost:" + p + ")/mysql?parseTime=true&multiStatements=true"
+			return "root:quark@tcp(localhost:" + p + ")/" + appDB + "?parseTime=true&multiStatements=true"
 		},
+		serverDSN:    func(p string) string { return "root:quark@tcp(localhost:" + p + ")/" },
+		ensureDBSQL:  "CREATE DATABASE IF NOT EXISTS " + appDB,
 		readyTimeout: 120 * time.Second,
 	},
 	control.MariaDB: {
@@ -68,15 +85,19 @@ var specs = map[control.Engine]spec{
 		image: "mariadb:11", hostPort: "3311", containerPort: "3306",
 		env: []string{"MARIADB_ROOT_PASSWORD=quark"},
 		dsn: func(p string) string {
-			return "root:quark@tcp(localhost:" + p + ")/mysql?parseTime=true&multiStatements=true"
+			return "root:quark@tcp(localhost:" + p + ")/" + appDB + "?parseTime=true&multiStatements=true"
 		},
+		serverDSN:    func(p string) string { return "root:quark@tcp(localhost:" + p + ")/" },
+		ensureDBSQL:  "CREATE DATABASE IF NOT EXISTS " + appDB,
 		readyTimeout: 120 * time.Second,
 	},
 	control.MSSQL: {
 		driver: "sqlserver", container: "superapp-mssql",
 		image: "mcr.microsoft.com/mssql/server:2022-latest", hostPort: "1435", containerPort: "1433",
 		env:          []string{"ACCEPT_EULA=Y", "MSSQL_SA_PASSWORD=Quark!2026"},
-		dsn:          func(p string) string { return "sqlserver://sa:Quark!2026@localhost:" + p + "?database=master" },
+		dsn:          func(p string) string { return "sqlserver://sa:Quark!2026@localhost:" + p + "?database=" + appDB },
+		serverDSN:    func(p string) string { return "sqlserver://sa:Quark!2026@localhost:" + p + "?database=master" },
+		ensureDBSQL:  "IF DB_ID('" + appDB + "') IS NULL CREATE DATABASE " + appDB,
 		readyTimeout: 180 * time.Second,
 	},
 	control.Oracle: {
@@ -107,6 +128,9 @@ func Up(ctx context.Context, engines ...control.Engine) (map[control.Engine]Conn
 			return out, fmt.Errorf("motor desconocido %q", e)
 		}
 		if dsn := os.Getenv(EnvVar(e)); dsn != "" {
+			// Override: el caller gestiona el contenedor. Para MySQL/MariaDB/MSSQL
+			// el DSN debe apuntar ya a una base dedicada existente (no `mysql`/
+			// `master`): se salta ensureDBSQL igual que se salta el boot.
 			out[e] = Conn{Engine: e, Driver: sp.driver, DSN: dsn}
 			continue
 		}
@@ -117,8 +141,17 @@ func Up(ctx context.Context, engines ...control.Engine) (map[control.Engine]Conn
 			return out, fmt.Errorf("boot %s: %w", e, err)
 		}
 		dsn := sp.dsn(sp.hostPort)
-		if err := waitReady(ctx, sp.driver, dsn, sp.readyTimeout); err != nil {
+		readyDSN := dsn
+		if sp.serverDSN != nil {
+			readyDSN = sp.serverDSN(sp.hostPort)
+		}
+		if err := waitReady(ctx, sp.driver, readyDSN, sp.readyTimeout); err != nil {
 			return out, fmt.Errorf("el motor %q nunca estuvo listo: %w", e, err)
+		}
+		if sp.ensureDBSQL != "" {
+			if err := ensureDatabase(ctx, sp.driver, readyDSN, sp.ensureDBSQL); err != nil {
+				return out, fmt.Errorf("crear base dedicada de %s: %w", e, err)
+			}
 		}
 		if e == control.Oracle {
 			grantOracleLock(sp.container)
@@ -198,6 +231,24 @@ func waitReady(ctx context.Context, driver, dsn string, timeout time.Duration) e
 		}
 	}
 	return fmt.Errorf("timeout tras %s: %w", timeout, lastErr)
+}
+
+// ensureDatabase crea la base dedicada del arnés ejecutando ensureDBSQL contra el
+// DSN de nivel-servidor (serverDSN). Idempotente por construcción (el DDL lleva
+// IF NOT EXISTS / IF DB_ID(...) IS NULL). Se corre tras el ping de readiness; el
+// CREATE DATABASE va por db.ExecContext directo (sin tx: PG/MSSQL lo exigen, y
+// aquí no hay Client de Quark todavía).
+func ensureDatabase(ctx context.Context, driver, serverDSN, ddl string) error {
+	db, err := sql.Open(driver, serverDSN)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	_, err = db.ExecContext(ctx, ddl)
+	return err
 }
 
 // grantOracleLock concede EXECUTE ON DBMS_LOCK (lo necesita el lock de migración

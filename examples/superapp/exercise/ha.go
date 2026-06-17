@@ -398,12 +398,11 @@ var SHARDING = Exerciser{Name: "ha-sharding", Fn: func(ctx context.Context, clie
 // código de deadlock), capacidad desigual ≠ fallo.
 var DEADLOCK = Exerciser{Name: "ha-deadlock", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder, conn Conn) error {
 	rec.Note(QF("WithDeadlockRetry"))
-	// SUPUESTO de pool (mismo aviso que el lock de migrate.go): 8 conexiones
-	// propias + las del harness. Si S7 acota el pool de Oracle (ORA-12516,
-	// el techo bajo de gvenzl que ya mordió en el soak F14), bajar este
-	// MaxOpenConns a ≤4 — el deadlock sólo necesita 2 conexiones vivas.
+	// Pool acotado a 4 (S7): el deadlock sólo necesita 2 conexiones vivas, y el
+	// techo de sesiones de gvenzl en Oracle (ORA-12516, visto en el soak F14)
+	// no tolera 8 conexiones propias + las del harness en la matriz completa.
 	dl, err := quark.New(conn.Driver, conn.DSN, append(rec.Options(),
-		quark.WithDeadlockRetry(6), quark.WithMaxOpenConns(8))...)
+		quark.WithDeadlockRetry(6), quark.WithMaxOpenConns(4))...)
 	if err != nil {
 		return fmt.Errorf("client deadlock-retry: %w", err)
 	}

@@ -60,13 +60,6 @@ func runSchemaPerTenant(ctx context.Context, client *quark.Client, rec *recorder
 	if !control.Supports(control.FeatSchemaPerTenant, conn.Engine) {
 		return nil // sin schemas reales: skip documentado (capability.go)
 	}
-	if conn.Engine != control.Postgres {
-		// MSSQL soporta schemas (la capability lo dice) pero el harness aún no
-		// tiene cómo migrar la tabla DENTRO de un schema ahí (no hay search_path
-		// por DSN). Error ruidoso para que habilitar MSSQL en la matriz obligue a
-		// implementarlo — no un skip que infle la cobertura.
-		return fmt.Errorf("schema-per-tenant: falta el mecanismo de migrate-into-schema para %s (TODO en HANDOFF)", conn.Engine)
-	}
 
 	admin, err := quark.New(conn.Driver, conn.DSN, quark.WithLimits(quark.Limits{
 		AllowRawQueries: true,
@@ -78,37 +71,17 @@ func runSchemaPerTenant(ctx context.Context, client *quark.Client, rec *recorder
 	}
 	defer admin.Close() // LIFO: el último — el cleanup necesita el admin abierto
 
-	cleanup := func() {
-		cctx := context.Background()
-		_ = admin.Exec(cctx, `DROP SCHEMA IF EXISTS `+sptSchemaA+` CASCADE`)
-		_ = admin.Exec(cctx, `DROP SCHEMA IF EXISTS `+sptSchemaB+` CASCADE`)
-	}
+	cleanup := func() { cleanupSchemaPerTenant(admin, conn.Engine) }
 	cleanup()
 	defer cleanup()
 
-	// Onboarding por tenant: CREATE SCHEMA + migrar la tabla DENTRO del schema
-	// vía un client efímero cuyo DSN fija search_path=<schema> (pgx pasa los
-	// query-params desconocidos como runtime params de la sesión).
+	// Onboarding por tenant (responsabilidad del caller, per el playbook): crea el
+	// schema y la tabla spt_docs DENTRO de él. El mecanismo de migrate-into-schema
+	// es por-motor (provisionSchema): PG vía client efímero con search_path; MSSQL
+	// vía DDL schema-cualificado (no hay search_path por DSN).
 	for _, schema := range []string{sptSchemaA, sptSchemaB} {
-		if err := admin.Exec(ctx, `CREATE SCHEMA `+schema); err != nil {
-			return fmt.Errorf("create schema %s: %w", schema, err)
-		}
-		dsn, err := searchPathDSN(conn.DSN, schema)
-		if err != nil {
+		if err := provisionSchema(ctx, admin, conn, schema); err != nil {
 			return err
-		}
-		l := quark.DefaultLimits()
-		l.SafeMigrations = false
-		tmp, err := quark.New(conn.Driver, dsn, quark.WithLimits(l))
-		if err != nil {
-			return fmt.Errorf("client search_path=%s: %w", schema, err)
-		}
-		merr := tmp.Migrate(ctx, &sptDoc{})
-		// El error de Close se descarta a sabiendas: si la conexión quedara viva,
-		// el leak-check de engine.Run (goroutines + pool) lo delataría igualmente.
-		_ = tmp.Close()
-		if merr != nil {
-			return fmt.Errorf("migrate en schema %s: %w", schema, merr)
 		}
 	}
 
@@ -174,6 +147,71 @@ func runSchemaPerTenant(ctx context.Context, client *quark.Client, rec *recorder
 		return fmt.Errorf("FUGA de schema: %s ve una fila de %s (%+v)", sptSchemaB, sptSchemaA, ghost)
 	}
 	return nil
+}
+
+// cleanupSchemaPerTenant borra los schemas del exerciser. En MSSQL la tabla va
+// primero (DROP SCHEMA exige el schema vacío); en PG el CASCADE se la lleva.
+// Re-ejecutable contra un contenedor persistente: todo IF EXISTS.
+func cleanupSchemaPerTenant(admin *quark.Client, e control.Engine) {
+	cctx := context.Background()
+	for _, schema := range []string{sptSchemaA, sptSchemaB} {
+		switch e {
+		case control.Postgres:
+			_ = admin.Exec(cctx, `DROP SCHEMA IF EXISTS `+schema+` CASCADE`)
+		case control.MSSQL:
+			_ = admin.Exec(cctx, `DROP TABLE IF EXISTS [`+schema+`].[spt_docs]`)
+			_ = admin.Exec(cctx, `DROP SCHEMA IF EXISTS `+schema)
+		}
+	}
+}
+
+// provisionSchema crea un schema y la tabla spt_docs dentro de él. El mecanismo es
+// por-motor: PG usa un client efímero cuyo DSN fija search_path=<schema> (pgx pasa
+// los query-params desconocidos como runtime params de sesión); MSSQL no tiene
+// search_path por DSN, así que crea la tabla con DDL schema-cualificado vía el
+// admin. En ambos casos lo que el exerciser ASERTA luego es la cualificación
+// schema.table del router en query-time (query_builder.go:115), no este DDL de
+// onboarding — el migrator de Quark tiene su propio exerciser (migrate.go).
+func provisionSchema(ctx context.Context, admin *quark.Client, conn Conn, schema string) error {
+	if err := admin.Exec(ctx, `CREATE SCHEMA `+schema); err != nil {
+		return fmt.Errorf("create schema %s: %w", schema, err)
+	}
+	switch conn.Engine {
+	case control.Postgres:
+		dsn, err := searchPathDSN(conn.DSN, schema)
+		if err != nil {
+			return err
+		}
+		l := quark.DefaultLimits()
+		l.SafeMigrations = false
+		tmp, err := quark.New(conn.Driver, dsn, quark.WithLimits(l))
+		if err != nil {
+			return fmt.Errorf("client search_path=%s: %w", schema, err)
+		}
+		merr := tmp.Migrate(ctx, &sptDoc{})
+		// El error de Close se descarta a sabiendas: una conexión viva la delataría
+		// el leak-check de engine.Run (goroutines + pool).
+		_ = tmp.Close()
+		if merr != nil {
+			return fmt.Errorf("migrate en schema %s: %w", schema, merr)
+		}
+	case control.MSSQL:
+		if err := admin.Exec(ctx, mssqlCreateSptDoc(schema)); err != nil {
+			return fmt.Errorf("create table en schema %s: %w", schema, err)
+		}
+	default:
+		return fmt.Errorf("schema-per-tenant: motor %q sin mecanismo de provisión", conn.Engine)
+	}
+	return nil
+}
+
+// mssqlCreateSptDoc es el DDL schema-cualificado de spt_docs para MSSQL: id IDENTITY
+// (Quark backfillea el PK vía OUTPUT INSERTED.id en el path Create), title nullable.
+// Espeja la forma que Migrate daría a sptDoc, cualificada al schema del tenant.
+func mssqlCreateSptDoc(schema string) string {
+	return `CREATE TABLE [` + schema + `].[spt_docs] (` +
+		`[id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY, ` +
+		`[title] NVARCHAR(255) NULL)`
 }
 
 // searchPathDSN añade search_path=<schema> a un DSN Postgres URL-form: el client
