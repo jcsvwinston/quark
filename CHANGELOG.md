@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5](https://github.com/jcsvwinston/quark/compare/v1.1.4...v1.1.5) (2026-06-17)
+
+
+### Documentation
+
+* bump version to v1.1.4 in README and intro ([2c862fd](https://github.com/jcsvwinston/quark/commit/2c862fd79090b05626731b140e8fcadaa25fe56e))
+* bump version to v1.1.4 in README and intro ([81a3452](https://github.com/jcsvwinston/quark/commit/81a3452b99e6887abd2da54db5e9902b05025239))
+* complete v1.1.4 release notes + bump remaining version statements ([a5290c7](https://github.com/jcsvwinston/quark/commit/a5290c7c4979d21c25397d400cd48b694836c453))
+* complete v1.1.4 release notes + bump remaining version statements ([1ef32c6](https://github.com/jcsvwinston/quark/commit/1ef32c65ad02cbe40e628228c6ee13a7d4b09e05))
+
 ## [1.1.4](https://github.com/jcsvwinston/quark/compare/v1.1.3...v1.1.4) (2026-06-17)
 
 
