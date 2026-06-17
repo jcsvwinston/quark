@@ -405,22 +405,23 @@ func testBatchOps(ctx context.Context, t *testing.T, client *quark.Client) {
 		t.Fatalf("CreateBatch seed: %v", err)
 	}
 
-	// Finding C regression: on RETURNING dialects (PG/SQLite/Oracle/MariaDB),
-	// CreateBatch must back-fill the generated PK into EVERY entity — not just
-	// the last one. Oracle's per-row INSERT path previously left them all 0
-	// while the rows inserted fine, a silent divergence the chunk test (which
-	// only checks the last row, SQLite-only) never caught.
-	if client.Dialect().SupportsReturning() {
-		pkSeen := make(map[int64]bool, len(seed))
-		for i, e := range seed {
-			switch {
-			case e.ID == 0:
-				t.Errorf("CreateBatch: seed[%d] (%s) PK not back-filled (ID==0)", i, e.Email)
-			case pkSeen[e.ID]:
-				t.Errorf("CreateBatch: seed[%d] PK %d duplicated — PKs not distinct", i, e.ID)
-			}
-			pkSeen[e.ID] = true
+	// Finding C + G regression: CreateBatch must back-fill the generated PK into
+	// EVERY entity on ALL SIX engines — not just the last one. RETURNING dialects
+	// (PG/SQLite/MariaDB) scan them back; Oracle uses a per-row RETURNING INTO
+	// (Finding C); MySQL and SQL Server — which can't read keys back from a
+	// multi-row INSERT — now insert per row and back-fill via LastInsertId /
+	// SCOPE_IDENTITY (Finding G). Before that, MySQL/MSSQL left every PK at 0, a
+	// silent divergence from single Create that the old SupportsReturning()-gated
+	// check skipped. The single auto-generated PK here exercises every dialect.
+	pkSeen := make(map[int64]bool, len(seed))
+	for i, e := range seed {
+		switch {
+		case e.ID == 0:
+			t.Errorf("CreateBatch: seed[%d] (%s) PK not back-filled (ID==0)", i, e.Email)
+		case pkSeen[e.ID]:
+			t.Errorf("CreateBatch: seed[%d] PK %d duplicated — PKs not distinct", i, e.ID)
 		}
+		pkSeen[e.ID] = true
 	}
 
 	// Re-fetch to get real PKs.
