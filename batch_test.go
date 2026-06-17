@@ -498,12 +498,13 @@ func testBatchOps(ctx context.Context, t *testing.T, client *quark.Client) {
 	})
 }
 
-// batchHookProbe verifies that batch ops fire Before* hooks per entity
-// (Finding H). Stamp is written ONLY by the hooks, so it stays "" — both in
-// memory and in the row — if a hook didn't run.
+// batchHookProbe verifies that batch and upsert ops fire Before* hooks per
+// entity (Findings H + I). Stamp is written ONLY by the hooks, so it stays "" —
+// both in memory and in the row — if a hook didn't run. Name is unique so it can
+// serve as an Upsert conflict column.
 type batchHookProbe struct {
 	ID    int64  `db:"id" pk:"true"`
-	Name  string `db:"name"`
+	Name  string `db:"name" quark:"unique"`
 	Stamp string `db:"stamp"`
 }
 
@@ -519,11 +520,12 @@ func (b *batchHookProbe) BeforeUpdate(ctx context.Context) error {
 	return nil
 }
 
-// testBatchHooks is the Finding H regression: CreateBatch must fire BeforeCreate
-// and UpdateBatch must fire BeforeUpdate, once per entity, with the mutation
-// reaching the row. Before the fix, batch ops skipped hooks entirely, so Stamp
-// stayed empty in the database — and a hook that set a NOT NULL timestamp instead
-// of a string produced a zero datetime that MySQL strict mode rejected.
+// testBatchHooks is the Findings H + I regression: CreateBatch must fire
+// BeforeCreate, UpdateBatch must fire BeforeUpdate, and Upsert/UpsertBatch must
+// fire BeforeCreate (insert-prep) — once per entity, with the mutation reaching
+// the row. Before the fixes, these ops skipped hooks entirely, so Stamp stayed
+// empty in the database — and a hook setting a NOT NULL timestamp produced a
+// zero datetime that MySQL strict mode rejected.
 func testBatchHooks(ctx context.Context, t *testing.T, client *quark.Client) {
 	dropTable(client, "batch_hook_probes")
 	if err := client.Migrate(ctx, &batchHookProbe{}); err != nil {
@@ -570,6 +572,43 @@ func testBatchHooks(ctx context.Context, t *testing.T, client *quark.Client) {
 	for i, a := range after {
 		if a.Stamp != "updated" {
 			t.Errorf("UpdateBatch: row %d persisted stamp=%q, want \"updated\"", i, a.Stamp)
+		}
+	}
+
+	// Finding I: Upsert (single) and UpsertBatch fire BeforeCreate on the insert
+	// path. conflictCols=["name"] is the unique column; the rows below are new,
+	// so they insert and BeforeCreate must stamp them (in memory and in the row).
+	ins := &batchHookProbe{Name: "upsert-1"}
+	if err := quark.For[batchHookProbe](ctx, client).Upsert(ins, []string{"name"}, []string{"stamp"}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if ins.Stamp != "created" {
+		t.Errorf("Upsert: BeforeCreate did not run (stamp=%q, want \"created\")", ins.Stamp)
+	}
+	gotUp, err := quark.For[batchHookProbe](ctx, client).Where("name", "=", "upsert-1").First()
+	if err != nil {
+		t.Fatalf("Upsert re-fetch: %v", err)
+	}
+	if gotUp.Stamp != "created" {
+		t.Errorf("Upsert: persisted stamp=%q, want \"created\"", gotUp.Stamp)
+	}
+
+	ub := []*batchHookProbe{{Name: "upsert-2"}, {Name: "upsert-3"}}
+	if err := quark.For[batchHookProbe](ctx, client).UpsertBatch(ub, []string{"name"}, []string{"stamp"}); err != nil {
+		t.Fatalf("UpsertBatch: %v", err)
+	}
+	for i, b := range ub {
+		if b.Stamp != "created" {
+			t.Errorf("UpsertBatch: BeforeCreate did not run on ub[%d] (stamp=%q, want \"created\")", i, b.Stamp)
+		}
+	}
+	for _, name := range []string{"upsert-2", "upsert-3"} {
+		got, ferr := quark.For[batchHookProbe](ctx, client).Where("name", "=", name).First()
+		if ferr != nil {
+			t.Fatalf("UpsertBatch re-fetch %s: %v", name, ferr)
+		}
+		if got.Stamp != "created" {
+			t.Errorf("UpsertBatch: %q persisted stamp=%q, want \"created\"", name, got.Stamp)
 		}
 	}
 }

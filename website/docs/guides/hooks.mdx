@@ -34,7 +34,7 @@ func (o *Order) AfterCreate(ctx context.Context) error {
 
 | Hook | Phase | Fires from |
 | --- | --- | --- |
-| `BeforeCreateHook` | Before INSERT | `Create`, `CreateBatch` |
+| `BeforeCreateHook` | Before INSERT | `Create`, `CreateBatch`, `Upsert`, `UpsertBatch` |
 | `AfterCreateHook` | After commit (in tx) / after INSERT (no tx) | `Create` |
 | `BeforeUpdateHook` | Before UPDATE | `Update`, `UpdateFields`, `Tracked.Save`, `UpdateBatch` |
 | `AfterUpdateHook` | After commit (in tx) / after UPDATE (no tx) | `Update`, `UpdateFields`, `Tracked.Save` |
@@ -45,10 +45,13 @@ func (o *Order) AfterCreate(ctx context.Context) error {
 
 `CreateBatch` and `UpdateBatch` fire their **`Before*`** hook once per
 entity, so timestamp / default / derived-field hooks apply to batched
-rows exactly as they do to single writes. Their **`After*`** hooks do
-**not** fire, and the WHERE-based variants (`DeleteBatch`, `DeleteBy`)
-bypass hooks entirely. See [Limitations](#limitations) below for the
-reasoning.
+rows exactly as they do to single writes. `Upsert` and `UpsertBatch` fire
+**`BeforeCreate`** (they prepare each row as an insert; on conflict the
+configured `updateCols` win) — not `BeforeUpdate`, since the
+insert-or-update outcome isn't known when the hook runs. Their
+**`After*`** hooks do **not** fire, and the WHERE-based variants
+(`DeleteBatch`, `DeleteBy`) bypass hooks entirely. See
+[Limitations](#limitations) below for the reasoning.
 
 ## Before* vs After*: what changed in v0.9.0
 
@@ -196,14 +199,17 @@ if err == nil {
 - **`Tracked.Save` runs both `BeforeUpdate` and `AfterUpdate`** —
   treats the save as an update from the recorded snapshot, so the
   hook contract matches plain `Update`.
-- **Batch `Before*` hooks fire; `After*` do not.** `CreateBatch`
+- **Batch/upsert `Before*` hooks fire; `After*` do not.** `CreateBatch`
   runs `BeforeCreate` and `UpdateBatch` runs `BeforeUpdate` once per
   entity (before binding), so field-mutating hooks — timestamps,
-  defaults, derived columns — apply to batched rows. Their `After*`
-  hooks are skipped: those carry commit-phase queue semantics
-  (`queueOrRunAfterHook`) that don't map cleanly onto a multi-row
-  write. If you need `After*` side-effects per row, loop through
-  single-row `Create` / `Update` inside `client.Tx`.
+  defaults, derived columns — apply to batched rows. `Upsert` and
+  `UpsertBatch` run `BeforeCreate` (insert-prep), not `BeforeUpdate`:
+  an insert-or-update can't know its outcome when the hook runs, so the
+  insert hook fires and the configured `updateCols` win on conflict.
+  Their `After*` hooks are skipped: those carry commit-phase queue
+  semantics (`queueOrRunAfterHook`) that don't map cleanly onto a
+  multi-row write. If you need `After*` side-effects per row, loop
+  through single-row `Create` / `Update` inside `client.Tx`.
 
 - **WHERE-based deletes bypass hooks** (`DeleteBatch`, `DeleteBy`).
   `DeleteBy` issues a single WHERE-based DELETE without loading the
