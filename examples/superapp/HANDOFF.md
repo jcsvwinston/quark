@@ -329,7 +329,27 @@ máquina-legible; el job CI corre `go run ./examples/superapp -engines=all
 DEADLOCK a ≤4 por ORA-12516, ver `ha.go`).
 
 **S7 · CI** — job que corre la superapp en los 6 (patrón `integration` de
-`ci.yml`; Oracle docker-run). Gate estricto bloqueante.
+`ci.yml`; Oracle docker-run). Gate estricto bloqueante. **EN CURSO.**
+- **S7-fix-harness (2026-06-17) — HECHO.** Los 4 fallos harness-side del 2026-06-15
+  cerrados: (1) MySQL zero-time — `domain.Project`/`Membership` ganaron `BeforeCreate`
+  (sólo `Account` lo tenía; el zero-time rompía MySQL 8 strict); (2) BD dedicada
+  `superapp` en MySQL/MariaDB/MSSQL (`engine.go`: `serverDSN`+`ensureDBSQL` crean la
+  base tras el ping — antes el DSN caía en `mysql`/`master` y el migrator borraba
+  tablas de sistema); (3) MSSQL migrate-into-schema (`tenant_schema_per.go`:
+  `provisionSchema` por-motor — PG vía search_path, MSSQL vía DDL schema-cualificado,
+  que es lo que el exerciser ASERTA: la cualificación schema.table del router, no el
+  migrator); (4) Oracle conns del exerciser DEADLOCK 8→4 (ORA-12516). Resultado:
+  **mariadb 142❌→168✅**; mysql/mssql/oracle avanzaron a builder-advanced.
+- **S7-fix-harness destapó 3 bugs de CORE** (TASKS § findings F/G/H) — todos en
+  `builder-advanced`, todos `fix:` con regresión 6-motores en la SharedSuite:
+  **F** `WithRecursive` emite `WITH RECURSIVE` en Oracle (ORA-02000; `query_exec.go:728`);
+  **G** `CreateBatch` no rellena PKs en MySQL/MSSQL (hermano de Finding C, `query_crud.go:1814`);
+  **H** `CreateBatch`/`UpdateBatch` no corren hooks (decisión owner: que los corran).
+  Van antes de S7-coverage/S7-ci. Tras F/G/H, el harness queda estricto (revierte el
+  workaround de timestamps del seed si se hubiera necesitado) y la fila funcional verde
+  en los 6 desbloquea el cableado de CI.
+- **Reusar Oracle persistente:** `SUPERAPP_DSN_ORACLE=oracle://system:quark@localhost:1521/FREEPDB1`
+  (el grant `DBMS_LOCK` se hace a mano como SYS — el path override salta `grantOracleLock`).
 
 **S8 · cierre** — snapshots SQL golden estables, paridad completa, página
 pública si el sidebar lo pide (regla 3: docs en el mismo PR).
