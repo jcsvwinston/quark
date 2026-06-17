@@ -34,18 +34,21 @@ func (o *Order) AfterCreate(ctx context.Context) error {
 
 | Hook | Phase | Fires from |
 | --- | --- | --- |
-| `BeforeCreateHook` | Before INSERT | `Create` |
+| `BeforeCreateHook` | Before INSERT | `Create`, `CreateBatch` |
 | `AfterCreateHook` | After commit (in tx) / after INSERT (no tx) | `Create` |
-| `BeforeUpdateHook` | Before UPDATE | `Update`, `UpdateFields`, `Tracked.Save` |
+| `BeforeUpdateHook` | Before UPDATE | `Update`, `UpdateFields`, `Tracked.Save`, `UpdateBatch` |
 | `AfterUpdateHook` | After commit (in tx) / after UPDATE (no tx) | `Update`, `UpdateFields`, `Tracked.Save` |
 | `BeforeDeleteHook` | Before DELETE | `Delete` |
 | `AfterDeleteHook` | After commit (in tx) / after DELETE (no tx) | `Delete` |
 | `BeforeFindHook` | Before SELECT is built | `List`, `First`, `Find`, `Iter`, `Cursor` |
 | `AfterFindHook` | After scan + Preload | `List`, `First`, `Find`, `Iter`, `Cursor` |
 
-Bulk and WHERE-based variants — `CreateBatch`, `UpdateBatch`,
-`DeleteBatch`, `DeleteBy` — currently **bypass hooks entirely**.
-See [Limitations](#limitations) below for the reasoning.
+`CreateBatch` and `UpdateBatch` fire their **`Before*`** hook once per
+entity, so timestamp / default / derived-field hooks apply to batched
+rows exactly as they do to single writes. Their **`After*`** hooks do
+**not** fire, and the WHERE-based variants (`DeleteBatch`, `DeleteBy`)
+bypass hooks entirely. See [Limitations](#limitations) below for the
+reasoning.
 
 ## Before* vs After*: what changed in v0.9.0
 
@@ -193,13 +196,20 @@ if err == nil {
 - **`Tracked.Save` runs both `BeforeUpdate` and `AfterUpdate`** —
   treats the save as an update from the recorded snapshot, so the
   hook contract matches plain `Update`.
-- **Batch and WHERE-based operations** (`CreateBatch`,
-  `UpdateBatch`, `DeleteBatch`, `DeleteBy`) currently bypass hooks.
-  Bulk paths skip the per-row dispatch by design; `DeleteBy` issues
-  a single WHERE-based DELETE without loading the affected rows, so
-  there is no entity instance to call the hook on. If you need
-  hooks for those paths, load the rows first and loop through the
-  single-row CRUD methods.
+- **Batch `Before*` hooks fire; `After*` do not.** `CreateBatch`
+  runs `BeforeCreate` and `UpdateBatch` runs `BeforeUpdate` once per
+  entity (before binding), so field-mutating hooks — timestamps,
+  defaults, derived columns — apply to batched rows. Their `After*`
+  hooks are skipped: those carry commit-phase queue semantics
+  (`queueOrRunAfterHook`) that don't map cleanly onto a multi-row
+  write. If you need `After*` side-effects per row, loop through
+  single-row `Create` / `Update` inside `client.Tx`.
+
+- **WHERE-based deletes bypass hooks** (`DeleteBatch`, `DeleteBy`).
+  `DeleteBy` issues a single WHERE-based DELETE without loading the
+  affected rows, so there is no entity instance to call the hook on;
+  `DeleteBatch` deletes by PK list the same way. Load the rows first
+  and loop through `Delete` if you need the hooks.
 
 - **Savepoints inside `Tx.Tx(nestedFn)`** roll back the SQL but do
   NOT remove already-queued `After*` hooks from the outer

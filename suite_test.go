@@ -249,6 +249,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testBatchOps(ctx, t, client)
 	})
 
+	t.Run("BatchHooks", func(t *testing.T) {
+		testBatchHooks(ctx, t, client)
+	})
+
 	t.Run("AuditLog", func(t *testing.T) {
 		testAuditLog(ctx, t, client)
 	})
