@@ -1744,6 +1744,18 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		return nil
 	}
 
+	// MySQL and SQL Server can't read generated PKs back from a multi-row INSERT
+	// (neither supports RETURNING). When the PK is auto-generated, insert per row
+	// and back-fill each entity with the same mechanism single Create uses
+	// (LastInsertId on MySQL, SCOPE_IDENTITY on SQL Server). Without this,
+	// CreateBatch silently leaves every entity.ID == 0 — the MySQL/MSSQL sibling
+	// of the Oracle Finding C (Finding G). Provided or composite PKs fall through
+	// to the faster chunked multi-row INSERT below.
+	if !q.dialect.SupportsReturning() &&
+		q.pk.Column != "" && !q.meta.HasCompositePK && isZeroPKValue(first.Field(q.pk.Index)) {
+		return q.createBatchBackfillPerRow(entities, columns, colIndexes, colTags)
+	}
+
 	// Chunk the multi-row INSERT so each statement stays within the dialect's
 	// bind-parameter ceiling (maxBatchBindParams). Without this, a CreateBatch
 	// of a few hundred wide rows overruns SQL Server's ~2100-parameter limit,
@@ -1770,6 +1782,64 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// createBatchBackfillPerRow inserts each entity with its own single-row INSERT
+// and back-fills the generated PK. It is the non-RETURNING path for MySQL and
+// SQL Server: a multi-row INSERT can't read generated keys back there, so the
+// only way to populate entity.ID is per row, with the same mechanism single
+// Create uses — LastInsertId on MySQL, SCOPE_IDENTITY (via LastInsertIDQuery)
+// on SQL Server. Slower than the chunked multi-row form, but only taken when
+// the PK is auto-generated and the caller therefore needs it back; provided or
+// composite PKs keep the multi-row path. Both executors pin to q.exec (primary
+// / tx), never a replica — this is a write.
+func (q *Query[T]) createBatchBackfillPerRow(entities []*T, columns []string, colIndexes []int, colTags []string) error {
+	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+	defer cancel()
+
+	colList := strings.Join(columns, ", ")
+	phs := make([]string, len(colIndexes))
+	for j := range colIndexes {
+		phs[j] = q.dialect.Placeholder(j + 1)
+	}
+	insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", q.fullTableName(), colList, strings.Join(phs, ", "))
+	isMSSQL := q.dialect.Name() == "mssql"
+
+	pks := make([]any, 0, len(entities))
+	for _, entity := range entities {
+		v := reflect.ValueOf(entity)
+		if v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+		q.ensureTenantID(v)
+		rowArgs := make([]any, len(colIndexes))
+		for j, ci := range colIndexes {
+			rowArgs[j] = q.bindColumnArg(colTags[j], v.Field(ci).Interface())
+		}
+
+		var id int64
+		if isMSSQL {
+			// SCOPE_IDENTITY() in the same batch returns this row's identity.
+			row := q.executeQueryRow(ctx, insertSQL+"; "+q.dialect.LastInsertIDQuery(q.meta.Table, q.pk.Column), rowArgs)
+			if err := row.Scan(&id); err != nil {
+				return wrapDBError(err)
+			}
+		} else { // mysql
+			res, err := q.executeExec(ctx, insertSQL, rowArgs)
+			if err != nil {
+				return err
+			}
+			id, _ = res.LastInsertId()
+		}
+		setPKValue(v, q.pk, id)
+		pks = append(pks, id)
+	}
+	// MySQL's executeExec already dropped the table tag per row; the MSSQL
+	// query-row path invalidates nothing. Drop the table tag + the fresh row
+	// tags once for the whole batch — parity with the Oracle path and single
+	// Create. No-op without a cache store.
+	q.invalidateBatchInsert(ctx, pks)
 	return nil
 }
 

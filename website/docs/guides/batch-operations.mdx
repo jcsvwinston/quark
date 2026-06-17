@@ -12,7 +12,7 @@ automatically.
 
 | Method | SQL shape | Atomicity |
 |---|---|---|
-| `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked to the dialect's bind-parameter ceiling; Oracle identity fallback | One statement per chunk |
+| `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked to the dialect's bind-parameter ceiling; per-row back-fill for auto-generated PKs on Oracle, MySQL, and SQL Server | One statement per chunk (per row when back-filling on Oracle/MySQL/SQL Server) |
 | `UpsertBatch` | Dialect-specific bulk upsert | Single statement for most dialects, N MERGE for Oracle |
 | `UpdateBatch` | N `UPDATE` statements | Single transaction |
 | `DeleteBatch` | `DELETE … WHERE pk IN (…)` chunked | Chunked statements |
@@ -22,8 +22,10 @@ automatically.
 ## CreateBatch
 
 Inserts multiple rows with a multi-row `INSERT … VALUES (…), (…)`. When the
-dialect supports `RETURNING`, primary keys are written back to each entity
-pointer.
+primary key is auto-generated, it is written back to each entity pointer on
+**every** engine: the `RETURNING` dialects (PostgreSQL, SQLite, MariaDB) scan it
+straight from the multi-row insert, while Oracle, MySQL and SQL Server recover
+each generated key with a per-row insert (see below).
 
 Large slices are **chunked automatically** so each statement stays within the
 dialect's bind-parameter ceiling (SQL Server caps a statement at ~2100
@@ -53,10 +55,14 @@ if err := quark.For[User](ctx, client).CreateBatch(users); err != nil {
 // users[0].ID, users[1].ID, users[2].ID are now populated
 ```
 
-Oracle limitation: multi-row insert forms conflict with `GENERATED ALWAYS AS IDENTITY`
-columns, so Oracle falls back to individual single-row inserts automatically. Each
-single-row insert still uses `RETURNING … INTO`, so generated primary keys are
-written back to every entity, the same as the other RETURNING dialects.
+Per-row back-fill (Oracle, MySQL, SQL Server): these engines can't read a
+generated key back from a multi-row `INSERT` — Oracle's multi-row form conflicts
+with `GENERATED ALWAYS AS IDENTITY`, and MySQL/SQL Server have no `RETURNING`. So
+when the primary key is auto-generated, Quark inserts one row at a time and
+back-fills each entity's PK (Oracle via `RETURNING … INTO`, MySQL via
+`LastInsertId`, SQL Server via `SCOPE_IDENTITY`) — the same result as the
+RETURNING dialects, just more round-trips. Supply the primary keys yourself and
+every engine keeps the faster chunked multi-row form.
 
 ---
 
