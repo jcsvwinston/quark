@@ -497,3 +497,79 @@ func testBatchOps(ctx context.Context, t *testing.T, client *quark.Client) {
 		}
 	})
 }
+
+// batchHookProbe verifies that batch ops fire Before* hooks per entity
+// (Finding H). Stamp is written ONLY by the hooks, so it stays "" — both in
+// memory and in the row — if a hook didn't run.
+type batchHookProbe struct {
+	ID    int64  `db:"id" pk:"true"`
+	Name  string `db:"name"`
+	Stamp string `db:"stamp"`
+}
+
+func (batchHookProbe) TableName() string { return "batch_hook_probes" }
+
+func (b *batchHookProbe) BeforeCreate(ctx context.Context) error {
+	b.Stamp = "created"
+	return nil
+}
+
+func (b *batchHookProbe) BeforeUpdate(ctx context.Context) error {
+	b.Stamp = "updated"
+	return nil
+}
+
+// testBatchHooks is the Finding H regression: CreateBatch must fire BeforeCreate
+// and UpdateBatch must fire BeforeUpdate, once per entity, with the mutation
+// reaching the row. Before the fix, batch ops skipped hooks entirely, so Stamp
+// stayed empty in the database — and a hook that set a NOT NULL timestamp instead
+// of a string produced a zero datetime that MySQL strict mode rejected.
+func testBatchHooks(ctx context.Context, t *testing.T, client *quark.Client) {
+	dropTable(client, "batch_hook_probes")
+	if err := client.Migrate(ctx, &batchHookProbe{}); err != nil {
+		t.Fatalf("migrate batch_hook_probes: %v", err)
+	}
+	defer dropTable(client, "batch_hook_probes")
+
+	rows := []*batchHookProbe{{Name: "a"}, {Name: "b"}, {Name: "c"}}
+	if err := quark.For[batchHookProbe](ctx, client).CreateBatch(rows); err != nil {
+		t.Fatalf("CreateBatch: %v", err)
+	}
+	for i, r := range rows {
+		if r.Stamp != "created" {
+			t.Errorf("CreateBatch: BeforeCreate did not run on rows[%d] (stamp=%q, want \"created\")", i, r.Stamp)
+		}
+	}
+	persisted, err := quark.For[batchHookProbe](ctx, client).OrderBy("id", "ASC").List()
+	if err != nil || len(persisted) != 3 {
+		t.Fatalf("list after CreateBatch: err=%v len=%d", err, len(persisted))
+	}
+	for i, p := range persisted {
+		if p.Stamp != "created" {
+			t.Errorf("CreateBatch: row %d persisted stamp=%q, want \"created\" — the BeforeCreate mutation must reach the INSERT", i, p.Stamp)
+		}
+	}
+
+	upd := make([]*batchHookProbe, len(persisted))
+	for i := range persisted {
+		v := persisted[i]
+		upd[i] = &v
+	}
+	if err := quark.For[batchHookProbe](ctx, client).UpdateBatch(upd); err != nil {
+		t.Fatalf("UpdateBatch: %v", err)
+	}
+	for i, u := range upd {
+		if u.Stamp != "updated" {
+			t.Errorf("UpdateBatch: BeforeUpdate did not run on upd[%d] (stamp=%q, want \"updated\")", i, u.Stamp)
+		}
+	}
+	after, err := quark.For[batchHookProbe](ctx, client).OrderBy("id", "ASC").List()
+	if err != nil {
+		t.Fatalf("list after UpdateBatch: %v", err)
+	}
+	for i, a := range after {
+		if a.Stamp != "updated" {
+			t.Errorf("UpdateBatch: row %d persisted stamp=%q, want \"updated\"", i, a.Stamp)
+		}
+	}
+}

@@ -1658,6 +1658,23 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		}
 	}
 
+	// Run BeforeCreate on every entity before binding, so hooks that set
+	// timestamps / defaults / derived fields land in the INSERT — the same
+	// contract as single Create (validate, then BeforeCreate). Batch ops used to
+	// skip hooks entirely, silently dropping those mutations: a model whose
+	// BeforeCreate sets CreatedAt would otherwise write a zero time that MySQL
+	// strict mode rejects, and any derived column would be lost (Finding H).
+	// After* hooks are intentionally NOT fired for batch ops — their commit-phase
+	// queue semantics (queueOrRunAfterHook) don't map onto a multi-row write; run
+	// a loop of single Create inside client.Tx if you need them.
+	for _, e := range entities {
+		if hook, ok := any(e).(BeforeCreateHook); ok {
+			if err := hook.BeforeCreate(q.ctx); err != nil {
+				return err
+			}
+		}
+	}
+
 	// Build column list from the first entity
 	first := reflect.ValueOf(entities[0])
 	if first.Kind() == reflect.Ptr {
@@ -2250,6 +2267,17 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 
 	return q.client.Tx(ctx, func(tx *Tx) error {
 		for _, entity := range entities {
+			// BeforeUpdate runs before buildUpdate so a hook that touches
+			// UpdatedAt / derived columns is reflected in the SET clause — the
+			// single-Update contract (Finding H). Inside the tx: a hook error
+			// rolls the whole batch back. q.ctx (not the batch-timeout ctx) is
+			// passed, mirroring single Create/Update and CreateBatch. After*
+			// hooks are not fired for batch ops (see CreateBatch).
+			if hook, ok := any(entity).(BeforeUpdateHook); ok {
+				if err := hook.BeforeUpdate(q.ctx); err != nil {
+					return err
+				}
+			}
 			v := reflect.ValueOf(entity)
 			if v.Kind() == reflect.Ptr {
 				v = v.Elem()
