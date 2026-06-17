@@ -115,15 +115,15 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		//   RHS: WHERE email IN ('carol@x','bob@x')
 		// UNION DISTINCT → {alice, bob, carol}.
 		//
-		// `.OrderBy("email", "ASC")` on the base is necessary for MSSQL:
-		// the implicit LIMIT 100 from `List()` translates to OFFSET/FETCH
-		// on that dialect, which requires an ORDER BY. Without an
-		// explicit one, buildSelect auto-injects `ORDER BY [id]`, but
-		// `id` isn't in the operand SELECT list (`SELECT email`) so
-		// MSSQL rejects: "ORDER BY items must appear in the select list
-		// if the statement contains a UNION ... operator." Explicit
-		// ordering by the projected column avoids the auto-injection
-		// path entirely and is a no-op on the other dialects.
+		// `.OrderBy("email", "ASC")` on the base exercises the explicit-ordering
+		// path under a compound-select. It USED to be required on MSSQL: the
+		// implicit LIMIT 100 from `List()` becomes OFFSET/FETCH there, which needs
+		// an ORDER BY, and buildSelect auto-injected `ORDER BY [id]` — but `id`
+		// isn't in the operand SELECT list (`SELECT email`), so UNION rejected it
+		// ("ORDER BY items must appear in the select list" — Finding J). buildSelect
+		// now auto-injects the positional `ORDER BY 1` for set-ops, so the explicit
+		// OrderBy is no longer required (UnionWithLimitNoExplicitOrderBy covers that
+		// path); it's kept here to exercise explicit ordering. No-op elsewhere.
 		lhs := quark.For[setUserA](ctx, baseClient).
 			Select("email").
 			WhereIn("email", []any{"alice@x", "carol@x"}).
@@ -142,6 +142,34 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		// UNION (non-ALL) deduplicates — exactly 3 distinct emails.
 		if len(seen) != 3 {
 			t.Errorf("expected 3 distinct emails, got %v", seen)
+		}
+	})
+
+	t.Run("UnionWithLimitNoExplicitOrderBy", func(t *testing.T) {
+		// Finding J regression: `.Union(...).Limit(N)` with NO explicit OrderBy
+		// must execute on every dialect. On MSSQL/Oracle the implicit OFFSET/FETCH
+		// needs an ORDER BY; buildSelect now auto-injects the positional `ORDER BY
+		// 1` (a select-list ordinal, valid under a compound-select) instead of the
+		// PK column — UNION/INTERSECT/EXCEPT reject a non-projected column with
+		// "ORDER BY items must appear in the select list". The other setop subtests
+		// sidestep this with an explicit OrderBy; this one exercises the fix (the
+		// superapp's builder-advanced surfaced it on MSSQL).
+		lhs := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			WhereIn("email", []any{"alice@x", "carol@x"})
+		rhs := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			WhereIn("email", []any{"carol@x", "bob@x"})
+		got, err := lhs.Union(rhs).Limit(10).List()
+		if err != nil {
+			t.Fatalf("Union+Limit without explicit OrderBy must execute on every dialect: %v", err)
+		}
+		seen := map[string]struct{}{}
+		for _, r := range got {
+			seen[r.Email] = struct{}{}
+		}
+		if len(seen) != 3 {
+			t.Errorf("expected 3 distinct emails (alice, bob, carol), got %v", seen)
 		}
 	})
 

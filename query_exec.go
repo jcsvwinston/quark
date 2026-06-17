@@ -999,11 +999,15 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 		}
 	} else if !suppressRowLimit && (q.limit > 0 || q.offset > 0) && (q.dialect.Name() == "mssql" || q.dialect.Name() == "oracle") {
 		// MSSQL/Oracle REQUIRE ORDER BY for OFFSET/FETCH. Use PK as default.
-		// Both dialects: DISTINCT and GROUP BY restrict which columns may appear in
-		// ORDER BY, so fall back to positional "1" to avoid ORA-01791 / ORA-00979
-		// on Oracle and the equivalent MSSQL error for DISTINCT/GROUP BY queries.
+		// DISTINCT, GROUP BY and set-ops (UNION/INTERSECT/EXCEPT) all restrict
+		// which items may appear in ORDER BY — only select-list columns or an
+		// ordinal position — so fall back to positional "1" there. Otherwise the
+		// PK isn't in the projected SELECT list and the engine rejects it
+		// (ORA-01791/ORA-00979 on Oracle; on a compound-select MSSQL/Oracle raise
+		// "ORDER BY items must appear in the select list if the statement contains
+		// a UNION/INTERSECT/EXCEPT operator" — Finding J).
 		sqlBuf.WriteString(" ORDER BY ")
-		if q.distinct || len(q.groupBy) > 0 {
+		if q.distinct || len(q.groupBy) > 0 || len(q.setOps) > 0 {
 			sqlBuf.WriteString("1")
 		} else if q.pk.Column != "" {
 			// Under a JOIN the bare PK name is ambiguous when the joined

@@ -51,7 +51,7 @@ Esto está por encima de bun y al nivel de ent. **No simplifiques esto** sin ver
 
 ### `OFFSET/FETCH` con `ORDER BY` automático en MSSQL/Oracle
 
-`query_exec.go:541-555` inyecta `ORDER BY 1` (fallback) cuando hay OFFSET sin ORDER BY explícito. MSSQL y Oracle lo exigen. Si introduces nuevo path de paginación, sigue este patrón — un OFFSET sin ORDER BY en estos motores es un error sintáctico.
+`buildSelect` (`query_exec.go`, rama justo tras la cláusula ORDER BY explícita) inyecta un ORDER BY cuando hay LIMIT/OFFSET sin ORDER BY explícito y el dialecto es MSSQL/Oracle (lo exigen para `OFFSET/FETCH`). Usa el **PK** por defecto, pero cae a la posición ordinal **`ORDER BY 1`** cuando hay `DISTINCT`, `GROUP BY` o un **set-op** (UNION/INTERSECT/EXCEPT): esos restringen el ORDER BY a columnas del select-list o a un ordinal, y el PK no proyectado los rompe (ORA-01791/ORA-00979 en Oracle; "ORDER BY items must appear in the select list" bajo compound-select — Finding J). Si introduces nuevo path de paginación, sigue este patrón — un OFFSET sin ORDER BY en estos motores es un error sintáctico.
 
 ### MariaDB se autodetecta por versión de servidor (BB-3)
 
