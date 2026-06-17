@@ -147,9 +147,17 @@ func testCTE(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		}
 	})
 
-	t.Run("WithRecursiveEmitsRECURSIVE", func(t *testing.T) {
-		base, err := quark.For[cteOrder](ctx, baseClient).
-			Select("id", "user_id", "amount").
+	t.Run("WithRecursiveExecutesAndKeywordIsDialectAware", func(t *testing.T) {
+		// Finding F regression: WithRecursive emitted "WITH RECURSIVE" on EVERY
+		// dialect, but Oracle and SQL Server reject the keyword (Oracle:
+		// ORA-02000 "missing AS keyword"; T-SQL: syntax error) — they infer
+		// recursion structurally. The query must EXECUTE on all six engines, and
+		// the prefix carries RECURSIVE only where the dialect accepts it. The
+		// previous test ignored the execution error and only checked the SQLite
+		// prefix, so it never caught the broken Oracle/MSSQL SQL.
+		recTop, err := quark.For[cteOrder](ctx, baseClient).
+			Select("user_id").
+			Where("amount", ">", 100).
 			AsSubquery()
 		if err != nil {
 			t.Fatalf("AsSubquery: %v", err)
@@ -161,17 +169,36 @@ func testCTE(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 			t.Fatalf("WithOptions: %v", err)
 		}
 
-		_, _ = quark.For[cteUser](ctx, client).
-			WithRecursive("rec_orders", base).
-			Limit(10).
+		got, err := quark.For[cteUser](ctx, client).
+			WithRecursive("rec_orders", recTop).
+			Join("rec_orders").On("cte_users.id", "=", "rec_orders.user_id").
+			Limit(50).
 			List()
+		if err != nil {
+			t.Fatalf("WithRecursive must execute on every dialect: %v", err)
+		}
+		// alice (200) and bob (150) qualify; carol does not.
+		if len(got) != 2 {
+			t.Fatalf("expected 2 users, got %d (%+v)", len(got), got)
+		}
 
 		captured := mw.snapshot()
 		if len(captured) == 0 {
 			t.Fatalf("no WITH-prefixed SQL captured")
 		}
-		if !strings.HasPrefix(strings.TrimSpace(captured[0]), "WITH RECURSIVE") {
-			t.Errorf("expected WITH RECURSIVE prefix, got %q", captured[0])
+		sql := strings.TrimSpace(captured[0])
+		switch name := client.Dialect().Name(); name {
+		case "oracle", "mssql":
+			if strings.HasPrefix(sql, "WITH RECURSIVE") {
+				t.Errorf("%s rejects the RECURSIVE keyword; prefix must be plain WITH, got %q", name, sql)
+			}
+			if !strings.HasPrefix(sql, "WITH ") {
+				t.Errorf("expected WITH prefix, got %q", sql)
+			}
+		default:
+			if !strings.HasPrefix(sql, "WITH RECURSIVE") {
+				t.Errorf("%s requires the RECURSIVE keyword, got %q", name, sql)
+			}
 		}
 	})
 

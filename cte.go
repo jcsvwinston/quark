@@ -56,15 +56,19 @@ func (q *Query[T]) With(name string, sub *Subquery) *Query[T] {
 	return c
 }
 
-// WithRecursive is the recursive form. Emits `WITH RECURSIVE` (or just
-// promotes the prefix when at least one of the previously-added entries
-// is recursive). The inner Subquery is responsible for shaping the
-// recursive body — typically a `UNION ALL` between a base case and a
-// step that references the CTE name. quark's typed Subquery surface
-// doesn't yet model UNION (F2-set), so practical recursive use today
-// is limited to engines/cases where the Subquery body can be
-// constructed from a single SELECT — full recursive support is the
-// motivating use case for F2-set.
+// WithRecursive is the recursive form. The prefix becomes recursive when at
+// least one entry is recursive; the RECURSIVE keyword itself is dialect-aware
+// (see recursiveCTEKeyword): PostgreSQL/MySQL/MariaDB/SQLite emit
+// `WITH RECURSIVE`, while Oracle and SQL Server infer recursion structurally
+// and reject the keyword, so Quark emits a plain `WITH` there. The inner
+// Subquery is responsible for shaping the recursive body — typically a
+// `UNION ALL` between a base case and a step that references the CTE name.
+// quark's typed Subquery surface doesn't yet model UNION (F2-set), so practical
+// recursive use today is limited to engines/cases where the Subquery body can
+// be constructed from a single SELECT — full recursive support is the
+// motivating use case for F2-set. (Oracle also requires a column-alias list on
+// the CTE name for a genuinely recursive body; that must live in the
+// Subquery's own SQL.)
 func (q *Query[T]) WithRecursive(name string, sub *Subquery) *Query[T] {
 	c := q.With(name, sub)
 	if c.err != nil {
