@@ -223,6 +223,14 @@ Dialect coverage:
   non-`ALL` variants).
 - **PostgreSQL**, **MSSQL**: full support.
 
+Applying `Limit`/`Offset` to a set-op without an explicit `OrderBy` is
+portable: MSSQL and Oracle need an `ORDER BY` for their `OFFSET/FETCH`
+pagination, so Quark auto-injects a positional `ORDER BY 1` (a select-list
+ordinal — the only form a compound-select accepts; a bare column would be
+rejected with "ORDER BY items must appear in the select list"). The other
+dialects paginate without it. Add your own `OrderBy` on a projected column
+when you need a defined order.
+
 ## Window Functions
 
 Window functions live in the SELECT list, so they need an alias to be

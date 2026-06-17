@@ -65,8 +65,10 @@ RETURNING dialects, just more round-trips. Supply the primary keys yourself and
 every engine keeps the faster chunked multi-row form.
 
 `CreateBatch` fires the `BeforeCreate` hook once per entity (and `UpdateBatch`
-fires `BeforeUpdate`), so timestamp / default / derived-field hooks apply to
-batched rows just like single writes. `After*` hooks do not fire for batch ops —
+fires `BeforeUpdate`); `Upsert` and `UpsertBatch` fire `BeforeCreate` (insert-prep
+— not `BeforeUpdate`, since the conflict outcome isn't known when the hook runs).
+So timestamp / default / derived-field hooks apply to batched and upserted rows
+just like single writes. `After*` hooks do not fire for these ops —
 see [Hooks › Limitations](./hooks#limitations).
 
 ---

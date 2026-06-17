@@ -1463,6 +1463,18 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
+	// Upsert prepares the row as an insert (it inserts, or updates the
+	// conflicting row's updateCols). Run BeforeCreate so timestamps / defaults /
+	// derived fields are set before binding — matching single Create (Finding I).
+	// On a conflict the configured updateCols still win. BeforeUpdate is NOT run:
+	// the insert-or-update outcome isn't known at call time, so only the insert
+	// prep hook fires (owner decision; see the hooks Limitations doc).
+	if hook, ok := any(entity).(BeforeCreateHook); ok {
+		if err := hook.BeforeCreate(q.ctx); err != nil {
+			return err
+		}
+	}
+
 	v := reflect.ValueOf(entity)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
@@ -2017,6 +2029,17 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 	for _, e := range entities {
 		if err := q.client.Validate(q.ctx, e); err != nil {
 			return fmt.Errorf("validation failed: %w", err)
+		}
+	}
+
+	// Run BeforeCreate per entity before binding — Upsert prepares each row as an
+	// insert (Finding I), same contract as single Upsert and CreateBatch.
+	// BeforeUpdate is not run for the conflict path (outcome unknown at call time).
+	for _, e := range entities {
+		if hook, ok := any(e).(BeforeCreateHook); ok {
+			if err := hook.BeforeCreate(q.ctx); err != nil {
+				return err
+			}
 		}
 	}
 
