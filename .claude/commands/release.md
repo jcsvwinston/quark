@@ -1,5 +1,5 @@
 ---
-description: Cierra una release de Quark complementando lo que release-please automatiza. Sólo cubre los 4 pasos que release-please NO hace (versionado de Docusaurus, MIGRATION_*, sidebar check, deploy verification). Usa este comando tras mergear el PR de release que abre release-please.
+description: Cierra una release de Quark complementando lo que release-please automatiza. Cubre los pasos manuales que release-please NO hace (bump del version-statement en 5 docs, secciones de release-notes, versionado de Docusaurus sólo en minors, MIGRATION_* sólo en breaking, sidebar check, deploy verification); el flujo distingue patch de minor. Usa este comando tras mergear el PR de release que abre release-please.
 argument-hint: vX.Y.Z
 ---
 
@@ -96,40 +96,58 @@ commit lleva `BREAKING CHANGE:` en el footer, escribe
 Enlázalo desde el `CHANGELOG.md` (release-please lo respeta si ya está) y
 desde el `RELEASE_NOTES_$ARGUMENTS.md` (paso 5).
 
-## Paso 5 — Release notes honestas + Docusaurus version snapshot
+## Paso 5 — Docs al día con la versión
 
-### 5.a · `docs/RELEASE_NOTES_$ARGUMENTS.md`
+Es la parte que más se salta y la que rompe la coherencia pública (v1.1.3 se
+publicó sin ella). **Distingue patch de minor** — no todo aplica a un patch.
 
-**release-please genera CHANGELOG, no RELEASE_NOTES narrativas.** Si el
-proyecto convencionalmente lleva ambos (ver `docs/RELEASE_NOTES_v0.{3..12}.0.md`),
-escribe el archivo. Sin lenguaje de marketing — ver `CLAUDE.md` regla
-anti-marketing. Estructura:
+### 5.a · Bump del "version statement" — TODA release (patch y minor)
 
-- Una frase de qué versión es ("Phase X cut: feature/correctness release").
-- Sección por categoría con bullets concisos.
-- Sección "Known limitations" si aplica (deferrals honestos a la siguiente
-  minor / v2.0; sin lenguaje de hype — ver regla anti-marketing).
-- Enlace a la página versionada del sitio:
-  `https://jcsvwinston.github.io/quark-docs/docs/$ARGUMENTS/`.
+La frase **"Quark is `vX.Y.Z` on the stable `v1.x` line"** vive en **cinco**
+sitios; bumpéalos todos a la versión nueva (saltarse esto fue exactamente el
+fallo de v1.1.3):
 
-### 5.b · Versionar Docusaurus
+- `README.md`
+- `website/docs/intro.mdx`
+- `website/docs/guides/installation.mdx`
+- `website/docs/reference/release-notes.mdx` (la frase **y** una sección `## vX.Y.Z`, ver 5.b)
+- `website/docs/reference/roadmap.mdx`
 
-**release-please NO hace esto.** Si lo saltas, el sitio público pierde la
-snapshot de esta versión.
+Caza los que falten antes de cerrar:
+
+```bash
+grep -rnE "Quark is( at)? \*\*v?[0-9]+\.[0-9]+\.[0-9]+" README.md website/docs/ | grep -v versioned_docs
+```
+
+### 5.b · Notas de release
+
+- **`website/docs/reference/release-notes.mdx`** lleva una **sección por
+  versión** (`## vX.Y.Z`, newest-first). Añádela en **toda** release (patch
+  incluido): bullets concisos de los fixes/features, sin marketing
+  (`CLAUDE.md` regla anti-marketing). Cierra con "No breaking changes." si
+  aplica.
+- **`docs/RELEASE_NOTES_vX.Y.0.md`** (archivo narrativo en `docs/`) es **sólo
+  para minors** — ver `docs/RELEASE_NOTES_v1.1.0.md`. Los patches **no** lo
+  llevan (mira `docs/RELEASE_NOTES_*.md`: sólo hay minors).
+
+### 5.c · Snapshot de Docusaurus — SÓLO en minors (X.Y.0)
+
+El repo versiona la doc **por minor**: `versioned_docs/` salta `1.0.0 →
+1.1.0` y `versions.json` lista sólo minors. **Los patches NO se snapshotean**
+— la snapshot de la minor + la doc "next" (`website/docs/`) cubren toda la
+línea `vX.Y.x`. En un **minor**:
 
 ```bash
 cd website
-npm run docusaurus docs:version $ARGUMENTS
+npm run docusaurus docs:version X.Y.Z   # SIN prefijo 'v' → genera version-X.Y.Z
 git add docs/ versioned_docs/ versioned_sidebars/ versions.json
 ```
 
-Esto genera:
+(Pasar `vX.Y.Z` con la `v` generaría `version-vX.Y.Z`, fuera de la convención
+`version-1.1.0`.) Genera `versioned_docs/version-X.Y.Z/`, su
+`versioned_sidebars/`, y una entrada en `versions.json`.
 
-- `website/versioned_docs/version-$ARGUMENTS/` (snapshot del contenido actual).
-- `website/versioned_sidebars/version-$ARGUMENTS-sidebars.json`.
-- Entrada en `website/versions.json`.
-
-### 5.c · Revisar `website/sidebars.ts`
+### 5.d · Revisar `website/sidebars.ts`
 
 Si la release añadió páginas nuevas en `website/docs/`, deben estar
 enlazadas en el sidebar — si no, los usuarios no las encuentran. Diff
@@ -160,24 +178,42 @@ Aprueba el PR y mergéalo (squash o merge según convención). En cuanto
 toque `main`, el workflow `release-please` taggea `vX.Y.Z` automáticamente
 y crea la GitHub Release.
 
+> **Alternativa más robusta (la usada en v1.1.4):** release-please
+> **force-pushea** su rama cuando regenera el PR, así que commits que le
+> añadas pueden perderse si entra otro commit a `main` antes del merge. Es
+> más seguro **mergear el PR de release tal cual** (sólo CHANGELOG +
+> manifest) y hacer el bump de docs del paso 5 en un **PR `docs:` aparte,
+> post-merge**. Coste: una ventana corta en la que el tag existe pero los
+> version-statements aún dicen la versión anterior — la cierras enseguida con
+> el PR de docs. Para un **patch** (sin snapshot ni MIGRATION) este PR de
+> docs es sólo el bump de los 5 version-statements + la sección de
+> release-notes.
+
 ## Paso 7 — Verificar deploy del sitio
 
-El tag dispara `.github/workflows/deploy.yml` (o `deploy-docs.yml` según
-nombre actual) que:
+`.github/workflows/deploy.yml` ("Deploy Docusaurus to GitHub Pages") corre
+**en cada push a `main` que toque `website/`** (está path-filtered): hace
+`npm ci && npm run build` y publica `website/build/` a las **GitHub Pages del
+repo `quark`** vía `actions/deploy-pages` — https://jcsvwinston.github.io/quark/.
+**No** usa la rama `gh-pages` ni el repo `quark-docs` (el sitio se movió a este
+repo en v0.3.0).
 
-1. `cd website && npm ci && npm run build`.
-2. Pushea `website/build/` a `jcsvwinston/quark-docs` rama `gh-pages`.
+OJO: el merge del PR de release-please que sólo toca `CHANGELOG.md` +
+`.release-please-manifest.json` **no dispara deploy** (no toca `website/`), y
+no hace falta. Es tu PR de doc-bump del paso 5 (que sí toca `website/`) el que
+redeploya el sitio con la versión nueva.
 
 ```bash
-# Confirmar que el job corrió y terminó OK
+# Confirmar que el deploy del último push a website/ terminó OK
 gh run list --workflow=deploy.yml --limit 3
 
-# Confirmar que la versión está en el sitio
-curl -sI https://jcsvwinston.github.io/quark-docs/docs/$ARGUMENTS/ | head -1
+# El sitio responde (la versión por defecto es la última snapshot minor,
+# no el patch — los patches no se snapshotean)
+curl -sI https://jcsvwinston.github.io/quark/ | head -1
 ```
 
-Si falla, arranca manualmente `cd website && npm run build && npm run deploy`
-con el PAT correcto e investiga la action.
+Si falla, revisa la action `deploy.yml`: el build de Docusaurus corre con
+`onBrokenLinks:'throw'`, así que un link interno roto la tumba.
 
 ## Paso 8 — Post-release
 
@@ -213,12 +249,13 @@ git checkout main && git pull
 ---
 
 **Recordatorio final:** este comando existe porque la primera auditoría de
-Quark detectó incoherencia entre `RELEASE_NOTES_V1` (v1.0 production-ready)
-y `CHANGELOG.md` (en 0.1.1). **release-please cubre lo que era el 80% del
-checklist viejo**; este comando se queda con el 20% que la automatización
-no toca (Docusaurus snapshot, MIGRATION guide narrativa, RELEASE_NOTES
-narrativas, deploy verification). No saltes ninguno de esos cuatro — son
-las cosas que rompen la coherencia pública entre release y release.
+Quark detectó incoherencia entre `RELEASE_NOTES_V1` (que vendía v1.0 como
+lista para producción) y `CHANGELOG.md` (en 0.1.1). **release-please cubre lo que era el 80% del
+checklist viejo**; este comando se queda con lo que la automatización no
+toca (bump del version-statement en los 5 docs, secciones/notas de release,
+Docusaurus snapshot en minors, MIGRATION en breaking, deploy verification).
+**No saltes el bump del version-statement** — saltárselo es lo que dejó
+v1.1.3 publicada con los docs 2 patches atrás (caught up en v1.1.4).
 
 **Nota histórica:** versiones anteriores de este comando documentaban un
 flujo manual (`gh pr create`, `git tag -a`, bump de versión a mano) que
