@@ -6,7 +6,7 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is **v1.1.2** on the stable `v1.x` line (v1.1.0 was the hardening
+Quark is **v1.1.4** on the stable `v1.x` line (v1.1.0 was the hardening
 minor). `v1.x` keeps API compatibility; breaking changes go to `v2.x`.
 
 Narrative release notes for each **minor** live in the main repository under
@@ -20,6 +20,49 @@ short summary below. Migration steps for the most recent breaking changes are
 at
 [`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
 v0.10 through v1.1.x introduced **no breaking changes**.
+
+## v1.1.4
+
+Patch release: five cross-engine correctness fixes surfaced by the acceptance
+harness (`examples/superapp/`).
+
+- `CreateBatch` now **back-fills generated primary keys on MySQL and SQL
+  Server** (it already did on the RETURNING dialects and Oracle). Those
+  engines can't read keys back from a multi-row insert, so when the PK is
+  auto-generated they insert per row and recover each via
+  `LastInsertId`/`SCOPE_IDENTITY` — `entity.ID` is populated everywhere
+  instead of silently left at 0.
+- **Recursive CTEs work on Oracle and SQL Server**: `WithRecursive` no longer
+  emits the `RECURSIVE` keyword there (both infer recursion structurally and
+  reject it), which previously failed with ORA-02000 / a T-SQL syntax error.
+- **Set-op pagination works on Oracle and SQL Server**: a `Union`/`Intersect`/
+  `Except` with `Limit`/`Offset` and no explicit `OrderBy` now emits a
+  positional `ORDER BY 1` (a select-list ordinal, valid under a
+  compound-select) instead of the primary key, which the engines rejected.
+- **Batch and upsert lifecycle hooks**: `CreateBatch`/`UpdateBatch` fire
+  `BeforeCreate`/`BeforeUpdate` per entity, and `Upsert`/`UpsertBatch` fire
+  `BeforeCreate` (insert-prep), so timestamp/default/derived-field hooks apply
+  to batched and upserted rows. `After*` hooks remain single-write only.
+
+No breaking changes.
+
+## v1.1.3
+
+Patch release: three cross-engine correctness fixes surfaced by the acceptance
+harness.
+
+- `CreateBatch` now **back-fills the generated primary key on Oracle**: the
+  per-row insert path uses `RETURNING … INTO`, so `entity.ID` is populated
+  like every other engine instead of left at 0.
+- The schema diff no longer drifts **MariaDB JSON columns** to a cosmetic
+  `longtext → JSON` alter: the introspector relabels a `longtext` carrying
+  MariaDB's auto-added `json_valid(col)` CHECK back to `json`.
+- Caché L2: `CreateBatch` now **invalidates the table tag on the RETURNING
+  dialects** (PostgreSQL/SQLite/MariaDB), so a cached table-level read no
+  longer serves stale rows after a batch insert (the batch sibling of the
+  v1.1.1 BB-15 fix).
+
+No breaking changes.
 
 ## v1.1.2
 
