@@ -725,10 +725,12 @@ func (q *BaseQuery) buildCTEPrefix(startArgIndex int) (string, []any, error) {
 		}
 	}
 	var sqlBuf strings.Builder
-	if anyRecursive {
-		sqlBuf.WriteString("WITH RECURSIVE ")
-	} else {
-		sqlBuf.WriteString("WITH ")
+	sqlBuf.WriteString("WITH ")
+	// Oracle and SQL Server recognise recursion from the query structure and
+	// REJECT the RECURSIVE keyword (Oracle: ORA-02000 "missing AS keyword";
+	// T-SQL: syntax error). PostgreSQL, MySQL 8+, MariaDB and SQLite require it.
+	if anyRecursive && recursiveCTEKeyword(q.dialect.Name()) {
+		sqlBuf.WriteString("RECURSIVE ")
 	}
 	args := make([]any, 0)
 	for i, e := range q.ctes {
@@ -747,6 +749,20 @@ func (q *BaseQuery) buildCTEPrefix(startArgIndex int) (string, []any, error) {
 	}
 	sqlBuf.WriteString(" ")
 	return sqlBuf.String(), args, nil
+}
+
+// recursiveCTEKeyword reports whether the dialect spells a recursive CTE with
+// the explicit RECURSIVE keyword. Oracle and SQL Server infer recursion from
+// the query structure and reject the keyword; PostgreSQL, MySQL, MariaDB and
+// SQLite require it. Name-based to stay non-breaking for custom dialects (they
+// default to emitting RECURSIVE, the standard-SQL spelling).
+func recursiveCTEKeyword(dialectName string) bool {
+	switch dialectName {
+	case "oracle", "mssql":
+		return false
+	default:
+		return true
+	}
 }
 
 // buildSelect constructs the SELECT SQL query.

@@ -289,11 +289,23 @@ users, err := quark.For[User](ctx, client).
 // SELECT * FROM "users" INNER JOIN "top_orders" ON ...
 ```
 
-`WithRecursive(name, sub)` adds the `RECURSIVE` keyword to the prefix
-when the inner body is a recursive `UNION ALL` shape. The CTE name is
+`WithRecursive(name, sub)` marks the CTE as recursive. The CTE name is
 validated through `SQLGuard.ValidateIdentifier`; multiple `With` calls
 compose in order, and a single `WithRecursive` anywhere in the chain
-promotes the entire prefix to `WITH RECURSIVE ...`.
+promotes the entire prefix to the recursive form.
+
+The `RECURSIVE` keyword is **dialect-specific**. PostgreSQL, MySQL,
+MariaDB and SQLite require it (`WITH RECURSIVE ...`). Oracle and SQL
+Server reject it — they infer recursion from the query structure — so
+Quark emits a plain `WITH ...` there. Quark selects the right spelling
+per dialect; you call `WithRecursive` the same way on every engine.
+
+:::note
+Oracle additionally requires a column-alias list on a *genuinely*
+recursive CTE (`WITH name (col1, col2) AS (anchor UNION ALL recursive)`).
+Quark's CTE body is a raw `Subquery`, so a true Oracle recursive query
+must include that alias list in the subquery's own SQL.
+:::
 
 CTE bodies are rendered with `?` markers at capture time and rewritten
 to the dialect's placeholder syntax when the outer SELECT is built. The
