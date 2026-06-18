@@ -75,7 +75,8 @@ injection-shaped input, not to mirror your schema.
 _, err = quark.For[User](ctx, client).
     WhereSubquery("id", "IN", "SELECT user_id FROM orders WHERE total > 100").
     List()
-// → ErrInvalidQuery: WhereSubquery requires AllowRawQueries to be enabled
+// → invalid query: WhereSubquery requires AllowRawQueries to be enabled
+//   errors.Is(err, quark.ErrInvalidQuery) == true
 ```
 
 ## Enabling raw queries
