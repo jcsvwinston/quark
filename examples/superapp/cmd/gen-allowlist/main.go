@@ -38,6 +38,35 @@ import (
 // Dialect misma ((Dialect).Quote) — \w* cubre el receptor vacío de la interfaz.
 var dialectMethod = regexp.MustCompile(`^\(\*?\w*Dialect\)\.`)
 
+// interfaceTypes son los tipos INTERFAZ públicos (excluidos Dialect/
+// SavepointDialect, que ya cubre dialectMethod). Sus métodos son CONTRATOS
+// ejercidos vía las implementaciones — los métodos concretos de cada impl se
+// cuentan aparte (p.ej. (*Store).Get cubre el contrato (CacheStore).Get; los
+// modelos del dominio cubren los hooks). No son entry points invocables
+// directos, así que entran al denominador como allowlist (misma decisión que
+// la interfaz Dialect en PR #1). Mantener en sync con `type X interface` del
+// API público si se añade una interfaz nueva.
+var interfaceTypes = map[string]bool{
+	"EventListener": true, "Event": true, "EventBus": true, "QueryObserver": true,
+	"Middleware": true, "Executor": true, "DBConn": true, "DBConnector": true,
+	"CacheStore": true, "ClientProvider": true, "ColumnTypeMapper": true,
+	"SchemaIntrospector": true, "MigrationLock": true, "MigrationLocker": true,
+	"Expr": true, "Operation": true, "Result": true, "Row": true, "PoolOption": true,
+	"AfterCreateHook": true, "AfterUpdateHook": true, "AfterDeleteHook": true, "AfterFindHook": true,
+	"BeforeCreateHook": true, "BeforeUpdateHook": true, "BeforeDeleteHook": true, "BeforeFindHook": true,
+}
+
+// recvType extrae el nombre del tipo receptor de un símbolo método:
+// "(*Foo[T]).Bar" → "Foo", "(Iface).M" → "Iface"; "" si no es método.
+var recvRe = regexp.MustCompile(`^\(\*?([A-Za-z_]\w*)`)
+
+func recvType(name string) string {
+	if m := recvRe.FindStringSubmatch(name); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 // manualReasons son las excepciones curadas a mano (no derivables del kind):
 // símbolos callable que conscientemente NO se ejercen. Se preservan al regenerar.
 var manualReasons = map[string]string{
@@ -49,6 +78,7 @@ const (
 	reasonType    = "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)"
 	reasonConst   = "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)"
 	reasonVar     = "package var: no invocable (denominador S7-coverage)"
+	reasonIface   = "método de interfaz: contrato ejercido vía las implementaciones (sus métodos concretos se cuentan aparte), no un entry point invocable directo (denominador S7-coverage)"
 )
 
 func main() {
@@ -73,6 +103,8 @@ func main() {
 			reasons[s.Key()] = reasonVar
 		case s.Kind == "method" && dialectMethod.MatchString(s.Name):
 			reasons[s.Key()] = reasonDialect
+		case s.Kind == "method" && interfaceTypes[recvType(s.Name)]:
+			reasons[s.Key()] = reasonIface
 		}
 	}
 	// Las excepciones manuales ganan (preservan su razón específica).
