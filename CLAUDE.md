@@ -49,6 +49,8 @@ quark/
 
 > **Esta regla es la razón principal de unificar docs y código en el mismo repo. Hacerla saltar rompe la coherencia que estamos intentando recuperar.**
 
+> **Qué dispara un release (release-please):** sólo `feat`/`fix`/`perf`/`refactor`/`revert` (cambios de código). `docs` y `test` están `hidden` en `release-please-config.json` (junto a `chore`/`ci`/`build`/`style`) — **no disparan un release** ni entran en el CHANGELOG de la librería. Los docs se publican por el pipeline del sitio; un cambio docs-only no corta versión (si no, el propio bump de docs de esta regla generaría un release circular — lo que pasó con la PR #209 de v1.1.5, ya cerrada).
+
 Cuando se taggea una nueva versión `vX.Y.Z`, **el mismo PR que bumpea la versión** debe:
 
 1. Actualizar `CHANGELOG.md` con todas las entradas desde el último tag (formato Keep a Changelog).

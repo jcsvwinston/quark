@@ -11,7 +11,11 @@ lo hace `release-please`** (ver `release-please-config.json` y
 
 - Detecta los Conventional Commits desde el último tag.
 - Genera/actualiza `CHANGELOG.md` por sección (`### Added` / `### Fixed` /
-  `### Performance` / `### Documentation` / `### Tests`).
+  `### Performance` / `### Changed` / `### Reverted`) a partir de
+  feat/fix/perf/refactor/revert. **`docs`/`test`/`chore` están `hidden`** en
+  `release-please-config.json`: no aparecen en el CHANGELOG **ni disparan un
+  release** — un cambio docs-only no corta versión (evita el release circular
+  por el bump de docs del paso 5).
 - Bumpea la versión en `.release-please-manifest.json`.
 - Abre/actualiza un PR llamado `chore(main): release X.Y.Z` que acumula
   cambios hasta que lo mergeas.
