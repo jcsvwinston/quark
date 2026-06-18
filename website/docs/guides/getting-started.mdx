@@ -302,6 +302,8 @@ case errors.Is(err, quark.ErrNotFound):
     return nil
 case errors.Is(err, quark.ErrConstraintViolation):
     return fmt.Errorf("duplicate or invalid related row: %w", err)
+case errors.Is(err, quark.ErrInvalidIdentifier):
+    return fmt.Errorf("rejected identifier before execution: %w", err)
 case errors.Is(err, quark.ErrInvalidQuery):
     return fmt.Errorf("query rejected before execution: %w", err)
 default:
@@ -309,8 +311,11 @@ default:
 }
 ```
 
-`ErrInvalidQuery` usually means SQLGuard rejected a column, table, operator, raw
-query, or safety condition before the statement reached the driver.
+A malformed **identifier** (a column or table name) surfaces as `ErrInvalidIdentifier`;
+`ErrInvalidQuery` covers a disallowed operator, a raw query without placeholders, or a
+structural problem (limits exceeded, uninitialised client) — all caught by SQLGuard
+before the statement reaches the driver. (Identifier checks are *lexical*: a well-formed
+but unknown column is rejected by the database, not by SQLGuard.)
 
 ## Next Steps
 

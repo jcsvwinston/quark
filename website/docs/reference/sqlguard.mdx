@@ -26,33 +26,47 @@ db.Order(userInput)  // userInput = "name; DROP TABLE users--"
 ```
 
 Quark validates every identifier at the API layer before it reaches the SQL builder.
-An unknown column, an unrecognized operator, or a suspicious keyword causes
-`ErrInvalidQuery` to be returned — the statement is never executed.
+A malformed identifier, an operator outside the allowed set, or a suspicious raw
+pattern is rejected and the statement is never executed. These are **lexical** checks
+— identifier shape, reserved words, length — not a lookup against your model or schema.
 
 ## What gets validated
 
+SQLGuard's checks are **lexical**, not semantic. It verifies that each identifier is
+well-formed and not a reserved word; it does **not** check that a column or table
+actually exists on your model or schema. A well-formed but unknown column passes the
+guard and is rejected by the database engine at execution time, not by Quark.
+
 | Category | Examples | Validation |
 |----------|----------|-----------|
-| Column names | `"name"`, `"created_at"` | Checked against registered model fields |
-| Table names | `"users"`, `"orders"` | Checked against known schema |
-| Operators | `"="`, `">="`, `"LIKE"`, `"IN"` | Checked against allowed operator set |
-| Keywords | `"ASC"`, `"DESC"` | Checked against allowed keyword list |
+| Column / table names | `"name"`, `"created_at"`, `"users"` | Lexical: must match `[A-Za-z_][A-Za-z0-9_]*`, not be a reserved SQL keyword, and be ≤64 characters. Rejections return `ErrInvalidIdentifier`. |
+| Operators | `"="`, `">="`, `"LIKE"`, `"IN"` | Checked against an allowed operator set; anything else returns `ErrInvalidQuery`. |
+| Keywords | `"ASC"`, `"DESC"` | Checked against an allowed keyword list. |
 
 ## Runtime examples
 
 ```go
-// Invalid operator — ErrInvalidQuery returned
+// Operator outside the whitelist → ErrInvalidQuery
 _, err := quark.For[User](ctx, client).
     Where("name", "drop_table", "x").
     List()
-// → ErrInvalidQuery: operator "drop_table" not allowed
+// → invalid query: operator "drop_table" is not allowed
+//   errors.Is(err, quark.ErrInvalidQuery) == true
 
-// Unknown column — ErrInvalidQuery returned
+// Malformed column identifier → ErrInvalidIdentifier
 _, err = quark.For[User](ctx, client).
-    Where("nonexistent_column", "=", "x").
+    Where("name; DROP TABLE users--", "=", "x").
     List()
-// → ErrInvalidQuery: column "nonexistent_column" not found on model User
+// → invalid identifier: identifier "name; DROP TABLE users--" contains invalid characters
+//   errors.Is(err, quark.ErrInvalidIdentifier) == true
 ```
+
+:::note
+SQLGuard validates identifiers **lexically**, so a *well-formed but unknown* column
+(e.g. `Where("nonexistent_column", "=", "x")`) passes the guard and is rejected by the
+database engine at execution time, not by Quark. The guard's job is to block
+injection-shaped input, not to mirror your schema.
+:::
 
 ## Raw subqueries require explicit opt-in
 
@@ -123,9 +137,11 @@ if errors.Is(err, quark.ErrInvalidIdentifier) {
 }
 ```
 
-`quark.ErrInvalidQuery` is separate: it signals a malformed *query structure*
-(client not initialised, limits exceeded, a raw subquery used without opting in),
-not an identifier/path/join validation failure.
+`quark.ErrInvalidQuery` is separate: it signals a malformed *query structure* or a
+disallowed element — an operator outside the whitelist, a raw query missing
+placeholders or matching a suspicious pattern, a raw subquery used without opting in,
+limits exceeded, or an uninitialised client — not an identifier/path/join validation
+failure.
 
 ## Design intent
 
