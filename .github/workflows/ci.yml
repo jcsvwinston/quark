@@ -40,6 +40,24 @@ jobs:
         # rules on purpose.
         run: bash scripts/lint-docs.sh
 
+      - name: superapp manifest freshness (S7-coverage)
+        # The coverage gate's denominator (apisurface.json) and its
+        # callable-surface allowlist (allowlist.json) are generated and
+        # committed. Regenerate both and fail if they drift: a new public
+        # symbol must land with a refreshed manifest in the same PR, so the
+        # gate can never silently stop counting it. Order matters —
+        # gen-allowlist reads apisurface.json, so regenerate it first.
+        run: |
+          go run ./examples/superapp/cmd/gen-apisurface
+          go run ./examples/superapp/cmd/gen-allowlist
+          if ! git diff --quiet examples/superapp/apisurface.json examples/superapp/allowlist.json; then
+            echo "apisurface.json / allowlist.json are stale. Run:"
+            echo "  go generate ./examples/superapp/..."
+            echo "and commit the result. Drift:"
+            git --no-pager diff --stat examples/superapp/apisurface.json examples/superapp/allowlist.json
+            exit 1
+          fi
+
   test:
     name: Test (SQLite)
     runs-on: ubuntu-latest
@@ -174,3 +192,64 @@ jobs:
       - name: Run ${{ matrix.engine }} suite
         timeout-minutes: ${{ matrix.timeout || 20 }}
         run: go test -tags=integration -timeout 25m -count=1 -run '^${{ matrix.run }}$' -v ./...
+
+  # S7-coverage: the superapp acceptance harness exercises Quark's public API
+  # surface across all 6 engines in one process and gates on a manifest
+  # (apisurface.json) minus an allowlist of non-invocable symbols
+  # (allowlist.json). `-gate=strict` fails the PR if any in-scope public
+  # symbol is left unexercised on a run engine, or if any exerciser asserts
+  # red / leaks a goroutine or pool connection.
+  #
+  # Unlike the integration matrix, this is a SINGLE job with `-engines=all`:
+  # the gate is union-based over one manifest, so fragmenting it per engine
+  # would break its semantics. The harness boots PG/MySQL/MariaDB/MSSQL
+  # itself via `docker run` (examples/superapp/engine); only Oracle needs the
+  # same out-of-band setup as the integration job (testcontainers crashes the
+  # gvenzl image on hosted runners), handed in via SUPERAPP_DSN_ORACLE — which
+  # short-circuits the harness's own Docker management for Oracle.
+  superapp:
+    name: Superapp acceptance (6 engines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Start Oracle
+        run: |
+          docker run -d --name quark-oracle -p 1521:1521 \
+            -e ORACLE_PASSWORD=quark \
+            -e APP_USER=quark \
+            -e APP_USER_PASSWORD=quark \
+            gvenzl/oracle-free:23-slim
+
+          echo "Waiting for Oracle to report ready..."
+          deadline=$((SECONDS + 360))
+          until docker logs quark-oracle 2>&1 | grep -q "DATABASE IS READY TO USE!"; do
+            if [ $SECONDS -ge $deadline ]; then
+              echo "Oracle did not become ready within 6 minutes; logs:"
+              docker logs quark-oracle
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "Granting EXECUTE ON DBMS_LOCK to quark..."
+          # AcquireMigrationLock on Oracle needs EXECUTE ON DBMS_LOCK
+          # (ADR-0018); not granted to schema users by default. -i forwards
+          # the heredoc to sqlplus stdin (see the integration job note).
+          docker exec -i quark-oracle sqlplus -S -L sys/quark@localhost:1521/FREEPDB1 as sysdba <<'SQL'
+          WHENEVER SQLERROR EXIT SQL.SQLCODE
+          GRANT EXECUTE ON DBMS_LOCK TO quark;
+          EXIT
+          SQL
+
+          echo "SUPERAPP_DSN_ORACLE=oracle://quark:quark@localhost:1521/FREEPDB1" >> "$GITHUB_ENV"
+
+      - name: Run superapp acceptance (all engines, strict gate)
+        timeout-minutes: 25
+        run: go run ./examples/superapp -engines=all -gate=strict
