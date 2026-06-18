@@ -71,7 +71,40 @@ func recvType(name string) string {
 // símbolos callable que conscientemente NO se ejercen. Se preservan al regenerar.
 var manualReasons = map[string]string{
 	"github.com/jcsvwinston/quark.RowLevelSecurity": "alias deprecado de RowLevelSecurityClient (desde v1.0, se retira en v2.0); el exerciser cubre RowLevelSecurityClient en su lugar",
+
+	// Stored routines/procedures: ejecutar uno necesita un fixture DB-side por
+	// motor (TVF/proc); no portable en el arnés in-process. La construcción del
+	// SQL está cubierta a nivel dialecto (BuildRoutineQuery/BuildProcedureCall).
+	"github.com/jcsvwinston/quark.NewRoutine":           reasonRoutine,
+	"github.com/jcsvwinston/quark.Call":                 reasonRoutine,
+	"github.com/jcsvwinston/quark.(*Routine[T]).First":  reasonRoutine,
+	"github.com/jcsvwinston/quark.(*Routine[T]).List":   reasonRoutine,
+	"github.com/jcsvwinston/quark.(*Routine[T]).Scalar": reasonRoutine,
+
+	// cache/redis: necesita un Redis vivo; se ejerce contra redis:7 real en
+	// recorder/infra_test.go (tag superapp_infra), fuera del run por-motor del gate.
+	"github.com/jcsvwinston/quark/cache/redis.New":                     reasonRedis,
+	"github.com/jcsvwinston/quark/cache/redis.(*Store).Get":            reasonRedis,
+	"github.com/jcsvwinston/quark/cache/redis.(*Store).Set":            reasonRedis,
+	"github.com/jcsvwinston/quark/cache/redis.(*Store).Delete":         reasonRedis,
+	"github.com/jcsvwinston/quark/cache/redis.(*Store).InvalidateTags": reasonRedis,
+	"github.com/jcsvwinston/quark/cache/redis.(*Store).Ping":           reasonRedis,
+
+	// Entrypoints CLI/instalador: necesitan args + sesión DB viva (y PG para
+	// RLS). Cubiertos por el exerciser cli (cmd/quark) y los tests de tenant;
+	// ParseAction/DefaultInstallOptions (puros) sí se ejercen en surface.
+	"github.com/jcsvwinston/quark/quarktenant.Run":                reasonCLIRun,
+	"github.com/jcsvwinston/quark/quarktenant.RunWithIO":          reasonCLIRun,
+	"github.com/jcsvwinston/quark/quarktenant.InstallRLSPolicies": reasonCLIRun,
+	"github.com/jcsvwinston/quark/quarkmigrate.Run":               reasonCLIRun,
+	"github.com/jcsvwinston/quark/quarkmigrate.RunWithOutput":     reasonCLIRun,
 }
+
+const (
+	reasonRoutine = "stored routine/proc: ejecutar necesita un fixture DB-side por motor; no portable in-process (el SQL se cubre a nivel dialecto) (denominador S7-coverage)"
+	reasonRedis   = "necesita un Redis vivo; ejercido contra redis real en recorder/infra_test.go (tag superapp_infra), fuera del run por-motor del gate (denominador S7-coverage)"
+	reasonCLIRun  = "entrypoint CLI/instalador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant; ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)"
+)
 
 const (
 	reasonDialect = "método de dialecto interno: ejercido transitivamente por cada query y unit-tested por motor en dialect_test.go; no es un entry point público directo (denominador S7-coverage)"
