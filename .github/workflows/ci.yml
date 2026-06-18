@@ -210,7 +210,10 @@ jobs:
   superapp:
     name: Superapp acceptance (6 engines)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # Boots Oracle (setup step) PLUS PG/MySQL/MariaDB/MSSQL (inside the run, via
+    # the harness's own docker run) — more containers than the integration job's
+    # single engine, so allow extra wall-clock headroom over its 35m.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
