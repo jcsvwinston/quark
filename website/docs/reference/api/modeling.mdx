@@ -46,7 +46,7 @@ type Post struct {
 
 type Product struct {
     ID       int64       `db:"id" pk:"true"`
-    Tags     []Tag       `rel:"m2m" m2m:"product_tags:product_id:tag_id"` // Many-to-many
+    Tags     []Tag       `rel:"many_to_many" m2m:"product_tags:product_id:tag_id"` // Many-to-many
 }
 ```
 
@@ -56,7 +56,7 @@ type Product struct {
 | `has_one` | One-to-one | Related table | `rel:"has_one" join:"fk_col"` |
 | `has_many` | One-to-many | Related table | `rel:"has_many" join:"fk_col"` |
 | `belongs_to` | Many-to-one | This table | `rel:"belongs_to" join:"fk_col"` |
-| `m2m` | Many-to-many | Join table | `rel:"m2m" m2m:"join_table:this_fk:other_fk"` |
+| `many_to_many` | Many-to-many | Join table | `rel:"many_to_many" m2m:"join_table:this_fk:other_fk"` |
 
 ### `quark` - Constraints
 

@@ -232,7 +232,8 @@ boundaries below).
 - `DeleteBy` and `DeleteBatch` are hard-delete APIs in the current
   implementation.
 - Bulk and WHERE-based methods (`CreateBatch`, `UpdateBatch`,
-  `DeleteBatch`, `DeleteBy`) **bypass hooks**.
+  `DeleteBatch`, `DeleteBy`) **do not fire `After*` hooks**. `Before*` hooks
+  run per entity in `CreateBatch`/`UpdateBatch` since v1.1.4.
 
 ## Long-term goals (post-v1.0)
 

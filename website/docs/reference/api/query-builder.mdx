@@ -26,9 +26,9 @@ q := quark.For[User](ctx, client)
 | `Distinct()` | Adds `SELECT DISTINCT`. |
 | `GroupBy(columns ...string)` | Adds `GROUP BY`. |
 | `Having(column, operator string, value any)` | Adds `HAVING`. |
-| `Join(table, on string)` | Adds inner join. |
-| `LeftJoin(table, on string)` | Adds left join. |
-| `RightJoin(table, on string)` | Adds right join. |
+| `Join(table string) *JoinBuilder[T]` | Inner join; complete with `.On(left, op, right)` or `.OnRaw(clause)`. |
+| `LeftJoin(table string) *JoinBuilder[T]` | Left join; same completion. |
+| `RightJoin(table string) *JoinBuilder[T]` | Right join; same completion. |
 | `Preload(relations ...string)` | Eager-loads relations by Go field name. |
 | `Apply(scopes ...Scope[T])` | Applies reusable scope functions. |
 | `Cache(ttl time.Duration, tags ...string)` | Enables per-query result caching. |
@@ -184,19 +184,20 @@ database view or controlled raw SQL for those reports.
 
 ```go
 orders, err := quark.For[Order](ctx, client).
-    Join("users", "users.id = orders.user_id").
+    Join("users").On("users.id", "=", "orders.user_id").
     Where("status", "=", "paid").
     Limit(100).
     List()
 ```
 
-`table` is validated and quoted. `on` is a raw SQL fragment and should be static.
-`Where` and `Select` still accept simple identifiers only; they do not accept
-`users.active` or `orders.total AS amount`.
+`table` is validated and quoted. `.On(left, op, right)` is the structured form
+(both identifiers validated by SQLGuard); `.OnRaw(clause)` is the escape hatch for the
+identifier-only grammar `ValidateJoinOn` accepts. `Where` and `Select` still accept
+simple identifiers only; they do not accept `users.active` or `orders.total AS amount`.
 
 ```go
 orders, err := quark.For[Order](ctx, client).
-    LeftJoin("payments", "payments.order_id = orders.id").
+    LeftJoin("payments").On("payments.order_id", "=", "orders.id").
     List()
 ```
 

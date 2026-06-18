@@ -218,7 +218,9 @@ Current support:
 ### `NewListenerFactory(client *Client) *ListenerFactory`
 
 Creates the inbound LISTEN/NOTIFY listener factory (renamed from
-`NewEventBus` in v0.9.0). `CreateListener` is not implemented and returns
-`ErrDialectNotSupported` — LISTEN/NOTIFY is out of scope for Fase 5
-(ADR-0013). This is unrelated to the outbound CRUD-event
-[`EventBus`](../../advanced/events) interface.
+`NewEventBus` in v0.9.0). On PostgreSQL, `CreateListener` returns a working
+inbound `LISTEN/NOTIFY` listener — a dedicated connection, fire-and-forget —
+delivered in v1.1.0 ([ADR-0019](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0019-inbound-listen-notify-dedicated-conn.md)).
+On the other five engines it returns `ErrDialectNotSupported`. See
+[inbound events](../../advanced/events) for usage. This is unrelated to the
+outbound CRUD-event [`EventBus`](../../advanced/events) interface.
