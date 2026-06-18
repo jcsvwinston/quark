@@ -18,7 +18,7 @@ phase: 0
 `internal/guard.SQLGuard` es la primera línea de defensa contra inyección SQL en Quark. Provee:
 
 - **`ValidateIdentifier(name)`**: regex `^[a-zA-Z_][a-zA-Z0-9_]*$`, blacklist de SQL keywords, max len 64.
-- **`ValidateOperator(op)`**: whitelist (`=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`, `LIKE`, `ILIKE`, `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`, `BETWEEN`).
+- **`ValidateOperator(op)`**: whitelist (`=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`, `LIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`, `IS NULL`, `IS NOT NULL`, `BETWEEN`, `NOT BETWEEN`). No `ILIKE` — PostgreSQL-only and not implemented; case-insensitive matching is the caller's via `LOWER(...)`.
 - **`ValidateRawQuery(sql, isSelect)`**: regex anti-`UNION SELECT`, `OR 1=1`, `; DROP `, `; DELETE`, `; UPDATE … SET`, y comentario de línea `--` (para `RawQuery` exige además placeholders). Sólo se ejecuta sobre queries que el usuario pasa a `client.RawQuery`/`Exec` con `AllowRawQueries=true`. **Backstop heurístico, no filtro completo**: los comentarios de bloque `/* */` se permiten a propósito (son *optimizer hints* `/*+ … */` legítimos), así que la evasión `UNION/**/SELECT` no se atrapa aquí — la frontera real es `AllowRawQueries` (off por defecto) + placeholders para valores. Cubierto por la fase F13 del bug-bash (`bugbash/phases/f13_security`).
 
 `security.go` extiende con `Limits` (max where conditions, max joins, max query length, etc.) y políticas de raw query.

@@ -509,7 +509,7 @@ var allowedAggregateFns = map[string]struct{}{
 // either a regular column name (validated through SQLGuard) or "*" — only
 // accepted with COUNT, since "SUM(*)" / "AVG(*)" / etc. are not valid SQL.
 // operator goes through the same whitelist Where uses (=, !=, <>, <, <=,
-// >, >=, IN, NOT IN, BETWEEN, IS [NOT] NULL, LIKE, ILIKE).
+// >, >=, IN, NOT IN, BETWEEN, NOT BETWEEN, IS [NOT] NULL, LIKE, NOT LIKE).
 //
 // Example:
 //
