@@ -6,7 +6,7 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is **v1.1.4** on the stable `v1.x` line (v1.1.0 was the hardening
+Quark is **v1.1.5** on the stable `v1.x` line (v1.1.0 was the hardening
 minor). `v1.x` keeps API compatibility; breaking changes go to `v2.x`.
 
 Narrative release notes for each **minor** live in the main repository under
@@ -20,6 +20,22 @@ short summary below. Migration steps for the most recent breaking changes are
 at
 [`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
 v0.10 through v1.1.x introduced **no breaking changes**.
+
+## v1.1.5
+
+Patch release.
+
+- **`SQLGuard` error wrapping**: a rejected `Where` operator, a raw query
+  missing placeholders, or a raw query matching a suspicious pattern now wrap
+  `quark.ErrInvalidQuery`, so `errors.Is(err, quark.ErrInvalidQuery)` matches
+  them (they previously returned a message the sentinel did not wrap). No SQL
+  or behavior change beyond the error value.
+
+This release also lands the v1.1.4 docs↔code certification: the published docs
+(Query Builder joins, the `Dialect` interface, SQLGuard's lexical validation,
+the `quark` CLI subcommands, the PostgreSQL `CreateListener`, batch hooks, and
+the composite-PK cache tag) were corrected to match the shipped API. No
+breaking changes.
 
 ## v1.1.4
 
