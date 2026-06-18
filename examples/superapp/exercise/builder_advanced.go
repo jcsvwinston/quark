@@ -274,7 +274,13 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 			}
 			if _, err := quark.ForTx[domain.Account](rec.Mark(ctx, QM("NoWait")), tx).
 				Where("email", "LIKE", "badv-%").ForUpdate().NoWait().Limit(2).List(); err != nil {
-				return fmt.Errorf("NoWait: %w", err)
+				// MSSQL has no NOWAIT for table hints (it uses SET LOCK_TIMEOUT 0);
+				// Quark rejects it at build time with ErrUnsupportedFeature, before
+				// any SQL — so the tx isn't poisoned and we continue. Capacidad
+				// desigual ≠ fallo (mismo trato que ForShare abajo).
+				if !errors.Is(err, quark.ErrUnsupportedFeature) {
+					return fmt.Errorf("NoWait: %w", err)
+				}
 			}
 			if _, err := quark.ForTx[domain.Account](rec.Mark(ctx, QM("ForShare")), tx).
 				Where("email", "LIKE", "badv-%").ForShare().Limit(2).List(); err != nil {
