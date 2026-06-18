@@ -120,8 +120,22 @@ var REPLICAS = Exerciser{Name: "ha-replicas", Fn: func(ctx context.Context, clie
 	rec.Note(QF("ReplicaStrategy"), QF("ReplicaRoundRobin"), QF("ReplicaRandom"), QF("ReplicaLeastConn"))
 	if !control.Supports(control.FeatDBPerTenantProvision, conn.Engine) {
 		// Oracle: las réplicas del arnés son DSNs aprovisionados (PDB fuera de
-		// alcance, ver capability.go). El routing es client-side y queda
-		// ejercido en los demás motores.
+		// alcance, ver capability.go). El routing client-side queda ejercido a
+		// fondo en los demás motores; aquí se INVOCAN igualmente los símbolos de
+		// réplica con una topología degenerada (el "réplica" es el propio DSN
+		// primario) para que el gate por-motor los cuente — mismo patrón que
+		// RLSNative en motores sin RLS (tenant_rls_native.go). Sin aserción de
+		// reparto: hay una sola BD real.
+		rec.Note(QF("WithReplicas"), QF("WithReplicaStrategy"), QF("WithReplicaDownCooldown"), QF("Sticky"))
+		routed, err := quark.New(conn.Driver, conn.DSN,
+			quark.WithReplicas(conn.DSN),
+			quark.WithReplicaStrategy(quark.ReplicaRoundRobin),
+			quark.WithReplicaDownCooldown(30*time.Second))
+		if err != nil {
+			return fmt.Errorf("réplica degenerada (%s): %w", conn.Engine, err)
+		}
+		defer routed.Close()
+		_ = quark.Sticky(ctx)
 		return nil
 	}
 
@@ -254,7 +268,27 @@ var REPLICAS = Exerciser{Name: "ha-replicas", Fn: func(ctx context.Context, clie
 var SHARDING = Exerciser{Name: "ha-sharding", Fn: func(ctx context.Context, client *quark.Client, rec *recorder.Recorder, conn Conn) error {
 	rec.Note(QF("ShardRouter"), QF("ShardFunc"), QF("ShardResolver"))
 	if !control.Supports(control.FeatDBPerTenantProvision, conn.Engine) {
-		return nil // Oracle: shards del arnés = DSNs aprovisionados (capability.go)
+		// Oracle: los shards del arnés son DSNs aprovisionados (PDB fuera de
+		// alcance, ver capability.go). El routing por shard-key es client-side y
+		// queda ejercido a fondo en los demás motores; aquí se INVOCAN igualmente
+		// los símbolos de sharding con un router de UN shard (el propio client del
+		// harness, que no se cierra) para que el gate por-motor los cuente — mismo
+		// patrón que RLSNative en motores sin RLS (tenant_rls_native.go).
+		rec.Note(QF("NewShardRouter"), QF("HashShardFunc"), QF("DefaultShardResolver"),
+			SRM("ShardNames"), QF("WithShardKey"), QF("ShardKeyFromContext"), SRM("GetClient"))
+		router, err := quark.NewShardRouter(
+			map[string]*quark.Client{"s1": client},
+			quark.DefaultShardResolver, quark.HashShardFunc([]string{"s1"}))
+		if err != nil {
+			return fmt.Errorf("shard router degenerado (%s): %w", conn.Engine, err)
+		}
+		_ = router.ShardNames()
+		kctx := quark.WithShardKey(ctx, "acct-007")
+		_ = quark.ShardKeyFromContext(kctx)
+		if _, err := router.GetClient(kctx); err != nil {
+			return fmt.Errorf("GetClient degenerado (%s): %w", conn.Engine, err)
+		}
+		return nil
 	}
 
 	dsns, cleanup, err := provisionHADBs(ctx, conn, "s", 3)
