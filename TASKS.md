@@ -18,7 +18,7 @@
 > Los fallos del bug-bash aparecen en la sección § "Bug-bash hallazgos"
 > de abajo (creada por `bugbash-reporter` al cerrar cada pasada).
 
-## Doc-sync — certificación docs↔código v1.1.4 (2026-06-18, ABIERTO) ⚠️
+## Doc-sync — certificación docs↔código v1.1.4 (2026-06-18 · DS-7…DS-14 cerrados; DS-15 pende v1.1.5)
 
 > **Foco válido para `/next-session auto` (o `/doc-sync`).** Auditoría exhaustiva
 > docs↔código del 2026-06-18 contra el tag `v1.1.4`: ~490 claims, ~449 verificados
@@ -36,7 +36,7 @@
 > doc). Anti-hype incondicional. Orden sugerido: DS-7, DS-8 → DS-9…DS-12 → DS-13, DS-14 →
 > DS-15 (versionado, cierra la tanda).
 
-### DS-7 · `JOIN`: ejemplos no compilables (firma de 2 args eliminada en v0.4) — CRÍTICO, abierto
+### DS-7 · `JOIN`: ejemplos no compilables (firma de 2 args eliminada en v0.4) — CRÍTICO · **cerrado #219**
 - **doc:** `reference/api/query-builder.mdx` (firmas + ejemplos) y `guides/querying.mdx:293` usan `Join(table, on string)`.
 - **código:** `Join(table string) *JoinBuilder[T]` (`query_builder.go:418`; LeftJoin `:423`; RightJoin `:428`) → `.On(left,op,right)` / `.OnRaw(clause)`. `querying.mdx` se autocontradice (`:590` ya dice que la forma de 2 args "is removed in v0.4").
 - **fix:** reescribir firmas+ejemplos a la forma builder; `querying.mdx:293` → `.Join("top_orders").OnRaw("users.id = top_orders.user_id")`. `query-builder.mdx` es **idéntico** en el snapshot 1.1.0.
@@ -56,39 +56,39 @@ en el switch) y `comparison.mdx`. Commits `3208f2cf` (fix) + `5c186b2a` (docs). 
 - **doc (original):** columnas "checked against registered model fields", tablas "against known schema"; ejemplo `ErrInvalidQuery: column "X" not found on model`.
 - **código (original):** `internal/guard/guard.go:79-99` valida **léxicamente** (regex + reserved words + len≤64), no contra el esquema. Operador inválido → string que **no envuelve** el sentinel. Propaga a `getting-started.mdx` y `comparison.mdx`.
 
-### DS-9 · La CLI infravalorada; `migrations.mdx` afirma que no existe — ALTO, abierto
+### DS-9 · La CLI infravalorada; `migrations.mdx` afirma que no existe — ALTO · **cerrado #219**
 - **doc:** `cli.mdx:9-16` ("gen es el primer subcomando GA"; el resto "best expressed as small Go commands"); `migrations.mdx:16-17` ("There is no standalone migration CLI in the current module tree").
 - **código:** `cmd/quark` despacha 9 subcomandos (`init/migrate/model/inspect/validate/seed/sync/tenant/gen`; `cmd/quark/commands/migrate.go:37,45-84`). Contradice además a `codegen.mdx`.
 - **fix:** reescribir `cli.mdx` y `migrations.mdx:16-17` a los 9 subcomandos reales (fuente de verdad de paths: `examples/superapp/cli/cli_test.go`).
 
-### DS-10 · `modeling.mdx` usa `rel:"m2m"` (falla escritura/migración) — ALTO, abierto
+### DS-10 · `modeling.mdx` usa `rel:"m2m"` (falla escritura/migración) — ALTO · **cerrado #219**
 - **doc:** ejemplo m2m de `reference/api/modeling.mdx` (≈ líneas 49, 59) con `rel:"m2m"`.
 - **código:** sólo Preload tolera `m2m` (`query_exec.go:1366`); Create no enlaza (`query_crud.go:1425`) ni Migrate crea la join table (`migrator.go:274`) salvo `many_to_many`. `relations.mdx`/`query-builder.mdx` ya usan la forma larga.
 - **fix:** `rel:"m2m"` → `rel:"many_to_many"`. **Idéntico** en el snapshot 1.1.0.
 
-### DS-11 · Interface `Dialect` mal documentada (bloquea dialectos custom) — ALTO, abierto
+### DS-11 · Interface `Dialect` mal documentada (bloquea dialectos custom) — ALTO · **cerrado #219**
 - **doc:** `reference/api/dialects.mdx` lista `JSONExtract(column, path string) string` y omite `LockSuffix`.
 - **código:** `JSONExtract(column, path string) (sql string, args []any, err error)` (`dialect.go:86`); `LockSuffix(opts LockOptions) (tableHint, suffix string, err error)` (`dialect.go:124`) es obligatorio.
 - **fix:** corregir la firma de `JSONExtract` + añadir `LockSuffix`; revisar la lista completa contra `dialect.go:15-132`. **Idéntico** en el snapshot 1.1.0.
 
-### DS-12 · `observability.mdx`: `CreateListener` documentado como "no implementado" — ALTO, abierto
+### DS-12 · `observability.mdx`: `CreateListener` documentado como "no implementado" — ALTO · **cerrado #219**
 - **doc:** "`CreateListener` is not implemented and returns `ErrDialectNotSupported` … (ADR-0013)".
 - **código:** implementado en PostgreSQL vía `pgListener` (`events.go:174`), entregado en v1.1.0, ADR-**0019**; `ErrDialectNotSupported` sólo en no-PG. `advanced/events.mdx` ya lo describe bien.
 - **fix:** documentar el soporte PG (fire-and-forget, conexión dedicada, ADR-0019). **Idéntico** en el snapshot 1.1.0.
 
-### DS-13 · El tag de caché per-row no une PKs compuestas con `:` — MEDIO, abierto
+### DS-13 · El tag de caché per-row no une PKs compuestas con `:` — MEDIO · **cerrado #219**
 - **doc:** `advanced/caching-observability.mdx:64` "Composite PKs join with `:`".
 - **código:** `cache_invalidation.go:21-44` → `rowTag` devuelve "" con PK compuesta y cae al tag de tabla (el join con `:` es del audit log, `audit.go:193`, no de la caché).
 - **fix:** alinear el texto ("las PKs compuestas caen al tag de tabla, como los métodos bulk").
 
-### DS-14 · `roadmap.mdx` "bulk bypass hooks" obsoleto — MEDIO, abierto
+### DS-14 · `roadmap.mdx` "bulk bypass hooks" obsoleto — MEDIO · **cerrado #219**
 - **doc:** `reference/roadmap.mdx:235` dice que `CreateBatch`/`UpdateBatch` "bypass hooks".
 - **código:** v1.1.4 añadió `Before*` per-entity (CHANGELOG 1.1.4; `release-notes.mdx:42-45`); sólo `After*` sigue bypassed.
 - **fix:** matizar ("`Before*` sí desde v1.1.4; `After*` no"). `hooks.mdx` ya lo documenta bien.
 
-### DS-15 · El sitio sirve docs v1.1.0 mientras el código va por v1.1.4 — PROCESO, abierto
-- **hecho:** `website/versions.json` para en `1.1.0`; el paso 4 de `/release` (`docusaurus docs:version`) se saltó en v1.1.1–v1.1.4 (releases `fix:`). El sitio sirve el snapshot 1.1.0 por defecto; varios items DS viven idénticos ahí (DS-7/8/10/11/12).
-- **fix (decisión owner):** (a) preferida — tras cerrar DS-7…DS-14 en next, `cd website && npm run docusaurus docs:version 1.1.4`; (b) alternativa — parchear los snapshots 1.1.0 afectados como "error explícito" (precedente DS-1). Reforzar el paso 4 de `/release`; considerar un check de CI que compile los bloques de código Go de `website/docs/` (habría cazado DS-7 y DS-10).
+### DS-15 · El sitio sirve docs v1.1.0 mientras el código va por v1.1.x — PROCESO, abierto (pende release)
+- **hecho:** `website/versions.json` para en `1.1.0`; el paso 4 de `/release` (`docusaurus docs:version`) se saltó en v1.1.1–v1.1.4 (releases `fix:`). El sitio sirve el snapshot 1.1.0 por defecto; varios items DS vivían idénticos ahí (DS-7/8/10/11/12), ya corregidos en next (#217/#219).
+- **fix (decisión owner = re-versionar):** con DS-7…DS-14 ya corregidos en `website/docs/` (next), `cd website && npm run docusaurus docs:version 1.1.5` **como paso 4 del release v1.1.5** que dispara el `fix(guard)` de DS-8 (#217). Así el snapshot nace correcto sin tocar snapshots inmutables. Reforzar el paso 4 de `/release`; considerar un check de CI que compile los bloques ```go de `website/docs/` (habría cazado DS-7 y DS-10). **Cierra esta tanda doc-sync.**
 
 ## Doc-sync — desfases auditoría pre-v1.2 (~~cerrado 2026-06-09~~)
 
