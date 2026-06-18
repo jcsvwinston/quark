@@ -21,8 +21,12 @@ var (
 	// ErrInvalidModel indicates that the provided model is invalid or not registered.
 	ErrInvalidModel = errors.New("invalid model")
 
-	// ErrInvalidQuery indicates that the query is malformed or invalid.
-	ErrInvalidQuery = errors.New("invalid query")
+	// ErrInvalidQuery indicates that the query is malformed or invalid. Re-exported
+	// from internal/guard, where ValidateOperator / ValidateRawQuery wrap it with
+	// %w, so errors.Is(err, ErrInvalidQuery) holds for a rejected operator, a raw
+	// query missing placeholders, or a suspicious raw pattern — as well as for the
+	// query-construction errors raised with it in this package.
+	ErrInvalidQuery = guard.ErrInvalidQuery
 
 	// ErrInvalidIdentifier indicates that a table or column identifier is invalid.
 	// Re-exported from internal/guard, where ValidateIdentifier wraps it with %w,

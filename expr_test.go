@@ -143,6 +143,18 @@ func TestAST_FuncWhitelist(t *testing.T) {
 	}
 }
 
+// TestAST_OperatorWrapsErrInvalidQuery: a comparison operator outside the
+// whitelist must surface ErrInvalidQuery via errors.Is. guard.ValidateOperator
+// wraps the sentinel with %w (DS-8), so callers can branch on the rejection like
+// any other invalid query instead of string-matching the message. The same guard
+// call backs the string Where(col, op, val) path, so this also covers it.
+func TestAST_OperatorWrapsErrInvalidQuery(t *testing.T) {
+	d, g := astCtx()
+	if _, _, err := Cmp(Col("status"), "EVIL", Lit("x")).ToSQL(d, g); !errors.Is(err, ErrInvalidQuery) {
+		t.Errorf("disallowed operator should error with ErrInvalidQuery, got %v", err)
+	}
+}
+
 // TestAST_IdentifierGuardedThroughLeaves makes sure the AST inherits the
 // builder's identifier-validation contract. Reaching for a junk column name
 // must fail through the same SQLGuard the rest of Where uses, regardless of

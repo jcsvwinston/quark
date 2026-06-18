@@ -75,6 +75,14 @@ type Quoter interface {
 // consistent with ErrInvalidJoin / ErrInvalidJSONPath.
 var ErrInvalidIdentifier = errors.New("invalid identifier")
 
+// ErrInvalidQuery indicates that a query is malformed or contains a disallowed
+// element detected by the guard: an operator outside the whitelist, a raw query
+// missing placeholders, or a raw query matching a suspicious pattern. Re-exported
+// as quark.ErrInvalidQuery (which also covers the query-construction errors raised
+// in the root package), so callers can errors.Is() the rejection regardless of
+// which call site produced it — consistent with ErrInvalidIdentifier.
+var ErrInvalidQuery = errors.New("invalid query")
+
 // ValidateIdentifier checks if a table or column identifier is safe to use.
 func (g *SQLGuard) ValidateIdentifier(name string) error {
 	if len(name) == 0 {
@@ -246,7 +254,7 @@ func (g *SQLGuard) ValidateOperator(op string) error {
 
 	upper := strings.ToUpper(strings.TrimSpace(op))
 	if !allowedOperators[upper] {
-		return fmt.Errorf("ErrInvalidQuery: operator %q is not allowed", op)
+		return fmt.Errorf("%w: operator %q is not allowed", ErrInvalidQuery, op)
 	}
 	return nil
 }
@@ -280,7 +288,7 @@ func HasPlaceholders(query string) bool {
 // for values.
 func (g *SQLGuard) ValidateRawQuery(query string, requirePlaceholders bool) error {
 	if requirePlaceholders && !HasPlaceholders(query) {
-		return fmt.Errorf("ErrInvalidQuery: raw queries must use placeholders (?, $1, @p1, :1, etc.)")
+		return fmt.Errorf("%w: raw queries must use placeholders (?, $1, @p1, :1, etc.)", ErrInvalidQuery)
 	}
 
 	suspiciousPatterns := []string{
@@ -303,7 +311,7 @@ func (g *SQLGuard) ValidateRawQuery(query string, requirePlaceholders bool) erro
 	for _, pattern := range suspiciousPatterns {
 		matched, _ := regexp.MatchString(pattern, upper)
 		if matched {
-			return fmt.Errorf("ErrInvalidQuery: query contains suspicious patterns that may indicate SQL injection")
+			return fmt.Errorf("%w: query contains suspicious patterns that may indicate SQL injection", ErrInvalidQuery)
 		}
 	}
 
