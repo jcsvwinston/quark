@@ -88,7 +88,7 @@ en el switch) y `comparison.mdx`. Commits `3208f2cf` (fix) + `5c186b2a` (docs). 
 
 ### DS-15 · El sitio sirve docs v1.1.0 mientras el código va por v1.1.x — PROCESO, abierto (pende release)
 - **hecho:** `website/versions.json` para en `1.1.0`; el paso 4 de `/release` (`docusaurus docs:version`) se saltó en v1.1.1–v1.1.4 (releases `fix:`). El sitio sirve el snapshot 1.1.0 por defecto; varios items DS vivían idénticos ahí (DS-7/8/10/11/12), ya corregidos en next (#217/#219).
-- **fix (decisión owner = re-versionar):** con DS-7…DS-14 ya corregidos en `website/docs/` (next), `cd website && npm run docusaurus docs:version 1.1.5` **como paso 4 del release v1.1.5** que dispara el `fix(guard)` de DS-8 (#217). Así el snapshot nace correcto sin tocar snapshots inmutables. Reforzar el paso 4 de `/release`; considerar un check de CI que compile los bloques ```go de `website/docs/` (habría cazado DS-7 y DS-10). **Cierra esta tanda doc-sync.**
+- **fix (decisión owner = re-versionar):** con DS-7…DS-14 ya corregidos en `website/docs/` (next), `cd website && npm run docusaurus docs:version 1.1.5` **como paso 4 del release v1.1.5** que dispara el `fix(guard)` de DS-8 (#217). Así el snapshot nace correcto sin tocar snapshots inmutables. Reforzar el paso 4 de `/release`; considerar un check de CI que compile los bloques de código Go de `website/docs/` (habría cazado DS-7 y DS-10). **Cierra esta tanda doc-sync.**
 
 ## Doc-sync — desfases auditoría pre-v1.2 (~~cerrado 2026-06-09~~)
 
