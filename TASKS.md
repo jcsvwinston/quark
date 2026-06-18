@@ -18,7 +18,7 @@
 > Los fallos del bug-bash aparecen en la sección § "Bug-bash hallazgos"
 > de abajo (creada por `bugbash-reporter` al cerrar cada pasada).
 
-## Doc-sync — certificación docs↔código v1.1.4 (2026-06-18 · DS-7…DS-14 cerrados; DS-15 pende v1.1.5)
+## Doc-sync — certificación docs↔código v1.1.4 (CERRADA 2026-06-18 · DS-7…DS-15 · #217/#219/#220, v1.1.5)
 
 > **Foco válido para `/next-session auto` (o `/doc-sync`).** Auditoría exhaustiva
 > docs↔código del 2026-06-18 contra el tag `v1.1.4`: ~490 claims, ~449 verificados
@@ -86,9 +86,9 @@ en el switch) y `comparison.mdx`. Commits `3208f2cf` (fix) + `5c186b2a` (docs). 
 - **código:** v1.1.4 añadió `Before*` per-entity (CHANGELOG 1.1.4; `release-notes.mdx:42-45`); sólo `After*` sigue bypassed.
 - **fix:** matizar ("`Before*` sí desde v1.1.4; `After*` no"). `hooks.mdx` ya lo documenta bien.
 
-### DS-15 · El sitio sirve docs v1.1.0 mientras el código va por v1.1.x — PROCESO, abierto (pende release)
-- **hecho:** `website/versions.json` para en `1.1.0`; el paso 4 de `/release` (`docusaurus docs:version`) se saltó en v1.1.1–v1.1.4 (releases `fix:`). El sitio sirve el snapshot 1.1.0 por defecto; varios items DS vivían idénticos ahí (DS-7/8/10/11/12), ya corregidos en next (#217/#219).
-- **fix (decisión owner = re-versionar):** con DS-7…DS-14 ya corregidos en `website/docs/` (next), `cd website && npm run docusaurus docs:version 1.1.5` **como paso 4 del release v1.1.5** que dispara el `fix(guard)` de DS-8 (#217). Así el snapshot nace correcto sin tocar snapshots inmutables. Reforzar el paso 4 de `/release`; considerar un check de CI que compile los bloques de código Go de `website/docs/` (habría cazado DS-7 y DS-10). **Cierra esta tanda doc-sync.**
+### ~~DS-15 · El sitio sirve docs v1.1.0 mientras el código va por v1.1.x — PROCESO~~ · resuelto (convención)
+- **hecho:** `website/versions.json` para en `1.1.0`; el snapshot por defecto sirve 1.1.0. Los items DS que vivían idénticos ahí (DS-7/8/10/11/12) ya están corregidos en `website/docs/` (next, #217/#219).
+- **resuelto (decisión owner = respetar la convención, SIN snapshot):** `/release` paso 5.c es firme — los patches NO se snapshotean (sólo minors; lo estableció #211). v1.1.5 (patch) bumpeó los 5 version-statements + sección release-notes, SIN `docs:version` (#220). Los fixes viven en `next` (ya publicado); el default servido (snapshot 1.1.0) se actualizará en el próximo **MINOR 1.2.0**, que snapshoteará `next` con todos los fixes. Si los críticos servidos (DS-7/8) urgen antes de 1.2.0, parchear el snapshot 1.1.0 como "error explícito" (precedente DS-1) — **no hecho ahora** (decisión: aceptable hasta 1.2.0). **Cierra la tanda doc-sync v1.1.4.**
 
 ## Doc-sync — desfases auditoría pre-v1.2 (~~cerrado 2026-06-09~~)
 
