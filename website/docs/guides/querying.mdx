@@ -290,7 +290,7 @@ topOrders, _ := quark.For[Order](ctx, client).
 
 users, err := quark.For[User](ctx, client).
     With("top_orders", topOrders).
-    Join("top_orders", "users.id = top_orders.user_id").
+    Join("top_orders").On("users.id", "=", "top_orders.user_id").
     Limit(50).
     List()
 // WITH "top_orders" AS (SELECT "user_id", "amount" FROM "orders" WHERE "amount" > $1)

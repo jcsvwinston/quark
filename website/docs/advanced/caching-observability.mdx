@@ -60,7 +60,8 @@ err = quark.For[User](ctx, client).
 
 The per-row tag (`<table>:<pk>`) was added in v0.8 (F4-6) so a single-row
 write does not blow away every cached query on the table. Composite PKs
-join with `:`. Bulk and WHERE-based methods (`UpdateBatch`,
+are not encoded per-row yet, so they fall back to the table tag (like the
+bulk methods below). Bulk and WHERE-based methods (`UpdateBatch`,
 `DeleteBatch`, `DeleteBy`) invalidate the table tag because the affected
 PKs are not enumerable.
 

@@ -52,12 +52,13 @@ written, and the caller must reload + replay or surface the conflict. See
 column-tag contract and an example retry pattern.
 
 `ErrInvalidJoin` is returned when [`Join`/`LeftJoin`/`RightJoin`](/docs/guides/querying#joins)
-receives an `ON` clause that does not match the minimal identifier-only
-grammar enforced by `internal/guard.ValidateJoinOn`. The grammar accepts
-identifier-to-identifier comparisons (`a.b = c.d`) joined by `AND`/`OR`
-and the operators `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Literals,
-function calls, subqueries, and parentheses are rejected — the string-raw
-form is deprecated and will be replaced by a structured builder in v0.4.
+receive an `ON` clause — via `.OnRaw(clause)` — that does not match the minimal
+identifier-only grammar enforced by `internal/guard.ValidateJoinOn`. The grammar
+accepts identifier-to-identifier comparisons (`a.b = c.d`) joined by `AND`/`OR`
+and the operators `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Literals, function calls,
+subqueries, and parentheses are rejected. The structured `.On(left, op, right)`
+builder (delivered in v0.4) is the preferred form; `.OnRaw` is the escape hatch and
+runs the same validator.
 
 `ErrInvalidTimezone` is returned by `Client.RegisterModel` and
 `Client.Migrate` when a model field carries a `quark:"tz=..."` tag whose

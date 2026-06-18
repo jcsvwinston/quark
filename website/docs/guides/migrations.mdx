@@ -13,8 +13,10 @@ Quark has two schema paths:
 | `client.Migrate` / `client.Sync` | Development, tests, prototypes, additive schema evolution. |
 | `github.com/jcsvwinston/quark/migrate` | Reviewable, ordered, reversible production migrations written in Go. |
 
-There is no standalone migration CLI in the current module tree. Run migrations
-from a small Go command, your application startup, CI, or an admin job.
+The `quark` binary provides a `migrate` subcommand (`create` / `up` / `down` /
+`status` / `version`); see [Operational Workflows](cli). You can also run migrations
+from a small Go command, your application startup, CI, or an admin job — the pattern
+this page documents.
 
 ## Create Tables with Migrate
 

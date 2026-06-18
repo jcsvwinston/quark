@@ -38,13 +38,14 @@ type Dialect interface {
     CurrentTimestamp() string
     BuildRoutineQuery(routine string, argCount int) string
     BuildProcedureCall(procedure string, argCount int) string
-    JSONExtract(column, path string) string
+    JSONExtract(column, path string) (sql string, args []any, err error)
     AlterTableAddColumn(table, column, dataType string) string
     AlterTableDropColumn(table, column string) string
     AlterTableAlterColumn(table, column, newDataType string) string
     RenameColumn(table, oldName, newName string) string
     RenameTable(oldName, newName string) string
     SupportsTransactionalDDL() bool
+    LockSuffix(opts LockOptions) (tableHint, suffix string, err error)
     UpsertSQL(conflictCols, updateCols []string, argOffset int) string
 }
 ```

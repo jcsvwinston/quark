@@ -6,14 +6,24 @@ description: Run Quark migrations, schema checks, and tenant jobs from Go comman
 
 # Operational Workflows
 
-Quark now ships a `cmd/quark` binary, whose first generally-available
-subcommand is `quark gen` (see [Code Generation](codegen)). The operational
-tasks below — migrations, schema checks, tenant jobs — are still best
-expressed as small Go commands that call the same public APIs your
-application uses, and that is what this page documents.
+Quark ships a `cmd/quark` binary with nine subcommands
+(`go install github.com/jcsvwinston/quark/cmd/quark@latest`):
 
-This page replaces the usual CLI command table with concrete command patterns
-you can place under `./cmd`.
+| Subcommand | What it does |
+|------------|--------------|
+| `init` | Scaffold a project (config + layout) for a chosen dialect. |
+| `gen` | Generate typed accessors / binders (see [Code Generation](codegen)). |
+| `model generate` | Generate a model struct from an existing table. |
+| `migrate` | `create` / `up` / `down` / `status` / `version` for the versioned migrator. |
+| `sync` | Diff the live schema against your models (`--dry-run` to preview). |
+| `seed` | `create` / `run` / `list` seed scripts. |
+| `inspect` | `schema` / `table <name>` / `sql` introspection. |
+| `tenant` | `provision` / `migrate` / `list` / `migrate-all` for multi-tenant DBs. |
+| `validate` | Validate a model's tags against the live schema. |
+
+You can also embed the same operations as small Go commands that call the public
+APIs your application uses — handy when you want them inside your own binary or CI.
+The patterns below show that approach.
 
 ## Migration Runner
 
