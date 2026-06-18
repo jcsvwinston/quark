@@ -56,6 +56,7 @@ func surfaceExprAST(ctx context.Context, client *quark.Client, rec *recorder.Rec
 		quark.Ne(quark.Col("name"), quark.Lit("")),
 		quark.Lt(quark.Col("version"), quark.Lit(int64(1<<30))),
 		quark.Lte(quark.Col("version"), quark.Lit(int64(1<<30))),
+		quark.Gte(quark.Col("version"), quark.Lit(int64(0))),
 	)
 	if _, err := quark.For[domain.Account](ctx, client).WhereExpr(expr).Limit(5).List(); err != nil {
 		return fmt.Errorf("surface WhereExpr: %w", err)
