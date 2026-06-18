@@ -262,18 +262,28 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 
 	// --- 6. Locking pesimista, por capability. --------------------------------
 	if control.Supports(control.FeatSkipLocked, conn.Engine) {
+		// Oracle no admite combinar FOR UPDATE/SKIP LOCKED/NOWAIT con un Limit/Offset
+		// explícito (ORA-02014; ver BB-4 + suppressRowLimit en query_exec.go). Ahí el
+		// lock se ejerce SIN Limit (bloquea todas las filas badv-%, pocas y dentro de
+		// la tx que revierte); el resto de motores combinan lock + Limit(2).
+		lockLimit := func(q *quark.Query[domain.Account]) *quark.Query[domain.Account] {
+			if conn.Engine == control.Oracle {
+				return q
+			}
+			return q.Limit(2)
+		}
 		// Camino real: dentro de una tx, los cuatro modificadores ejecutan.
 		if err := client.Tx(ctx, func(tx *quark.Tx) error {
-			if _, err := quark.ForTx[domain.Account](rec.Mark(ctx, QM("ForUpdate")), tx).
-				Where("email", "LIKE", "badv-%").ForUpdate().Limit(2).List(); err != nil {
+			if _, err := lockLimit(quark.ForTx[domain.Account](rec.Mark(ctx, QM("ForUpdate")), tx).
+				Where("email", "LIKE", "badv-%").ForUpdate()).List(); err != nil {
 				return fmt.Errorf("ForUpdate: %w", err)
 			}
-			if _, err := quark.ForTx[domain.Account](rec.Mark(ctx, QM("SkipLocked")), tx).
-				Where("email", "LIKE", "badv-%").ForUpdate().SkipLocked().Limit(2).List(); err != nil {
+			if _, err := lockLimit(quark.ForTx[domain.Account](rec.Mark(ctx, QM("SkipLocked")), tx).
+				Where("email", "LIKE", "badv-%").ForUpdate().SkipLocked()).List(); err != nil {
 				return fmt.Errorf("SkipLocked: %w", err)
 			}
-			if _, err := quark.ForTx[domain.Account](rec.Mark(ctx, QM("NoWait")), tx).
-				Where("email", "LIKE", "badv-%").ForUpdate().NoWait().Limit(2).List(); err != nil {
+			if _, err := lockLimit(quark.ForTx[domain.Account](rec.Mark(ctx, QM("NoWait")), tx).
+				Where("email", "LIKE", "badv-%").ForUpdate().NoWait()).List(); err != nil {
 				// MSSQL has no NOWAIT for table hints (it uses SET LOCK_TIMEOUT 0);
 				// Quark rejects it at build time with ErrUnsupportedFeature, before
 				// any SQL — so the tx isn't poisoned and we continue. Capacidad
@@ -282,8 +292,8 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 					return fmt.Errorf("NoWait: %w", err)
 				}
 			}
-			if _, err := quark.ForTx[domain.Account](rec.Mark(ctx, QM("ForShare")), tx).
-				Where("email", "LIKE", "badv-%").ForShare().Limit(2).List(); err != nil {
+			if _, err := lockLimit(quark.ForTx[domain.Account](rec.Mark(ctx, QM("ForShare")), tx).
+				Where("email", "LIKE", "badv-%").ForShare()).List(); err != nil {
 				// MSSQL no modela FOR SHARE: capacidad desigual ≠ fallo.
 				if errors.Is(err, quark.ErrUnsupportedFeature) {
 					return nil

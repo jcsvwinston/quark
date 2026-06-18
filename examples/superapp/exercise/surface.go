@@ -50,7 +50,9 @@ func surfaceExprAST(ctx context.Context, client *quark.Client, rec *recorder.Rec
 		),
 		quark.In(quark.Col("role"), quark.Lit("admin"), quark.Lit("member"), quark.Lit("viewer")),
 		quark.NotIn(quark.Col("name"), quark.Lit("x"), quark.Lit("y")),
-		quark.Gt(quark.Func("LENGTH", quark.Col("email")), quark.Lit(int64(0))),
+		// ABS, no LENGTH: LENGTH no existe en MSSQL (allí es LEN). ABS está en los
+		// 6 motores, así que el árbol entero es portable; ejerce quark.Func igual.
+		quark.Gt(quark.Func("ABS", quark.Col("version")), quark.Lit(int64(-1))),
 		quark.Ne(quark.Col("name"), quark.Lit("")),
 		quark.Lt(quark.Col("version"), quark.Lit(int64(1<<30))),
 		quark.Lte(quark.Col("version"), quark.Lit(int64(1<<30))),

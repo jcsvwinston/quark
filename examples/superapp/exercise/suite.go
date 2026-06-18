@@ -109,7 +109,7 @@ func Run(conns map[control.Engine]engine.Conn, tol int, exercisers []Exerciser) 
 		}
 		ctx := context.Background()
 		rec := recs[e]
-		rec.Note(QF("New"), QF("DefaultLimits"), CM("Close")) // los usa el harness
+		rec.Note(QF("New"), QF("DefaultLimits"), QF("WithCacheStore"), QF("WithLimits"), CM("Close")) // los usa el harness (newClient)
 		if err := client.Migrate(rec.Mark(ctx, CM("Migrate")), domain.AllModels()...); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
@@ -139,7 +139,7 @@ func AllExercisers() []Exerciser {
 		CRUD, TX, BUILDER, RELATIONS, SECURITY, CACHE,
 		TENANT, RLSNATIVE, SCHEMAPERTENANT, DBPERTENANT,
 		REPLICAS, SHARDING, DEADLOCK, OBSERVABILITY, BUILDERADV, MIGRATE,
-		SURFACE, SURFACEMETHODS,
+		SURFACE, SURFACEMETHODS, SURFACECLIENT,
 	}
 }
 
