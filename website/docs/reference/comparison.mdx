@@ -101,12 +101,13 @@ Ent provides a typed API through generated code. The generation step is a requir
 // Operator is validated at the API layer — never reaches the DB
 _, err := quark.For[User](ctx, client).
     Where("name", "drop_table", "x").List()
-// → ErrInvalidQuery: operator "drop_table" not allowed
+// → invalid query: operator "drop_table" is not allowed  (errors.Is quark.ErrInvalidQuery)
 
-// Unknown column is caught before SQL generation
+// Injection-shaped column identifier is caught before SQL generation
 _, err = quark.For[User](ctx, client).
-    Where(userInput, "=", "value").List()
-// → ErrInvalidQuery: column "injected--" not found
+    Where(userInput, "=", "value").List()  // userInput = "injected--"
+// → invalid identifier: identifier "injected--" contains invalid characters
+//   (errors.Is quark.ErrInvalidIdentifier)
 ```
 
 ### GORM — value protection only
