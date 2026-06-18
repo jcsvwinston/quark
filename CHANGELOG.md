@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5](https://github.com/jcsvwinston/quark/compare/v1.1.4...v1.1.5) (2026-06-18)
+
+
+### Fixed
+
+* **guard:** wrap ErrInvalidQuery for rejected operators + raw queries (DS-8) ([deeb2a1](https://github.com/jcsvwinston/quark/commit/deeb2a193ebd1bd4081b0364eda87babc57a7e43))
+* **guard:** wrap ErrInvalidQuery for rejected operators and raw queries ([3208f2c](https://github.com/jcsvwinston/quark/commit/3208f2cf926ce5344f1bd17e805a3b69c3613273))
+
 ## [1.1.4](https://github.com/jcsvwinston/quark/compare/v1.1.3...v1.1.4) (2026-06-17)
 
 
