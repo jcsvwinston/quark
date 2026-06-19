@@ -847,6 +847,7 @@ campo. Aislado porque las otras tres estrategias no usan `q.schema`.
 > 4. ~~**Cross-instance stampede protection**~~ — ✅ CERRADO vía Salida B:
 >    warning "in-process only" promovido en `caching-observability.mdx` +
 >    caveat en `intro.mdx`; hook `DistributedLock` diferido a post-v1.0.
+>    **Entregado en v1.2** (#224): opt-in `WithCacheCrossInstance` + capacidad opcional `CacheLocker` (ADR-0020).
 > 5. ~~**`RELEASE_NOTES_v1.0.0.md` con Known limitations**~~ — ✅ CERRADO
 >    (2026-05-27, PR #127): `docs/RELEASE_NOTES_v1.0.0.md` con los waivers de
 >    items 2+3+4 (+ F6-3b, migration registry global, failover pasivo) y la
@@ -903,8 +904,8 @@ campo. Aislado porque las otras tres estrategias no usan `q.schema`.
 > `stampedeStore` wrapper (singleflight + ±jitter + XFetch, ADR-0011;
 > #72 + gofmt #73), per-row invalidation + Redis tag-TTL fix (#74),
 > deadlock retry on `Client.Tx` (#75). Sin breaking changes; todas
-> las features opt-in. Cross-instance stampede queda como gap
-> documentado para ADR sucesor; deadlock retry test cross-engine
+> las features opt-in. Cross-instance stampede quedó como gap
+> documentado (entregado luego en v1.2, ADR-0020 / #224); deadlock retry test cross-engine
 > queda como follow-up.
 >
 > **v0.7.0 publicada (2026-05-14).** Timezones por columna entregadas;
@@ -977,9 +978,9 @@ Fase 6): savepoint-rollback gap (PR #88), MSSQL JSON[T] scan bug
 barrier; SQLite excluido, MSSQL/Oracle cubiertos por el classifier
 unit test), Raw-under-Native warning (PR #91). Guards `logger != nil`:
 **descartado** (no son redundantes — protegen literales de test con
-logger nil). Cross-instance stampede protection sigue diferido
-(ADR-0011 §Cuándo reabrir; sólo si surge demanda real, con un hook
-`DistributedLock` opcional).
+logger nil). Cross-instance stampede protection **entregado en v1.2**
+(#224): opt-in `WithCacheCrossInstance` + capacidad opcional `CacheLocker`
+(ADR-0020).
 
 **Foco sugerido** del slash command: `fase6` — abrir el camino a v1.0
 con el mismo rigor que Fases 3/4/5. Cada F6-N como su propio PR.

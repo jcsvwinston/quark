@@ -141,9 +141,10 @@ Tuning knobs:
 | --- | --- | --- |
 | `WithCacheJitter(pct)` | `0.1` | Range `[0, 1]`; values outside are clamped. `0` disables jitter, singleflight + XFetch stay on. |
 | `WithCacheXFetchBeta(β)` | `1.0` | Range `β ≥ 0`. Higher β triggers earlier refresh. `β = 0` disables XFetch, singleflight + jitter stay on. |
+| `WithCacheCrossInstance()` | off | Opt-in cross-replica recompute serialisation (ADR-0020). No effect unless the store implements `CacheLocker` (see [above](#cross-instance-coordination-opt-in)). |
 
-(The in-process scope of these protections is called out in the warning
-at the top of this section.)
+(Jitter/XFetch/singleflight are per-process; cross-instance coordination is the
+opt-in above.)
 
 ## Memory Store
 
