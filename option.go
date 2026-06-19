@@ -141,6 +141,23 @@ func WithCacheXFetchBeta(beta float64) Option {
 	}
 }
 
+// WithCacheCrossInstance enables cross-instance cache-stampede coordination
+// (ADR-0020). Off by default. When enabled AND the installed CacheStore
+// implements CacheLocker (the redis store does; the in-memory store provides a
+// single-process equivalent), a cache miss on a hot key is serialised across
+// processes: one instance acquires a per-key lock and recomputes while the
+// others wait briefly and re-read its result, instead of every instance hitting
+// the database. Costs one lock round-trip per hot-key miss — opt in when you run
+// multiple instances against a shared cache and a hot key's recompute is
+// expensive. No effect without WithCacheStore, or when the store does not
+// implement CacheLocker (the wrapper then falls back to in-process singleflight
+// + XFetch unchanged).
+func WithCacheCrossInstance() Option {
+	return func(c *Client) {
+		c.stampedeCrossInstance = true
+	}
+}
+
 // WithSlowQueryThreshold enables structured slow-query logging.
 //
 // Every query, exec, query-row, raw-query and raw-exec whose duration

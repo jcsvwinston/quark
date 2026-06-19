@@ -2,6 +2,8 @@ package redis
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -11,7 +13,10 @@ import (
 
 // Store is a professional Redis implementation of quark.CacheStore.
 // It leverages Redis Sets for tag-based invalidation (reverse index).
-var _ quark.CacheStore = (*Store)(nil)
+var (
+	_ quark.CacheStore  = (*Store)(nil)
+	_ quark.CacheLocker = (*Store)(nil)
+)
 
 type Store struct {
 	rdb *redis.Client
@@ -37,6 +42,37 @@ func New(opts Options) *Store {
 // Ping checks the connectivity to the Redis server.
 func (s *Store) Ping(ctx context.Context) error {
 	return s.rdb.Ping(ctx).Err()
+}
+
+// releaseLockScript atomically deletes the lock key only if it still holds our
+// token, so a release that fires after the lock auto-expired (and a peer
+// re-acquired it) never clobbers the new holder.
+var releaseLockScript = redis.NewScript(
+	`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
+
+// AcquireLock implements quark.CacheLocker (ADR-0020) via SET NX with a TTL: the
+// first caller across all processes claims the key with a unique token and gets
+// acquired=true; concurrent callers get false. release runs a token-checked Lua
+// delete so only the current holder unlocks. The TTL guarantees a crashed holder
+// cannot wedge the key. The caller (the stampede wrapper) supplies an
+// already-namespaced key.
+func (s *Store) AcquireLock(ctx context.Context, key string, ttl time.Duration) (bool, func() error, error) {
+	tok := make([]byte, 16)
+	if _, err := rand.Read(tok); err != nil {
+		return false, nil, fmt.Errorf("redis lock token: %w", err)
+	}
+	token := hex.EncodeToString(tok)
+	ok, err := s.rdb.SetNX(ctx, key, token, ttl).Result()
+	if err != nil {
+		return false, nil, fmt.Errorf("redis SETNX %q: %w", key, err)
+	}
+	if !ok {
+		return false, nil, nil
+	}
+	release := func() error {
+		return releaseLockScript.Run(context.Background(), s.rdb, []string{key}, token).Err()
+	}
+	return true, release, nil
 }
 
 func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
