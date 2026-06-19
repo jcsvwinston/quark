@@ -103,8 +103,12 @@ var specs = map[control.Engine]spec{
 	control.Oracle: {
 		driver: "oracle", container: "superapp-oracle",
 		image: "gvenzl/oracle-free:23-slim", hostPort: "1523", containerPort: "1521",
-		env:          []string{"ORACLE_PASSWORD=quark"},
-		dsn:          func(p string) string { return "oracle://system:quark@localhost:" + p + "/FREEPDB1" },
+		// Connect as a non-privileged APP_USER (gvenzl provisions it), NOT system:
+		// as system, schema introspection sees Oracle internal tables (aq$_schedules,
+		// …) and the MIGRATE converge tries to DROP them → ErrInvalidIdentifier. The
+		// app user only sees its own schema. Mirrors the `integration` CI job.
+		env:          []string{"ORACLE_PASSWORD=quark", "APP_USER=quark", "APP_USER_PASSWORD=quark"},
+		dsn:          func(p string) string { return "oracle://quark:quark@localhost:" + p + "/FREEPDB1" },
 		readyTimeout: 300 * time.Second,
 	},
 }
@@ -251,12 +255,15 @@ func ensureDatabase(ctx context.Context, driver, serverDSN, ddl string) error {
 	return err
 }
 
-// grantOracleLock concede EXECUTE ON DBMS_LOCK (lo necesita el lock de migración
-// distribuido de Quark en Oracle, ADR-0018). El `-i` es obligatorio: sin stdin
-// el grant es un no-op silencioso. Best-effort.
+// grantOracleLock concede EXECUTE ON DBMS_LOCK al app-user quark (lo necesita el
+// lock de migración distribuido de Quark en Oracle, ADR-0018). DBMS_LOCK lo posee
+// SYS, así que el grant a otro usuario va como sysdba (mismo patrón que el job
+// `integration`). El `-i` es obligatorio: sin stdin el grant es un no-op
+// silencioso. Best-effort (un grant fallido aflora luego como AcquireMigrationLock
+// rojo en el gate).
 func grantOracleLock(container string) {
 	cmd := exec.Command("docker", "exec", "-i", container,
-		"sqlplus", "-s", "system/quark@//localhost:1521/FREEPDB1")
-	cmd.Stdin = strings.NewReader("GRANT EXECUTE ON DBMS_LOCK TO system;\nEXIT;\n")
+		"sqlplus", "-s", "sys/quark@//localhost:1521/FREEPDB1", "as", "sysdba")
+	cmd.Stdin = strings.NewReader("GRANT EXECUTE ON DBMS_LOCK TO quark;\nEXIT;\n")
 	_ = cmd.Run()
 }
