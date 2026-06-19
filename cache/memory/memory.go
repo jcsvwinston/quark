@@ -152,6 +152,15 @@ func (s *Store) cleanupLoop() {
 				}
 			}
 			s.mu.Unlock()
+			// Evict expired recompute locks too, so keys that were locked once
+			// but never re-locked don't accumulate in the locks map.
+			s.lockMu.Lock()
+			for key, l := range s.locks {
+				if now.After(l.expiry) {
+					delete(s.locks, key)
+				}
+			}
+			s.lockMu.Unlock()
 		case <-s.stopCh:
 			return
 		}

@@ -24,9 +24,12 @@ package quark
 // the richer getOrCompute API when available; everything else falls back
 // to the plain cache-aside Get/Set.
 //
-// Cross-instance stampede (N processes all missing the same key) is NOT
-// addressed — the singleflight is in-process only. Documented gap; an
-// ADR successor adds a DistributedLock hook if real demand surfaces.
+// Cross-instance stampede (N processes all missing the same key) is addressed
+// opt-in (ADR-0020): with WithCacheCrossInstance enabled and an inner store that
+// implements CacheLocker, the in-process singleflight winner races other
+// processes for a per-key lock; losers wait-and-reread the winner's value rather
+// than stampeding the source. Off by default; stores without CacheLocker keep
+// the in-process-only behaviour (singleflight + jitter + XFetch).
 
 import (
 	"context"

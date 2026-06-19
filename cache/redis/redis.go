@@ -70,6 +70,9 @@ func (s *Store) AcquireLock(ctx context.Context, key string, ttl time.Duration) 
 		return false, nil, nil
 	}
 	release := func() error {
+		// context.Background(): release is typically deferred and must run even
+		// if the caller's ctx has since expired, so the lock is freed promptly
+		// for the next holder rather than waiting out its TTL.
 		return releaseLockScript.Run(context.Background(), s.rdb, []string{key}, token).Err()
 	}
 	return true, release, nil

@@ -125,3 +125,27 @@ func TestStampede_CrossInstanceFallbackNoLocker(t *testing.T) {
 		t.Errorf("compute ran %d times, want 1", n)
 	}
 }
+
+// TestStampede_WaitForValueHonorsContextCancel: a lock loser waiting for the
+// holder's value must abandon the wait when its context is cancelled, rather
+// than block to the lock-TTL budget.
+func TestStampede_WaitForValueHonorsContextCancel(t *testing.T) {
+	ss := newStampedeStore(newFakeStore(), 0, false, 0, true, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+
+	done := make(chan struct{})
+	var ok bool
+	go func() {
+		_, ok = ss.waitForValue(ctx, "never-published")
+		close(done)
+	}()
+	select {
+	case <-done:
+		if ok {
+			t.Error("waitForValue must return ok=false on a cancelled context")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForValue ignored context cancellation (blocked)")
+	}
+}
