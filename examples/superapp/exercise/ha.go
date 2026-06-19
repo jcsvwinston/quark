@@ -32,6 +32,10 @@ type shardProbe struct {
 
 func (shardProbe) TableName() string { return "shard_probes" }
 
+// ShardKey makes shardProbe a quark.ShardKeyer (ADR-0021), so writes can route
+// by the entity itself via quark.WithShardKeyOf.
+func (p shardProbe) ShardKey() string { return p.Skey }
+
 // dlProbe son las dos filas contendidas del deadlock (patrón bugbash F12).
 type dlProbe struct {
 	ID      int64  `db:"id" pk:"true"`
@@ -275,7 +279,7 @@ var SHARDING = Exerciser{Name: "ha-sharding", Fn: func(ctx context.Context, clie
 		// harness, que no se cierra) para que el gate por-motor los cuente — mismo
 		// patrón que RLSNative en motores sin RLS (tenant_rls_native.go).
 		rec.Note(QF("NewShardRouter"), QF("HashShardFunc"), QF("DefaultShardResolver"),
-			SRM("ShardNames"), QF("WithShardKey"), QF("ShardKeyFromContext"), SRM("GetClient"))
+			SRM("ShardNames"), QF("WithShardKey"), QF("WithShardKeyOf"), QF("ShardKeyFromContext"), SRM("GetClient"))
 		router, err := quark.NewShardRouter(
 			map[string]*quark.Client{"s1": client},
 			quark.DefaultShardResolver, quark.HashShardFunc([]string{"s1"}))
@@ -287,6 +291,12 @@ var SHARDING = Exerciser{Name: "ha-sharding", Fn: func(ctx context.Context, clie
 		_ = quark.ShardKeyFromContext(kctx)
 		if _, err := router.GetClient(kctx); err != nil {
 			return fmt.Errorf("GetClient degenerado (%s): %w", conn.Engine, err)
+		}
+		// Entity-based routing (ADR-0021): WithShardKeyOf derives the key from a
+		// ShardKeyer entity. Invoked here too so the per-engine gate counts it on
+		// engines without multi-shard provisioning (e.g. Oracle).
+		if _, err := router.GetClient(quark.WithShardKeyOf(ctx, shardProbe{Skey: "acct-007"})); err != nil {
+			return fmt.Errorf("GetClient via WithShardKeyOf degenerado (%s): %w", conn.Engine, err)
 		}
 		return nil
 	}
@@ -331,7 +341,7 @@ var SHARDING = Exerciser{Name: "ha-sharding", Fn: func(ctx context.Context, clie
 	}
 
 	// Routing determinista: la misma key resuelve al MISMO client.
-	rec.Note(QF("WithShardKey"), QF("ShardKeyFromContext"), SRM("GetClient"))
+	rec.Note(QF("WithShardKey"), QF("WithShardKeyOf"), QF("ShardKeyFromContext"), SRM("GetClient"))
 	kctx := quark.WithShardKey(ctx, "acct-007")
 	if got := quark.ShardKeyFromContext(kctx); got != "acct-007" {
 		return fmt.Errorf("ShardKeyFromContext=%q", got)
@@ -349,7 +359,10 @@ var SHARDING = Exerciser{Name: "ha-sharding", Fn: func(ctx context.Context, clie
 	const nKeys = 30
 	for i := 0; i < nKeys; i++ {
 		k := fmt.Sprintf("cust-%02d", i)
-		if err := quark.For[shardProbe](rec.Mark(quark.WithShardKey(ctx, k), QM("Create")), router).Create(&shardProbe{Skey: k}); err != nil {
+		p := &shardProbe{Skey: k}
+		// Route by the entity's own ShardKey() (ADR-0021): WithShardKeyOf reads
+		// p.Skey, equivalent to WithShardKey(ctx, k) but keyed off the entity.
+		if err := quark.For[shardProbe](rec.Mark(quark.WithShardKeyOf(ctx, p), QM("Create")), router).Create(p); err != nil {
 			return fmt.Errorf("create %s: %w", k, err)
 		}
 	}

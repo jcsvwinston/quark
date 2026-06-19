@@ -1752,6 +1752,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(ShardKeyer).ShardKey",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).Between",
       "kind": "method"
     },
@@ -2777,6 +2782,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "ShardKeyer",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "ShardResolver",
       "kind": "type"
     },
@@ -2988,6 +2998,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithShardKey",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "WithShardKeyOf",
       "kind": "func"
     },
     {

@@ -135,6 +135,88 @@ func TestShardRouterConstruction(t *testing.T) {
 	}
 }
 
+// shKeyedUser owns its shard key (the model hook of ADR-0016): ShardKey reports
+// the partition the row belongs to. The key field is unexported, so it is not a
+// persisted column — it only drives routing via WithShardKeyOf. The row itself
+// maps to the same sh_users table as shUser (id, name).
+type shKeyedUser struct {
+	ID   int64  `db:"id" pk:"true"`
+	Name string `db:"name"`
+	key  string // shard key only; not persisted
+}
+
+func (shKeyedUser) TableName() string  { return "sh_users" }
+func (u shKeyedUser) ShardKey() string { return u.key }
+
+var _ quark.ShardKeyer = shKeyedUser{}
+
+// TestWithShardKeyOfRoutesByEntity: WithShardKeyOf(ctx, entity) routes a write to
+// the shard that owns entity.ShardKey() — entity-based routing equivalent to
+// WithShardKey(ctx, entity.ShardKey()), with the key-deriving logic on the model.
+func TestWithShardKeyOfRoutesByEntity(t *testing.T) {
+	ctx := context.Background()
+	shards := map[string]*quark.Client{
+		"a": newShard(t, "file:sh_keyer_a?mode=memory&cache=shared"),
+		"b": newShard(t, "file:sh_keyer_b?mode=memory&cache=shared"),
+	}
+	shardFor := quark.HashShardFunc([]string{"a", "b"})
+	router, err := quark.NewShardRouter(shards, quark.DefaultShardResolver, shardFor)
+	if err != nil {
+		t.Fatalf("NewShardRouter: %v", err)
+	}
+
+	used := map[string]bool{}
+	keys := []string{"user-1", "user-2", "user-3", "user-4", "user-5", "user-6"}
+	for _, k := range keys {
+		want := shardFor(k)
+		used[want] = true
+
+		// Route the Create off the entity's own ShardKey(), not a manual key.
+		u := shKeyedUser{Name: k, key: k}
+		if err := quark.For[shKeyedUser](quark.WithShardKeyOf(ctx, u), router).Create(&u); err != nil {
+			t.Fatalf("create keyed %q: %v", k, err)
+		}
+
+		// It must land on the mapped shard and nowhere else.
+		got, err := quark.For[shUser](ctx, shards[want]).Where("name", "=", k).List()
+		if err != nil || len(got) != 1 {
+			t.Fatalf("read mapped shard for %q: %v (n=%d)", k, err, len(got))
+		}
+		other := "a"
+		if want == "a" {
+			other = "b"
+		}
+		leak, err := quark.For[shUser](ctx, shards[other]).Where("name", "=", k).List()
+		if err != nil {
+			t.Fatalf("read other shard for %q: %v", k, err)
+		}
+		if len(leak) != 0 {
+			t.Errorf("entity %q (shard %q) leaked into shard %q", k, want, other)
+		}
+	}
+	if !used["a"] || !used["b"] {
+		t.Fatalf("test did not exercise both shards (used=%v)", used)
+	}
+}
+
+// TestWithShardKeyOfEmptyKey: an entity whose ShardKey() is "" routes nowhere —
+// it fails like a missing WithShardKey, never a silent cross-shard fan-out.
+func TestWithShardKeyOfEmptyKey(t *testing.T) {
+	ctx := context.Background()
+	shards := map[string]*quark.Client{
+		"a": newShard(t, "file:sh_keyer_empty_a?mode=memory&cache=shared"),
+		"b": newShard(t, "file:sh_keyer_empty_b?mode=memory&cache=shared"),
+	}
+	router, err := quark.NewShardRouter(shards, quark.DefaultShardResolver, quark.HashShardFunc([]string{"a", "b"}))
+	if err != nil {
+		t.Fatalf("NewShardRouter: %v", err)
+	}
+	u := shKeyedUser{Name: "no-key"} // key == ""
+	if err := quark.For[shKeyedUser](quark.WithShardKeyOf(ctx, u), router).Create(&u); !errors.Is(err, quark.ErrInvalidQuery) {
+		t.Fatalf("empty ShardKey: err = %v, want ErrInvalidQuery", err)
+	}
+}
+
 // TestHashShardFuncDeterministic: same key → same shard, every time.
 func TestHashShardFuncDeterministic(t *testing.T) {
 	sf := quark.HashShardFunc([]string{"a", "b", "c"})

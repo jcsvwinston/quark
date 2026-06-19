@@ -28,12 +28,18 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Account lives in exactly one shard, chosen by its owner (the shard key here).
+// Account lives in exactly one shard, chosen by its owner. It implements
+// quark.ShardKeyer (ADR-0021): the model declares its own shard key, so a write
+// can route by the entity itself via quark.WithShardKeyOf — the key-deriving
+// logic lives here, not at every call site.
 type Account struct {
 	ID      int64  `db:"id" pk:"true"`
 	Owner   string `db:"owner"`
 	Balance int64  `db:"balance"`
 }
+
+// ShardKey implements quark.ShardKeyer — the account is partitioned by owner.
+func (a Account) ShardKey() string { return a.Owner }
 
 func main() {
 	ctx := context.Background()
@@ -79,20 +85,23 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Write one account per owner. Each write carries its owner's shard key, so
-	// the router sends it to exactly one shard.
+	// Write one account per owner. Each account owns its shard key (it implements
+	// quark.ShardKeyer), so the write routes by the entity itself via
+	// WithShardKeyOf — no need to restate the key at the call site.
 	owners := []string{"alice", "bob", "carol", "dave"}
-	fmt.Println("Creating accounts (routed by owner shard key):")
+	fmt.Println("Creating accounts (routed by the entity's own shard key):")
 	for _, owner := range owners {
-		shardCtx := quark.WithShardKey(ctx, owner)
 		acct := &Account{Owner: owner, Balance: 100}
+		shardCtx := quark.WithShardKeyOf(ctx, acct)
 		if err := quark.For[Account](shardCtx, router).Create(acct); err != nil {
 			log.Fatalf("create %s: %v", owner, err)
 		}
 		fmt.Printf("  created %-6s (id=%d)\n", owner, acct.ID)
 	}
 
-	// Read back per shard key — each read routes to the owning shard.
+	// Read back per shard key — each read routes to the owning shard. A read
+	// carries no entity, so it passes the key via WithShardKey directly
+	// (WithShardKeyOf is for writes, where you hold the entity).
 	fmt.Println("Reading each owner back through the router:")
 	for _, owner := range owners {
 		shardCtx := quark.WithShardKey(ctx, owner)

@@ -52,6 +52,7 @@ var interfaceTypes = map[string]bool{
 	"CacheStore": true, "CacheLocker": true, "ClientProvider": true, "ColumnTypeMapper": true,
 	"SchemaIntrospector": true, "MigrationLock": true, "MigrationLocker": true,
 	"Expr": true, "Operation": true, "Result": true, "Row": true, "PoolOption": true,
+	"ShardKeyer":      true,
 	"AfterCreateHook": true, "AfterUpdateHook": true, "AfterDeleteHook": true, "AfterFindHook": true,
 	"BeforeCreateHook": true, "BeforeUpdateHook": true, "BeforeDeleteHook": true, "BeforeFindHook": true,
 }

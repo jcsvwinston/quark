@@ -38,6 +38,34 @@ run it with `go run ./examples/sharding/main.go`. It routes accounts by shard
 key, proves the data is disjoint per shard, and shows the keyless-query
 rejection.
 
+## Routing writes by the entity (`ShardKeyer`)
+
+When a model owns its shard key, implement `ShardKeyer` so the key-deriving
+logic lives on the model — not repeated at every call site — and route writes
+with `WithShardKeyOf`:
+
+```go
+type User struct {
+    ID       int64  `db:"id" pk:"true"`
+    TenantID string `db:"tenant_id"`
+    // ...
+}
+
+// The model declares which field its partition is keyed on.
+func (u User) ShardKey() string { return u.TenantID }
+
+// WithShardKeyOf reads it — no need to repeat user.TenantID at the call site.
+ctx = quark.WithShardKeyOf(ctx, user)
+_ = quark.For[User](ctx, router).Create(&user) // → the shard owning user.TenantID
+```
+
+`WithShardKeyOf(ctx, entity)` is exactly `WithShardKey(ctx, entity.ShardKey())`.
+It applies to **writes**, where you hold the entity; reads carry no entity, so
+they keep passing the key to `WithShardKey` directly. An entity whose
+`ShardKey()` returns the empty string fails to route — like a missing key, never
+a silent fan-out. See
+[ADR-0021](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0021-shard-key-from-entity.md).
+
 ## How routing works
 
 1. `DefaultShardResolver` reads the shard key from the context
