@@ -27,6 +27,7 @@
 | [0018](0018-oracle-migration-lock-dbms-lock.md) | Lock de migración Oracle vía `DBMS_LOCK` (session-scoped), no lock-table `FOR UPDATE` | Accepted | Fase 3 / v1.0-gate |
 | [0019](0019-inbound-listen-notify-dedicated-conn.md) | Inbound LISTEN/NOTIFY (PostgreSQL) sobre `*sql.Conn` dedicada del pool, no un pool propio | Accepted | post-v1.0 / v1.1 |
 | [0020](0020-cross-instance-cache-stampede-coordination.md) | Coordinación de cache-stampede cross-instancia vía capacidad opcional `CacheLocker` (opt-in, wait-and-reread) | Accepted | v1.2 |
+| [0021](0021-shard-key-from-entity.md) | Shard key desde la entidad vía interfaz `ShardKeyer` (helper `WithShardKeyOf` caller-side, no un hook del router) | Accepted | v1.2 |
 
 ## Cómo añadir un ADR nuevo
 

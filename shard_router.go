@@ -103,6 +103,37 @@ func ShardKeyFromContext(ctx context.Context) string {
 // [NewShardRouter] for the common case.
 func DefaultShardResolver(ctx context.Context) string { return ShardKeyFromContext(ctx) }
 
+// ShardKeyer is implemented by a model that owns its shard key. It is the model
+// hook ADR-0016 anticipated for entity-based routing: the entity returns the
+// value its partition is keyed on (its tenant id, user id, region, …), so the
+// key-deriving logic lives on the model instead of being repeated at every call
+// site. Reads, which carry no entity, keep using [WithShardKey] directly — the
+// context stays the uniform routing mechanism; this only populates it from an
+// entity. Implement it on the value or pointer you pass to [WithShardKeyOf]:
+//
+//	func (u User) ShardKey() string { return u.TenantID }
+type ShardKeyer interface {
+	// ShardKey returns the shard-key value for this entity. An empty string is
+	// "no key": routing then fails like a missing [WithShardKey], rather than
+	// silently fanning out across shards.
+	ShardKey() string
+}
+
+// WithShardKeyOf returns a context carrying entity.ShardKey() as the shard key,
+// so a write routes to the shard the entity belongs to:
+//
+//	ctx = quark.WithShardKeyOf(ctx, &user) // user implements ShardKeyer
+//	err := quark.For[User](ctx, shardRouter).Create(&user)
+//
+// It is exactly WithShardKey(ctx, entity.ShardKey()) — a convenience that keeps
+// the partition field in one place (the model's ShardKey method). The router is
+// unchanged and still unaware of sharding (ADR-0016): routing happens in
+// GetClient(ctx), so the key must be in context before For[T] resolves the
+// shard — this helper puts it there from the entity.
+func WithShardKeyOf(ctx context.Context, entity ShardKeyer) context.Context {
+	return WithShardKey(ctx, entity.ShardKey())
+}
+
 // HashShardFunc returns a ShardFunc that maps a key to one of shardNames by
 // FNV-1a hash modulo the shard count — a stable, uniform default assignment.
 // The names are copied, so later mutation of the caller's slice does not change
