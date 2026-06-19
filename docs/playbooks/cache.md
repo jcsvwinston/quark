@@ -54,10 +54,15 @@ Ninguno crítico hoy. Hay **deuda estructural** que limita uso en producción.
   `β = 1.0`, ajustable con `WithCacheXFetchBeta(β)`. `β = 0` desactiva
   XFetch.
 
-Gap documentado (ADR-0011 §Consecuencias): el singleflight **no cubre
-cross-instancia** (N procesos → N computes). El stampede in-process es
-el caso severo y común y queda resuelto al 100%; cross-instancia se
-aborda en ADR sucesor si surge demanda real.
+El singleflight es in-process: por sí solo **no cubre cross-instancia** (N
+procesos → N computes). Para eso, **opt-in `WithCacheCrossInstance()`**
+(ADR-0020): el wrapper detecta la capacidad opcional `CacheLocker` (la implementa
+`redis.Store` vía `SET … NX`; `memory.Store` da el equivalente in-process) y
+serializa el recompute de una clave caliente entre procesos — el ganador del
+lock recomputa, los perdedores esperan-y-releen (`computeWithLock` en
+`cache_stampede.go`). Off por defecto; un store sin `CacheLocker` cae a
+singleflight + XFetch sin cambios. El stampede in-process (singleflight) sigue
+siendo el default y resuelve el caso severo y común al 100%.
 
 Cobertura: `cache_stampede_test.go` (10 tests: encoding/decoding,
 detección de entradas legacy, jitter en rango, XFetch boundary cases,
