@@ -192,7 +192,11 @@ func maliciousOperator(t *testing.T, ctx context.Context, c *quark.Client, eng s
 	}
 	for _, p := range payloads {
 		_, err := quark.For[domain.Order](ctx, c).Where("status", p, "x").Limit(1).List()
-		r.blocked("Where/operator ["+p+"]", err)
+		// guard.ValidateOperator wraps ErrInvalidQuery (%w) since v1.1.5 (DS-8),
+		// so callers can errors.Is the rejection — certify it across engines.
+		if r.blocked("Where/operator ["+p+"]", err) {
+			r.wrapped("Where/operator ["+p+"]", err, quark.ErrInvalidQuery)
+		}
 	}
 	// Anti-regression: a whitelisted operator must still be accepted, so the
 	// guard isn't over-blocking. (A guard that rejects everything would pass
