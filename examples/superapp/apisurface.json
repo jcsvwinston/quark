@@ -1382,6 +1382,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(CacheLocker).AcquireLock",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(CacheStore).Delete",
       "kind": "method"
     },
@@ -1903,6 +1908,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CacheConfig",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "CacheLocker",
       "kind": "type"
     },
     {
@@ -2887,6 +2897,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "WithCacheCrossInstance",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "WithCacheJitter",
       "kind": "func"
     },
@@ -2982,6 +2997,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
+      "name": "(*Store).AcquireLock",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "(*Store).Close",
       "kind": "method"
     },
@@ -3014,6 +3034,11 @@
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "Store",
       "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/cache/redis",
+      "name": "(*Store).AcquireLock",
+      "kind": "method"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",

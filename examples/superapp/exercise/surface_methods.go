@@ -160,10 +160,22 @@ func surfaceMemStore(ctx context.Context, rec *recorder.Recorder) error {
 	if err := s.Delete(ctx, "k"); err != nil {
 		return fmt.Errorf("surface mem.Delete: %w", err)
 	}
+	// AcquireLock (quark.CacheLocker, ADR-0020): claim the per-key try-lock and
+	// release it, exercising both the acquire and release paths.
+	acquired, release, err := s.AcquireLock(ctx, "lock-k", time.Second)
+	if err != nil {
+		return fmt.Errorf("surface mem.AcquireLock: %w", err)
+	}
+	if acquired {
+		if err := release(); err != nil {
+			return fmt.Errorf("surface mem.AcquireLock release: %w", err)
+		}
+	}
 	rec.Note(
 		memPkg+".New",
 		memPkg+".(*Store).Set", memPkg+".(*Store).Get",
 		memPkg+".(*Store).InvalidateTags", memPkg+".(*Store).Delete", memPkg+".(*Store).Close",
+		memPkg+".(*Store).AcquireLock",
 	)
 	return nil
 }
