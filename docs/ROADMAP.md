@@ -48,7 +48,7 @@ for the cache wrapper decision):
 - [x] **F4-2 Span argument redaction** — `WithSpanRedaction(mode)`. Default `RedactArgs` keeps bind values off spans; `IncludeArgs` opts in for local debug.
 - [x] **F4-3 Slow query log** — `WithSlowQueryThreshold(d)`. Single comparison on the centralised observer path; bind args never logged.
 - [x] **F4-4 Cache key determinism** — type-tagged, length-prefixed encoding. Closes three collision classes (type / boundary / nil) the previous `%v` encoding allowed. Prerequisite of F4-5/F4-6.
-- [x] **F4-5 Cache stampede protection** — `stampedeStore` wrapper auto-installed by `WithCacheStore`: singleflight in-process + ±jitter TTL + Vattani XFetch. `WithCacheJitter` and `WithCacheXFetchBeta` tune the knobs. Cross-instance gap documented.
+- [x] **F4-5 Cache stampede protection** — `stampedeStore` wrapper auto-installed by `WithCacheStore`: singleflight in-process + ±jitter TTL + Vattani XFetch. `WithCacheJitter` and `WithCacheXFetchBeta` tune the knobs. Cross-instance coordination delivered opt-in via `WithCacheCrossInstance` (ADR-0020).
 - [x] **F4-6 Per-row invalidation + Redis tag-TTL fix** — `<table>:<pk>` tag in addition to the table tag on `Update`/`Delete`/`Tracked.Save`/`Create`; Redis tag-set TTL now takes the MAX via `ExpireNX` + `ExpireGT` (Redis 7+).
 - [x] **F4-7 Deadlock retry** — `WithDeadlockRetry(maxAttempts)` on `Client.Tx`. Exponential backoff + jitter, opt-in, ctx-aware. PG 40P01 / MySQL 1213 / MSSQL 1205 / Oracle ORA-00060.
 
@@ -217,8 +217,9 @@ in [`TASKS.md`](../TASKS.md) § "Bug-bash hallazgos"). No breaking changes;
       `/*+ … */` stay allowed).
 
 Deferred to **v1.2+** (not in v1.1): F6-3b UPDATE/partial/batch codegen binder
-(ADR-0017, ~1% payoff), scatter-gather + shard-key-from-entity sharding, and
-cross-instance cache-stampede coordination.
+(ADR-0017, ~1% payoff) and scatter-gather + shard-key-from-entity sharding.
+Cross-instance cache-stampede coordination is **delivered** — opt-in
+`WithCacheCrossInstance` (ADR-0020).
 
 The 12h × 6-engine RC soak (`bugbash/phases/f14_soak/run-rc-soak.sh`) is RC
 assurance, not a hard gate — it does not block the tag.

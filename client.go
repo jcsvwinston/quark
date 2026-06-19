@@ -84,6 +84,10 @@ type Client struct {
 	stampedeJitterPct  float64
 	stampedeXFetchOn   bool
 	stampedeXFetchBeta float64
+	// stampedeCrossInstance opts into cross-instance lock coordination
+	// (ADR-0020); off by default. Effective only when the CacheStore
+	// implements CacheLocker.
+	stampedeCrossInstance bool
 
 	// Deadlock retry budget for Client.Tx (F4-7). 0 (the default) means
 	// no retry — a deadlock from inside the closure propagates on the
@@ -306,7 +310,7 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 	// the wrapper. Done after the options loop so WithCacheJitter and
 	// WithCacheXFetchBeta have already taken effect.
 	if c.cacheStore != nil {
-		c.cacheStore = newStampedeStore(c.cacheStore, c.stampedeJitterPct, c.stampedeXFetchOn, c.stampedeXFetchBeta, c.logger)
+		c.cacheStore = newStampedeStore(c.cacheStore, c.stampedeJitterPct, c.stampedeXFetchOn, c.stampedeXFetchBeta, c.stampedeCrossInstance, c.logger)
 	}
 
 	c.logger.Info("quark client initialized",

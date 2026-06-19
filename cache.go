@@ -27,6 +27,24 @@ type CacheStore interface {
 	InvalidateTags(ctx context.Context, tags ...string) error
 }
 
+// CacheLocker is an OPTIONAL capability a CacheStore may implement to enable
+// cross-instance stampede coordination (ADR-0020). The stampede wrapper detects
+// it by type-assertion: when present AND WithCacheCrossInstance is enabled, a
+// cache miss on a hot key is serialised across processes — one holder recomputes
+// while the others wait-and-reread — instead of every process recomputing
+// (in-process singleflight only dedupes within one process). Stores that do not
+// implement it fall back to singleflight + XFetch unchanged.
+type CacheLocker interface {
+	// AcquireLock attempts to claim per-key recompute rights WITHOUT blocking.
+	// It returns acquired=true and a release func to the single winner; every
+	// other caller gets acquired=false (and a nil release) and should
+	// wait-and-reread the winner's value. The lock auto-expires after ttl so a
+	// crashed holder cannot wedge the key. release is safe to call once; it must
+	// only delete the lock if this caller still owns it (token-checked), so a
+	// late release after ttl expiry never clobbers a new holder.
+	AcquireLock(ctx context.Context, key string, ttl time.Duration) (acquired bool, release func() error, err error)
+}
+
 // CacheConfig holds the caching parameters for a specific query.
 type CacheConfig struct {
 	TTL     time.Duration

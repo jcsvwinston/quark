@@ -86,13 +86,12 @@ custom tag represents user data.
 
 ## Stampede protection
 
-:::warning In-process only — cross-instance is post-v1.0
-The protections below (singleflight, jitter, XFetch) are **per-process**.
-In a multi-replica deployment each replica collapses its own concurrent
-callers, but N replicas can still each compute the same hot key once —
-much less severe than an in-process stampede, but real. Cross-instance
-coordination (an optional distributed-lock hook) is a tracked v1.0 known
-limitation, planned **post-v1.0** (ADR-0011 §"Cuándo reabrir").
+:::note Per-process by default; cross-instance is opt-in
+The three protections below (singleflight, jitter, XFetch) are **per-process**:
+each replica collapses its own concurrent callers, but N replicas can still each
+compute the same hot key once. To coordinate across replicas, opt into
+[`WithCacheCrossInstance()`](#cross-instance-coordination-opt-in) — a distributed
+lock so a hot-key miss recomputes once across the fleet (ADR-0020).
 :::
 
 Every CacheStore installed via `WithCacheStore` is wrapped automatically
@@ -115,11 +114,26 @@ possible (the protections are "all or nothing", per the cache playbook).
 
 ```go
 client, _ := quark.New("pgx", dsn,
-    quark.WithCacheStore(memory.New()),
+    quark.WithCacheStore(redisStore),
     quark.WithCacheJitter(0.2),         // ±20% TTL jitter (default 0.1)
     quark.WithCacheXFetchBeta(0.5),     // tune XFetch aggressiveness
+    quark.WithCacheCrossInstance(),     // coordinate recompute across replicas
 )
 ```
+
+### Cross-instance coordination (opt-in)
+
+`WithCacheCrossInstance()` (off by default) adds **deterministic** cross-replica
+stampede protection on top of the per-process singleflight (ADR-0020). On a
+hot-key miss, replicas race for a per-key distributed lock: the winner recomputes
+and publishes the value; the losers wait briefly and re-read it instead of all
+hitting the database. It takes effect only when the installed `CacheStore`
+implements the optional `CacheLocker` capability — the bundled `redis.Store` does
+(via `SET … NX` + a token-checked release); `memory.Store` provides the
+single-process equivalent. A store without `CacheLocker` falls back to
+singleflight + XFetch unchanged. Cost: one lock round-trip per hot-key miss, so
+opt in when you run multiple instances against a shared cache and a recompute is
+expensive.
 
 Tuning knobs:
 
@@ -127,9 +141,10 @@ Tuning knobs:
 | --- | --- | --- |
 | `WithCacheJitter(pct)` | `0.1` | Range `[0, 1]`; values outside are clamped. `0` disables jitter, singleflight + XFetch stay on. |
 | `WithCacheXFetchBeta(β)` | `1.0` | Range `β ≥ 0`. Higher β triggers earlier refresh. `β = 0` disables XFetch, singleflight + jitter stay on. |
+| `WithCacheCrossInstance()` | off | Opt-in cross-replica recompute serialisation (ADR-0020). No effect unless the store implements `CacheLocker` (see [above](#cross-instance-coordination-opt-in)). |
 
-(The in-process scope of these protections is called out in the warning
-at the top of this section.)
+(Jitter/XFetch/singleflight are per-process; cross-instance coordination is the
+opt-in above.)
 
 ## Memory Store
 

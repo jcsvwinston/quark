@@ -250,6 +250,7 @@ func surfaceEventsCodegenOptions(ctx context.Context, rec *recorder.Recorder, co
 	c, err := quark.New(conn.Driver, conn.DSN,
 		quark.WithCacheJitter(0.1),
 		quark.WithCacheXFetchBeta(1.0),
+		quark.WithCacheCrossInstance(),
 		quark.WithQueryObserver(surfObs{}),
 	)
 	if err != nil {
@@ -264,7 +265,7 @@ func surfaceEventsCodegenOptions(ctx context.Context, rec *recorder.Recorder, co
 		QF("StubBinder"), QF("StubScanner"), QF("RegisterTypedScanner"), QF("RegisterTypedBinder"),
 		QF("RegisterGeneratedMeta"), QF("RegisterTypeMapper"),
 		QF("GeneratedBinderRegistered"), QF("GetModelMeta"), QF("HashModelFields"),
-		QF("WithCacheJitter"), QF("WithCacheXFetchBeta"), QF("WithQueryObserver"),
+		QF("WithCacheJitter"), QF("WithCacheXFetchBeta"), QF("WithCacheCrossInstance"), QF("WithQueryObserver"),
 	)
 	return nil
 }

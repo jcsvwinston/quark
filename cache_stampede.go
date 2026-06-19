@@ -24,9 +24,12 @@ package quark
 // the richer getOrCompute API when available; everything else falls back
 // to the plain cache-aside Get/Set.
 //
-// Cross-instance stampede (N processes all missing the same key) is NOT
-// addressed — the singleflight is in-process only. Documented gap; an
-// ADR successor adds a DistributedLock hook if real demand surfaces.
+// Cross-instance stampede (N processes all missing the same key) is addressed
+// opt-in (ADR-0020): with WithCacheCrossInstance enabled and an inner store that
+// implements CacheLocker, the in-process singleflight winner races other
+// processes for a per-key lock; losers wait-and-reread the winner's value rather
+// than stampeding the source. Off by default; stores without CacheLocker keep
+// the in-process-only behaviour (singleflight + jitter + XFetch).
 
 import (
 	"context"
@@ -55,13 +58,28 @@ const xfetchEntryHeaderLen = 4 /*magic*/ + 1 /*version*/ + 8*3 /*deltaNs, comput
 // which then treats it as a regular miss.
 var errStampedeMiss = errors.New("stampede: encoded entry not recognised")
 
+const (
+	// stampedeLockKey prefixes the per-key cross-instance recompute lock
+	// (ADR-0020) so it never collides with the cached value's own key.
+	stampedeLockKey = "quark:stampede-lock:"
+	// stampedeLockTTL bounds how long one process may hold recompute rights and
+	// how long losers wait for its result. A recompute slower than this lets the
+	// lock auto-expire so another process can take over — degrading to a few
+	// computes, never the full herd. Generous enough for typical query+serialise.
+	stampedeLockTTL = 5 * time.Second
+	// stampedeWaitPoll is how often a waiting loser re-reads the cache for the
+	// holder's published value.
+	stampedeWaitPoll = 25 * time.Millisecond
+)
+
 // stampedeStore wraps any CacheStore with singleflight + jitter + XFetch.
 type stampedeStore struct {
-	inner     CacheStore
-	jitterPct float64 // 0..1; 0.1 = ±10%
-	xfetchOn  bool
-	beta      float64      // XFetch tuning; >0; default 1.0
-	logger    *slog.Logger // optional; nil = silent
+	inner         CacheStore
+	jitterPct     float64 // 0..1; 0.1 = ±10%
+	xfetchOn      bool
+	beta          float64      // XFetch tuning; >0; default 1.0
+	crossInstance bool         // ADR-0020: coordinate via CacheLocker across processes
+	logger        *slog.Logger // optional; nil = silent
 
 	sf     singleflight.Group
 	randMu sync.Mutex // guards rng — math/rand is not goroutine-safe
@@ -78,7 +96,7 @@ type stampedeStore struct {
 //
 // inner == nil is a programming error and panics — the wrapper is only
 // installed by WithCacheStore, which never passes nil.
-func newStampedeStore(inner CacheStore, jitterPct float64, xfetchOn bool, beta float64, logger *slog.Logger) *stampedeStore {
+func newStampedeStore(inner CacheStore, jitterPct float64, xfetchOn bool, beta float64, crossInstance bool, logger *slog.Logger) *stampedeStore {
 	if inner == nil {
 		panic("newStampedeStore: inner must not be nil")
 	}
@@ -92,11 +110,12 @@ func newStampedeStore(inner CacheStore, jitterPct float64, xfetchOn bool, beta f
 		beta = 0
 	}
 	return &stampedeStore{
-		inner:     inner,
-		jitterPct: jitterPct,
-		xfetchOn:  xfetchOn,
-		beta:      beta,
-		logger:    logger,
+		inner:         inner,
+		jitterPct:     jitterPct,
+		xfetchOn:      xfetchOn,
+		beta:          beta,
+		crossInstance: crossInstance,
+		logger:        logger,
 		// time-seeded rng is fine: XFetch only needs non-pathological
 		// uniform draws; seeded for-uniqueness across processes.
 		rng:   rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -181,31 +200,97 @@ func (s *stampedeStore) getOrCompute(ctx context.Context, key string, ttl time.D
 		_ = err
 	}
 
-	// Slow path: collapse concurrent missing/refreshing callers.
+	// Slow path: collapse concurrent missing/refreshing callers within THIS
+	// process via singleflight. The single winner then coordinates ACROSS
+	// processes when cross-instance is enabled and the store supports it.
 	v, err, _ := s.sf.Do(key, func() (any, error) {
-		start := s.nowFn()
-		data, err := compute(ctx)
-		if err != nil {
-			return nil, err
-		}
-		deltaNs := s.nowFn().Sub(start).Nanoseconds()
-		if setErr := s.setWithDelta(ctx, key, data, ttl, deltaNs, tags...); setErr != nil {
-			// Compute succeeded; an unreachable cache is not a fatal
-			// error for THIS call, but it does mean every subsequent
-			// call will also pay the compute cost — surface it as WARN
-			// so operators see a failing backing without having to
-			// instrument it themselves.
-			if s.logger != nil {
-				s.logger.Warn("cache set failed after compute",
-					"key", key, "error", setErr)
+		if s.crossInstance {
+			if locker, ok := s.inner.(CacheLocker); ok {
+				return s.computeWithLock(ctx, locker, key, ttl, tags, compute)
 			}
 		}
-		return data, nil
+		return s.computeAndSet(ctx, key, ttl, tags, compute)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return v.([]byte), nil
+}
+
+// computeAndSet runs compute, measures its delta (for XFetch), and writes the
+// result to the inner store. A failed Set is logged, not fatal to this call —
+// the value still returns; subsequent calls just re-pay the compute.
+func (s *stampedeStore) computeAndSet(ctx context.Context, key string, ttl time.Duration, tags []string, compute computeFunc) (any, error) {
+	start := s.nowFn()
+	data, err := compute(ctx)
+	if err != nil {
+		return nil, err
+	}
+	deltaNs := s.nowFn().Sub(start).Nanoseconds()
+	if setErr := s.setWithDelta(ctx, key, data, ttl, deltaNs, tags...); setErr != nil {
+		if s.logger != nil {
+			s.logger.Warn("cache set failed after compute", "key", key, "error", setErr)
+		}
+	}
+	return data, nil
+}
+
+// computeWithLock coordinates the recompute ACROSS processes (ADR-0020). The
+// in-process singleflight already reduced this process to one caller; here it
+// races other processes for a per-key lock. The winner recomputes; losers
+// wait-and-reread the winner's value, falling through to their own compute only
+// if the wait times out (winner slow or dead — the lock auto-expires).
+func (s *stampedeStore) computeWithLock(ctx context.Context, locker CacheLocker, key string, ttl time.Duration, tags []string, compute computeFunc) (any, error) {
+	acquired, release, err := locker.AcquireLock(ctx, stampedeLockKey+key, stampedeLockTTL)
+	if err != nil {
+		// Lock backend hiccup: degrade to an uncoordinated compute rather than
+		// fail or block the caller — cross-instance coordination is best-effort.
+		if s.logger != nil {
+			s.logger.Warn("cache cross-instance lock failed; computing without coordination",
+				"key", key, "error", err)
+		}
+		return s.computeAndSet(ctx, key, ttl, tags, compute)
+	}
+	if acquired {
+		if release != nil {
+			defer func() { _ = release() }()
+		}
+		return s.computeAndSet(ctx, key, ttl, tags, compute)
+	}
+	// A peer holds the lock and is recomputing — wait for its result instead of
+	// stampeding the source.
+	if data, ok := s.waitForValue(ctx, key); ok {
+		return data, nil
+	}
+	// Timed out (holder slow/dead; the lock auto-expires). Compute rather than
+	// block indefinitely — degrades to a few computes under a pathologically
+	// slow holder, never the full N-process herd.
+	if s.logger != nil {
+		s.logger.Debug("cache cross-instance wait timed out; computing", "key", key)
+	}
+	return s.computeAndSet(ctx, key, ttl, tags, compute)
+}
+
+// waitForValue polls Get until the lock holder publishes the value or the wait
+// budget (stampedeLockTTL — the holder cannot keep the lock longer) elapses.
+// Honors ctx cancellation. Returns ok=false on timeout/cancel.
+func (s *stampedeStore) waitForValue(ctx context.Context, key string) ([]byte, bool) {
+	deadline := time.Now().Add(stampedeLockTTL)
+	ticker := time.NewTicker(stampedeWaitPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-ticker.C:
+			if data, err := s.Get(ctx, key); err == nil {
+				return data, true
+			}
+			if time.Now().After(deadline) {
+				return nil, false
+			}
+		}
+	}
 }
 
 // jitterTTL multiplies ttl by a uniform random factor in

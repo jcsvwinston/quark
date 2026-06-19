@@ -49,7 +49,7 @@ var dialectMethod = regexp.MustCompile(`^\(\*?\w*Dialect\)\.`)
 var interfaceTypes = map[string]bool{
 	"EventListener": true, "Event": true, "EventBus": true, "QueryObserver": true,
 	"Middleware": true, "Executor": true, "DBConn": true, "DBConnector": true,
-	"CacheStore": true, "ClientProvider": true, "ColumnTypeMapper": true,
+	"CacheStore": true, "CacheLocker": true, "ClientProvider": true, "ColumnTypeMapper": true,
 	"SchemaIntrospector": true, "MigrationLock": true, "MigrationLocker": true,
 	"Expr": true, "Operation": true, "Result": true, "Row": true, "PoolOption": true,
 	"AfterCreateHook": true, "AfterUpdateHook": true, "AfterDeleteHook": true, "AfterFindHook": true,
@@ -88,6 +88,7 @@ var manualReasons = map[string]string{
 	"github.com/jcsvwinston/quark/cache/redis.(*Store).Set":            reasonRedis,
 	"github.com/jcsvwinston/quark/cache/redis.(*Store).Delete":         reasonRedis,
 	"github.com/jcsvwinston/quark/cache/redis.(*Store).InvalidateTags": reasonRedis,
+	"github.com/jcsvwinston/quark/cache/redis.(*Store).AcquireLock":    reasonRedis,
 	"github.com/jcsvwinston/quark/cache/redis.(*Store).Ping":           reasonRedis,
 
 	// Entrypoints CLI/instalador: necesitan args + sesión DB viva (y PG para
