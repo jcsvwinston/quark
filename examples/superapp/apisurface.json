@@ -2752,6 +2752,21 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "ScatterCount",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "ScatterGather",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "ScatterMerge",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "Schema",
       "kind": "type"
     },
