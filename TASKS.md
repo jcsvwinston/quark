@@ -832,7 +832,8 @@ campo. Aislado porque las otras tres estrategias no usan `q.schema`.
 >    no-op silencioso). Detalle en [`docs/V1_GATE.md`](docs/V1_GATE.md) §A Item 1.
 > 2. ~~**F6-7 follow-ups**~~ — ✅ CERRADO (alcance mínimo): ejemplo runnable
 >    `examples/sharding/main.go` (SQLite, self-contained) + `advanced/sharding.mdx`;
->    scatter-gather y `shard-key-from-entity` diferidos a v1.1.
+>    scatter-gather y `shard-key-from-entity` diferidos entonces; entregados
+>    luego en v1.2 (ADR-0022 / ADR-0021).
 > 3. ~~**`LISTEN/NOTIFY` listener side**~~ — ✅ CERRADO en dos pasos:
 >    (a) en v1.0, Salida B: asimetría outbound/inbound documentada
 >    (warning en `events.mdx` + caveat en `intro.mdx`), inbound diferido
@@ -1323,7 +1324,7 @@ diseño con ADR-0015.
 > `TestReplicaFailoverToPrimary`, `TestReplicaHealthRecovery`,
 > `TestIsTransientConnErr`. Verde. Cierra el pillar HA F6-5+F6-6.
 
-### F6-7 · Sharding pluggable (`ShardRouter`) ✅ mergeado (#115, post-v0.13.0); follow-up: scatter-gather, shard-key-from-entity, runnable PG example
+### F6-7 · Sharding pluggable (`ShardRouter`) ✅ mergeado (#115, post-v0.13.0); follow-ups: ~~scatter-gather~~ ✅ v1.2 (ADR-0022, `ScatterGather`/`ScatterCount`), ~~shard-key-from-entity~~ ✅ v1.2 (ADR-0021, `ShardKeyer`/`WithShardKeyOf`); runnable PG example cubierto por el ejemplo SQLite + nota engine-agnostic en `sharding.mdx`
 
 Interface `ShardRouter` que, dada una entidad + operación, elige el
 Client del shard. Fan-out de reads con scatter-gather opcional.

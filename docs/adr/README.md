@@ -28,6 +28,7 @@
 | [0019](0019-inbound-listen-notify-dedicated-conn.md) | Inbound LISTEN/NOTIFY (PostgreSQL) sobre `*sql.Conn` dedicada del pool, no un pool propio | Accepted | post-v1.0 / v1.1 |
 | [0020](0020-cross-instance-cache-stampede-coordination.md) | Coordinación de cache-stampede cross-instancia vía capacidad opcional `CacheLocker` (opt-in, wait-and-reread) | Accepted | v1.2 |
 | [0021](0021-shard-key-from-entity.md) | Shard key desde la entidad vía interfaz `ShardKeyer` (helper `WithShardKeyOf` caller-side, no un hook del router) | Accepted | v1.2 |
+| [0022](0022-scatter-gather-cross-shard-reads.md) | Scatter-gather cross-shard reads vía funcs explícitas (`ScatterGather`/`ScatterCount`), merge caller-side, agregados no-COUNT diferidos | Accepted | v1.2 |
 
 ## Cómo añadir un ADR nuevo
 

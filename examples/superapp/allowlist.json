@@ -325,6 +325,7 @@
     "github.com/jcsvwinston/quark.SQLGuard": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.SQLiteDialect": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.SavepointDialect": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark.ScatterMerge": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.Schema": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.SchemaIntrospector": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.SchemaPerTenant": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",

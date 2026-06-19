@@ -127,6 +127,31 @@ func main() {
 	}
 	fmt.Printf("  total    %d (across %d shards)\n", total, len(shards))
 
+	// Scatter-gather (ADR-0022): read ACROSS shards explicitly. ScatterCount sums
+	// the per-shard counts; ScatterGather fans the query out to every shard and
+	// merges — here a single list ordered by owner, regardless of which shard
+	// each row lives on. This is opt-in; a normal keyless query still errors.
+	scTotal, err := quark.ScatterCount[Account](ctx, router, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	all, err := quark.ScatterGather(ctx, router,
+		func(q *quark.Query[Account]) *quark.Query[Account] {
+			return q.OrderBy("owner", "ASC").Limit(100)
+		},
+		quark.ScatterMerge[Account]{
+			Less: func(a, b Account) bool { return a.Owner < b.Owner },
+		},
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Scatter-gather across all shards (ScatterCount=%d), owners in global order:", scTotal)
+	for _, a := range all {
+		fmt.Printf(" %s", a.Owner)
+	}
+	fmt.Println()
+
 	// A request WITHOUT a shard key is rejected — there is no implicit
 	// cross-shard fan-out (ADR-0016). The router surfaces this at routing time:
 	if _, err := router.GetClient(ctx); err != nil {

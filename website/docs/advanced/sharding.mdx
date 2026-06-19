@@ -80,14 +80,46 @@ A query **without a shard key in context errors** — there is no implicit
 cross-shard fan-out (forgetting the key fails loudly rather than silently
 querying every shard).
 
+## Scatter-gather (cross-shard reads)
+
+To read **across** shards — explicitly, never as a fallback for a forgotten key
+— use `ScatterGather`. It runs the same query on every shard concurrently and
+merges the rows. Supply a comparator and a global limit via `ScatterMerge` for a
+correct global top-N:
+
+```go
+top, err := quark.ScatterGather(ctx, router,
+    func(q *quark.Query[Account]) *quark.Query[Account] {
+        return q.OrderBy("balance", "DESC").Limit(10) // each shard's top 10
+    },
+    quark.ScatterMerge[Account]{
+        Less:  func(a, b Account) bool { return a.Balance > b.Balance },
+        Limit: 10, // global top 10 across all shards
+    },
+)
+```
+
+`ScatterCount` sums per-shard counts (exact, since shards are disjoint):
+
+```go
+n, err := quark.ScatterCount[Account](ctx, router, nil) // total across all shards
+```
+
+If any shard errors, the call returns that error rather than a silently partial
+result. Aggregates beyond count (`AVG`/`MIN`/`MAX`) and cross-shard `GROUP BY`
+are **not** merged — run those per shard. See
+[ADR-0022](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0022-scatter-gather-cross-shard-reads.md).
+
 ## Limits
 
 - **No cross-shard joins** — a `JOIN` only sees the resolved shard.
 - **No cross-shard transactions** — a `Tx` is bound to one shard's client; there
   is no two-phase commit. Design the model so each operation stays within a
   shard (choose the shard key well; denormalize where needed).
-- **Scatter-gather reads** (query all shards and merge) are not yet available —
-  a deliberate follow-up, not an implicit fallback.
+- **Scatter-gather is an explicit opt-in** — cross-shard reads happen only
+  through `ScatterGather`/`ScatterCount` (above), never as the fallback of a
+  forgotten key. Aggregates beyond count and cross-shard `GROUP BY` are not
+  merged.
 - **Resharding** (changing the `ShardFunc` + migrating data) is an operator
   task; the shard set is fixed at construction.
 

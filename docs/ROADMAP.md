@@ -171,7 +171,7 @@ Anchor decision: [ADR-0014](adr/0014-codegen-coexistence-typed-registry.md)
       (F6-6) — delivered v0.13.0 (ADR-0015).
 - [x] **Sharding** pluggable (F6-7, `ShardRouter`) — merged to `main`
       (ADR-0016) with a runnable example; scatter-gather and
-      shard-key-from-entity deferred to v1.1.
+      shard-key-from-entity delivered later in v1.2 (ADR-0022 / ADR-0021).
 - [x] **Benchmarks** vs `database/sql` / GORM (F6-8a, v0.11.0) +
       stress/load testing (F6-9, v0.13.0) + ent + sqlc codegen-tier
       (F6-8b, v1.0.0) — delivered; informational, not a gate (ADR-0017).
@@ -217,9 +217,11 @@ in [`TASKS.md`](../TASKS.md) § "Bug-bash hallazgos"). No breaking changes;
       `/*+ … */` stay allowed).
 
 Deferred to **v1.2+** (not in v1.1): F6-3b UPDATE/partial/batch codegen binder
-(ADR-0017, ~1% payoff) and scatter-gather + shard-key-from-entity sharding.
-Cross-instance cache-stampede coordination is **delivered** — opt-in
-`WithCacheCrossInstance` (ADR-0020).
+(ADR-0017, ~1% payoff). The F6-7 sharding follow-ups are **delivered** in v1.2 —
+shard-key-from-entity via `ShardKeyer`/`WithShardKeyOf` (ADR-0021) and
+scatter-gather cross-shard reads via `ScatterGather`/`ScatterCount` (ADR-0022) —
+as is cross-instance cache-stampede coordination, opt-in `WithCacheCrossInstance`
+(ADR-0020).
 
 The 12h × 6-engine RC soak (`bugbash/phases/f14_soak/run-rc-soak.sh`) is RC
 assurance, not a hard gate — it does not block the tag.

@@ -298,6 +298,22 @@ var SHARDING = Exerciser{Name: "ha-sharding", Fn: func(ctx context.Context, clie
 		if _, err := router.GetClient(quark.WithShardKeyOf(ctx, shardProbe{Skey: "acct-007"})); err != nil {
 			return fmt.Errorf("GetClient via WithShardKeyOf degenerado (%s): %w", conn.Engine, err)
 		}
+		// Scatter-gather (ADR-0022): invoked over the 1-shard router so the
+		// per-engine gate counts ScatterGather/ScatterCount on engines without
+		// multi-shard provisioning. The real cross-shard merge is asserted on the
+		// other engines (multi-shard path below). Needs shard_probes to exist.
+		rec.Note(QF("ScatterCount"), QF("ScatterGather"))
+		if err := client.Migrate(ctx, &shardProbe{}); err != nil {
+			return fmt.Errorf("migrate shardProbe degenerado (%s): %w", conn.Engine, err)
+		}
+		if _, err := quark.ScatterCount[shardProbe](ctx, router, nil); err != nil {
+			return fmt.Errorf("ScatterCount degenerado (%s): %w", conn.Engine, err)
+		}
+		if _, err := quark.ScatterGather(ctx, router,
+			func(q *quark.Query[shardProbe]) *quark.Query[shardProbe] { return q.Limit(1) },
+			quark.ScatterMerge[shardProbe]{}); err != nil {
+			return fmt.Errorf("ScatterGather degenerado (%s): %w", conn.Engine, err)
+		}
 		return nil
 	}
 
@@ -400,6 +416,32 @@ var SHARDING = Exerciser{Name: "ha-sharding", Fn: func(ctx context.Context, clie
 		}
 	}
 
+	// Scatter-gather (ADR-0022): cross-shard read fan-out + merge over the 3
+	// shards. ScatterCount sums the per-shard counts (exact, shards disjoint);
+	// ScatterGather merges a global top-N ordered by skey.
+	rec.Note(QF("ScatterCount"), QF("ScatterGather"))
+	scN, err := quark.ScatterCount[shardProbe](ctx, router, nil)
+	if err != nil {
+		return fmt.Errorf("ScatterCount: %w", err)
+	}
+	if scN != nKeys {
+		return fmt.Errorf("ScatterCount=%d, esperaba %d (suma cross-shard)", scN, nKeys)
+	}
+	top, err := quark.ScatterGather(ctx, router,
+		func(q *quark.Query[shardProbe]) *quark.Query[shardProbe] {
+			return q.OrderBy("skey", "DESC").Limit(5)
+		},
+		quark.ScatterMerge[shardProbe]{
+			Less:  func(a, b shardProbe) bool { return a.Skey > b.Skey },
+			Limit: 5,
+		})
+	if err != nil {
+		return fmt.Errorf("ScatterGather: %w", err)
+	}
+	if len(top) != 5 || top[0].Skey != "cust-29" {
+		return fmt.Errorf("ScatterGather top-5 por skey DESC = %v, esperaba 5 filas con cust-29 primero", top)
+	}
+
 	// Tx ligada a un único shard: el GetClient de la key da el client y su Tx
 	// no puede tocar otros shards (no existe tx cross-shard, ADR-0016).
 	if err := c1.Tx(ctx, func(tx *quark.Tx) error {
@@ -409,8 +451,8 @@ var SHARDING = Exerciser{Name: "ha-sharding", Fn: func(ctx context.Context, clie
 	}
 
 	// Estabilidad al reshard: un 4º shard + router nuevo → la API sigue
-	// funcionando (no hay migración de datos implícita; eso es scatter-gather,
-	// deferral v1.2).
+	// funcionando (no hay migración/rebalanceo de datos implícito en el reshard;
+	// eso es tarea del operador, ADR-0016).
 	dsns4, cleanup4, err := provisionHADBs(ctx, conn, "x", 1)
 	if err != nil {
 		return fmt.Errorf("provision 4º shard: %w", err)
