@@ -2,6 +2,18 @@
 
 Complete reference for ACID transactions, savepoints, and nested transactions.
 
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `Client.Tx` | `Tx(ctx, fn func(tx *Tx) error) error` | Run `fn` in a transaction; commit on nil, roll back on error or panic. |
+| `Client.BeginTx` | `BeginTx(ctx, opts *sql.TxOptions) (*Tx, error)` | Start a transaction with explicit options. |
+| `Tx.Commit` | `Commit() error` | Commit the transaction. |
+| `Tx.Rollback` | `Rollback() error` | Roll back the transaction. |
+| `Tx.Savepoint` | `Savepoint(name string) error` | Create a named savepoint. |
+| `Tx.RollbackTo` | `RollbackTo(name string) error` | Roll back to a savepoint and drop work queued since it. |
+| `Tx.ReleaseSavepoint` | `ReleaseSavepoint(name string) error` | Release a savepoint (no-op on engines without a release statement). |
+| `Tx.Tx` | `Tx(ctx, fn func(tx *Tx) error) error` | Nested transaction implemented with savepoints. |
+| `ForTx` | `ForTx[T any](ctx, tx *Tx) *Query[T]` | Create a query bound to a transaction. |
+
 ## Automatic Transaction Management
 
 ### `Tx(ctx context.Context, fn func(tx *Tx) error) error`
@@ -117,9 +129,9 @@ if err := tx.Savepoint("before_payment"); err != nil {
 
 Rolls back to a named savepoint. In addition to undoing the SQL, it
 discards the model `After*` hooks and `OnCommit`/`OnRollback` callbacks
-queued by CRUD run since that savepoint, so rolled-back work cannot
-trigger its side-effects on the eventual commit. The savepoint itself
-survives and can be rolled back to again until released.
+that CRUD operations queued since that savepoint, so rolled-back work
+cannot trigger its side-effects on the eventual commit. The savepoint
+itself survives and can be rolled back to again until released.
 
 ```go
 if err := processPayment(); err != nil {

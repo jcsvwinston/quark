@@ -2,6 +2,19 @@
 
 Reference for observers, middleware, OpenTelemetry, hooks, and notifications.
 
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `QueryObserver` | interface — `ObserveQuery(event QueryEvent)` | Receives a `QueryEvent` per operation. |
+| `WithQueryObserver` | `WithQueryObserver(o QueryObserver) Option` | Registers an observer on a client. |
+| `Middleware` | interface — `WrapExec` / `WrapQuery` / `WrapQueryRow` | Wraps execution functions. |
+| `WithMiddleware` | `WithMiddleware(m Middleware) Option` | Registers middleware on a client. |
+| `WithSlowQueryThreshold` | `WithSlowQueryThreshold(d time.Duration) Option` | Logs a WARN line for operations slower than `d`. |
+| `quarkotel.New` | `New(opts ...Option) *Middleware` | OpenTelemetry spans + metrics middleware. |
+| `quarkotel.WithSpanRedaction` | `WithSpanRedaction(mode RedactionMode) Option` | `RedactArgs` (default) or `IncludeArgs`. |
+| `quarkotel.WithDBSystem` | `WithDBSystem(name string) Option` | Sets the `db.system` attribute. |
+| `Notify` | `Notify(ctx, provider ClientProvider, channel, payload string) error` | Sends a DB notification (PG only). |
+| `NewListenerFactory` | `NewListenerFactory(client *Client) *ListenerFactory` | Builds the inbound LISTEN/NOTIFY factory. |
+
 ## QueryObserver
 
 ```go
@@ -95,10 +108,10 @@ Fields on the log record:
 | --- | --- | --- |
 | `duration_ms` | int64 | The observed duration in milliseconds. |
 | `threshold_ms` | int64 | The configured threshold in milliseconds. |
-| `operation` | string | `SELECT` / `EXEC` / `SELECT_ROW` / `RAW_QUERY` / `RAW_EXEC`. |
+| `operation` | string | The `QueryEvent.Operation` value — `SELECT`, `SELECT (stream)`, `SELECT (cursor)`, `QUERY_ROW`, `EXEC`, `RAW_QUERY`, or `RAW_EXEC`. |
 | `table` | string | The Quark-managed table, when known (raw queries leave it empty). |
-| `rows` | int64 | Rows affected for `EXEC` / rows returned for `SELECT_ROW`; zero otherwise. |
-| `sql` | string | The parameterised SQL. **Bind arguments are NOT included** — same redaction principle as the F4-2 span policy. |
+| `rows` | int64 | Rows affected for `EXEC` / rows returned for `QUERY_ROW`; zero otherwise. |
+| `sql` | string | The parameterised SQL. **Bind arguments are NOT included** — the same redaction principle as OTel spans (below). |
 
 Default: `0` (disabled). A negative value is also treated as disabled.
 Callers that want richer context (or argument-aware reporting under their
@@ -217,10 +230,12 @@ Current support:
 
 ### `NewListenerFactory(client *Client) *ListenerFactory`
 
-Creates the inbound LISTEN/NOTIFY listener factory (renamed from
-`NewEventBus` in v0.9.0). On PostgreSQL, `CreateListener` returns a working
-inbound `LISTEN/NOTIFY` listener — a dedicated connection, fire-and-forget —
-delivered in v1.1.0 ([ADR-0019](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0019-inbound-listen-notify-dedicated-conn.md)).
-On the other five engines it returns `ErrDialectNotSupported`. See
-[inbound events](../../advanced/events) for usage. This is unrelated to the
-outbound CRUD-event [`EventBus`](../../advanced/events) interface.
+Creates the inbound LISTEN/NOTIFY listener factory. On PostgreSQL,
+`CreateListener` returns a working inbound `LISTEN/NOTIFY` listener — a
+dedicated connection, fire-and-forget. On the other five engines it returns
+`ErrDialectNotSupported`. See [inbound events](../../advanced/events) for
+usage. This is unrelated to the outbound CRUD-event
+[`EventBus`](../../advanced/events) interface.
+
+{/* Design: [ADR-0019](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0019-inbound-listen-notify-dedicated-conn.md) — inbound LISTEN/NOTIFY on a dedicated connection. */}
+

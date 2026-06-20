@@ -18,6 +18,42 @@
 > Los fallos del bug-bash aparecen en la sección § "Bug-bash hallazgos"
 > de abajo (creada por `bugbash-reporter` al cerrar cada pasada).
 
+## Overhaul DX de la documentación + 1 fix nuevo — handoff al owner (2026-06-20) ⚠️
+
+> **Foco válido para `/next-session auto`.** Reescritura de la doc pública a nivel
+> Eloquent/Django (orientada a tarea, output visible, jerga interna purgada),
+> ENCIMA de los DS-7…DS-15 ya cerrados (#217/#219/#220, v1.1.5). **Cada ejemplo
+> verificado compilando Y ejecutando** contra el módulo local con Go real (harness
+> `/tmp/docverify`, toolchain `/tmp/goroot`). Revisión `code-reviewer` de los fixes:
+> APRUEBA (`go vet` + `go test -short ./` verdes). Yo no hago commit/push/release.
+>
+> **Lo que falta por tu lado, por comando:**
+
+### 1. Publicar la reescritura
+Las páginas reescritas están en `website/docs/` (next). Para que lleguen a los
+lectores hay que versionarlas en la próxima release: **`/release vX.Y.Z`** (paso 4 →
+`cd website && npm run docusaurus docs:version X.Y.Z`). Antes, `cd website &&
+npm run build` valida enlaces (`onBrokenLinks:'throw'`).
+
+### 2. Commits pendientes
+- Reescrituras `website/docs/*.mdx` (Waves 1–2 hechas; 3–4 en curso) → PR(s) `docs:` (no cortan release; pasan por `code-reviewer`→`docs-auditor`).
+- **Incongruencia NUEVA de esta sesión** (no estaba en DS-7…DS-15): el `quark gen --help` describía el codegen como "inert stubs (F6-1)" cuando ya está cableado (el sample genera scanner/binder reales y `query_exec.go:1245` los usa). Fix en `cmd/quark/commands/gen.go`, **sin commitear**. Mensaje sugerido (NO `fix:`, no corta release): `docs(cli): correct 'quark gen' help to describe real generated output`. `codegen.mdx` ya estaba alineado.
+- Fix del WARN ruidoso en Update: ✅ ya commiteado (`4f261bc6`, `fix(query): warn only on skipped scalar zero-values in Update, not nil pointers`).
+
+### 3. CI 6 motores
+SQLite + unit verde en local (sin Docker para los otros 5 aquí). Los 2 fixes son
+independientes del motor (el WARN no cambia SQL; gen.go es texto). La matriz completa
+la corre tu CI en el PR.
+
+### Estado de la reescritura — COMPLETA (las 41 páginas)
+- ✅ Wave 1: intro, getting-started, modeling, querying, relations.
+- ✅ Wave 2: installation, batch-operations, transactions, hooks, cli, codegen, migrations.
+- ✅ Wave 3 (Advanced ×7): multi-tenant, row-level-native, events, audit-log, caching-observability, read-replicas, sharding.
+- ✅ Wave 4: Reference ×8 (sqlguard, comparison, configuration, dialects, benchmarks, architecture, roadmap, release-notes) + API Reference ×14.
+- ✅ Verificación final: grep anti-hype vacío; 0 códigos de fase/bug en prosa; 0 enlaces/anclas internas rotas (checker propio — cazó y se arregló 1 que introdujo la reestructuración: `errors.mdx`→`modeling#optimistic-locking`). Cada ejemplo ejecutable se compiló Y ejecutó contra el módulo local (Go 1.26).
+- ⚠️ **Pendiente owner**: `cd website && npm run build` en plataforma con node_modules correcto (aquí falló por binario nativo `@rspack/binding` linux ausente — node_modules es de macOS; NO es error de docs) + matriz 6 motores en CI.
+- Hallazgos extra de Wave 4 (ya corregidos en las páginas, van en el PR `docs:`): 2 ejemplos que no compilaban en `comparison.mdx` (`DeleteBatch([]any{...})`, `UpdateBatch` devuelve solo `error`); `observability.mdx` listaba `SELECT_ROW` en vez de `QUERY_ROW` en el slow-query log; `caching.mdx` no documentaba `WithCacheCrossInstance`/`CacheLocker` (añadido).
+
 ## Doc-sync — certificación docs↔código v1.1.4 (CERRADA 2026-06-18 · DS-7…DS-15 · #217/#219/#220, v1.1.5)
 
 > **Foco válido para `/next-session auto` (o `/doc-sync`).** Auditoría exhaustiva

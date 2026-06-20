@@ -2,6 +2,20 @@
 
 Reference for read execution methods on `*quark.Query[T]`.
 
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `First` | `First() (T, error)` | First matching row, or `ErrNotFound`. |
+| `Find` | `Find(id any) (T, error)` | One row by single-column primary key. |
+| `List` | `List() ([]T, error)` | Scan all matching rows into `[]T`. |
+| `Count` | `Count() (int64, error)` | Count matching rows. |
+| `Sum` | `Sum(column string) (float64, error)` | Sum of a column over matching rows. |
+| `Avg` | `Avg(column string) (float64, error)` | Average of a column. |
+| `Min` | `Min(column string) (float64, error)` | Minimum of a column. |
+| `Max` | `Max(column string) (float64, error)` | Maximum of a column. |
+| `Paginate` | `Paginate(pageSize, page int) (*Page[T], error)` | Count + limited select into a `*Page[T]`. |
+| `Cursor` | `Cursor() (*Cursor[T], error)` | Type-safe cursor over `sql.Rows`. |
+| `Iter` | `Iter(fn func(T) error) error` | Stream rows through a callback. |
+
 ## First
 
 ### `First() (T, error)`
@@ -85,6 +99,7 @@ Counts matching rows.
 count, err := quark.For[User](ctx, client).
     Where("active", "=", true).
     Count()
+// => count is the number of matching rows, e.g. 2; err is nil
 ```
 
 `Count` includes `Where`, joins, soft-delete filters, and tenant filters. It does
@@ -122,6 +137,7 @@ max, err := quark.For[Product](ctx, client).
     Max("price")
 ```
 
+For two paid orders of `100.5` and `49.5`, `Sum("amount")` returns `150`.
 Aggregate column names are validated as identifiers. The helpers return `0`
 when the database aggregate result is `NULL`.
 
@@ -137,10 +153,13 @@ page, err := quark.For[User](ctx, client).
     OrderBy("id", "ASC").
     Paginate(20, 0)
 
-fmt.Println(page.Items)
-fmt.Println(page.Total)
-fmt.Println(page.TotalPages)
+fmt.Println(len(page.Items)) // => rows in this page (≤ pageSize)
+fmt.Println(page.Total)      // => total matching rows across all pages
+fmt.Println(page.TotalPages) // => ceil(Total / pageSize)
 ```
+
+With three matching rows and `Paginate(2, 0)`, `page.Items` has length 2,
+`page.Total` is 3, and `page.TotalPages` is 2.
 
 `page` is zero-indexed. Negative pages are treated as `0`. A non-positive
 `pageSize` defaults to `100`.

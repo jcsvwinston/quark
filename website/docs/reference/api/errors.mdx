@@ -57,7 +57,7 @@ identifier-only grammar that `internal/guard.ValidateJoinOn` enforces at executi
 time. The grammar accepts identifier-to-identifier comparisons (`a.b = c.d`) joined by
 `AND`/`OR` and the operators `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Literals, function
 calls, subqueries, and parentheses are rejected. The structured `.On(...)` builder
-(delivered in v0.4) is the preferred form; `.OnRaw` is the escape hatch for clauses
+is the preferred form; `.OnRaw` is the escape hatch for clauses
 outside the simple binary shape.
 
 `ErrInvalidTimezone` is returned by `Client.RegisterModel` and

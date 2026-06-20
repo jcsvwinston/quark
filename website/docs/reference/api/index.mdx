@@ -55,21 +55,26 @@ func main() {
     // Create
     user := &User{Name: "Alice", Email: "alice@example.com"}
     quark.For[User](ctx, client).Create(user)
-    
+    // => user.ID is populated with the generated primary key
+
     // Read
     u, _ := quark.For[User](ctx, client).Find(user.ID)
-    
+    // => u is the matching User; err is quark.ErrNotFound if no row exists
+
     // Query
     users, _ := quark.For[User](ctx, client).
         Where("active", "=", true).
         OrderBy("created_at", "DESC").
         List()
-    
+    // => users is a []User of active rows, newest first
+
     // Update
     u.Name = "Alice Smith"
     quark.For[User](ctx, client).Update(&u)
-    
+    // => returns (rowsAffected int64, err error)
+
     // Delete
     quark.For[User](ctx, client).Delete(&u)
+    // => returns (rowsAffected int64, err error)
 }
 ```

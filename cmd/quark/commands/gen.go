@@ -25,8 +25,12 @@ Drive it from a model package with:
 
 	//go:generate quark gen ./...
 
-This is the F6-1 scaffolding: the generated scanner/binder are inert stubs
-today; the typed fast path lands in later phases.`,
+What the generated code does today: List/First/Find use a typed row scanner
+(no reflection), and Create uses a typed insert binder for single-integer-PK
+models. Update, batch inserts, composite/non-integer keys, and the per-column
+timezone feature still take the reflection path. Generated files carry a
+versioned contract and fall back to reflection when it changes, so a stale
+generated file is always safe.`,
 	Args: cobra.ArbitraryArgs,
 	// main.go prints the returned error and exits 1; silence cobra's own
 	// error/usage dump so that single line is the only output (matches genCmd).

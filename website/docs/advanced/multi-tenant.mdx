@@ -1,73 +1,56 @@
 ---
 sidebar_position: 1
 title: Multi-Tenant
-description: Use TenantRouter with database, schema, or row-level isolation.
+description: Isolate each tenant's data with one of three strategies — database-per-tenant, schema-per-tenant, or row-level — all behind one TenantRouter.
 ---
 
 # Multi-Tenant
 
-`TenantRouter` implements Quark's `ClientProvider` interface, so the same query
-entry point works for single-tenant and multi-tenant code:
+You're running one application for many customers (tenants), and each must see
+only its own data. Quark handles that with a `TenantRouter`: it resolves a tenant
+ID from the request `context.Context`, picks an isolation strategy, and you query
+it **exactly like a normal client** — the same `quark.For[T]` entry point:
 
 ```go
-users, err := quark.For[User](ctx, client).List()
-users, err = quark.For[User](tenantCtx, router).List()
+users, _ := quark.For[User](ctx, client).List()       // single-tenant
+users, _ = quark.For[User](tenantCtx, router).List()  // multi-tenant — same call
 ```
 
-The router resolves a tenant ID from `context.Context` and chooses one of three
-isolation strategies.
-
-## Strategy Matrix
+## Pick a strategy
 
 | Strategy | How it isolates | Requires | Best fit |
 | --- | --- | --- | --- |
-| `DatabasePerTenant` | Separate `*sql.DB` / `Client` per tenant. | `factory func(tenantID string) (*Client, error)` | Strong isolation, custom DSNs, tenant-specific scaling. |
-| `SchemaPerTenant` | Prefixes table names with the tenant ID as schema. | `BaseClient` | Shared database with schema namespaces. |
-| `RowLevelSecurityClient` | Injects `WHERE tenant_id = ?` into every query built by Quark. **Client-side scoping**, not engine-enforced — `client.Raw()` and `client.Exec()` bypass it. | `BaseClient`, `TenantColumn` | Shared tables, application-level tenant filters across all six dialects. |
+| `DatabasePerTenant` | A separate `*sql.DB` / `Client` per tenant. | a `factory func(tenantID) (*Client, error)` | Strongest isolation, custom DSNs, per-tenant scaling. |
+| `SchemaPerTenant` | Qualifies tables with the tenant ID as the schema. | `BaseClient` | One database, schema namespaces. |
+| `RowLevelSecurityClient` | Injects `WHERE tenant_id = ?` into every query Quark builds. **Client-side** — `client.Raw()`/`Exec()` bypass it. | `BaseClient`, `TenantColumn` | Shared tables across all six engines. |
 
-:::note Naming change in v0.9.0
+On PostgreSQL there's a fourth option,
+[`RowLevelSecurityNative`](row-level-native), which pushes the filter into the
+database engine so even raw SQL can't escape it. Tenant IDs must match
+`^[a-z0-9_-]+$` (this keeps schema names and cache keys safe).
 
-The constant was previously called `RowLevelSecurity`. Starting in v0.9.0
-(Fase 5) it is renamed to `RowLevelSecurityClient` to make explicit that
-this strategy is client-side WHERE injection — not engine-enforced
-Row-Level Security. The old name remains as a `Deprecated:` alias with
-identical value until v1.0; existing code keeps compiling without
-changes.
+## Resolve the tenant from context
 
-On PostgreSQL, [`RowLevelSecurityNative`](row-level-native) delegates
-isolation to the database engine via `set_config('app.tenant_id', ...)`
-and `CREATE POLICY`. The two strategies are mutually exclusive per
-router on PG; other dialects continue to use `RowLevelSecurityClient`
-as the only row-level option.
-
-:::
-
-Tenant IDs must match `^[a-z0-9_-]+$`. This protects schema names and cache keys
-from unsafe values.
-
-## Resolve Tenants from Context
-
-Keep tenant resolution small and deterministic:
+Keep resolution small and deterministic, and pass it to the router:
 
 ```go
 type tenantKey struct{}
 
-func WithTenant(ctx context.Context, tenantID string) context.Context {
-    return context.WithValue(ctx, tenantKey{}, tenantID)
+func WithTenant(ctx context.Context, id string) context.Context {
+    return context.WithValue(ctx, tenantKey{}, id)
 }
-
 func ResolveTenant(ctx context.Context) string {
-    tenantID, _ := ctx.Value(tenantKey{}).(string)
-    return tenantID
+    id, _ := ctx.Value(tenantKey{}).(string)
+    return id
 }
 ```
 
-Pass `ResolveTenant` to the router. If it returns an empty string or an invalid
-tenant ID, query execution returns an error before SQL is built.
+If the resolver returns an empty or invalid tenant ID, the query fails before any
+SQL is built — it never silently falls back to a "public" tenant.
 
-## Row-Level Isolation
+## Row-level isolation
 
-Row-level isolation uses one shared client and injects a tenant predicate:
+One shared client; Quark adds the tenant predicate to every query and write:
 
 ```go
 type Document struct {
@@ -80,147 +63,107 @@ cfg := quark.DefaultTenantConfig()
 cfg.Strategy = quark.RowLevelSecurityClient
 cfg.BaseClient = client
 cfg.TenantColumn = "tenant_id"
-
 router := quark.NewTenantRouter(cfg, ResolveTenant, nil)
 
-tenantCtx := WithTenant(ctx, "acme")
+acme := WithTenant(ctx, "acme")
 
-docs, err := quark.For[Document](tenantCtx, router).
-    Where("title", "LIKE", "Invoice%").
-    Limit(50).
-    List()
+doc := Document{Title: "Invoice 1001"}
+quark.For[Document](acme, router).Create(&doc)
+fmt.Println(doc.TenantID)
+// => acme   (writes inherit the tenant; a zero tenant field is filled in)
+
+docs, _ := quark.For[Document](acme, router).List()
+// docs contains only acme's rows — even though the query never names tenant_id
 ```
 
-The effective query includes `tenant_id = 'acme'` even though application code
-does not repeat that filter.
-
-`Or()` groups inherit the tenant predicate. Because SQL operator precedence
-parses `A AND B OR C` as `(A AND B) OR C`, an OR branch built by the callback
-must carry its own `tenant_id = ?` predicate to stay isolated. Quark does this
-automatically:
+`Or()` groups inherit the predicate too. Since SQL parses `A AND B OR C` as
+`(A AND B) OR C`, an OR branch needs its own `tenant_id = ?` to stay isolated, and
+Quark adds it automatically:
 
 ```go
-docs, err := quark.For[Document](tenantCtx, router).
+quark.For[Document](acme, router).
     Where("status", "=", "draft").
     Or(func(q *quark.Query[Document]) *quark.Query[Document] {
         return q.Where("status", "=", "published")
     }).
     List()
-// emitted: WHERE tenant_id = ? AND status = ? OR (tenant_id = ? AND status = ?)
+// WHERE tenant_id = ? AND status = ? OR (tenant_id = ? AND status = ?)
 ```
 
-Writes also inherit tenant context. If the model has the configured tenant
-column and the field is zero, Quark fills it before insert.
+Remember the boundary: this is client-side scoping, so `client.Raw()` and
+`client.Exec()` aren't filtered. When that bypass risk matters and you're on
+PostgreSQL, use [Native RLS](row-level-native).
 
-```go
-doc := Document{Title: "Invoice 1001"}
-err := quark.For[Document](tenantCtx, router).Create(&doc)
-// doc.TenantID == "acme"
-```
+## Schema-per-tenant
 
-## Schema-per-Tenant
-
-Schema-per-tenant uses a shared client and prefixes table names with the resolved
-tenant ID:
+One shared client; Quark qualifies table names with the resolved tenant ID:
 
 ```go
 cfg := quark.DefaultTenantConfig()
 cfg.Strategy = quark.SchemaPerTenant
 cfg.BaseClient = client
-
 router := quark.NewTenantRouter(cfg, ResolveTenant, nil)
 
-users, err := quark.For[User](WithTenant(ctx, "tenant_acme"), router).List()
+users, _ := quark.For[User](WithTenant(ctx, "tenant_acme"), router).List()
+// table references become "tenant_acme"."users"
 ```
 
-For tenant `tenant_acme`, Quark builds table references like:
+The resolver's return value is used directly as the schema name. Creating each
+tenant's schema and running migrations into it is your job — `client.Migrate`
+runs on the base client; the router doesn't orchestrate per-schema provisioning.
 
-```sql
-"tenant_acme"."users"
-```
+## Database-per-tenant
 
-The current router uses the tenant ID directly as the schema name. If your
-database uses a prefix such as `tenant_acme`, return that full schema name from
-the resolver.
-
-Run schema creation and migrations once per tenant schema. `client.Migrate`
-operates on the base client; tenant-schema migration orchestration is an
-application concern in the current release.
-
-## Database-per-Tenant
-
-Database-per-tenant asks your factory to create a client for each tenant:
+Your factory builds a client per tenant; the router caches them (LRU):
 
 ```go
 cfg := quark.DefaultTenantConfig()
 cfg.Strategy = quark.DatabasePerTenant
 cfg.MaxCachedPools = 100
 
-router := quark.NewTenantRouter(
-    cfg,
-    ResolveTenant,
+router := quark.NewTenantRouter(cfg, ResolveTenant,
     func(tenantID string) (*quark.Client, error) {
         return quark.New("postgres", dsnForTenant(tenantID),
-            quark.WithMaxOpenConns(10),
-            quark.WithMaxIdleConns(10),
-        )
+            quark.WithMaxOpenConns(10))
     },
 )
 
-users, err := quark.For[User](WithTenant(ctx, "acme"), router).Limit(100).List()
-```
-
-The router keeps an LRU cache of tenant clients. When the cache exceeds
-`MaxCachedPools`, the least recently used client is evicted and its underlying
-database connection is closed.
-
-```go
+users, _ := quark.For[User](WithTenant(ctx, "acme"), router).List()
 active := router.ActiveTenants()
 ```
 
-Use database-per-tenant only after you have a clear pool budget. With 100 active
-tenants and `db.SetMaxOpenConns(10)`, the process may open up to 1000 database
-connections.
+When the cache exceeds `MaxCachedPools`, the least-recently-used client is evicted
+and its connections closed. Budget your pool: 100 active tenants × 10 max conns is
+up to 1000 connections, so size `MaxCachedPools` and per-client limits together.
 
-## TenantConfig Reference
+## Configuration
 
 ```go
 type TenantConfig struct {
-    Strategy       TenantStrategy
-    MaxCachedPools int
-    BaseClient     *quark.Client
-    TenantColumn   string
+    Strategy       TenantStrategy // default DatabasePerTenant
+    MaxCachedPools int            // default 100 (database-per-tenant)
+    BaseClient     *quark.Client  // required for schema / row-level
+    TenantColumn   string         // default "tenant_id" (row-level)
 }
 ```
 
-| Field | Used by | Default | Notes |
-| --- | --- | --- | --- |
-| `Strategy` | All | `DatabasePerTenant` | One of `DatabasePerTenant`, `SchemaPerTenant`, `RowLevelSecurityClient`. The legacy spelling `RowLevelSecurity` is accepted as a deprecated alias (same value) until v1.0. |
-| `MaxCachedPools` | Database per tenant | `100` | Maximum cached clients before LRU eviction. |
-| `BaseClient` | Schema / row-level | `nil` | Required for shared-database strategies. |
-| `TenantColumn` | Row-level | `tenant_id` | Column injected into queries and writes. |
+(The strategy `RowLevelSecurityClient` was once called `RowLevelSecurity`; the old
+name still works as a deprecated alias and is removed in v2.)
 
-## Relations and Cache Isolation
+## Relations, cache, and the bigger picture
 
-Tenant context is carried into relation loading. If a preloaded related model has
-the configured tenant column, Quark adds the tenant predicate to the relation
-query too.
-
-Cache keys include tenant ID and schema, so two tenants do not share cached
-results for the same SQL shape.
-
-## Operational Guidance
+Tenant context flows into `Preload`: if a related model has the tenant column,
+Quark filters the relation query too, so a parent can't preload another tenant's
+children. Cache keys include the tenant ID and schema, so two tenants never share
+a cached result for the same SQL.
 
 | Concern | Guidance |
 | --- | --- |
-| Missing tenant | Fail fast. Do not silently default to a public tenant. |
-| Tenant ID format | Return only lowercase letters, digits, underscores, and hyphens. |
-| Row-level models | Include `tenant_id` on every tenant-owned table. |
-| Shared lookup tables | Use the base client for truly global tables. |
-| Migrations | Run migrations per database or schema before routing traffic. |
-| Reporting | Use explicit reporting clients instead of bypassing tenant filters accidentally. |
-| Defense in depth | Combine app-level row filters with native database RLS where required. |
+| Missing tenant | Fail fast — never default to a shared tenant. |
+| Tenant-owned tables | Put `tenant_id` on every one (row-level strategy). |
+| Global lookup tables | Use the base client directly. |
+| Reporting / cross-tenant | Use an explicit reporting client, not an accidental bypass. |
+| Defense in depth | Pair app-level filters with [Native RLS](row-level-native) where it matters. |
 
-`TenantRouter` centralizes tenant selection, but it does not replace database
-permissions, audit logging, backups, or operational safeguards. Treat it as the
-ORM layer in a broader tenancy design.
+`TenantRouter` centralizes tenant selection — it's the ORM layer of a tenancy
+design, not a replacement for database permissions, audit logging, and backups.

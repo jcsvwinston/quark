@@ -1,13 +1,30 @@
 # Multi-Tenancy API Reference
 
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `NewTenantRouter` | `NewTenantRouter(config TenantConfig, resolver func(context.Context) string, factory func(string) (*Client, error)) *TenantRouter` | Builds a tenant-aware router. |
+| `TenantRouter.ResolveTenant` | `ResolveTenant(ctx) (string, error)` | Extracts the tenant ID from context. |
+| `TenantRouter.GetClient` | `GetClient(ctx) (*Client, error)` | Returns the client for the resolved tenant. |
+| `TenantRouter.ActiveTenants` | `ActiveTenants() []string` | Lists cached tenant connections. |
+| `DatabasePerTenant` | `TenantStrategy` const | Separate DB pool per tenant. |
+| `SchemaPerTenant` | `TenantStrategy` const | Shared pool, schema prefix per tenant. |
+| `RowLevelSecurityClient` | `TenantStrategy` const | Client-side `WHERE tenant_id = ?` injection. |
+| `RowLevelSecurityNative` | `TenantStrategy` const | Engine-enforced policies (PostgreSQL only). |
+
 ## Tenant Strategies
 
 | Strategy | Description | Use Case |
 |----------|-------------|----------|
 | `DatabasePerTenant` | Separate DB per tenant | Strong isolation, regulatory |
 | `SchemaPerTenant` | Schema per tenant | Medium isolation, shared pool |
-| `RowLevelSecurityClient` | Client-side `WHERE tenant_id = ?` injection on every Quark-built query (raw SQL bypasses it). Renamed from `RowLevelSecurity` in v0.9.0; legacy name kept as deprecated alias until v1.0. | Shared table, simple scaling. On PG, [`RowLevelSecurityNative`](../../advanced/row-level-native) offers engine-enforced policies as the alternative. |
-| `RowLevelSecurityNative` | PostgreSQL-only. Engine-enforced via `set_config('app.tenant_id', ...)` per implicit transaction + `CREATE POLICY` clauses on each tenant-scoped table. `client.Raw()` is also filtered server-side. | Production PG deployments where bypass risk matters; mutually exclusive with `RowLevelSecurityClient` per router. |
+| `RowLevelSecurityClient` | Client-side `WHERE tenant_id = ?` injection on every Quark-built query (raw SQL bypasses it). | Shared table, simple scaling. On PG, [`RowLevelSecurityNative`](../../advanced/row-level-native) offers engine-enforced policies as the alternative. |
+| `RowLevelSecurityNative` | PostgreSQL-only. Engine-enforced via `set_config('app.tenant_id', ...)` per implicit transaction + `CREATE POLICY` clauses on each tenant-scoped table. `client.Raw()` is also filtered server-side. | PG deployments where bypass risk matters; mutually exclusive with `RowLevelSecurityClient` per router. |
+
+:::caution `RowLevelSecurity` is deprecated
+`RowLevelSecurity` is a deprecated alias for `RowLevelSecurityClient`.
+Use `RowLevelSecurityClient` in new code; the alias is scheduled for
+removal in v2.0.
+:::
 
 ## TenantRouter
 

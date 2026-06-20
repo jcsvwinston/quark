@@ -3,6 +3,25 @@
 `Client` wraps a `*sql.DB` and owns Quark configuration: dialect, logger,
 SQLGuard, limits, middleware, observers, and cache store.
 
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `New` | `New(driverName, dataSource string, opts ...any) (*Client, error)` | Open a connection, ping it, return a configured client. |
+| `For` | `For[T any](ctx, provider ClientProvider) *Query[T]` | Create a typed query builder for model `T`. |
+| `WithDialect` | `WithDialect(d Dialect) Option` | Override the auto-detected dialect. |
+| `WithLogger` | `WithLogger(l *slog.Logger) Option` | Set the structured logger. |
+| `WithLimits` | `WithLimits(l Limits) Option` | Set security and performance limits. |
+| `DefaultLimits` | `DefaultLimits() Limits` | Return the default `Limits` struct. |
+| `WithCacheStore` | `WithCacheStore(s CacheStore) Option` | Attach a cache backend. |
+| `WithMiddleware` | `WithMiddleware(m Middleware) Option` | Add middleware to the execution chain. |
+| `WithQueryObserver` | `WithQueryObserver(o QueryObserver) Option` | Add a post-execution observer. |
+| `WithDeadlockRetry` | `WithDeadlockRetry(maxAttempts int) Option` | Retry `Tx` closures on a driver deadlock. |
+| `WithDefaultTZ` | `WithDefaultTZ(loc *time.Location) Option` | Fallback timezone for `time.Time` columns. |
+| `RawQuery` | `RawQuery(ctx, query string, args ...any) (*sql.Rows, error)` | Run raw SQL that returns rows. |
+| `Exec` | `Exec(ctx, query string, args ...any) error` | Run raw SQL that returns no rows. |
+| `Raw` | `Raw() *sql.DB` | Return the underlying `*sql.DB`. |
+| `Close` | `Close() error` | Close the underlying `*sql.DB`. |
+| `Dialect` | `Dialect() Dialect` | Return the active dialect. |
+
 ## New
 
 ### `New(driverName, dataSource string, opts ...any) (*Client, error)`
@@ -169,11 +188,11 @@ inside a half-committed tx makes no sense. Non-deadlock errors
 propagate on the first attempt; the retry budget is irrelevant for
 them.
 
-`maxAttempts` is the total number of attempts (1 = no retry, the
-historical behaviour; 0 or negative also disables). Between attempts
-the runner sleeps with exponential backoff + ±50% jitter
-(10ms → 20ms → 40ms → … capped at 1s). A cancelled context aborts the
-backoff and returns the context error.
+`maxAttempts` is the total number of attempts (1 = no retry; 0 or
+negative also disables). Between attempts the runner sleeps with
+exponential backoff + ±50% jitter (10ms → 20ms → 40ms → … capped at
+1s). A cancelled context aborts the backoff and returns the context
+error.
 
 ```go
 client, _ := quark.New("pgx", dsn,
@@ -185,10 +204,10 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 })
 ```
 
-Disabled by default: callers explicitly opt in to retry semantics —
-the at-most-once-per-call contract that has shipped since v0.1 stays
-the default. SQLite is single-writer and never raises a true deadlock,
-so the option is a no-op there.
+Disabled by default: callers explicitly opt in to retry semantics, so
+the at-most-once-per-call contract stays the default. SQLite is
+single-writer and never raises a true deadlock, so the option is a
+no-op there.
 
 ### `WithDefaultTZ(loc *time.Location) Option`
 

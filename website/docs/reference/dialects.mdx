@@ -6,7 +6,7 @@ description: Supported engines and dialect-specific behavior.
 
 # Dialects
 
-QUARK routes SQL generation through a dialect abstraction. Dialects are
+Quark routes SQL generation through a dialect abstraction. Dialects are
 responsible for placeholders, identifier quoting, insert ID behavior, upsert
 syntax, and DDL operations.
 
@@ -51,7 +51,7 @@ Oracle differs from the other engines in two ways worth knowing:
 
 - **Empty strings are NULL.** Oracle stores `''` as `NULL`, so an empty
   string written to a `VARCHAR2`/`CLOB` column comes back as `NULL`. When
-  scanning into a non-pointer `string` field, QUARK coerces that `NULL` to
+  scanning into a non-pointer `string` field, Quark coerces that `NULL` to
   `""`, so empty strings round-trip consistently with the other engines. Use
   `*string` or `sql.Null[string]` if you need to tell `NULL` apart from `""`.
 - **JSON path is inlined.** `WhereJSON` binds the JSON path as a parameter on

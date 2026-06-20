@@ -2,6 +2,20 @@
 
 Complete reference for struct tags, relations, hooks, and model metadata.
 
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `BeforeCreate` | `BeforeCreate(ctx context.Context) error` | Hook run before an insert. |
+| `AfterCreate` | `AfterCreate(ctx context.Context) error` | Hook run after a successful insert. |
+| `BeforeUpdate` | `BeforeUpdate(ctx context.Context) error` | Hook run before an update. |
+| `AfterUpdate` | `AfterUpdate(ctx context.Context) error` | Hook run after a successful update. |
+| `BeforeDelete` | `BeforeDelete(ctx context.Context) error` | Hook run before a delete. |
+| `AfterDelete` | `AfterDelete(ctx context.Context) error` | Hook run after a successful delete. |
+| `TableName` | `TableName() string` | Override the default (snake-cased, pluralised) table name. |
+| `GetModelMeta` | `GetModelMeta[T any]() *ModelMeta` | Return cached reflection metadata for model `T`. |
+
+Hooks are optional: implement the methods you need on the model's pointer
+receiver and Quark calls them at the matching point in the write path.
+
 ## Struct Tags
 
 ### `db` - Column Mapping
@@ -195,17 +209,32 @@ func (User) TableName() string {
 ## Metadata Access
 
 ```go
+type User struct {
+    ID    int64  `db:"id" pk:"true"`
+    Name  string `db:"name"`
+    Email string `db:"email"`
+    Posts []Post `rel:"has_many" join:"user_id"`
+}
+
 meta := quark.GetModelMeta[User]()
 
-fmt.Println(meta.Table)           // "users"
-fmt.Println(meta.PK.Column)       // "id"
-fmt.Println(meta.HasCompositePK)  // false
+fmt.Println(meta.Table)           // => users
+fmt.Println(meta.PK.Column)       // => id
+fmt.Println(meta.HasCompositePK)  // => false
 
 for _, field := range meta.Fields {
     fmt.Printf("%s -> %s\n", field.Column, field.Type)
 }
+// => id -> int64
+// => name -> string
+// => email -> string
 
 for name, rel := range meta.Relations {
     fmt.Printf("%s: %s via %s\n", name, rel.Type, rel.JoinCol)
 }
+// => Posts: has_many via user_id   (relations live in meta.Relations, not meta.Fields)
 ```
+
+`meta.Fields` holds only the persisted columns; relations are kept separately in
+`meta.Relations`, keyed by Go field name. `field.Type` is a `reflect.Type`, so it
+prints as `int64`, `string`, and so on.

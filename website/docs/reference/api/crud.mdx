@@ -3,6 +3,22 @@
 Reference for create, update, delete, upsert, and batch write methods on
 `*quark.Query[T]`.
 
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `Create` | `Create(entity *T) error` | Validate and insert one entity. |
+| `CreateBatch` | `CreateBatch(entities []*T) error` | Validate and insert many entities. |
+| `Update` | `Update(entity *T) (int64, error)` | Update one entity by PK (skips zero values). |
+| `Track` | `Track() *TrackedQuery[T]` | Switch reads to dirty-tracking wrappers for diff-based `Save`. |
+| `UpdateFields` | `UpdateFields(entity *T, fields ...string) (int64, error)` | Update only named fields, including zero values. |
+| `UpdateMap` | `UpdateMap(data map[string]any) (int64, error)` | Update explicit columns for `Where`-matched rows. |
+| `Delete` | `Delete(entity *T) (int64, error)` | Soft-delete by PK if `deleted_at` exists, else hard-delete. |
+| `HardDelete` | `HardDelete(entity *T) (int64, error)` | Permanently delete by PK even when soft delete is enabled. |
+| `DeleteBy` | `DeleteBy() (int64, error)` | Hard-delete rows matching the current `Where` clauses. |
+| `DeleteBatch` | `DeleteBatch(ids []any) (int64, error)` | Hard-delete rows by primary-key values. |
+| `Upsert` | `Upsert(entity *T, conflictCols, updateCols []string) error` | Insert or update one entity on conflict. |
+| `UpsertBatch` | `UpsertBatch(entities []*T, conflictCols, updateCols []string) error` | Bulk insert-or-update. |
+| `UpdateBatch` | `UpdateBatch(entities []*T) error` | Update many entities by PK in one transaction. |
+
 ## Create
 
 ### `Create(entity *T) error`
@@ -87,17 +103,17 @@ Zero values are skipped:
 | `false` | yes |
 | `nil` pointer/slice/map | yes |
 
-:::caution Zero-value trap (P0-4)
+:::caution Zero-value trap
 Because `Update` filters out zero values, it **cannot** write `false`, `0`,
 `""`, or `nil` to a column. To put `active = false` into the database use
 [`Track + Save`](#track--save-dirty-tracking) (recommended; the snapshot-driven
-escape hatch added in Phase 1), [`UpdateFields`](#updatefields), or
+escape hatch), [`UpdateFields`](#updatefields), or
 [`UpdateMap`](#updatemap). When `Update` detects skipped zero-value fields it
 logs a `WARN` line so you notice the silent skip.
 
-The trap is preserved on `Update` itself for behavioural compatibility; reach
-for `Track + Save` when you want to mutate a struct freely and let Quark
-decide what to write.
+The zero-value filter is preserved on `Update` itself for behavioural
+compatibility; reach for `Track + Save` when you want to mutate a struct
+freely and let Quark decide what to write.
 :::
 
 `Update` merges primary-key predicates with any existing query `Where` clauses:
@@ -145,7 +161,7 @@ Rules:
 | The configured tenant column is never written. | RLS isolation boundary; a `Save` cannot move a row across tenants. |
 | The tenant predicate from the loading query is added to the `WHERE`. | Same isolation guarantee as the rest of the multi-tenant API. |
 | Hooks `BeforeUpdate` / `AfterUpdate` run, just like on `Update`. | Behaviour parity with the partial-update path. |
-| Save is the permanent fix for the [P0-4 zero-value trap](#update). | `Update`'s zero-value filter doesn't apply — values are written based on the diff, not on whether they're zero. |
+| Save sidesteps the [zero-value trap](#update). | `Update`'s zero-value filter doesn't apply — values are written based on the diff, not on whether they're zero. |
 
 The snapshot lives on the wrapper, not in the Client, so there is no
 shared map to grow or evict. Each `Tracked` is independent — pass it
@@ -252,8 +268,8 @@ rows, err := quark.For[User](ctx, client).
     DeleteBy()
 ```
 
-`DeleteBy` requires at least one `Where` clause. It does not perform soft delete
-in the current implementation. For a bulk soft delete, use `UpdateMap`:
+`DeleteBy` requires at least one `Where` clause. It always hard-deletes; it does
+not honour soft delete. For a bulk soft delete, use `UpdateMap`:
 
 ```go
 rows, err := quark.For[User](ctx, client).

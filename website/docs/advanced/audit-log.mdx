@@ -6,83 +6,105 @@ description: Record an immutable per-row change trail in quark_audit, written at
 
 # Audit Log
 
-Quark can record an audit trail of every `Create`, `Update`, and
-`Delete` into a `quark_audit` table. Turn it on with
-`Client.EnableAuditLog`; from then on each write inserts an audit row
-**on the same connection/transaction as the write itself**, so the
-trail is atomic with the data.
+Quark can record an audit trail of every `Create`, `Update`, and `Delete` into a
+`quark_audit` table. Turn it on with `Client.EnableAuditLog`; from then on each
+write inserts an audit row **on the same connection/transaction as the write
+itself**, so the trail is atomic with the data.
 
 ```go
 err := client.EnableAuditLog(ctx, quark.AuditConfig{
     UserFromContext:   func(ctx context.Context) string { return userID(ctx) },
     TenantFromContext: func(ctx context.Context) string { return tenantID(ctx) },
 })
+
+// From here, writes record their own trail:
+quark.For[Order](ctx, client).Create(&order) // → one "created" audit row
+order.Status = "shipped"
+quark.For[Order](ctx, client).Update(&order)  // → one "updated" audit row
 ```
 
 ## What gets recorded
 
-`EnableAuditLog` migrates the `quark_audit` table (idempotent). Its
-columns:
+`EnableAuditLog` migrates the `quark_audit` table (idempotent). Its columns:
 
 | Column | Meaning |
 | --- | --- |
 | `id` | Audit row PK. |
 | `ts` | UTC timestamp of the write. |
-| `tenant_id` | From `AuditConfig.TenantFromContext` (empty if unset). |
-| `user_id` | From `AuditConfig.UserFromContext` (empty if unset). |
+| `tenant_id` / `user_id` | From `AuditConfig.*FromContext` (empty if unset). |
 | `table_name` | The audited table. |
 | `operation` | `created` / `updated` / `deleted`. |
 | `pk` | The affected row's primary key (composite PKs joined with `:`). |
-| `diff` | JSON change payload (see below). |
+| `diff` | JSON change payload (below). |
 
-The table is created from a model, so its DDL is **portable across
-all six dialects** — `diff` lands in the engine's JSON column (or a
-text column where the engine has none). You do not write
-PostgreSQL-specific `JSONB`/`BIGSERIAL` DDL by hand.
+The table is created from a model, so its DDL is portable across all six engines —
+`diff` lands in the engine's JSON column (or text where it has none); you never
+hand-write `JSONB`/`BIGSERIAL` DDL.
 
-## The diff payload
+### The diff payload
 
 | Operation | `diff` shape |
 | --- | --- |
-| `created` | The full inserted row: `{"id": 1, "name": "foo", "qty": 3}`. |
-| `deleted` | The full row being deleted. |
-| `updated` via `Update` / `UpdateFields` | The new values: `{"name": "bar"}` (no prior value — there is no snapshot). |
-| `updated` via `Tracked.Save` | A per-column delta: `{"name": {"old": "foo", "new": "bar"}}`. |
+| `created` / `deleted` | The full row: `{"id": 1, "name": "foo", "qty": 3}`. |
+| `updated` via `Update` / `UpdateFields` | The new values only: `{"status": "shipped"}` (no prior value — there's no snapshot). |
+| `updated` via `Tracked.Save` | A per-column delta: `{"status": {"old": "pending", "new": "shipped"}}`. |
 
-To get the `{old, new}` delta, load through the dirty-tracking API:
+To get the `{old, new}` delta, load through dirty tracking so Quark has the
+snapshot:
 
 ```go
 tracked, _ := quark.For[Order](ctx, client).Track().Find(id)
 tracked.Entity.Status = "shipped"
-tracked.Save(ctx) // audit diff = {"status": {"old": "pending", "new": "shipped"}}
+tracked.Save(ctx) // diff = {"status": {"old": "pending", "new": "shipped"}}
 ```
 
-:::note JSON number round-tripping
+## Reading the trail
 
-Numbers in the `diff` come back from the JSON column as `float64`
-when you read them into a `map[string]any`. Compare them accordingly
-(or decode into a typed struct).
+`quark_audit` is an ordinary table — map it with a model and query it like
+anything else:
 
-:::
+```go
+type AuditEntry struct {
+    ID        int64     `db:"id" pk:"true"`
+    TS        time.Time `db:"ts"`
+    UserID    string    `db:"user_id"`
+    Operation string    `db:"operation"`
+    Table     string    `db:"table_name"`
+    PK        string    `db:"pk"`
+}
+
+func (AuditEntry) TableName() string { return "quark_audit" }
+
+// "Who changed this order, and when?"
+history, _ := quark.For[AuditEntry](ctx, client).
+    Where("table_name", "=", "orders").
+    Where("pk", "=", "42").
+    OrderBy("ts", "DESC").
+    List()
+
+fmt.Println(len(history), history[0].Operation)
+// => 2 updated
+```
+
+Add a `diff quark.JSON[map[string]any]` field with `db:"diff"` when you need the
+payload too.
 
 ## Atomicity — written with the commit, not after
 
-The audit row is inserted **inline on the CRUD connection**, so:
+The audit row is inserted **inline on the CRUD connection**:
 
-- Inside `Client.Tx`, the audit INSERT joins that transaction. If the
-  transaction commits, the data and its audit row commit together; if
-  it rolls back, **both disappear**. You never get committed data
-  without its trail, nor a trail for work that was undone.
-- Outside a transaction, the audit INSERT is a separate statement
-  immediately after the write. There is a small crash window between
-  the two — wrap your writes in `Client.Tx` when you need the
-  guarantee.
+- Inside `client.Tx`, the audit INSERT joins that transaction — data and trail
+  commit together, or **both roll back**. You never get committed data without
+  its trail, nor a trail for work that was undone.
+- Outside a transaction, the audit INSERT is a separate statement right after the
+  write, with a small crash window between them — wrap writes in `client.Tx` when
+  you need the guarantee.
 
-This is intentionally a **stronger** guarantee than the
-[Event Bus](events), whose post-commit emission can be lost on a
-crash. Losing an event is tolerable; losing an audit record is not.
+This is a deliberately **stronger** guarantee than the [Event Bus](events), whose
+post-commit emit can be lost on a crash. Losing an event is tolerable; losing an
+audit record isn't.
 
-## Filtering which tables are audited
+## Choosing which tables to audit
 
 ```go
 client.EnableAuditLog(ctx, quark.AuditConfig{
@@ -92,21 +114,23 @@ client.EnableAuditLog(ctx, quark.AuditConfig{
 })
 ```
 
-`ExcludeTables` takes precedence over `IncludeTables`. The
-`quark_audit` table is always excluded — auditing the audit log would
-recurse.
+`ExcludeTables` wins over `IncludeTables`, and `quark_audit` itself is always
+excluded (auditing the audit log would recurse).
 
 ## Limitations
 
-- **Bulk and WHERE-based methods are not audited**: `CreateBatch`,
-  `UpdateBatch`, `DeleteBatch`, `DeleteBy`, and `UpdateMap` have no
-  per-row entity to diff. Loop the single-row methods if you need a
-  trail for them.
-- **Plain `Update` records new values only** — the `{old, new}` delta
-  requires `Tracked.Save`, which carries the snapshot.
-- **No automatic retention/pruning.** `quark_audit` grows unbounded;
-  schedule your own retention job.
-- **The audit row write uses a raw parameterised INSERT** that
-  bypasses the query observer/middleware chain (so it never recurses
-  and never appears in slow-query logs). Identifiers are fixed
-  constants, values are bound — no injection surface.
+- **Bulk and WHERE-based methods aren't audited** (`CreateBatch`, `UpdateBatch`,
+  `DeleteBatch`, `DeleteBy`, `UpdateMap`) — no per-row entity to diff. Loop the
+  single-row methods if you need a trail.
+- **Plain `Update` records new values only**; the `{old, new}` delta needs
+  `Tracked.Save`.
+- **No automatic retention** — `quark_audit` grows unbounded; schedule your own
+  pruning.
+- **The audit INSERT bypasses the observer/middleware chain** (so it never
+  recurses and never shows up in slow-query logs); identifiers are fixed, values
+  are bound — no injection surface.
+
+:::note JSON numbers
+Numbers in `diff` read back as `float64` from a JSON column into a
+`map[string]any` — compare accordingly, or decode into a typed struct.
+:::

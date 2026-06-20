@@ -1,40 +1,47 @@
 ---
-sidebar_position: 4
+sidebar_position: 5
 title: Batch Operations
-description: Efficiently create, upsert, update, and delete multiple records in bulk across all supported dialects.
+description: Create, upsert, update, and delete many rows in one call — chunked and dialect-aware across all six engines.
 ---
 
 # Batch Operations
 
-QUARK provides four bulk operations that reduce round-trips and improve throughput when
-working with multiple records. All batch methods handle dialect-specific SQL generation
-automatically.
+Four bulk methods cut round-trips when you're writing many rows at once. Each one
+generates the right dialect-specific SQL and chunks large inputs for you.
 
 | Method | SQL shape | Atomicity |
 |---|---|---|
-| `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked to the dialect's bind-parameter ceiling; per-row back-fill for auto-generated PKs on Oracle, MySQL, and SQL Server | One statement per chunk (per row when back-filling on Oracle/MySQL/SQL Server) |
-| `UpsertBatch` | Dialect-specific bulk upsert | Single statement for most dialects, N MERGE for Oracle |
+| `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked; per-row back-fill for auto-PKs on Oracle/MySQL/SQL Server | One statement per chunk |
+| `UpsertBatch` | Dialect-specific bulk upsert | One statement (N `MERGE` on Oracle) |
 | `UpdateBatch` | N `UPDATE` statements | Single transaction |
-| `DeleteBatch` | `DELETE … WHERE pk IN (…)` chunked | Chunked statements |
-
----
+| `DeleteBatch` | `DELETE … WHERE pk IN (…)`, chunked | One statement per chunk |
 
 ## CreateBatch
 
-Inserts multiple rows with a multi-row `INSERT … VALUES (…), (…)`. When the
-primary key is auto-generated, it is written back to each entity pointer on
-**every** engine: the `RETURNING` dialects (PostgreSQL, SQLite, MariaDB) scan it
-straight from the multi-row insert, while Oracle, MySQL and SQL Server recover
-each generated key with a per-row insert (see below).
+Inserts many rows and writes each generated primary key **back into the entity**
+on every engine:
 
-Large slices are **chunked automatically** so each statement stays within the
-dialect's bind-parameter ceiling (SQL Server caps a statement at ~2100
-parameters; SQLite/PostgreSQL/MySQL allow more). You can pass tens of thousands
-of rows in one call without hitting a "too many parameters" / "too many SQL
-variables" error. Chunks are issued on whatever executor the query is bound to
-(the connection pool, or an explicit transaction / native-RLS session), but
-they are **not** wrapped in an implicit transaction — if you need the whole
-batch to be all-or-nothing, run `CreateBatch` inside [`client.Tx`](./transactions):
+```go
+users := []*User{
+    {Name: "Alice", Email: "alice@example.com"},
+    {Name: "Bob", Email: "bob@example.com"},
+    {Name: "Carol", Email: "carol@example.com"},
+}
+
+if err := quark.For[User](ctx, client).CreateBatch(users); err != nil {
+    return err
+}
+
+fmt.Println(users[0].ID, users[1].ID, users[2].ID)
+// => 1 2 3
+```
+
+Large slices are **chunked automatically** so each statement stays under the
+engine's bind-parameter ceiling (SQL Server caps a statement at ~2100 parameters),
+so you can pass tens of thousands of rows without a "too many parameters" error.
+Chunks run on whatever executor the query is bound to (the pool, or an explicit
+transaction), but they are **not** wrapped in an implicit transaction — for
+all-or-nothing semantics, run `CreateBatch` inside [`client.Tx`](transactions):
 
 ```go
 err := client.Tx(ctx, func(tx *quark.Tx) error {
@@ -42,41 +49,21 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 })
 ```
 
-```go
-users := []*User{
-    {Name: "Alice", Email: "alice@example.com"},
-    {Name: "Bob",   Email: "bob@example.com"},
-    {Name: "Carol", Email: "carol@example.com"},
-}
+:::note Auto-generated keys on Oracle, MySQL, SQL Server
+These engines can't read a generated key back from a multi-row `INSERT`, so when
+the primary key is auto-generated Quark inserts one row at a time and back-fills
+each key (Oracle via `RETURNING … INTO`, MySQL via `LastInsertId`, SQL Server via
+`SCOPE_IDENTITY`) — same result, just more round-trips. Supply the primary keys
+yourself and every engine keeps the faster chunked multi-row form.
+:::
 
-if err := quark.For[User](ctx, client).CreateBatch(users); err != nil {
-    return err
-}
-// users[0].ID, users[1].ID, users[2].ID are now populated
-```
-
-Per-row back-fill (Oracle, MySQL, SQL Server): these engines can't read a
-generated key back from a multi-row `INSERT` — Oracle's multi-row form conflicts
-with `GENERATED ALWAYS AS IDENTITY`, and MySQL/SQL Server have no `RETURNING`. So
-when the primary key is auto-generated, Quark inserts one row at a time and
-back-fills each entity's PK (Oracle via `RETURNING … INTO`, MySQL via
-`LastInsertId`, SQL Server via `SCOPE_IDENTITY`) — the same result as the
-RETURNING dialects, just more round-trips. Supply the primary keys yourself and
-every engine keeps the faster chunked multi-row form.
-
-`CreateBatch` fires the `BeforeCreate` hook once per entity (and `UpdateBatch`
-fires `BeforeUpdate`); `Upsert` and `UpsertBatch` fire `BeforeCreate` (insert-prep
-— not `BeforeUpdate`, since the conflict outcome isn't known when the hook runs).
-So timestamp / default / derived-field hooks apply to batched and upserted rows
-just like single writes. `After*` hooks do not fire for these ops —
-see [Hooks › Limitations](./hooks#limitations).
-
----
+`CreateBatch` runs `BeforeCreate` once per entity, so timestamp / default /
+derived-field hooks apply to batched rows just like single writes. `After*` hooks
+don't fire for batch operations — see [Hooks › Limitations](hooks#limitations).
 
 ## UpsertBatch
 
-Inserts rows that do not exist yet, and updates rows that conflict on a given set
-of columns — in a single batch statement where the dialect allows it.
+Inserts new rows and updates the ones that conflict on a chosen unique key:
 
 ```go
 records := []*Product{
@@ -86,157 +73,97 @@ records := []*Product{
 
 err := quark.For[Product](ctx, client).UpsertBatch(
     records,
-    []string{"sku"},               // conflict column(s) — must have a UNIQUE constraint
-    []string{"name", "price"},     // columns to update on conflict
+    []string{"sku"},           // conflict column(s) — must have a UNIQUE constraint
+    []string{"name", "price"}, // columns to update on conflict
 )
 ```
 
-Pass `updateCols` explicitly. In the current dialect implementations, an empty
-`updateCols` slice is not a portable “update everything” signal: PostgreSQL and
-SQLite generate `DO NOTHING`, MySQL/MariaDB update the duplicate-key column, and
-MERGE-based dialects can infer non-conflict columns.
-
-### Auto-increment PK handling
-
-When the first entity in the slice has a zero primary key (e.g. `ID == 0`),
-QUARK omits the PK column from the `INSERT` clause so the database assigns it —
-identical to how `CreateBatch` works.
-
-### Dialect strategies
+Pass `updateCols` explicitly: an empty slice isn't a portable "update everything"
+signal (PostgreSQL/SQLite emit `DO NOTHING`, MySQL/MariaDB update the
+duplicate-key column, MERGE dialects infer non-conflict columns). When the first
+entity has a zero primary key, Quark omits the PK column so the database assigns
+it — just like `CreateBatch`. Each dialect gets its native form:
 
 | Dialect | SQL generated |
 |---|---|
-| **PostgreSQL** | `INSERT INTO … VALUES (…), (…) ON CONFLICT (sku) DO UPDATE SET …` |
-| **SQLite** | `INSERT INTO … VALUES (…), (…) ON CONFLICT (sku) DO UPDATE SET col = excluded.col` |
-| **MySQL / MariaDB** | `INSERT INTO … VALUES (…), (…) ON DUPLICATE KEY UPDATE name = VALUES(name), …` |
-| **MSSQL** | `MERGE INTO products AS target USING (VALUES (…), (…)) AS src(…) ON (…) WHEN MATCHED … WHEN NOT MATCHED …` |
-| **Oracle** | N individual `MERGE INTO … USING (SELECT …) …` statements |
+| PostgreSQL | `INSERT … ON CONFLICT (sku) DO UPDATE SET …` |
+| SQLite | `INSERT … ON CONFLICT (sku) DO UPDATE SET col = excluded.col` |
+| MySQL / MariaDB | `INSERT … ON DUPLICATE KEY UPDATE name = VALUES(name), …` |
+| SQL Server | `MERGE INTO products … WHEN MATCHED … WHEN NOT MATCHED …` |
+| Oracle | N individual `MERGE INTO … USING (SELECT …)` (identity columns aren't compatible with the multi-row MERGE shape) |
 
-:::info Oracle note
-Oracle identity columns are not compatible with Quark's multi-row MERGE shape,
-so QUARK falls back to N individual MERGE calls for Oracle to avoid duplicate
-identity values.
-:::
-
----
+Like `CreateBatch`, `UpsertBatch` runs `BeforeCreate` per entity (insert-prep);
+on conflict the `updateCols` win.
 
 ## UpdateBatch
 
-Updates multiple existing records by their primary key. Each entity receives a
-**partial update** — zero-value fields (`0`, `""`, `false`, `nil`) are not written,
-exactly like `Update`.
-
-All updates are wrapped in a **single transaction**. If any row update fails, the
-entire batch is rolled back.
+Updates many rows by primary key. Each entity gets a **partial update** —
+zero-value fields are skipped, exactly like [`Update`](getting-started#update-a-row) —
+and **all updates run in a single transaction**: if any row fails, the whole
+batch rolls back.
 
 ```go
-// Fetch some records, modify in memory, bulk-write back.
 users, _ := quark.For[User](ctx, client).Where("active", "=", true).List()
-
-ptrs := make([]*User, len(users))
 for i := range users {
     users[i].Score += 100
     ptrs[i] = &users[i]
 }
 
 if err := quark.For[User](ctx, client).UpdateBatch(ptrs); err != nil {
-    return err // all changes rolled back automatically
+    return err // every change rolled back
 }
 ```
 
-### Zero-value semantics
-
-Because `UpdateBatch` reuses the partial-update logic from `Update`, a struct like:
-
-```go
-&User{ID: 5, Score: 200}
-```
-
-generates:
-
-```sql
-UPDATE users SET score = 200 WHERE id = 5
-```
-
-and leaves `name`, `email`, and other fields untouched.
-
-Use `UpdateMap` for individual rows when you need to write explicit zero values.
-
-### Atomicity guarantee
-
-A `TestUpdateBatch_IsAtomic_RollsBackOnError` test verifies that if any entity
-yields no updatable fields (or hits a DB error), the transaction rolls back and
-every previously processed row reverts to its original state.
-
----
+To write an explicit zero value, use `UpdateMap` on the individual row.
 
 ## DeleteBatch
 
-Hard-deletes multiple rows by primary key using `DELETE … WHERE pk IN (…)`.
+Hard-deletes rows by primary key, chunked to the engine's `IN`-list limit
+(Oracle caps `IN` at 1000 elements, so 2500 IDs become three statements:
+1000 + 1000 + 500). IDs that don't exist aren't an error — `affected` is just the
+count actually removed:
 
 ```go
-ids := []any{10, 11, 12, 13, 14}
-affected, err := quark.For[User](ctx, client).DeleteBatch(ids)
-// affected == number of rows actually removed
+affected, err := quark.For[User](ctx, client).DeleteBatch([]any{10, 11, 12})
+fmt.Println(affected)
+// => 1   (only one of those IDs still existed)
+
+missing, _ := quark.For[User](ctx, client).DeleteBatch([]any{99999})
+fmt.Println(missing)
+// => 0
 ```
 
-### Chunking
+`DeleteBatch` is always a hard delete. For a bulk **soft** delete, use `UpdateMap`
+to set `deleted_at` under an explicit predicate. WHERE-based deletes bypass
+lifecycle hooks — load the rows and loop through `Delete` if you need them.
 
-Oracle limits `IN` list expressions to **1000 elements**. QUARK automatically
-chunks larger slices into sequential DELETE statements, each covering at most 1000
-IDs, so you never need to chunk manually.
+## A data-sync workflow
 
-```go
-// 2500 IDs → three statements: 1000 + 1000 + 500
-affected, err := quark.For[User](ctx, client).DeleteBatch(largeIDSlice)
-```
-
-### Soft-delete note
-
-`DeleteBatch` is a hard delete in the current API. If you need a bulk soft delete,
-use `UpdateMap` to set `deleted_at` under an explicit predicate.
-
-### Non-existent IDs
-
-IDs that no longer exist do not produce errors — `affected` simply reflects the
-count of rows that were actually removed.
+The four together make a typical sync readable end to end:
 
 ```go
-affected, err := quark.For[User](ctx, client).DeleteBatch([]any{99999})
-// err == nil, affected == 0
-```
-
----
-
-## Combining batch operations
-
-A typical data-sync workflow uses all four operations together:
-
-```go
-// 1. Bulk-insert new records
+// 1. Insert new records.
 if err := quark.For[Product](ctx, client).CreateBatch(newProducts); err != nil {
     return err
 }
-
-// 2. Upsert catalog feed (insert-or-update by SKU)
+// 2. Upsert the catalog feed (insert-or-update by SKU).
 if err := quark.For[Product](ctx, client).UpsertBatch(
-    catalogFeed,
-    []string{"sku"},
-    []string{"name", "price", "stock"},
+    catalogFeed, []string{"sku"}, []string{"name", "price", "stock"},
 ); err != nil {
     return err
 }
-
-// 3. Bulk-update prices in memory
+// 3. Re-price in memory, then bulk-update.
 for _, p := range productsToReprice {
     p.Price = newPrice(p.SKU)
 }
 if err := quark.For[Product](ctx, client).UpdateBatch(productsToReprice); err != nil {
     return err
 }
-
-// 4. Remove discontinued SKUs
+// 4. Remove discontinued SKUs.
 if _, err := quark.For[Product](ctx, client).DeleteBatch(discontinuedIDs); err != nil {
     return err
 }
 ```
+
+For a sync that must be all-or-nothing, wrap the whole thing in
+[`client.Tx`](transactions) and use `ForTx`.
