@@ -6,7 +6,7 @@ description: Request lifecycle, immutable builders, SQLGuard, middleware, routin
 
 # Architecture
 
-QUARK is organized around a small set of primitives:
+Quark is organized around a small set of primitives:
 
 - `Client` owns the database handle, dialect, middleware, observers, cache, and
   migration helpers.
@@ -55,7 +55,7 @@ flowchart TD
 
 ## Native routines and events
 
-QUARK separates routine execution from normal model queries.
+Quark separates routine execution from normal model queries.
 
 ```go
 users, err := quark.NewRoutine[User](

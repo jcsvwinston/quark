@@ -103,6 +103,7 @@ top, err := quark.ScatterGather(ctx, router,
 
 ```go
 n, err := quark.ScatterCount[Account](ctx, router, nil) // total across all shards
+// => n is the exact total — shards are disjoint, so per-shard counts just sum
 ```
 
 If any shard errors, the call returns that error rather than a silently partial

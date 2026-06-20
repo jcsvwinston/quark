@@ -3,6 +3,20 @@
 Reference for schema creation, schema sync, indexes, foreign keys, and versioned
 migrations.
 
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `Client.Migrate` | `Migrate(ctx, models ...any) error` | Creates missing tables (and m2m join tables). |
+| `Client.Sync` | `Sync(ctx, opts SyncOptions, models ...any) error` | Reconciles existing tables with model metadata. |
+| `Client.CreateIndex` | `CreateIndex(ctx, table, indexName string, columns []string, unique bool) error` | Creates a simple index. |
+| `Client.AddForeignKey` | `AddForeignKey(ctx, table, constraintName string, columns []string, refTable string, refColumns []string, onDelete, onUpdate string) error` | Adds a foreign key constraint. |
+| `migrate.Register` | `Register(m *Migration)` | Registers a migration in the global registry. |
+| `migrate.Reset` | `Reset()` | Clears the registry (tests). |
+| `migrate.NewMigrator` | `NewMigrator(client *quark.Client) *Migrator` | Binds a migrator to a client. |
+| `Migrator.Init` | `Init(ctx) error` | Creates the `quark_migrations` tracking table. |
+| `Migrator.Up` | `Up(ctx, steps int) error` | Applies pending migrations (ID order). |
+| `Migrator.UpDryRun` | `UpDryRun(ctx, steps int) error` | Prints pending migrations without running them. |
+| `Migrator.Down` | `Down(ctx, steps int) error` | Reverts applied migrations (reverse ID order). |
+
 ## Client Schema Helpers
 
 ### `Migrate(ctx context.Context, models ...any) error`
@@ -31,13 +45,23 @@ Supported sync operations:
 | Missing table | Calls `Migrate` unless `DryRun` is true. |
 | New column | Adds the column. |
 | Renamed column | Uses `quark:"rename:old_col"`. |
-| Removed column | Drops only when `SafeMigrations` is false. |
+| Removed column | Drops only when the client's `Limits.SafeMigrations` is `false`. |
 
 ```go
 type SyncOptions struct {
-    DryRun        bool
-    NoTransaction bool
+    DryRun        bool // Log the SQL but don't execute it.
+    NoTransaction bool // Don't wrap the sync in a transaction.
 }
+```
+
+Dropping a removed column is gated by `Limits.SafeMigrations`, not by
+`SyncOptions`. `DefaultLimits()` sets `SafeMigrations: true`, so removed
+columns are left in place until you opt into destructive sync:
+
+```go
+limits := quark.DefaultLimits()
+limits.SafeMigrations = false // allow DROP COLUMN
+client, _ := quark.New("postgres", dsn, quark.WithLimits(limits))
 ```
 
 ### `CreateIndex(ctx, table, indexName string, columns []string, unique bool) error`

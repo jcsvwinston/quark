@@ -78,6 +78,7 @@ _ = quark.For[User](ctx, client).Create(&u)
 fresh, _ := quark.For[User](quark.Sticky(ctx), client).
     Where("id", "=", u.ID).
     List()
+// => fresh includes the row you just wrote — Sticky read it from the primary
 ```
 
 `Sticky` is a no-op when no replicas are configured.

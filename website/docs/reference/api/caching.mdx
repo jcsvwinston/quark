@@ -2,6 +2,17 @@
 
 Quark cache support is opt-in per client and per query.
 
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `Query.Cache` | `Cache(ttl time.Duration, tags ...string) *Query[T]` | Enables result caching for one query. |
+| `WithCacheStore` | `WithCacheStore(s CacheStore) Option` | Attaches a cache store to a client. |
+| `WithCacheJitter` | `WithCacheJitter(pct float64) Option` | Sets the ±TTL jitter factor (default `0.1`). |
+| `WithCacheXFetchBeta` | `WithCacheXFetchBeta(beta float64) Option` | Tunes early-refresh aggressiveness (default `1.0`). |
+| `WithCacheCrossInstance` | `WithCacheCrossInstance() Option` | Coordinates stampede across instances when the store implements `CacheLocker`. |
+| `CacheStore` | interface | Get / Set / Delete / InvalidateTags. |
+| `memory.New` | `memory.New() *Store` | Process-local in-memory store. |
+| `rediscache.New` | `rediscache.New(Options) *Store` | Redis-backed store. |
+
 ## Query Cache
 
 ### `Cache(ttl time.Duration, tags ...string) *Query[T]`
@@ -70,22 +81,27 @@ user, err := quark.For[User](ctx, client).
     First()
 ```
 
-A later `quark.For[User](ctx, client).UpdateFields(&u, "name")` on the row
-with `id = 1` invalidates `users` (every listing on the table, as
-before) AND `users:1` (this single Find). Updates on a different row,
-e.g. `id = 2`, invalidate `users` (still consistent for listings) and
-`users:2` — `users:1` survives.
+A later `UpdateFields(&u, "name")` on the row with `id = 1` invalidates
+both tags; an update on a different row leaves `users:1` intact:
 
-Mutations whose affected rows aren't known up front (`DeleteBatch` with
-a complex WHERE, raw `Exec`, `Upsert`/`UpsertBatch`) emit only the table
-tag — the historical fallback. `UpdateBatch` and `Update` / `UpdateFields`
-/ `Tracked.Save` / `Create` / by-PK `Delete` all DO emit per-row tags.
-`CreateBatch` emits per-row tags for the rows whose PKs it back-fills (the
-RETURNING dialects) plus the table tag, so a cached listing reflects the
-batch.
-**Composite-primary-key** models fall back to the table tag; a follow-up
-may add a stable encoding of composite keys for per-row invalidation if
-demand surfaces.
+```go
+quark.For[User](ctx, client).UpdateFields(&u, "name") // u.ID == 1
+// => invalidates "users" (all listings) and "users:1"
+
+quark.For[User](ctx, client).UpdateFields(&v, "name") // v.ID == 2
+// => invalidates "users" and "users:2"; "users:1" survives
+```
+
+Which tags a mutation emits depends on whether it can identify the
+affected rows:
+
+| Mutation | Tags invalidated |
+| --- | --- |
+| `Update`, `UpdateFields`, `Tracked.Save`, `Create`, by-PK `Delete` | table tag + `<table>:<pk>` |
+| `UpdateBatch` | table tag + `<table>:<pk>` per affected row |
+| `CreateBatch` | table tag + `<table>:<pk>` per back-filled PK (RETURNING dialects) |
+| `DeleteBatch` (complex WHERE), raw `Exec`, `Upsert`, `UpsertBatch` | table tag only |
+| Composite-primary-key models | table tag only |
 
 :::note Tag format is opaque
 The `<table>:<pk>` shape is implementation. Treat it as an opaque
@@ -97,9 +113,9 @@ matching still works, but splitting on `:` does not.
 ## Stampede protection
 
 Every `CacheStore` passed to `WithCacheStore` is wrapped automatically
-with singleflight + TTL jitter + XFetch (ADR-0011). The wrapper
-implements `CacheStore`, so existing third-party stores keep working
-unchanged inside it. Two `Option`s tune the wrapper; both are optional.
+with singleflight + TTL jitter + XFetch. The wrapper implements
+`CacheStore`, so existing third-party stores keep working unchanged
+inside it. Two `Option`s tune the wrapper; both are optional.
 
 ### `WithCacheJitter(pct float64) Option`
 
@@ -127,8 +143,42 @@ client, _ := quark.New("pgx", dsn,
 )
 ```
 
+### `WithCacheCrossInstance() Option`
+
+Singleflight and XFetch are in-process: on their own they collapse
+concurrent recomputes within a single instance, but not across instances
+sharing one cache. `WithCacheCrossInstance` coordinates recompute across
+instances **when the store implements the `CacheLocker` interface** — on a
+hot-key miss, one caller acquires a short-lived lock and recomputes while
+the others wait and re-read its value. It costs one lock round-trip per
+hot-key miss; opt in when you run multiple instances against a shared
+cache and a hot key's recompute is expensive.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithCacheStore(redisStore), // must implement CacheLocker
+    quark.WithCacheCrossInstance(),
+)
+```
+
+If the store does not implement `CacheLocker` (or `WithCacheStore` is
+absent), this Option has no effect — the wrapper falls back to in-process
+singleflight + XFetch unchanged.
+
+```go
+type CacheLocker interface {
+    // AcquireLock claims per-key recompute rights without blocking.
+    // The single winner gets acquired=true and a release func; every
+    // other caller gets acquired=false and should wait-and-reread.
+    AcquireLock(ctx context.Context, key string, ttl time.Duration) (acquired bool, release func() error, err error)
+}
+```
+
 See [Caching and Observability — Stampede protection](/docs/advanced/caching-observability#stampede-protection)
 for the design rationale and the cross-instance gap.
+
+{/* Design: ADR-0011 (stampede wrapper), ADR-0020 (cross-instance CacheLocker). */}
+
 
 ## CacheStore
 
