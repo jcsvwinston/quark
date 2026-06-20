@@ -603,8 +603,9 @@ func (q *BaseQuery) scanReturning(row *sql.Row, v reflect.Value) error {
 // because zero values are skipped, calling Update cannot write false to a
 // bool, 0 to an integer, "" to a string, or nil to a pointer/slice/map.
 // To write a zero value explicitly, use UpdateFields or UpdateMap.
-// When Update detects skipped zero-value fields it logs a WARN line so
-// callers notice the silent skip.
+// When Update skips a scalar zero (false / 0 / ""), it logs a WARN so callers
+// notice the silent skip; skipped nil pointers/slices/maps are the expected
+// "absent" case and do not warn.
 //
 // Any Where() conditions are merged into the WHERE clause alongside the PK.
 // Returns the number of rows affected. Recursively saves associations.
@@ -923,11 +924,16 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 			continue
 		}
 
-		// Skip zero values (partial update). Track them so we can log a
-		// single WARN below — Update with zero values is silently skipped
-		// (the P0-4 trap), and users that hit it should be told.
+		// Skip zero values (partial update). A skipped *scalar* zero
+		// (false / 0 / "") is the P0-4 trap worth a WARN below: the caller
+		// may have meant to persist it. A nil pointer/slice/map is the
+		// idiomatic "absent / not applicable" case (e.g. deleted_at on every
+		// soft-delete model), so it is skipped silently — warning on it is
+		// just noise. Either way the field is omitted from the SET clause.
 		if isZeroValue(fieldValue) {
-			skippedZero = append(skippedZero, dbTag)
+			if isWarnableZero(fieldValue) {
+				skippedZero = append(skippedZero, dbTag)
+			}
 			continue
 		}
 
@@ -953,7 +959,7 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 
 	if len(skippedZero) > 0 && q.client != nil && q.client.logger != nil {
 		q.client.logger.Warn(
-			"Update skipped zero-value fields; use UpdateFields(entity, ...) or UpdateMap to write false / 0 / \"\" / nil explicitly",
+			"Update skipped zero-value fields; use UpdateFields(entity, ...) or UpdateMap to write false / 0 / \"\" explicitly",
 			"table", q.table,
 			"skipped", skippedZero,
 		)
@@ -1101,6 +1107,21 @@ func isZeroValue(v reflect.Value) bool {
 		return v.IsNil()
 	default:
 		return false
+	}
+}
+
+// isWarnableZero reports whether a skipped zero value is worth a WARN: a scalar
+// zero (false / 0 / "") the caller may have intended to persist via Update.
+// Nil pointers, interfaces, slices, and maps are the idiomatic "absent / not
+// applicable" case — most models carry at least one (e.g. a nil deleted_at), so
+// warning on them would fire on nearly every partial update. They are still
+// skipped from the SET clause; they just don't trigger the WARN.
+func isWarnableZero(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map:
+		return false
+	default:
+		return true
 	}
 }
 

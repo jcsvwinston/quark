@@ -1,31 +1,293 @@
 ---
 sidebar_position: 2
 title: Getting Started
-description: "Build a complete Quark flow: connect, model, migrate, write, query, update, delete, and handle errors."
+description: "Build a working users service with Quark in ten minutes: model, migrate, create, read, update, delete — and see what every call returns."
 ---
 
 # Getting Started
 
-This guide builds the smallest useful Quark application. It uses SQLite so you
-can run it locally without containers, but the same model and query code works
-with PostgreSQL, MySQL, MariaDB, SQL Server, and Oracle by changing the driver
-name passed to `quark.New`.
+In the next ten minutes you'll build a tiny but complete users service: define a
+model, create its table, and run every basic operation against it — inserting a
+row, reading it back, querying a list, updating, and deleting. You'll run it on
+SQLite so there's nothing to install, but the exact same code works on
+PostgreSQL, MySQL, MariaDB, SQL Server, and Oracle by changing one string.
 
-## The Mental Model
+Throughout this guide, the `// =>` comments show what each snippet **prints**, so
+you can follow along as if you were typing into a shell.
 
-Quark has three main pieces:
+## Start with a model
 
-| Piece | Role |
-| --- | --- |
-| `Client` | Owns `*sql.DB`, dialect, limits, middleware, observers, cache, and schema helpers. |
-| `Model` | A normal Go struct with `db`, `pk`, validation, and relation tags. |
-| `Query[T]` | An immutable typed builder created with `quark.For[T](ctx, client)`. |
+A Quark model is a plain Go struct. The tags tell Quark how the struct maps to a
+table:
 
-Reads and writes start from `quark.For[Model](ctx, client)`. Builder methods
-such as `Where`, `OrderBy`, `Limit`, `Preload`, and `Cache` return a cloned
-query, so you can reuse base queries safely.
+```go
+type User struct {
+    ID        int64      `db:"id" pk:"true"`
+    Email     string     `db:"email" quark:"unique,not_null" validate:"required,email"`
+    Name      string     `db:"name" quark:"not_null"`
+    Active    bool       `db:"active"`
+    CreatedAt time.Time  `db:"created_at"`
+    UpdatedAt time.Time  `db:"updated_at"`
+    DeletedAt *time.Time `db:"deleted_at"`
+}
+```
 
-## Complete Example
+That's the whole data layer. A few conventions are worth knowing up front, but
+none of them need configuration:
+
+- **`db:"..."`** is the column name. A field without a `db` tag is ignored
+  entirely — never migrated, inserted, or scanned.
+- **`pk:"true"`** marks the primary key. (No primary key tag? Quark falls back to
+  the field tagged `db:"id"`.)
+- **The table name is inferred** by pluralizing and snake-casing the struct:
+  `User` → `users`, `APIKey` → `api_keys`. Already have a table with a different
+  name? Add one method:
+
+  ```go
+  func (User) TableName() string { return "app_users" }
+  ```
+
+- **A `*time.Time` field named `deleted_at`** turns on soft deletes automatically.
+  You'll see that pay off in a minute.
+
+Want timestamps set for you on every write? Add lifecycle hooks — ordinary
+methods on the struct:
+
+```go
+func (u *User) BeforeCreate(ctx context.Context) error {
+    now := time.Now()
+    u.CreatedAt, u.UpdatedAt = now, now
+    return nil
+}
+
+func (u *User) BeforeUpdate(ctx context.Context) error {
+    u.UpdatedAt = time.Now()
+    return nil
+}
+```
+
+## Connect
+
+`quark.New` takes a driver name and a data source, and gives you back a `Client`:
+
+```go
+client, err := quark.New("sqlite", "file:quark.db?cache=shared")
+if err != nil {
+    log.Fatal(err)
+}
+defer client.Close()
+```
+
+Quark detects the dialect from the driver name — pass `"postgres"`, `"mysql"`,
+`"sqlserver"`, etc. to talk to a real database instead. That's the only line that
+changes between engines.
+
+:::note Quark logs through `log/slog`
+With the default logger you'll see an informational line when the client starts
+(`INFO quark client initialized dialect=sqlite ...`), and the occasional `WARN`
+when Quark wants your attention — for example when an update skips a zero value
+(more on that below). Pass [`quark.WithLogger`](configuration) to route these
+through your own logger or to silence them.
+:::
+
+## Create the table
+
+For local development and tests, `Migrate` creates any missing tables (and
+many-to-many join tables) from your models:
+
+```go
+if err := client.Migrate(ctx, &User{}); err != nil {
+    log.Fatal(err)
+}
+```
+
+That's enough to start building. When you later need to evolve a live schema
+without losing data, you'll graduate to `Sync` or versioned migrations — see
+[Migrations](migrations) — but you don't need them yet.
+
+## Insert a row — and watch the ID come back
+
+Every query starts from `quark.For[Model](ctx, client)`. Here's a create:
+
+```go
+u := User{Email: "alice@example.com", Name: "Alice", Active: true}
+
+if err := quark.For[User](ctx, client).Create(&u); err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println("new id:", u.ID)
+// => new id: 1
+```
+
+`Create` validates the struct (that `validate:"required,email"` tag is enforced
+here), runs your `BeforeCreate` hook, inserts the row, and writes the generated
+primary key **back into `u`** — which is why `u.ID` is `1` afterward.
+
+## Read it back
+
+For a lookup by primary key, use `Find`:
+
+```go
+alice, err := quark.For[User](ctx, client).Find(1)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("%+v\n", alice)
+// => {ID:1 Email:alice@example.com Name:Alice Active:true CreatedAt:... UpdatedAt:... DeletedAt:<nil>}
+```
+
+The row comes back as a fully typed `User` — no casts, no `interface{}`, no manual
+`Scan`.
+
+## Query a list
+
+Chain `Where`, `OrderBy`, and `Limit`, then call `List`:
+
+```go
+active, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Where("name", "LIKE", "A%").
+    OrderBy("created_at", "DESC").
+    Limit(20).
+    List()
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println(len(active), "active users")
+fmt.Println(active[0].Name)
+// => 1 active users
+// => Alice
+```
+
+Each builder method returns a **new** query, so you can keep a base query in a
+variable and branch off it without surprises:
+
+```go
+base := quark.For[User](ctx, client).Where("active", "=", true)
+
+count, _ := base.Count()
+page, _ := base.OrderBy("name", "ASC").Limit(10).List()
+
+fmt.Println(count, "match;", len(page), "on this page")
+// => 1 match; 1 on this page
+```
+
+If you forget `Limit`, `List` applies a safe default of 100 rows. For genuinely
+large result sets, stream with `Iter` or `Cursor` instead of loading everything
+into memory.
+
+## Update a row
+
+Change a field on the struct and call `Update`. It returns the number of rows
+affected:
+
+```go
+alice.Name = "Alice Walker"
+
+rows, err := quark.For[User](ctx, client).Update(&alice)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println(rows, "row updated")
+// => 1 row updated
+```
+
+`Update` is **partial**: it skips zero values, so a half-filled struct can't
+accidentally blank out columns with `false`, `0`, or `""`. If you skip a scalar
+zero this way, Quark logs a `WARN` so it's never silent (a nil pointer like an
+unset `deleted_at` is the expected "absent" case and stays quiet). When you
+genuinely *want* to write a zero value, say so explicitly with `UpdateMap`:
+
+```go
+rows, _ = quark.For[User](ctx, client).
+    Where("id", "=", alice.ID).
+    UpdateMap(map[string]any{"active": false})
+
+fmt.Println(rows, "row deactivated")
+// => 1 row deactivated
+```
+
+`UpdateMap` requires a `Where` clause — there's no way to fat-finger a
+full-table update.
+
+## Delete a row (softly)
+
+Because `User` has a `deleted_at` column, `Delete` performs a **soft delete** —
+the row stays in the table but disappears from normal queries:
+
+```go
+quark.For[User](ctx, client).Delete(&alice)
+
+_, err = quark.For[User](ctx, client).Find(alice.ID)
+fmt.Println(errors.Is(err, quark.ErrNotFound))
+// => true   (soft-deleted rows are hidden by default)
+```
+
+Need to see them anyway? Add `Unscoped`:
+
+```go
+all, _ := quark.For[User](ctx, client).Unscoped().List()
+fmt.Println(len(all), "rows including soft-deleted")
+// => 1 rows including soft-deleted
+```
+
+To delete for real, use `HardDelete` (one entity) or `DeleteBy` (by predicate,
+no row loaded first):
+
+```go
+quark.For[User](ctx, client).Where("active", "=", false).DeleteBy()
+```
+
+## Insert-or-update in one call
+
+When an import or an idempotent command should create a row if it's new or update
+it if it already exists, use `Upsert`:
+
+```go
+incoming := User{Email: "alice@example.com", Name: "Alice W.", Active: true}
+
+err = quark.For[User](ctx, client).Upsert(
+    &incoming,
+    []string{"email"},          // conflict target (a unique key)
+    []string{"name", "active"}, // columns to update on conflict
+)
+```
+
+Quark emits the right `ON CONFLICT`, `ON DUPLICATE KEY`, or `MERGE` for whatever
+engine you're on — you write this once.
+
+## When something goes wrong
+
+Quark returns sentinel errors you can match with `errors.Is`, so your handlers
+stay readable:
+
+```go
+user, err := quark.For[User](ctx, client).Find(999)
+switch {
+case err == nil:
+    fmt.Println("found:", user.Name)
+case errors.Is(err, quark.ErrNotFound):
+    fmt.Println("no such user")
+    // => no such user
+case errors.Is(err, quark.ErrConstraintViolation):
+    fmt.Println("duplicate email or bad foreign key")
+default:
+    log.Fatal(err)
+}
+```
+
+One nice safety net: a malformed column or table name is caught **before** the
+query ever reaches the database, and comes back as `quark.ErrInvalidIdentifier`.
+(It's a fast structural check, not a spell-checker — a perfectly-formed name for a
+column that doesn't exist is still rejected by the database, as usual.)
+
+## The complete program
+
+Here's everything above as one runnable file:
 
 ```go
 package main
@@ -33,6 +295,7 @@ package main
 import (
     "context"
     "errors"
+    "fmt"
     "log"
     "time"
 
@@ -44,8 +307,7 @@ type User struct {
     ID        int64      `db:"id" pk:"true"`
     Email     string     `db:"email" quark:"unique,not_null" validate:"required,email"`
     Name      string     `db:"name" quark:"not_null"`
-    Active    bool       `db:"active" default:"1"`
-    Score     int        `db:"score" default:"0"`
+    Active    bool       `db:"active"`
     CreatedAt time.Time  `db:"created_at"`
     UpdatedAt time.Time  `db:"updated_at"`
     DeletedAt *time.Time `db:"deleted_at"`
@@ -53,8 +315,7 @@ type User struct {
 
 func (u *User) BeforeCreate(ctx context.Context) error {
     now := time.Now()
-    u.CreatedAt = now
-    u.UpdatedAt = now
+    u.CreatedAt, u.UpdatedAt = now, now
     return nil
 }
 
@@ -76,253 +337,45 @@ func main() {
         log.Fatal(err)
     }
 
-    user := User{
-        Email:  "alice@example.com",
-        Name:   "Alice",
-        Active: true,
-    }
-
-    if err := quark.For[User](ctx, client).Create(&user); err != nil {
+    // Create
+    u := User{Email: "alice@example.com", Name: "Alice", Active: true}
+    if err := quark.For[User](ctx, client).Create(&u); err != nil {
         log.Fatal(err)
     }
+    fmt.Println("new id:", u.ID) // => new id: 1
 
-    found, err := quark.For[User](ctx, client).Find(user.ID)
-    if err != nil {
-        log.Fatal(err)
-    }
+    // Read
+    alice, _ := quark.For[User](ctx, client).Find(u.ID)
+    fmt.Println(alice.Name) // => Alice
 
-    found.Name = "Alice Walker"
-    if _, err := quark.For[User](ctx, client).Update(&found); err != nil {
-        log.Fatal(err)
-    }
+    // Update
+    alice.Name = "Alice Walker"
+    rows, _ := quark.For[User](ctx, client).Update(&alice)
+    fmt.Println(rows, "row updated") // => 1 row updated
 
-    active, err := quark.For[User](ctx, client).
+    // List
+    active, _ := quark.For[User](ctx, client).
         Where("active", "=", true).
         OrderBy("created_at", "DESC").
         Limit(20).
         List()
-    if err != nil {
-        log.Fatal(err)
-    }
+    fmt.Println(len(active), "active users") // => 1 active users
 
-    log.Printf("active users: %d", len(active))
-
-    if _, err := quark.For[User](ctx, client).Delete(&found); err != nil {
-        log.Fatal(err)
-    }
-
-    _, err = quark.For[User](ctx, client).Find(found.ID)
-    if errors.Is(err, quark.ErrNotFound) {
-        log.Println("soft-deleted rows are hidden by default")
-    }
+    // Soft delete
+    quark.For[User](ctx, client).Delete(&alice)
+    _, err = quark.For[User](ctx, client).Find(alice.ID)
+    fmt.Println(errors.Is(err, quark.ErrNotFound)) // => true
 }
 ```
 
-## Create a Client
+Run it with `go run .` and you'll see each line print as commented above.
 
-```go
-client, err := quark.New("sqlite", "file:quark.db?cache=shared")
-if err != nil {
-    return err
-}
-defer client.Close()
-```
+## Where to next
 
-The dialect is auto-detected from the driver name. Use `WithDialect` to override
-when the driver name is ambiguous (e.g. registering a custom dialect under
-`pgx`).
-
-## Define a Model
-
-```go
-type User struct {
-    ID        int64      `db:"id" pk:"true"`
-    Email     string     `db:"email" quark:"unique,not_null" validate:"required,email"`
-    Name      string     `db:"name" quark:"not_null"`
-    Active    bool       `db:"active" default:"1"`
-    DeletedAt *time.Time `db:"deleted_at"`
-}
-```
-
-The `db` tag is the persisted column name. Fields without `db` are ignored by
-`Migrate`, inserts, updates, and scans. `pk:"true"` marks the primary key. If no
-`pk:"true"` tag exists, Quark falls back to a field tagged `db:"id"`.
-
-Table names are inferred by pluralizing and snake-casing the struct name:
-`User` maps to `users`, `APIKey` maps to `api_keys`. Implement `TableName()`
-when the database already uses another name.
-
-```go
-func (User) TableName() string {
-    return "app_users"
-}
-```
-
-## Create Tables
-
-```go
-if err := client.Migrate(ctx, &User{}); err != nil {
-    return err
-}
-```
-
-`Migrate` creates missing tables and many-to-many join tables. It is intentionally
-simple and useful for development, tests, and initial schema creation. For live
-schema evolution, use `Sync` or versioned migrations as described in
-[Migrations and Sync](migrations).
-
-## Insert Rows
-
-```go
-user := User{
-    Email:  "alice@example.com",
-    Name:   "Alice",
-    Active: true,
-}
-
-if err := quark.For[User](ctx, client).Create(&user); err != nil {
-    return err
-}
-
-fmt.Println(user.ID)
-```
-
-`Create` validates the model, runs `BeforeCreate`, inserts the row, writes back
-the primary key when the dialect supports it, then runs `AfterCreate`.
-
-## Query Rows
-
-Use `Find` for simple primary keys:
-
-```go
-user, err := quark.For[User](ctx, client).Find(42)
-```
-
-Use `Where`, `OrderBy`, and `Limit` for lists:
-
-```go
-users, err := quark.For[User](ctx, client).
-    Where("active", "=", true).
-    Where("score", ">=", 100).
-    OrderBy("created_at", "DESC").
-    Limit(50).
-    List()
-```
-
-`List` applies a safe default limit of 100 when you forget to call `Limit`.
-Use `Iter` or `Cursor` when you intentionally want to stream a large result set.
-
-## Update Rows
-
-```go
-user.Name = "Alice Walker"
-rows, err := quark.For[User](ctx, client).Update(&user)
-```
-
-`Update` is partial: zero values are skipped. This prevents a sparse struct from
-accidentally overwriting columns with `false`, `0`, `""`, or `nil`.
-
-When you do need to write a zero value, use `UpdateMap` with an explicit
-predicate:
-
-```go
-rows, err = quark.For[User](ctx, client).
-    Where("id", "=", user.ID).
-    UpdateMap(map[string]any{
-        "active": false,
-        "score":  0,
-    })
-```
-
-`UpdateMap` requires a `Where` clause to avoid accidental full-table updates.
-
-## Delete Rows
-
-If a model has a `deleted_at` column, `Delete` performs a soft delete:
-
-```go
-rows, err := quark.For[User](ctx, client).Delete(&user)
-```
-
-Soft-deleted rows are hidden from normal `Find`, `First`, `List`, `Count`, and
-aggregate operations. Use `Unscoped` to include them:
-
-```go
-allUsers, err := quark.For[User](ctx, client).Unscoped().List()
-```
-
-Use `HardDelete` to permanently remove a single entity:
-
-```go
-rows, err = quark.For[User](ctx, client).HardDelete(&user)
-```
-
-Use `DeleteBy` when you want a hard delete by predicate without loading each row:
-
-```go
-rows, err = quark.For[User](ctx, client).
-    Where("active", "=", false).
-    DeleteBy()
-```
-
-`DeleteBy` requires a `Where` clause. In the current API it performs a hard
-delete, even if the model has `deleted_at`.
-
-## Upsert
-
-Use `Upsert` when an external feed or idempotent command should insert a row if
-it does not exist, or update selected columns if it conflicts.
-
-```go
-incoming := User{
-    Email:  "alice@example.com",
-    Name:   "Alice",
-    Active: true,
-}
-
-err := quark.For[User](ctx, client).Upsert(
-    &incoming,
-    []string{"email"},
-    []string{"name", "active"},
-)
-```
-
-The conflict columns must match a primary key or unique constraint in the
-database. Quark generates the appropriate `ON CONFLICT`, `ON DUPLICATE KEY`, or
-`MERGE` statement for the selected dialect.
-
-## Handle Common Errors
-
-```go
-user, err := quark.For[User](ctx, client).Find(42)
-switch {
-case err == nil:
-    _ = user
-case errors.Is(err, quark.ErrNotFound):
-    return nil
-case errors.Is(err, quark.ErrConstraintViolation):
-    return fmt.Errorf("duplicate or invalid related row: %w", err)
-case errors.Is(err, quark.ErrInvalidIdentifier):
-    return fmt.Errorf("rejected identifier before execution: %w", err)
-case errors.Is(err, quark.ErrInvalidQuery):
-    return fmt.Errorf("query rejected before execution: %w", err)
-default:
-    return err
-}
-```
-
-A malformed **identifier** (a column or table name) surfaces as `ErrInvalidIdentifier`;
-`ErrInvalidQuery` covers a disallowed operator, a raw query without placeholders, or a
-structural problem (limits exceeded, uninitialised client) — all caught by SQLGuard
-before the statement reaches the driver. (Identifier checks are *lexical*: a well-formed
-but unknown column is rejected by the database, not by SQLGuard.)
-
-## Next Steps
-
-| Need | Read |
+| You want to… | Read |
 | --- | --- |
-| Model tags, composite keys, validation, hooks | [Modeling](modeling) |
-| Filters, scopes, pagination, streaming | [Query Builder](querying) |
-| Eager loading and association persistence | [Relations](relations) |
-| Bulk create, update, upsert, delete | [Batch Operations](batch-operations) |
-| Schema evolution | [Migrations and Sync](migrations) |
+| Use composite keys, validation, hooks, rich types, timezones | [Modeling](modeling) |
+| Filter, paginate, join, aggregate, stream | [Query Builder](querying) |
+| Load related rows and save associations | [Relations](relations) |
+| Create, update, upsert, or delete in bulk | [Batch Operations](batch-operations) |
+| Evolve a live schema safely | [Migrations](migrations) |
