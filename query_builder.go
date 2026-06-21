@@ -92,6 +92,18 @@ type BaseQuery struct {
 	// active for this query (both fall through to the reflection scan path).
 	typedScanResolved bool
 	typedScan         TypedScanner
+
+	// scanPlanResolved memoizes the reflection scan path's column→field
+	// resolution so rows.Columns(), the per-column FieldByCol/findField lookup,
+	// and the []any target buffer are computed once per query, not once per row
+	// — the columns and field indices are invariant across rows; only the
+	// per-row struct changes. scanPlan maps each result column (by position) to
+	// a struct field index (-1 = discard); scanDest is the reused Scan-target
+	// buffer and scanDiscard the shared sink for unmapped columns.
+	scanPlanResolved bool
+	scanPlan         []scanCol
+	scanDest         []any
+	scanDiscard      any
 }
 
 // selectExprEntry holds one AST-rendered projection in the SELECT list.
