@@ -17,6 +17,11 @@ var (
     ErrConnection          = errors.New("database connection error")
     ErrTimeout             = errors.New("query timeout")
     ErrConstraintViolation = errors.New("constraint violation")
+
+    // Event bus + inbound LISTEN/NOTIFY listener
+    ErrEventEmitFailed = errors.New("event emit failed after commit")
+    ErrListenerClosed  = errors.New("event listener closed")
+    ErrNoSubscription  = errors.New("event listener has no channel subscribed")
 )
 ```
 
@@ -68,6 +73,14 @@ migration time, not on the first query that binds or scans the column.
 The wrapped error names the field, the column and the offending timezone
 string. See [Timezones](/docs/guides/modeling#timezones) for the
 per-column timezone contract.
+
+`ErrEventEmitFailed`, `ErrListenerClosed`, and `ErrNoSubscription` cover the
+event subsystem. `ErrEventEmitFailed` wraps an `EventBus.Publish` failure that
+happens *after* the transaction commits — the commit stands, but the post-commit
+emit could not be delivered. `ErrListenerClosed` and `ErrNoSubscription` come
+from the inbound PostgreSQL `LISTEN/NOTIFY` listener: calling `Listen` after the
+listener is closed, or `Receive` before any channel has been subscribed. See
+[Events](/docs/advanced/events) for the bus and listener contracts.
 
 ## Error Checking
 
