@@ -98,3 +98,33 @@ re-evaluate Phase 6").
     would help bulk reads/writes.
   Note that even these are bounded: against a networked database the driver
   round-trip dwarfs all of it, and even in-memory the engine dominates CPU.
+
+## Update — AUD-2 (v1.2): scan-plan + result pre-size
+
+Two of the allocation levers above are now implemented for the read path
+(`perf:`, no API change, no reflection added — reflection is *reduced*):
+
+- **Scan-plan memoization.** `scanRow` resolved `rows.Columns()`, the per-column
+  `FieldByCol`/`findField` lookup, and the `[]any` scan-target slice *per row*.
+  Those are invariant across a query's rows, so they are now resolved once
+  (`resolveScanPlan`) and the scan-target buffer is reused, re-pointed at each
+  row's struct fields.
+- **Result pre-size.** The `List` result slice is pre-sized to the (capped) row
+  limit, avoiding the repeated slice-growth reallocations that dominated the
+  read-path alloc profile.
+
+Measured on `BenchmarkQuark_ListWhere` (SQLite in-process, `-count=6`):
+
+| | allocs/op | B/op | ns/op |
+| --- | --- | --- | --- |
+| before | 468 | 28,170 | 66,400 |
+| after | 415 | 20,000 | 54,700 |
+| Δ | −11% | −29% | −18% |
+
+The alloc ratio vs hand-written `database/sql` dropped 1.28× → 1.14× (time
+~1.74× → ~1.61×; the time ratio carries shared-hardware noise, the alloc/byte
+deltas do not). The remaining gap is the inherent per-field boxing in
+`makeScanDest` (`field.Addr().Interface()` — only the codegen typed scanner
+removes it) plus the immutable-clone builder — both architectural, per the
+analysis above. This confirms the earlier finding: the lever is allocation
+reduction, not reflection removal.

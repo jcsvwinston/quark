@@ -355,7 +355,17 @@ func (q *Query[T]) List() ([]T, error) {
 		}
 		defer rows.Close()
 
-		var results []T
+		// Pre-size the result slice to the (capped) row limit so the append loop
+		// avoids repeated slice-growth reallocations — the dominant read-path
+		// allocator per benchmarks/PROFILING.md. Capped so a large MaxResults
+		// with few actual rows doesn't over-allocate.
+		capHint := q.limit
+		if capHint < 0 {
+			capHint = 0
+		} else if capHint > 1024 {
+			capHint = 1024
+		}
+		results := make([]T, 0, capHint)
 		for rows.Next() {
 			var entity T
 			if scanErr := q.scanRow(rows, &entity); scanErr != nil {
@@ -1260,74 +1270,101 @@ func (q *Query[T]) scanRow(rows *sql.Rows, dest *T) error {
 		return fmt.Errorf("dest must point to a struct")
 	}
 
+	// Resolve the column→field plan once per query. The columns, their field
+	// indices and the []any target buffer are invariant across rows — only the
+	// per-row struct (elem) changes — so this hoists rows.Columns(), the
+	// per-column lookup and the slice allocation out of the per-row path.
+	if !q.scanPlanResolved {
+		if err := q.resolveScanPlan(rows, elem); err != nil {
+			return err
+		}
+		q.scanPlanResolved = true
+	}
+
+	// Per row: re-point the reused scan-target buffer at this row's fields.
+	for i := range q.scanPlan {
+		sc := &q.scanPlan[i]
+		if sc.fieldIndex >= 0 {
+			q.scanDest[i] = makeScanDest(elem.Field(sc.fieldIndex), sc.loc)
+		} else {
+			q.scanDest[i] = &q.scanDiscard
+		}
+	}
+	return rows.Scan(q.scanDest...)
+}
+
+// resolveScanPlan computes, once per query, the mapping from each result column
+// to a struct field index (-1 to discard) plus its per-column timezone, and
+// allocates the reusable scan-target buffer. The matching mirrors the historical
+// per-row path: cached FieldMeta first (FieldByCol), then the reflection
+// fallback (findFieldIndex); a column matching no field is discarded.
+func (q *Query[T]) resolveScanPlan(rows *sql.Rows, elem reflect.Value) error {
 	columns, err := rows.Columns()
 	if err != nil {
 		return err
 	}
-
-	// Resolve the per-column timezone state once per row. When the feature
-	// is inactive for this query, tzOn is false and every column scans with
-	// loc nil — makeScanDest then behaves exactly as it did in v0.6.
+	// Resolve the per-column timezone state once. When the feature is inactive
+	// for this query, tzOn is false and every column scans with loc nil —
+	// makeScanDest then behaves exactly as it did on the per-row path.
 	tzOn := q.tzActive()
 	var clientDefaultTZ *time.Location
 	if tzOn && q.client != nil {
 		clientDefaultTZ = q.client.defaultTZ
 	}
-
-	scanDest := make([]any, len(columns))
+	plan := make([]scanCol, len(columns))
 	for i, col := range columns {
-		matched := false
-		// Fast path: use cached metadata
+		idx := -1
+		var loc *time.Location
 		if q.meta != nil {
 			if fm, ok := q.meta.FieldByCol[strings.ToLower(col)]; ok {
-				var loc *time.Location
+				idx = fm.Index
 				if tzOn {
 					loc = resolveFieldTZ(fm, clientDefaultTZ)
 				}
-				scanDest[i] = makeScanDest(elem.Field(fm.Index), loc)
-				matched = true
 			}
 		}
-		if !matched {
+		if idx < 0 {
 			// Slow path: reflection lookup. No FieldMeta here, so only the
-			// client default can apply — a column tag override needs the
-			// cached metadata.
-			field := q.findField(elem, col)
-			if field.IsValid() && field.CanAddr() {
-				var loc *time.Location
+			// client default can apply — a column tag override needs the cached
+			// metadata.
+			if fi := q.findFieldIndex(elem, col); fi >= 0 {
+				idx = fi
 				if tzOn {
 					loc = clientDefaultTZ
 				}
-				scanDest[i] = makeScanDest(field, loc)
-				matched = true
-			} else {
-				var discard any
-				scanDest[i] = &discard
 			}
 		}
+		plan[i] = scanCol{fieldIndex: idx, loc: loc}
 	}
-
-	err = rows.Scan(scanDest...)
-	return err
+	q.scanPlan = plan
+	q.scanDest = make([]any, len(columns))
+	return nil
 }
 
-// findField finds a struct field matching the column name (fallback for uncached lookups).
-func (q *Query[T]) findField(elem reflect.Value, column string) reflect.Value {
+// findFieldIndex returns the struct field index matching the column name (the
+// reflection fallback for uncached lookups), or -1 if no field matches. elem
+// comes from a pointer's Elem(), so a matched field is always addressable.
+func (q *Query[T]) findFieldIndex(elem reflect.Value, column string) int {
 	t := elem.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-
 		dbTag := columnFromDBTag(field.Tag.Get("db"))
 		if strings.EqualFold(dbTag, column) {
-			return elem.Field(i)
+			return i
 		}
-
 		if strings.EqualFold(toSnakeCase(field.Name), column) || strings.EqualFold(field.Name, column) {
-			return elem.Field(i)
+			return i
 		}
 	}
+	return -1
+}
 
-	return reflect.Value{}
+// scanCol is one column's resolved scan target in a Query's reflection scan
+// plan (see scanPlan): the struct field index to scan into, or -1 to discard
+// the column, plus the per-column timezone (nil when the tz feature is off).
+type scanCol struct {
+	fieldIndex int
+	loc        *time.Location
 }
 
 // loadRelations eager loads requested relations for the given results,
