@@ -104,7 +104,7 @@ Te invocan tras un cambio. Pasos en orden:
 - [ ] **El test cubre los 6 motores de CI** si el cambio toca SQL (PG/MySQL/MariaDB/MSSQL/Oracle + SQLite). Oracle corre en la matriz `integration` bloqueante (vía `docker run gvenzl/oracle-free`, no testcontainers, cuyo ciclo de vida fallaba en los runners hosteados).
 - [ ] **Si tocas concurrencia, hay `t.Parallel()`** y assertions reales (no `fmt.Printf`).
 - [ ] **Si cambias hooks o transacciones, hay tests de transacción anidada / savepoint / panic-rollback / hook unwind**.
-- [ ] **No se introducen `t.Skip` por env var nuevos**. Usa testcontainers (`containers_test.go`) o build-tag `//go:build integration`.
+- [ ] **No se saca ningún motor de la matriz `integration` bloqueante, ni se hace la cobertura *en CI* dependiente de un env-var** (regla #7). Las suites por-motor usan el fallback de testcontainers (`containers_test.go`) bajo `-tags=integration`; los `t.Skip` por `QUARK_TEST_<MOTOR>_DSN not set` en el build `!integration` son una conveniencia de dev local sin Docker (CI corre `-tags=integration` → el contenedor arranca y el skip no salta), no un agujero de cobertura.
 
 ### Documentación (regla dura — bloqueante por delegación a `docs-auditor`)
 
