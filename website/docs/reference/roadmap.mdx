@@ -98,9 +98,11 @@ The operational backlog lives at
   groups).
 - **`RowLevelSecurityNative`** — PostgreSQL engine-enforced RLS via
   `set_config('app.tenant_id', …, true)` + `CREATE POLICY`. PostgreSQL
-  only; other dialects fail-fast with `ErrUnsupportedFeature`. Includes
-  the `quark tenant install-rls-policies` command to generate the policy
-  DDL.
+  only; other dialects fail-fast with `ErrUnsupportedFeature`. The
+  embeddable `quarktenant` library generates the policy DDL —
+  `quarktenant.InstallRLSPolicies`, or `quarktenant.Run` wired into your
+  own CLI (e.g. `go run ./cmd/tenant install-rls-policies`). See
+  [Native RLS](../advanced/row-level-native).
 - Tenant context propagation through association loads/saves.
 
 ### L2 cache (memory + Redis)
@@ -171,7 +173,9 @@ The operational backlog lives at
   is taken out of rotation for a cooldown.
 - **Sharding** (`ShardRouter`): routes each query by shard key, with a
   runnable example in `examples/sharding/`. Cross-shard scatter-gather
-  and deriving the shard key from the entity are deferred to v1.2+.
+  (`ScatterGather`/`ScatterCount`) and deriving the shard key from the
+  entity (`WithShardKeyOf`/`ShardKeyer`) are delivered (v1.2,
+  ADR-0022 / ADR-0021).
 - **Stress/load harness** (v0.13.0) in `benchmarks/stress/`.
 - **ent and sqlc in the benchmark harness** (v1.0.0): the
   code-generation tier of the comparison harness, informational rather
@@ -239,8 +243,6 @@ dialects on every PR (see boundaries below).
   declarative schema (Atlas/Prisma-style). The pure-Go schema diff
   shipped in v0.6 is the foundation; the schema-first DSL is the next
   layer if demand justifies it.
-- **Cross-instance stampede coordination** (a distributed-lock hook for
-  the cache layer), reopened only if user demand surfaces.
 - **Pluggable ID strategies** (UUID v7, ULID, Snowflake) as built-ins.
 - **Outbound CRUD lifecycle events to NATS/Kafka/Redis Streams** as
   out-of-the-box `EventBus` implementations beyond the logger/OTel
