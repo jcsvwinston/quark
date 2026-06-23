@@ -18,7 +18,41 @@
 > Los fallos del bug-bash aparecen en la sección § "Bug-bash hallazgos"
 > de abajo (creada por `bugbash-reporter` al cerrar cada pasada).
 
-## Overhaul DX de la documentación + 1 fix nuevo — handoff al owner (2026-06-20) ⚠️
+## Auditoría integral v1.1.5 — cerrar gaps de código (FOCO próxima /next-session auto) ⚠️
+
+> **Foco para `/next-session auto`.** Auditoría integral del 2026-06-21 (docs + código + benchmarks + madurez): [`docs/AUDITORIA_INTEGRAL_v1.1.5.md`](docs/AUDITORIA_INTEGRAL_v1.1.5.md). Veredicto: técnicamente sólido y honesto (docs ≈98% exactas, seguridad SQL sin huecos, 6 motores reales y bloqueantes en CI; benchmarks re-ejecutados confirman "misma clase que GORM/ent" y overhead más consistente — siempre ≤1,9× el SQL a mano). **No "enterprise-grade" todavía, por adopción/bus-factor/gobernanza, NO por técnica** (§5–6 del informe).
+>
+> **Encargo del owner: cerrar SOLO los gaps que dependen del código (§7, items 1–4).** Los items 5–8 (adopción externa, 2º mantenedor, gobernanza, respaldo) son sociales/operativos — fuera de esta tanda.
+>
+> Reglas: Conventional Commits; `code-reviewer` antes de cada PR; si toca SQL, 6 motores verdes; docs+CHANGELOG en el mismo PR. (Entre paréntesis, el tipo que corta release.)
+
+### AUD-1 · Corregir desfases doc↔código de la auditoría (§1) — `docs:` (no corta release)
+- `website/docs/reference/roadmap.mdx`: scatter-gather y shard-key-desde-entidad figuran como "diferidos a v1.2" pero **están entregados** — `ScatterGather`/`ScatterCount`/`ScatterMerge` (`shard_scatter.go`), `WithShardKeyOf`/`ShardKeyer` (`shard_router.go`). Moverlos a entregado.
+- `roadmap.mdx`: stampede cross-instancia listado como futuro pero existe — `WithCacheCrossInstance()`/`CacheLocker` (ADR-0020). Sacarlo de "goals".
+- `roadmap.mdx`: `quark tenant install-rls-policies` se describe como subcomando del CLI; es entrypoint de la **librería** `quarktenant` que se embebe (la guía `row-level-native.mdx` ya lo hace bien).
+- `website/docs/reference/api/query-builder.mdx:114`: WhereJSON PG muestra `::jsonb->>`; el código emite `jsonb_extract_path_text(...)` (`dialect.go:222`). Alinear con `querying.mdx`.
+- `website/docs/reference/api/errors.mdx`: añadir sentinels que faltan — `ErrEventEmitFailed`, `ErrNoSubscription`, `ErrListenerClosed`.
+- **Verificación:** `docs-auditor` + `cd website && npm run build` (enlaces).
+
+### AUD-2 · Optimizar `ListWhere` (scan reflect por fila) — `perf:` (corta patch)
+- Benchmark fresco (2026-06-21): Quark **1,92× raw** en `ListWhere` vs GORM 1,54× / ent 1,39× — **único punto donde Quark va por detrás**. Hot path: scan reflect por fila (`query_exec.go`, `scanRow`/`executeQuery`).
+- Acción: perfilar (patrón `benchmarks/PROFILING.md`) y bajar allocs/fila en el scan (cachear field-index en `ModelMeta`, reusar slices de scan-target) **sin añadir reflect** (ADR-0002 / regla 5). Alternativa: si el typed scanner del codegen ya cierra el gap, medirlo con codegen activo y documentarlo.
+- **Verificación:** re-correr `benchmarks/` con `-count=6` + `benchstat`; el ratio de `ListWhere` debe bajar. No toca SQL → `go test -short ./...` verde basta.
+
+### AUD-3 · Cerrar la grieta de la regla #7 (`t.Skip` por env-var) — `test:`/`docs:`
+- ~18 `t.Skip` por `QUARK_TEST_*_DSN not set` viven en el build `!integration`; la regla #7 de `CLAUDE.md` los prohíbe. En CI están **neutralizados** (la matriz corre `-tags=integration` → testcontainers, no pueden saltarse).
+- **Decisión del owner:** (a) eliminar los skips por env-var y confiar siempre en testcontainers, o (b) reescribir la regla #7 para reflejar la realidad de los build tags (skips solo en dev local sin Docker; imposibles en CI). Elegir una y dejar regla y código coherentes.
+- **Verificación:** `go test -short ./...` verde; job `integration` intacto.
+
+### AUD-4 · Benchmark reproducible + badge de cobertura real — `chore:`/`ci:`
+- Añadir target (p.ej. `make bench`) que corra `-count=6 -benchmem` + `benchstat` y emita la tabla; opcional job CI no-bloqueante que la publique. La cifra **publicable** debe correrse en hardware dedicado (no CI compartido ni sandbox: ruido ±10–25%) — documentarlo.
+- Badge de cobertura del README → debe reflejar un reporte real (lo exige ya la regla de release); generar cobertura real y wirearla (raíz medida: 67,9%).
+- **Verificación:** `make bench` produce salida `benchstat`; el badge enlaza un reporte real.
+
+### Estado
+Pendiente (próxima `/next-session auto`). Ninguno es Bug P0. Orden sugerido: **AUD-1** (rápido, docs) → **AUD-3** (decisión + limpieza) → **AUD-2** (perf, medir) → **AUD-4** (tooling).
+
+## Overhaul DX de la documentación — PUBLICADO (2026-06-21, PR #230); handoff cerrado ✅
 
 > **Foco válido para `/next-session auto`.** Reescritura de la doc pública a nivel
 > Eloquent/Django (orientada a tarea, output visible, jerga interna purgada),
