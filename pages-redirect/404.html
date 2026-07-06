@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Movido a Quantum</title>
+    <meta name="robots" content="noindex" />
+    <script>
+      (function () {
+        var OLD = '/quark/docs';
+        var NEW = '/quantum/quark';
+        var p = location.pathname;
+        var rest = p.indexOf(OLD) === 0 ? p.slice(OLD.length) : '';
+        var target = NEW + (rest && rest !== '/' ? rest : '/intro');
+        location.replace(target + location.search + location.hash);
+      })();
+    </script>
+  </head>
+  <body>
+    Esta página se ha movido al
+    <a href="/quantum/quark/intro">sitio unificado de Quantum</a>.
+  </body>
+</html>
