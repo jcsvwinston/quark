@@ -1,10 +1,10 @@
-name: Deploy Docusaurus to GitHub Pages
+name: Deploy Pages redirector (docs live in the unified Quantum site)
 
 on:
   push:
     branches: [main]
     paths:
-      - 'website/**'
+      - 'pages-redirect/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -29,21 +29,11 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: website
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: website/package-lock.json
-      - run: npm ci
-      - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: website/build
+          path: pages-redirect
 
   deploy:
     needs: build
