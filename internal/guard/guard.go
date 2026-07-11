@@ -279,39 +279,88 @@ func HasPlaceholders(query string) bool {
 	return false
 }
 
+// suspiciousPattern is one heuristic ValidateRawQuery scans for. Structural
+// patterns (stacked statements, comments, UNION) are matched against a copy
+// of the query whose single-quoted literal CONTENTS are masked out, so a
+// legitimate literal like 'range--max' no longer trips the comment check
+// (H-Q10). Tautology patterns (OR 1=1 and its quoted variant) are matched
+// against the original text — their whole point is what is inside the quotes.
+type suspiciousPattern struct {
+	re           *regexp.Regexp
+	desc         string
+	maskLiterals bool
+}
+
+var suspiciousPatterns = []suspiciousPattern{
+	{regexp.MustCompile(`;\s*DROP\s`), "a stacked DROP statement", true},
+	{regexp.MustCompile(`;\s*DELETE\s`), "a stacked DELETE statement", true},
+	{regexp.MustCompile(`;\s*UPDATE\s+\w+\s+SET\s+\w+\s*=`), "a stacked UPDATE statement", true},
+	{regexp.MustCompile(`UNION\s+SELECT`), "UNION SELECT", true},
+	{regexp.MustCompile(`OR\s+1\s*=\s*1`), "the tautology OR 1=1", false},
+	{regexp.MustCompile(`OR\s+'\s*1\s*'\s*=\s*'\s*1`), "the tautology OR '1'='1'", false},
+	// SQL line comment: the classic injection tail (`... OR 1=1 --`).
+	// Block comments (/* */) are intentionally NOT rejected: they are
+	// legitimate in raw queries as optimizer hints (MySQL `/*+ ... */`,
+	// Oracle `/*+ INDEX(...) */`). ValidateRawQuery is a best-effort
+	// heuristic backstop, not a complete anti-injection filter — the real
+	// boundary is AllowRawQueries (off by default) + placeholders for
+	// values. See docs/playbooks/security.md.
+	{regexp.MustCompile(`--`), "the line-comment marker --", true},
+}
+
+// maskLiterals returns the query with the contents of single-quoted string
+// literals removed (the quotes stay, so surrounding structure is preserved):
+// `WHERE tag = 'range--max'` → `WHERE tag = ”`. A doubled ” inside a
+// literal is the standard SQL escape and stays inside the literal. An
+// unterminated literal is masked to the end of the string — leaning
+// conservative for a validator (nothing hidden after a stray quote gets
+// scanned as structure).
+func maskLiterals(query string) string {
+	var b strings.Builder
+	b.Grow(len(query))
+	inLiteral := false
+	for i := 0; i < len(query); i++ {
+		c := query[i]
+		if !inLiteral {
+			b.WriteByte(c)
+			if c == '\'' {
+				inLiteral = true
+			}
+			continue
+		}
+		if c == '\'' {
+			if i+1 < len(query) && query[i+1] == '\'' {
+				i++ // escaped '' — still inside the literal, drop both
+				continue
+			}
+			inLiteral = false
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
 // ValidateRawQuery performs basic validation on a raw SQL query. It is a
 // best-effort heuristic backstop for the opt-in raw path (AllowRawQueries),
-// NOT a complete anti-injection filter. It does not parse SQL, so it has known
-// false positives — e.g. a `--` inside a string literal (`'range--max'`) is
-// rejected even though it is not a comment; rephrase such a query. The real
-// boundary for raw queries is AllowRawQueries (off by default) + placeholders
-// for values.
+// NOT a complete anti-injection filter. It does not fully parse SQL; it does
+// skip single-quoted literal contents for the structural checks, so e.g.
+// `'range--max'` is accepted while a `--` outside a literal is still
+// rejected. The real boundary for raw queries is AllowRawQueries (off by
+// default) + placeholders for values.
 func (g *SQLGuard) ValidateRawQuery(query string, requirePlaceholders bool) error {
 	if requirePlaceholders && !HasPlaceholders(query) {
 		return fmt.Errorf("%w: raw queries must use placeholders (?, $1, @p1, :1, etc.)", ErrInvalidQuery)
 	}
 
-	suspiciousPatterns := []string{
-		`;\s*DROP\s`,
-		`;\s*DELETE\s`,
-		`;\s*UPDATE\s+\w+\s+SET\s+\w+\s*=`,
-		`UNION\s+SELECT`,
-		`OR\s+1\s*=\s*1`,
-		`OR\s+'\s*1\s*'\s*=\s*'\s*1`,
-		`--`, // SQL line comment: the classic injection tail (`... OR 1=1 --`).
-		// Block comments (/* */) are intentionally NOT rejected: they are
-		// legitimate in raw queries as optimizer hints (MySQL `/*+ ... */`,
-		// Oracle `/*+ INDEX(...) */`). ValidateRawQuery is a best-effort
-		// heuristic backstop, not a complete anti-injection filter — the real
-		// boundary is AllowRawQueries (off by default) + placeholders for
-		// values. See docs/playbooks/security.md.
-	}
-
 	upper := strings.ToUpper(query)
-	for _, pattern := range suspiciousPatterns {
-		matched, _ := regexp.MatchString(pattern, upper)
-		if matched {
-			return fmt.Errorf("%w: query contains suspicious patterns that may indicate SQL injection", ErrInvalidQuery)
+	upperMasked := strings.ToUpper(maskLiterals(query))
+	for _, p := range suspiciousPatterns {
+		text := upper
+		if p.maskLiterals {
+			text = upperMasked
+		}
+		if p.re.MatchString(text) {
+			return fmt.Errorf("%w: raw query contains %s, which may indicate SQL injection", ErrInvalidQuery, p.desc)
 		}
 	}
 

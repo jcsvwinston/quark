@@ -279,6 +279,48 @@ func TestValidateRawQuery_BlockCommentAllowed(t *testing.T) {
 	}
 }
 
+// Structural patterns are matched with single-quoted literal contents masked
+// out (H-Q10): a legitimate literal like 'range--max' is data, not a comment.
+// The previously documented false positive is now accepted.
+func TestValidateRawQuery_StructuralPatternsInsideLiteralsAllowed(t *testing.T) {
+	g := guard.New()
+	for _, q := range []string{
+		"SELECT * FROM tags WHERE name = 'range--max'",
+		"SELECT * FROM notes WHERE body = '; DROP TABLE x'",
+		"SELECT * FROM posts WHERE title = 'union select in prose'",
+		// A doubled '' is the standard escape and stays inside the literal.
+		"SELECT * FROM notes WHERE body = 'it''s a -- dash'",
+	} {
+		if err := g.ValidateRawQuery(q, false); err != nil {
+			t.Errorf("literal-only payload %q should be allowed, got: %v", q, err)
+		}
+	}
+}
+
+// The masking must not create blind spots: the same markers OUTSIDE a
+// literal keep being rejected, including right after a closed literal.
+func TestValidateRawQuery_StructuralPatternsOutsideLiteralsRejected(t *testing.T) {
+	g := guard.New()
+	for _, q := range []string{
+		"SELECT * FROM tags WHERE name = 'x' -- AND hidden = 1",
+		"SELECT * FROM tags WHERE name = 'x'; DROP TABLE users",
+		"SELECT id FROM users WHERE note = 'x' UNION SELECT password FROM admins",
+	} {
+		if err := g.ValidateRawQuery(q, false); err == nil {
+			t.Errorf("expected error for out-of-literal payload %q, got nil", q)
+		}
+	}
+}
+
+// Tautology patterns intentionally keep seeing literal contents — what is
+// inside the quotes is their whole point.
+func TestValidateRawQuery_QuotedTautologyStillRejected(t *testing.T) {
+	g := guard.New()
+	if err := g.ValidateRawQuery("SELECT * FROM users WHERE name = ? OR '1'='1'", false); err == nil {
+		t.Error("expected error for OR '1'='1' tautology, got nil")
+	}
+}
+
 // --- ValidateJSONPath ---
 
 func TestValidateJSONPath_Valid(t *testing.T) {

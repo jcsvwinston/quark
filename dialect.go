@@ -166,7 +166,12 @@ func (p *PostgresDialect) Placeholders(n int) []string {
 }
 
 func (p *PostgresDialect) Quote(identifier string) string {
-	return fmt.Sprintf(`"%s"`, identifier)
+	// Defense in depth (H-Q7): identifiers reach Quote already vetted by
+	// guard.ValidateIdentifier on the main paths, but Quote itself must not
+	// depend on that — doubling the closing quote makes an embedded `"`
+	// inert instead of an identifier-injection point for any future
+	// call-site that forgets to validate.
+	return fmt.Sprintf(`"%s"`, strings.ReplaceAll(identifier, `"`, `""`))
 }
 
 func (p *PostgresDialect) LimitOffset(limit, offset int) string {
@@ -312,7 +317,8 @@ func (m *MySQLDialect) Placeholders(n int) []string {
 }
 
 func (m *MySQLDialect) Quote(identifier string) string {
-	return fmt.Sprintf("`%s`", identifier)
+	// Self-escaping quote — see PostgresDialect.Quote (H-Q7).
+	return fmt.Sprintf("`%s`", strings.ReplaceAll(identifier, "`", "``"))
 }
 
 func (m *MySQLDialect) LimitOffset(limit, offset int) string {
@@ -422,7 +428,8 @@ func (s *SQLiteDialect) Placeholders(n int) []string {
 }
 
 func (s *SQLiteDialect) Quote(identifier string) string {
-	return fmt.Sprintf(`"%s"`, identifier)
+	// Self-escaping quote — see PostgresDialect.Quote (H-Q7).
+	return fmt.Sprintf(`"%s"`, strings.ReplaceAll(identifier, `"`, `""`))
 }
 
 func (s *SQLiteDialect) LimitOffset(limit, offset int) string {
@@ -558,7 +565,10 @@ func (m *MSSQLDialect) Placeholders(n int) []string {
 }
 
 func (m *MSSQLDialect) Quote(identifier string) string {
-	return fmt.Sprintf("[%s]", identifier)
+	// Self-escaping quote — see PostgresDialect.Quote (H-Q7). Only the
+	// closing bracket terminates a T-SQL bracketed identifier, so `[`
+	// needs no escaping.
+	return fmt.Sprintf("[%s]", strings.ReplaceAll(identifier, "]", "]]"))
 }
 
 func (m *MSSQLDialect) LimitOffset(limit, offset int) string {
@@ -672,7 +682,8 @@ func (o *OracleDialect) Placeholders(n int) []string {
 }
 
 func (o *OracleDialect) Quote(identifier string) string {
-	return fmt.Sprintf(`"%s"`, strings.ToUpper(identifier))
+	// Self-escaping quote — see PostgresDialect.Quote (H-Q7).
+	return fmt.Sprintf(`"%s"`, strings.ReplaceAll(strings.ToUpper(identifier), `"`, `""`))
 }
 
 func (o *OracleDialect) LimitOffset(limit, offset int) string {
