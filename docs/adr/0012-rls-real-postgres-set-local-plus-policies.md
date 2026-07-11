@@ -99,6 +99,12 @@ estrategia de fila — no tienen RLS de motor equivalente.
 
 ### Generador de policies
 
+> **Estado (v1.2.0):** el generador se entregó **library-style** como
+> `quarktenant.InstallRLSPolicies` / `quarktenant.Run` (con ejemplo runnable
+> en `examples/tenant-rls-native/`), no como subcomando de la CLI. El
+> `quark tenant install-rls-policies` descrito abajo era la forma planeada
+> en este ADR y sigue sin existir como comando.
+
 `quark tenant install-rls-policies [--dry-run]` emite el SQL templated
 por cada modelo registrado en el `Client`:
 
@@ -130,7 +136,8 @@ es decorativa.
 ### Onboarding y offboarding de tenants
 
 Fuera del scope de este ADR; lo cubre `quark tenant onboard <id>` en
-el playbook tenant (Fase 5 también, pero ítem F5 independiente).
+el playbook tenant (Fase 5 también, pero ítem F5 independiente; a fecha
+de v1.2.0 ese subcomando sigue siendo un plan, no un comando existente).
 
 ## Consecuencias
 

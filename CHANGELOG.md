@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 * **query:** warn only on skipped scalar zero-values in Update, not nil pointers ([4f261bc](https://github.com/jcsvwinston/quark/commit/4f261bc6de41ddd591551fc582de397451610d47))
-* **security:** pin toolchain go1.26.5 + pgx v5.9.2 (11 advisories reached at v1.1.5) ([#235](https://github.com/jcsvwinston/quark/issues/235)) ([85cd55e](https://github.com/jcsvwinston/quark/commit/85cd55e98fc6ad630c74ceefb6a966ce18e75b6e))
+* **security:** pin toolchain go1.26.5 + pgx v5.9.2 — upstream security fixes accumulated against the v1.1.5 pins; see SECURITY.md. (The original commit title claimed "11 advisories", a count nothing in the repo substantiates; corrected here.) ([#235](https://github.com/jcsvwinston/quark/issues/235)) ([85cd55e](https://github.com/jcsvwinston/quark/commit/85cd55e98fc6ad630c74ceefb6a966ce18e75b6e))
 
 
 ### Performance

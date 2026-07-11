@@ -2,16 +2,16 @@
 
 ## Supported Versions
 
-Quark is **v1.1.2** — stable under SemVer. Security fixes land on `main` and
+Quark is **v1.2.0** — stable under SemVer. Security fixes land on `main` and
 on the latest two tagged minors; older tags are not patched. Upgrade to the
 current tag for security updates.
 
 | Version | Supported |
 |---------|-----------|
 | `main` | ✅ |
+| `v1.2.x` | ✅ |
 | `v1.1.x` | ✅ |
-| `v1.0.x` | ✅ |
-| `v0.13.x` and earlier | ❌ — please upgrade |
+| `v1.0.x` and earlier | ❌ — please upgrade |
 
 ---
 
@@ -49,6 +49,17 @@ Quark was built with security as a core design constraint, not a layer bolted on
 - **No credential storage** — Quark never stores or logs DSN credentials.
 
 If you find a bypass for any of these mechanisms, it is considered a critical security vulnerability.
+
+---
+
+## Dependency and Toolchain Advisories
+
+v1.2.0 pinned the Go toolchain to **go1.26.5** and **pgx v5.9.2** to pick up
+upstream security fixes that had accumulated against the versions pinned at
+v1.1.5. Quark does not maintain its own advisory list — the source of truth
+is the [Go vulnerability database](https://vuln.go.dev/) as reported by
+`govulncheck ./...`, which runs in CI on every PR and push to `main`. A
+finding that is actually reachable from Quark's code fails the build.
 
 ---
 

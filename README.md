@@ -20,7 +20,9 @@
 
 ## 📌 Status
 
-Quark is **v1.1.5** on the stable `v1.x` line (v1.1.0 was the hardening minor; v1.0.0 the first stable release under SemVer). Phases 0–6 are complete: the core query builder, CRUD, schema-as-code migrations across all six dialects (Oracle now in blocking CI), multi-tenancy, caché, hooks/events/audit log, observability, opt-in code generation, read replicas with failover, and pluggable sharding. `v1.x` keeps API compatibility; breaking changes go to `v2.x` with a `docs/MIGRATION_v2.0.0.md`. v1.0 was gated on the qualitative checklist in [`docs/V1_GATE.md`](docs/V1_GATE.md) (cross-engine coverage, structural gaps closed or consciously waived), not on a performance target — [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so code generation is a type-safety feature, not a speedup. Known limitations consciously deferred to v1.2+ are listed in [`docs/RELEASE_NOTES_v1.1.0.md`](docs/RELEASE_NOTES_v1.1.0.md).
+Quark is **v1.2.0** on the stable `v1.x` line (v1.1.0 was the hardening minor; v1.0.0 the first stable release under SemVer). Phases 0–6 are complete: the core query builder, CRUD, schema-as-code migrations across all six dialects (Oracle now in blocking CI), multi-tenancy, caché, hooks/events/audit log, observability, opt-in code generation, read replicas with failover, and pluggable sharding. `v1.x` keeps API compatibility; breaking changes go to `v2.x` with a `docs/MIGRATION_v2.0.0.md`. v1.0 was gated on the qualitative checklist in [`docs/V1_GATE.md`](docs/V1_GATE.md) (cross-engine coverage, structural gaps closed or consciously waived), not on a performance target — [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so code generation is a type-safety feature, not a speedup. Known limitations consciously deferred at each minor are listed in the release notes ([`docs/RELEASE_NOTES_v1.2.0.md`](docs/RELEASE_NOTES_v1.2.0.md) for the current line).
+
+**v1.2** (scaling follow-ups): closes two v1.1 deferrals — **cross-instance cache-stampede coordination** (opt-in `WithCacheCrossInstance` with a memory or Redis `CacheLocker`, ADR-0020) and richer sharding ergonomics: shard keys derived from the entity via `ShardKeyer`/`WithShardKeyOf` (ADR-0021) and explicit **scatter-gather cross-shard reads** (`ScatterGather`/`ScatterCount`/`ScatterMerge`, ADR-0022). Also pins toolchain go1.26.5 + pgx v5.9.2 (dependency security updates), fixes an over-eager Update zero-value warning, and memoizes the scan plan on the read path. No breaking changes.
 
 **v1.1** (hardening): the post-v1.0 bug-bash (phases F0–F14, a systematic cross-engine pass over the whole surface) plus the correctness fixes it surfaced — `CreateBatch` now chunks to each dialect's bind-parameter ceiling, versioned migrations work on SQL Server, a MariaDB schema-diff false positive is gone, dialect-aware savepoints, multi-tenant `SchemaPerTenant` write routing, and three eager-loading fixes, plus `--` rejected in raw queries (BB-5…BB-13). Adds automatic MariaDB detection and an inbound PostgreSQL `LISTEN/NOTIFY` listener (ADR-0019). No breaking changes.
 
@@ -241,13 +243,13 @@ rows, err = quark.For[User](ctx, client).Where("active", "=", false).DeleteBy()
 
 ```go
 // DeleteBatch — chunked IN clauses, respects dialect limits
-affected, err := quark.For[User](ctx, client).DeleteBatch([]int64{1, 2, 3, 100})
+affected, err := quark.For[User](ctx, client).DeleteBatch([]any{1, 2, 3, 100})
 
 // UpsertBatch — dialect-optimal (multi-row ON CONFLICT / bulk MERGE / individual MERGE)
 err = quark.For[User](ctx, client).UpsertBatch(users, []string{"email"}, []string{"name", "age"})
 
 // UpdateBatch — N partial updates in a single transaction
-affected, err = quark.For[User](ctx, client).UpdateBatch(users)
+err = quark.For[User](ctx, client).UpdateBatch(users)
 ```
 
 ### Query Builder
@@ -348,8 +350,9 @@ client, _ := quark.New("postgres", "postgres://user:pass@localhost/db",
 // Create table if not exists
 client.Migrate(ctx, &User{}, &Order{})
 
-// Evolve schema: add columns, rename with quark:"rename:old_col", drop with safe=false
-client.Sync(ctx, &User{})
+// Evolve schema: add columns, rename with quark:"rename:old_col",
+// drop only when Limits.SafeMigrations is false
+client.Sync(ctx, quark.SyncOptions{}, &User{})
 ```
 
 ### Versioned Migrations

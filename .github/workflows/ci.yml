@@ -40,6 +40,14 @@ jobs:
         # rules on purpose.
         run: bash scripts/lint-docs.sh
 
+      - name: version coherence
+        # H-Q6. The v1.2.0 release shipped while README/SECURITY/CLAUDE.md/
+        # release-notes still claimed v1.1.5/v1.1.2/v1.1.0. This fails the
+        # release-please PR (and any later drift) until the user-facing
+        # version mentions match .release-please-manifest.json and the
+        # current minor has a docs/RELEASE_NOTES_vX.Y.0.md.
+        run: bash scripts/check-version-coherence.sh
+
       - name: superapp manifest freshness (S7-coverage)
         # The coverage gate's denominator (apisurface.json) and its
         # callable-surface allowlist (allowlist.json) are generated and
@@ -57,6 +65,26 @@ jobs:
             git --no-pager diff --stat examples/superapp/apisurface.json examples/superapp/allowlist.json
             exit 1
           fi
+
+  govulncheck:
+    name: govulncheck
+    # H-Q5. SECURITY.md points at the Go vulnerability database as the
+    # source of truth for advisory status; this job is what backs that
+    # claim. govulncheck only fails on vulnerabilities reachable from
+    # Quark's code, so a red run is actionable, not noise.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
   test:
     name: Test (SQLite)

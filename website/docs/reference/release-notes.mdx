@@ -6,20 +6,43 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is **v1.1.5** on the stable `v1.x` line (v1.1.0 was the hardening
-minor). `v1.x` keeps API compatibility; breaking changes go to `v2.x`.
+Quark is **v1.2.0** on the stable `v1.x` line (v1.1.0 was the hardening
+minor; v1.2.0 adds the scaling follow-ups). `v1.x` keeps API compatibility;
+breaking changes go to `v2.x`.
 
 Narrative release notes for each **minor** live in the main repository under
 [`docs/RELEASE_NOTES_*.md`](https://github.com/jcsvwinston/quark/tree/main/docs)
 — the current line is documented at
-[`docs/RELEASE_NOTES_v1.1.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.1.0.md).
+[`docs/RELEASE_NOTES_v1.2.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.2.0.md).
 Patch releases are recorded in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and
 the [GitHub Releases](https://github.com/jcsvwinston/quark/releases), with a
 short summary below. Migration steps for the most recent breaking changes are
 at
 [`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
-v0.10 through v1.1.x introduced **no breaking changes**.
+v0.10 through v1.2.x introduced **no breaking changes**.
+
+## v1.2.0
+
+Minor release: the scaling follow-ups deferred at v1.1.
+
+- **Cross-instance cache-stampede coordination** (ADR-0020): opt-in
+  `WithCacheCrossInstance()` + the optional `CacheLocker` store capability
+  (implemented by the `memory` and `redis` stores). The lock winner recomputes
+  and writes; losers wait-and-reread. A lock-backend failure degrades to the
+  previous in-process behavior, never to an error.
+- **Shard key from the entity** (ADR-0021): entities implementing `ShardKeyer`
+  route with `WithShardKeyOf(ctx, entity)` — a caller-side helper, not a
+  router hook.
+- **Scatter-gather cross-shard reads** (ADR-0022): `ScatterGather` /
+  `ScatterCount` with an explicit caller-side `ScatterMerge`; COUNT is the
+  only aggregate merged for you.
+- **Security**: toolchain pinned to go1.26.5 and pgx to v5.9.2 (upstream
+  security fixes accumulated against the v1.1.5 pins).
+- **Fixes/perf**: the Update zero-value warning no longer fires on nil
+  pointers; the read path memoizes the scan plan and pre-sizes result slices.
+
+No breaking changes.
 
 ## v1.1.5
 
