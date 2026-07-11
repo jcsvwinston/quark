@@ -1,0 +1,144 @@
+---
+sidebar_position: 1
+title: Overview
+description: "Type-safe ORM for Go: define a struct, query it back as that struct — across six SQL engines with one API."
+---
+
+# QUARK ORM
+
+Quark is a type-safe ORM for Go. You define your tables as plain structs, and
+every read comes back as those structs — no `interface{}`, no manual `Scan`. The
+same model and query code runs on PostgreSQL, MySQL, MariaDB, SQLite, SQL Server,
+and Oracle; switching engines is a one-line change.
+
+```bash
+go get github.com/jcsvwinston/quark
+```
+
+Here's the whole idea in one snippet — a model, and a query that returns it:
+
+```go
+type User struct {
+    ID        int64     `db:"id" pk:"true"`
+    Email     string    `db:"email" quark:"unique,not_null"`
+    Name      string    `db:"name"`
+    Active    bool      `db:"active"`
+    CreatedAt time.Time `db:"created_at"`
+}
+
+// active is a []User — fully typed, ready to use. No casts, no manual Scan.
+active, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    OrderBy("created_at", "DESC").
+    Limit(10).
+    List()
+
+fmt.Printf("%d active user(s); first: %s\n", len(active), active[0].Name)
+// => 1 active user(s); first: Ada Lovelace
+```
+
+Ready to build something? **[Getting Started](guides/getting-started)** takes you
+from an empty file to full CRUD — connect, model, migrate, query — in about ten
+minutes, with the runnable version of the code above.
+
+## Why Quark
+
+- **Type-safe, generics-first.** `quark.For[User](ctx, client)` returns a
+  `*Query[User]`, and reads map straight back into your structs. There's no cast
+  to forget and no `interface{}` the compiler can't check.
+- **One API, six SQL engines.** PostgreSQL, MySQL, MariaDB, SQLite, SQL Server,
+  and Oracle. Placeholders, upserts (`ON CONFLICT` / `ON DUPLICATE KEY` /
+  `MERGE`), pagination, and DDL all differ underneath — your code doesn't.
+- **Immutable query builder.** Every builder method returns a new query, so a
+  shared base query is safe to reuse and branch from, even across goroutines.
+- **Identifier safety built in.** Column and table names are checked before a
+  statement is assembled, so a malformed identifier is caught at the API
+  boundary instead of deep in the driver. (Values are always parameterized.)
+- **Batteries included, opt-in when you need them.** Migrations, relations with
+  eager loading, batch operations, transactions with savepoints, validation, an
+  L2 cache, OpenTelemetry traces and metrics, and multi-tenancy — all on the same
+  client.
+- **Honest about trade-offs.** Quark is a reflection-based ORM in the same
+  performance class as GORM and Ent (see [Benchmarks](reference/benchmarks)); the
+  optional code generator buys compile-time column safety, not a speed claim.
+
+## Why I built this
+
+Quark grew out of running production services on GORM, where the same handful of
+patterns kept causing incidents:
+
+- Every `db.Find(&result)` forced an `interface{}` the compiler couldn't verify.
+- Column names in `WHERE` clauses were plain strings — a typo, or an injected
+  identifier in a dynamic query, had nothing standing in its way.
+- An N+1 query appeared the moment someone forgot a `Preload`, surfacing only in
+  slow-query logs hours later.
+- Multi-tenant isolation meant copy-pasting `WHERE tenant_id = ?` everywhere and
+  trusting discipline.
+
+Quark is the ORM I wanted instead: generics end the casts, identifiers are
+validated at the API boundary, eager loading is explicit, and multi-tenancy is
+first-class rather than an afterthought.
+
+## Documentation map
+
+### Guides
+
+| Section | Contents |
+|---|---|
+| [Installation](guides/installation) | Requirements, drivers, optional packages, env vars |
+| [Getting Started](guides/getting-started) | Connect, model, migrate, CRUD |
+| [Modeling](guides/modeling) | Tags, composite PKs, soft delete, validation, rich types (`Nullable`/`JSON`/`Array`), per-column timezones |
+| [Query Builder](guides/querying) | Filters, scopes, joins, aggregates, streaming, CTEs, window functions, set operators, locking |
+| [Batch Operations](guides/batch-operations) | CreateBatch, UpsertBatch, UpdateBatch, DeleteBatch |
+| [Relations](guides/relations) | has_many, belongs_to, many_to_many, polymorphic |
+| [Migrations](guides/migrations) | Migrate, Sync, schema diff (`PlanMigration`/`ApplyPlan`), `Backfill`, distributed lock |
+| [Transactions](guides/transactions) | Callback, manual, savepoints, isolation levels, `WithDeadlockRetry` |
+| [Lifecycle Hooks](guides/hooks) | Before/After Create/Update/Delete/Find, post-commit semantics, `Tx.OnCommit`/`Tx.OnRollback` |
+| [Operational Workflows](guides/cli) | The `quark` CLI: migrations, schema inspection, model generation, tenant jobs |
+| [Code Generation](guides/codegen) | Opt-in `quark gen` — typed scanners, INSERT binder, compile-time column accessors |
+
+### Advanced
+
+| Section | Contents |
+|---|---|
+| [Multi-Tenant](advanced/multi-tenant) | `DatabasePerTenant`, `SchemaPerTenant`, `RowLevelSecurityClient` |
+| [PostgreSQL Native RLS](advanced/row-level-native) | `RowLevelSecurityNative` engine-enforced + `quarktenant` CLI |
+| [Event Bus](advanced/events) | `Client.UseEventBus`, synchronous post-commit, at-least-once |
+| [Audit Log](advanced/audit-log) | `Client.EnableAuditLog`, atomic with the CRUD transaction |
+| [Caching & Observability](advanced/caching-observability) | L2 cache, stampede protection, OTel traces + metrics, slow-query log |
+| [Read Replicas](advanced/read-replicas) | `WithReplicas` read/write split, `Sticky(ctx)` read-your-writes, automatic failover |
+| [Sharding](advanced/sharding) | `ShardRouter`, shard-key context routing, `HashShardFunc`, cross-shard limits |
+
+### Reference
+
+| Section | Contents |
+|---|---|
+| [SQLGuard](reference/sqlguard) | Identifier validation, JSON path, JOIN-ON, AllowRawQueries |
+| [Comparison](reference/comparison) | Cell-by-cell vs GORM, sqlx, Ent |
+| [Configuration](reference/configuration) | Limits, `WithDialect`, `WithCacheStore`, middleware, observability options |
+| [Dialects](reference/dialects) | Dialect table, upsert mapping, custom dialects |
+| [Benchmarks](reference/benchmarks) | Reproducible `database/sql` baseline + GORM/Ent/sqlc comparison |
+| [Architecture](reference/architecture) | Request lifecycle, identifier validation, schema evolution |
+| [Roadmap](reference/roadmap) | Delivered today vs deferred |
+| [Release Notes](reference/release-notes) | Per-version changelog |
+
+### API Reference
+
+Symbol-level reference for the public API, grouped as in the sidebar:
+
+| Group | Pages |
+|---|---|
+| [Overview](reference/api/) | Index of every documented type and function |
+| Core API | [Client](reference/api/client), [Query Builder](reference/api/query-builder), [CRUD](reference/api/crud), [Querying](reference/api/querying) |
+| Schema & Data | [Modeling](reference/api/modeling), [Transactions](reference/api/transactions), [Migrations](reference/api/migrations) |
+| Advanced Features | [Caching](reference/api/caching), [Multi-Tenancy](reference/api/multi-tenant), [Observability](reference/api/observability) |
+| Reference | [Dialects](reference/api/dialects), [Errors](reference/api/errors), [Stored Routines](reference/api/routines) |
+
+## Project status
+
+Quark is on the stable **v1.x** line and follows [SemVer](https://semver.org):
+the public API stays compatible within v1.x, and breaking changes are reserved
+for a future v2 with a migration guide. All six engines — Oracle included — run
+on every pull request in CI. For the current version and what changed in each
+release, see the [Releases](https://github.com/jcsvwinston/quark/releases) page
+and the [Release Notes](reference/release-notes).

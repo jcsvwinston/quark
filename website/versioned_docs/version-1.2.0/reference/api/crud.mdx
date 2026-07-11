@@ -1,0 +1,390 @@
+# CRUD Operations API Reference
+
+Reference for create, update, delete, upsert, and batch write methods on
+`*quark.Query[T]`.
+
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `Create` | `Create(entity *T) error` | Validate and insert one entity. |
+| `CreateBatch` | `CreateBatch(entities []*T) error` | Validate and insert many entities. |
+| `Update` | `Update(entity *T) (int64, error)` | Update one entity by PK (skips zero values). |
+| `Track` | `Track() *TrackedQuery[T]` | Switch reads to dirty-tracking wrappers for diff-based `Save`. |
+| `UpdateFields` | `UpdateFields(entity *T, fields ...string) (int64, error)` | Update only named fields, including zero values. |
+| `UpdateMap` | `UpdateMap(data map[string]any) (int64, error)` | Update explicit columns for `Where`-matched rows. |
+| `Delete` | `Delete(entity *T) (int64, error)` | Soft-delete by PK if `deleted_at` exists, else hard-delete. |
+| `HardDelete` | `HardDelete(entity *T) (int64, error)` | Permanently delete by PK even when soft delete is enabled. |
+| `DeleteBy` | `DeleteBy() (int64, error)` | Hard-delete rows matching the current `Where` clauses. |
+| `DeleteBatch` | `DeleteBatch(ids []any) (int64, error)` | Hard-delete rows by primary-key values. |
+| `Upsert` | `Upsert(entity *T, conflictCols, updateCols []string) error` | Insert or update one entity on conflict. |
+| `UpsertBatch` | `UpsertBatch(entities []*T, conflictCols, updateCols []string) error` | Bulk insert-or-update. |
+| `UpdateBatch` | `UpdateBatch(entities []*T) error` | Update many entities by PK in one transaction. |
+
+## Create
+
+### `Create(entity *T) error`
+
+Validates and inserts one entity.
+
+```go
+user := &User{
+    Email: "alice@example.com",
+    Name:  "Alice",
+}
+
+err := quark.For[User](ctx, client).Create(user)
+```
+
+Behavior:
+
+| Step | Detail |
+| --- | --- |
+| Validation | Calls `client.Validate(ctx, entity)`. |
+| Hooks | Runs `BeforeCreate` and `AfterCreate` when implemented. |
+| Associations | Recursively saves `belongs_to`, main entity, `has_one`, `has_many`, then many-to-many links. |
+| Primary key | Writes back integer PKs when the dialect supports `RETURNING` or last-insert ID. |
+| Cache | Invalidates the model table tag after successful write execution. |
+
+The entity must be a non-nil pointer to a struct.
+
+## CreateBatch
+
+### `CreateBatch(entities []*T) error`
+
+Validates and inserts multiple entities.
+
+```go
+users := []*User{
+    {Email: "a@example.com", Name: "A"},
+    {Email: "b@example.com", Name: "B"},
+}
+
+err := quark.For[User](ctx, client).CreateBatch(users)
+```
+
+Behavior:
+
+| Dialect | Shape |
+| --- | --- |
+| PostgreSQL, SQLite, MySQL, MariaDB, SQL Server | Multi-row `INSERT ... VALUES ...`, chunked so each statement stays under the dialect's bind-parameter ceiling (SQL Server ~2100). |
+| Oracle | Individual single-row inserts to avoid identity-column conflicts. |
+
+Large slices are chunked automatically, so a call with tens of thousands of rows
+will not overrun a dialect's parameter limit. Chunks run on the bound executor
+and are not wrapped in an implicit transaction — wrap `CreateBatch` in
+`client.Tx` if you need all-or-nothing across chunks.
+
+If the first entity has a zero single-column integer primary key, Quark omits
+that PK column and lets the database assign it. Dialects with `RETURNING` can
+write generated primary keys back to the entity pointers.
+
+`CreateBatch` returns `nil` for an empty slice.
+
+## Update
+
+### `Update(entity *T) (int64, error)`
+
+Updates one entity by primary key using partial-update semantics.
+
+```go
+user := &User{
+    ID:   42,
+    Name: "Alice Walker",
+}
+
+rows, err := quark.For[User](ctx, client).Update(user)
+```
+
+Zero values are skipped:
+
+| Zero value | Skipped by `Update` |
+| --- | --- |
+| `""` | yes |
+| `0` | yes |
+| `false` | yes |
+| `nil` pointer/slice/map | yes |
+
+:::caution Zero-value trap
+Because `Update` filters out zero values, it **cannot** write `false`, `0`,
+`""`, or `nil` to a column. To put `active = false` into the database use
+[`Track + Save`](#track--save-dirty-tracking) (recommended; the snapshot-driven
+escape hatch), [`UpdateFields`](#updatefields), or
+[`UpdateMap`](#updatemap). When `Update` detects skipped zero-value fields it
+logs a `WARN` line so you notice the silent skip.
+
+The zero-value filter is preserved on `Update` itself for behavioural
+compatibility; reach for `Track + Save` when you want to mutate a struct
+freely and let Quark decide what to write.
+:::
+
+`Update` merges primary-key predicates with any existing query `Where` clauses:
+
+```go
+rows, err := quark.For[User](ctx, client).
+    Where("tenant_id", "=", tenantID).
+    Update(user)
+```
+
+Hooks: `BeforeUpdate` and `AfterUpdate`.
+
+## Track + Save (dirty tracking)
+
+### `Query[T].Track() *TrackedQuery[T]`
+
+Opt-in dirty tracking. `Track` swaps the result type of `Find` / `First` /
+`List` from `T` / `[]T` to `*Tracked[T]` / `[]*Tracked[T]`. Each tracked
+value carries a snapshot of the column values at load time, so a later
+`Save` can emit an UPDATE that touches only the columns whose values
+actually changed — and writes them even when the new value is zero.
+
+```go
+tracked, err := quark.For[User](ctx, client).Track().Find(42)
+if err != nil { return err }
+
+tracked.Entity.Active = false
+tracked.Entity.Score = 0
+
+rows, err := tracked.Save(ctx)
+// emits: UPDATE "users" SET "active" = $1, "score" = $2 WHERE "id" = $3
+//        args = [false, 0, 42]
+```
+
+`Tracked.Changed()` returns the list of columns whose values differ from
+the snapshot; `Tracked.Save(ctx)` runs the UPDATE and refreshes the
+snapshot on success, so a second `Save` with no further mutation is a
+no-op (returns `0, nil` without touching the database).
+
+Rules:
+
+| Rule | Why |
+| --- | --- |
+| The primary-key column is never included in `SET`. | Identity is WHERE-only. |
+| The configured tenant column is never written. | RLS isolation boundary; a `Save` cannot move a row across tenants. |
+| The tenant predicate from the loading query is added to the `WHERE`. | Same isolation guarantee as the rest of the multi-tenant API. |
+| Hooks `BeforeUpdate` / `AfterUpdate` run, just like on `Update`. | Behaviour parity with the partial-update path. |
+| Save sidesteps the [zero-value trap](#update). | `Update`'s zero-value filter doesn't apply — values are written based on the diff, not on whether they're zero. |
+
+The snapshot lives on the wrapper, not in the Client, so there is no
+shared map to grow or evict. Each `Tracked` is independent — pass it
+around, mutate it, save it whenever you want.
+
+## UpdateFields
+
+### `UpdateFields(entity *T, fields ...string) (int64, error)`
+
+Updates only the named fields on the entity, bypassing the zero-value filter.
+This is the recommended escape hatch for writing `false`, `0`, `""`, or `nil`.
+
+```go
+user := User{ID: 42, Active: false}
+rows, err := quark.For[User](ctx, client).UpdateFields(&user, "active")
+// emitted: UPDATE "users" SET "active" = $1 WHERE "id" = $2  args=[false, 42]
+```
+
+Rules:
+
+| Rule | Reason |
+| --- | --- |
+| Field name matches the `db` tag (or struct field name when no `db` tag is set). | Same identifier resolution as `Update`/`Find`. |
+| Listing the primary key column returns an error. | Overwriting the PK would corrupt the row's identity. |
+| Listing an unknown field returns an error. | Fail fast on typos. |
+| Empty `fields` returns an error. | An update with no SET clause is meaningless. |
+| Existing `Where()` predicates are merged with the PK predicate. | Same behaviour as `Update`. |
+
+Hooks: `BeforeUpdate` and `AfterUpdate` run, just like `Update`.
+
+## UpdateMap
+
+### `UpdateMap(data map[string]any) (int64, error)`
+
+Updates explicit columns for rows matching the current `Where` conditions.
+
+```go
+rows, err := quark.For[User](ctx, client).
+    Where("id", "=", 42).
+    UpdateMap(map[string]any{
+        "active": false,
+        "score":  0,
+    })
+```
+
+Rules:
+
+| Rule | Reason |
+| --- | --- |
+| `data` must not be empty. | Prevents invalid `UPDATE ... SET`. |
+| At least one `Where` is required. | Prevents accidental full-table updates. |
+| Map keys are sorted. | Produces deterministic SQL. |
+| Keys are validated as identifiers. | Protects dynamic update maps. |
+
+`UpdateMap` is the preferred API for explicit zero values, admin bulk changes,
+and computed updates that do not require loading a full entity.
+
+## Delete
+
+### `Delete(entity *T) (int64, error)`
+
+Deletes one entity by primary key.
+
+If the model has a `deleted_at` column, `Delete` soft-deletes:
+
+```go
+type User struct {
+    ID        int64      `db:"id" pk:"true"`
+    Email     string     `db:"email"`
+    DeletedAt *time.Time `db:"deleted_at"`
+}
+
+rows, err := quark.For[User](ctx, client).Delete(&User{ID: 42})
+```
+
+Generated shape:
+
+```sql
+UPDATE users
+SET deleted_at = CURRENT_TIMESTAMP
+WHERE id = ? AND deleted_at IS NULL
+```
+
+If the model does not have `deleted_at`, `Delete` performs a hard delete by
+primary key.
+
+Hooks: `BeforeDelete` and `AfterDelete`.
+
+### `HardDelete(entity *T) (int64, error)`
+
+Permanently deletes one entity by primary key even when soft delete is enabled.
+
+```go
+rows, err := quark.For[User](ctx, client).HardDelete(&User{ID: 42})
+```
+
+### `DeleteBy() (int64, error)`
+
+Hard-deletes rows matching the current `Where` conditions.
+
+```go
+rows, err := quark.For[User](ctx, client).
+    Where("active", "=", false).
+    DeleteBy()
+```
+
+`DeleteBy` requires at least one `Where` clause. It always hard-deletes; it does
+not honour soft delete. For a bulk soft delete, use `UpdateMap`:
+
+```go
+rows, err := quark.For[User](ctx, client).
+    Where("active", "=", false).
+    UpdateMap(map[string]any{"deleted_at": time.Now()})
+```
+
+### `DeleteBatch(ids []any) (int64, error)`
+
+Hard-deletes rows by primary key values.
+
+```go
+ids := []any{1, 2, 3}
+rows, err := quark.For[User](ctx, client).DeleteBatch(ids)
+```
+
+The method chunks IDs in groups of 1000 so the generated `IN` list remains
+inside supported dialect limits. Empty input returns `(0, nil)`.
+
+## Upsert
+
+### `Upsert(entity *T, conflictCols []string, updateCols []string) error`
+
+Inserts the entity or updates it when a conflict occurs.
+
+```go
+product := &Product{
+    SKU:   "ABC-123",
+    Name:  "Widget",
+    Price: 1999,
+}
+
+err := quark.For[Product](ctx, client).Upsert(
+    product,
+    []string{"sku"},
+    []string{"name", "price"},
+)
+```
+
+`conflictCols` should match a unique constraint or primary key. Pass
+`updateCols` explicitly for portable behavior. Empty `updateCols` is dialect
+specific and should not be treated as “update all columns”.
+
+| Dialect | Shape |
+| --- | --- |
+| PostgreSQL | `INSERT ... ON CONFLICT (...) DO UPDATE SET ...` |
+| SQLite | `INSERT ... ON CONFLICT (...) DO UPDATE SET ...` |
+| MySQL / MariaDB | `INSERT ... ON DUPLICATE KEY UPDATE ...` |
+| SQL Server | `MERGE INTO ... USING ...` |
+| Oracle | `MERGE INTO ... USING ...` |
+
+Validation runs before the SQL is built.
+
+## UpsertBatch
+
+### `UpsertBatch(entities []*T, conflictCols []string, updateCols []string) error`
+
+Bulk insert-or-update.
+
+```go
+products := []*Product{
+    {SKU: "A", Name: "Alpha", Price: 1000},
+    {SKU: "B", Name: "Beta", Price: 2000},
+}
+
+err := quark.For[Product](ctx, client).UpsertBatch(
+    products,
+    []string{"sku"},
+    []string{"name", "price"},
+)
+```
+
+Behavior:
+
+| Dialect | Strategy |
+| --- | --- |
+| PostgreSQL, SQLite, MySQL, MariaDB | Multi-row insert with dialect upsert fragment. |
+| SQL Server | Single bulk `MERGE ... USING (VALUES ...)`. |
+| Oracle | One `MERGE` per entity. |
+
+Empty input returns `nil`. All entities are validated before any SQL is built.
+
+## UpdateBatch
+
+### `UpdateBatch(entities []*T) error`
+
+Updates multiple entities by primary key inside one transaction.
+
+```go
+users[0].Score += 10
+users[1].Score += 10
+
+ptrs := []*User{&users[0], &users[1]}
+err := quark.For[User](ctx, client).UpdateBatch(ptrs)
+```
+
+Each row uses the same partial-update semantics as `Update`. If any row fails,
+the transaction rolls back.
+
+`UpdateBatch` returns `nil` for empty input.
+
+## Composite Primary Keys
+
+For models with multiple `pk:"true"` fields, `Update`, `Delete`, and
+`HardDelete` include all primary key columns in the predicate.
+
+```go
+type RolePermission struct {
+    RoleID       int64 `db:"role_id" pk:"true"`
+    PermissionID int64 `db:"permission_id" pk:"true"`
+    Enabled      bool  `db:"enabled"`
+}
+
+rp := &RolePermission{RoleID: 1, PermissionID: 9, Enabled: true}
+rows, err := quark.For[RolePermission](ctx, client).Update(rp)
+```
+
+Use `Where(...).First()` instead of `Find(id)` for composite-key reads.
