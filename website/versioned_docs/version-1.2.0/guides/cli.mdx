@@ -1,0 +1,126 @@
+---
+sidebar_position: 10
+title: Operational Workflows
+description: The quark CLI — migrations, schema inspection, model generation, seeders, and tenant jobs — plus how to embed the same operations in your own binary.
+---
+
+# Operational Workflows
+
+Quark ships a `quark` binary for the operational tasks around your app:
+migrations, schema inspection, model generation, seeding, and multi-tenant jobs.
+
+```bash
+go install github.com/jcsvwinston/quark/cmd/quark@latest
+```
+
+| Subcommand | What it does |
+|------------|--------------|
+| `init` | Scaffold a project (config + layout) for a chosen dialect. |
+| `migrate` | `create` / `up` / `down` / `status` / `version` for the versioned migrator. |
+| `model generate` | Generate a model struct from a table (`--from-table`) or an inline spec (`--fields`). |
+| `inspect` | `schema` / `table <name>` / `sql` introspection. |
+| `sync` | Diff the live schema against your models (`--dry-run` to preview). |
+| `seed` | `create` / `run` / `list` seed scripts. |
+| `tenant` | `provision` / `migrate` / `list` / `migrate-all` for multi-tenant databases. |
+| `validate` | Validate a model's tags against the live schema. |
+| `gen` | Generate typed accessors / binders (see [Code Generation](codegen)). |
+
+The CLI reads its connection from a `.quark.yml` config (created by `quark init`)
+or from `QUARK_DATABASE_DEFAULT_DRIVER` / `QUARK_DATABASE_DEFAULT_DSN`.
+
+## Migrations from the CLI
+
+```bash
+quark migrate create add_users_table   # scaffold a new migration file
+quark migrate up                        # apply pending migrations
+quark migrate status                    # show applied vs pending
+quark migrate down                      # roll back the last migration
+```
+
+## Generating models from an existing database
+
+`model generate` is database-first or spec-first. From existing tables, it
+introspects the database and writes one struct per table:
+
+```bash
+quark model generate --from-table users,orders --out ./models --package models
+```
+
+Nullable columns become pointers, `JSON`/`JSONB` becomes `json.RawMessage`, and
+timestamp columns become `time.Time`. Treat the output as a starting point —
+review it before adding rich types, relations, soft-delete, or optimistic
+locking. Or define a model inline, no database needed:
+
+```bash
+quark model generate Product --fields "id:int64,name:string,price:float64" --out ./models
+```
+
+Flags: `--from-table`, `--fields`, `--out` (default `./models`), `--package`
+(default `models`), `--dialect`, `--tags` (default `json`). The `--out` directory
+is created if missing, and a malformed spec or unwritable output exits non-zero.
+
+## Inspecting and validating
+
+```bash
+quark inspect schema          # list tables and columns
+quark inspect table users     # describe one table
+quark validate                # check a model's tags against the live schema
+quark sync --dry-run          # preview the schema diff without applying it
+```
+
+## Embedding the same operations in your own binary
+
+When you'd rather run these from your own service or CI binary, call the public
+APIs directly. A migration runner imports your migration package for its side
+effects and drives the versioned migrator:
+
+```go
+// cmd/migrate/main.go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true
+
+client, err := quark.New("postgres", dsn, quark.WithLimits(limits))
+if err != nil {
+    log.Fatal(err)
+}
+defer client.Close()
+
+migrator := migrate.NewMigrator(client)
+switch {
+case dryRun:
+    err = migrator.UpDryRun(ctx, 0)
+case down > 0:
+    err = migrator.Down(ctx, down)
+default:
+    err = migrator.Up(ctx, 0)
+}
+```
+
+For a dev/test schema bootstrap, call `Migrate` directly (it reflects the current
+model shape and creates missing tables — different from versioned migrations,
+which record exactly which DDL ran):
+
+```go
+err := client.Migrate(ctx, &User{}, &Order{}, &Product{})
+```
+
+And for database-per-tenant, keep tenant migration explicit — resolve each
+tenant's DSN, build a client, run the same migrator:
+
+```go
+for _, tenant := range tenants {
+    client, err := clientForTenant(tenant)
+    if err != nil {
+        return err
+    }
+    if err := migrate.NewMigrator(client).Up(ctx, 0); err != nil {
+        _ = client.Close()
+        return fmt.Errorf("tenant %s: %w", tenant.ID, err)
+    }
+    _ = client.Close()
+}
+```
+
+(`TenantRouter` uses tenant IDs as schema names at query time but doesn't
+orchestrate schema provisioning — see [Multi-Tenant](../advanced/multi-tenant).)
+Commit these commands with your app and run them from CI or deployment jobs.

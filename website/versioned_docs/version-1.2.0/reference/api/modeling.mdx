@@ -1,0 +1,240 @@
+# Modeling API Reference
+
+Complete reference for struct tags, relations, hooks, and model metadata.
+
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `BeforeCreate` | `BeforeCreate(ctx context.Context) error` | Hook run before an insert. |
+| `AfterCreate` | `AfterCreate(ctx context.Context) error` | Hook run after a successful insert. |
+| `BeforeUpdate` | `BeforeUpdate(ctx context.Context) error` | Hook run before an update. |
+| `AfterUpdate` | `AfterUpdate(ctx context.Context) error` | Hook run after a successful update. |
+| `BeforeDelete` | `BeforeDelete(ctx context.Context) error` | Hook run before a delete. |
+| `AfterDelete` | `AfterDelete(ctx context.Context) error` | Hook run after a successful delete. |
+| `TableName` | `TableName() string` | Override the default (snake-cased, pluralised) table name. |
+| `GetModelMeta` | `GetModelMeta[T any]() *ModelMeta` | Return cached reflection metadata for model `T`. |
+
+Hooks are optional: implement the methods you need on the model's pointer
+receiver and Quark calls them at the matching point in the write path.
+
+## Struct Tags
+
+### `db` - Column Mapping
+
+```go
+type User struct {
+    ID        int64  `db:"id"`          // Column name
+    FirstName string `db:"first_name"`  // Explicit column name
+    Internal  string `db:"-"`          // Ignored (not persisted)
+}
+```
+
+### `pk` - Primary Key
+
+```go
+// Single primary key
+type User struct {
+    ID int64 `db:"id" pk:"true"`
+}
+
+// Composite primary key
+type Membership struct {
+    UserID  int64 `db:"user_id" pk:"true"`
+    GroupID int64 `db:"group_id" pk:"true"`
+}
+```
+
+### `rel` - Relations
+
+```go
+type User struct {
+    ID    int64  `db:"id" pk:"true"`
+    Posts []Post `rel:"has_many" join:"user_id"`     // One-to-many
+    Profile Profile `rel:"has_one" join:"user_id"` // One-to-one
+}
+
+type Post struct {
+    ID     int64  `db:"id" pk:"true"`
+    UserID int64  `db:"user_id"`
+    User   *User  `rel:"belongs_to" join:"user_id"` // Many-to-one
+}
+
+type Product struct {
+    ID       int64       `db:"id" pk:"true"`
+    Tags     []Tag       `rel:"many_to_many" m2m:"product_tags:product_id:tag_id"` // Many-to-many
+}
+```
+
+**Relation Types:**
+| Type | Direction | FK Location | Tag |
+|------|-----------|-------------|-----|
+| `has_one` | One-to-one | Related table | `rel:"has_one" join:"fk_col"` |
+| `has_many` | One-to-many | Related table | `rel:"has_many" join:"fk_col"` |
+| `belongs_to` | Many-to-one | This table | `rel:"belongs_to" join:"fk_col"` |
+| `many_to_many` | Many-to-many | Join table | `rel:"many_to_many" m2m:"join_table:this_fk:other_fk"` |
+
+### `quark` - Constraints
+
+```go
+type User struct {
+    ID    int64  `db:"id" pk:"true"`
+    Email string `db:"email" quark:"unique,not_null"`
+    Name  string `db:"name" quark:"not_null"`
+    
+    // Column rename for migrations
+    NewField string `db:"new_field" quark:"rename:old_field"`
+}
+```
+
+| Option | Description |
+|--------|-------------|
+| `not_null` | NOT NULL constraint |
+| `unique` | UNIQUE constraint |
+| `rename:old` | Rename column during sync |
+
+### `default` - Default Values
+
+```go
+type User struct {
+    Status string `db:"status" default:"'active'"`
+    Count  int    `db:"count" default:"0"`
+}
+```
+
+### `nullable` - Null Handling
+
+```go
+type User struct {
+    // Explicitly allow NULL
+    DeletedAt *time.Time `db:"deleted_at" nullable:"true"`
+    
+    // Explicitly disallow NULL
+    Email string `db:"email" nullable:"false"`
+}
+```
+
+### Soft Delete
+
+```go
+type User struct {
+    ID        int64      `db:"id" pk:"true"`
+    Name      string     `db:"name"`
+    DeletedAt *time.Time `db:"deleted_at"` // Enables soft delete
+}
+
+// Query excludes soft-deleted by default
+users, _ := quark.For[User](ctx, client).List()
+
+// Include soft-deleted with Unscoped
+allUsers, _ := quark.For[User](ctx, client).Unscoped().List()
+```
+
+---
+
+## Hooks
+
+### BeforeCreateHook
+
+```go
+func (u *User) BeforeCreate(ctx context.Context) error {
+    u.CreatedAt = time.Now()
+    if u.Status == "" {
+        u.Status = "pending"
+    }
+    return nil
+}
+```
+
+### AfterCreateHook
+
+```go
+func (u *User) AfterCreate(ctx context.Context) error {
+    // Send welcome email, index in search, etc.
+    return eventBus.Publish(ctx, "user.created", u.ID)
+}
+```
+
+### BeforeUpdateHook
+
+```go
+func (u *User) BeforeUpdate(ctx context.Context) error {
+    u.UpdatedAt = time.Now()
+    return nil
+}
+```
+
+### AfterUpdateHook
+
+```go
+func (u *User) AfterUpdate(ctx context.Context) error {
+    // Invalidate cache, sync to external systems
+    return cache.Invalidate(ctx, fmt.Sprintf("user:%d", u.ID))
+}
+```
+
+### BeforeDeleteHook
+
+```go
+func (u *User) BeforeDelete(ctx context.Context) error {
+    // Clean up related resources
+    return cleanupUserFiles(u.ID)
+}
+```
+
+### AfterDeleteHook
+
+```go
+func (u *User) AfterDelete(ctx context.Context) error {
+    // Audit logging
+    return audit.Log(ctx, "user.deleted", u.ID)
+}
+```
+
+---
+
+## Custom Table Name
+
+```go
+type User struct {
+    ID   int64  `db:"id" pk:"true"`
+    Name string `db:"name"`
+}
+
+func (User) TableName() string {
+    return "app_users" // Custom table name
+}
+```
+
+---
+
+## Metadata Access
+
+```go
+type User struct {
+    ID    int64  `db:"id" pk:"true"`
+    Name  string `db:"name"`
+    Email string `db:"email"`
+    Posts []Post `rel:"has_many" join:"user_id"`
+}
+
+meta := quark.GetModelMeta[User]()
+
+fmt.Println(meta.Table)           // => users
+fmt.Println(meta.PK.Column)       // => id
+fmt.Println(meta.HasCompositePK)  // => false
+
+for _, field := range meta.Fields {
+    fmt.Printf("%s -> %s\n", field.Column, field.Type)
+}
+// => id -> int64
+// => name -> string
+// => email -> string
+
+for name, rel := range meta.Relations {
+    fmt.Printf("%s: %s via %s\n", name, rel.Type, rel.JoinCol)
+}
+// => Posts: has_many via user_id   (relations live in meta.Relations, not meta.Fields)
+```
+
+`meta.Fields` holds only the persisted columns; relations are kept separately in
+`meta.Relations`, keyed by Go field name. `field.Type` is a `reflect.Type`, so it
+prints as `int64`, `string`, and so on.
