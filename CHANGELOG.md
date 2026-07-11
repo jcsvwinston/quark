@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0](https://github.com/jcsvwinston/quark/compare/v1.1.5...v1.2.0) (2026-07-11)
+
+
+### Added
+
+* **cache:** cross-instance cache-stampede coordination (ADR-0020) ([03aa61d](https://github.com/jcsvwinston/quark/commit/03aa61df475fcba4da517d1b6279205373a54df7))
+* **cache:** cross-instance stampede coordination (ADR-0020) ([bc2a174](https://github.com/jcsvwinston/quark/commit/bc2a174f9519235ac6092cca828655e4ee163415))
+* **cache:** review follow-ups — in-memory lock GC, comment accuracy, ctx-cancel test ([6973073](https://github.com/jcsvwinston/quark/commit/697307361472a5aed69a23c5dbe7c731ae64131e))
+* **sharding:** scatter-gather cross-shard reads (ADR-0022) ([21b1b35](https://github.com/jcsvwinston/quark/commit/21b1b35a5eb5bf90d7363658e35cc712579f4950))
+* **sharding:** scatter-gather cross-shard reads (ADR-0022) ([b009b2e](https://github.com/jcsvwinston/quark/commit/b009b2e48a817ecfbb6f8835cc8c2a9ae4913f67))
+* **sharding:** shard key from entity via ShardKeyer (ADR-0021) ([563ae32](https://github.com/jcsvwinston/quark/commit/563ae32b74922feeb6966ff20a5c63d087c715f5))
+* **sharding:** shard key from entity via ShardKeyer (ADR-0021) ([69b92c7](https://github.com/jcsvwinston/quark/commit/69b92c732102cc64da01a9ca612fcbbf5051cef3))
+
+
+### Fixed
+
+* **query:** warn only on skipped scalar zero-values in Update, not nil pointers ([4f261bc](https://github.com/jcsvwinston/quark/commit/4f261bc6de41ddd591551fc582de397451610d47))
+* **security:** pin toolchain go1.26.5 + pgx v5.9.2 (11 advisories reached at v1.1.5) ([#235](https://github.com/jcsvwinston/quark/issues/235)) ([85cd55e](https://github.com/jcsvwinston/quark/commit/85cd55e98fc6ad630c74ceefb6a966ce18e75b6e))
+
+
+### Performance
+
+* **query:** memoize scan plan + pre-size result slice (AUD-2) ([ac99f87](https://github.com/jcsvwinston/quark/commit/ac99f872b2e1a6273d69f20b409c0e2532d58e33))
+* **query:** memoize scan plan + pre-size result slice (AUD-2) ([f646a38](https://github.com/jcsvwinston/quark/commit/f646a3863849109bfc7b3c8e06dfcca31f9af55d))
+
 ## [1.1.5](https://github.com/jcsvwinston/quark/compare/v1.1.4...v1.1.5) (2026-06-18)
 
 
