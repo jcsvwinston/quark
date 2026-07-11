@@ -49,20 +49,26 @@ var seedCmd = &cobra.Command{
 	Short: "Manage database seeders",
 }
 
+// Seeders run from scripts and CI, so a failing create/run must exit
+// non-zero (RunE → main.go prints and exits 1).
 var seedCreateCmd = &cobra.Command{
-	Use:   "create <name>",
-	Short: "Create a new seeder file",
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		runSeedCreate(args[0])
+	Use:           "create <name>",
+	Short:         "Create a new seeder file",
+	Args:          cobra.ExactArgs(1),
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSeedCreate(args[0])
 	},
 }
 
 var seedRunCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Run seeders",
-	Run: func(cmd *cobra.Command, args []string) {
-		runSeedRun()
+	Use:           "run",
+	Short:         "Run seeders",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSeedRun()
 	},
 }
 
@@ -85,7 +91,7 @@ func snakeToCamel(s string) string {
 	return strings.Join(parts, "")
 }
 
-func runSeedCreate(name string) {
+func runSeedCreate(name string) error {
 	filename := fmt.Sprintf("%s_seeder.go", name)
 	dir := viper.GetString("paths.seeders")
 	if dir == "" {
@@ -93,8 +99,7 @@ func runSeedCreate(name string) {
 	}
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		color.Red("Error creating seeders directory: %v", err)
-		return
+		return fmt.Errorf("creating seeders directory: %w", err)
 	}
 
 	path := filepath.Join(dir, filename)
@@ -108,33 +113,31 @@ func runSeedCreate(name string) {
 	tmpl, _ := template.New("seeder").Parse(seederTemplate)
 	file, err := os.Create(path)
 	if err != nil {
-		color.Red("Error creating seeder file: %v", err)
-		return
+		return fmt.Errorf("creating seeder file: %w", err)
 	}
 	defer file.Close()
 
 	if err := tmpl.Execute(file, data); err != nil {
-		color.Red("Error executing template: %v", err)
-		return
+		return fmt.Errorf("executing template: %w", err)
 	}
 
 	fmt.Printf("Created seeder: %s\n", path)
+	return nil
 }
 
-func runSeedRun() {
+func runSeedRun() error {
 	if len(seederRegistry) == 0 {
 		color.Yellow("No seeders registered.")
 		color.Yellow("Register seeders before calling Execute():")
 		fmt.Println()
 		fmt.Println("  commands.RegisterSeeder(\"users\", seeders.SeedUsers)")
 		fmt.Println("  commands.Execute()")
-		return
+		return nil
 	}
 
 	client, err := clidb.GetQuarkClient()
 	if err != nil {
-		color.Red("Error connecting to database: %v", err)
-		return
+		return fmt.Errorf("connecting to database: %w", err)
 	}
 	defer client.Close()
 
@@ -143,16 +146,14 @@ func runSeedRun() {
 	if seedName != "" {
 		fn, ok := seederRegistry[seedName]
 		if !ok {
-			color.Red("Seeder %q not found. Use 'seed list' to see available seeders.", seedName)
-			os.Exit(1)
+			return fmt.Errorf("seeder %q not found; use 'seed list' to see available seeders", seedName)
 		}
 		color.Cyan("Running seeder: %s [env=%s]", seedName, seedEnv)
 		if err := fn(ctx, client); err != nil {
-			color.Red("Seeder %q failed: %v", seedName, err)
-			os.Exit(1)
+			return fmt.Errorf("seeder %q failed: %w", seedName, err)
 		}
 		color.Green("Seeder %q completed successfully.", seedName)
-		return
+		return nil
 	}
 
 	// Run all seeders in registration order
@@ -170,8 +171,9 @@ func runSeedRun() {
 	}
 	fmt.Printf("\nDone: %d succeeded, %d failed.\n", success, failed)
 	if failed > 0 {
-		os.Exit(1)
+		return fmt.Errorf("%d of %d seeders failed", failed, success+failed)
 	}
+	return nil
 }
 
 func runSeedList() {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	clidb "github.com/jcsvwinston/quark/cmd/quark/internal/db"
 	"github.com/jcsvwinston/quark/cmd/quark/internal/gen"
 	internaldb "github.com/jcsvwinston/quark/internal/db"
 	"github.com/spf13/cobra"
@@ -85,7 +86,9 @@ func generateFromTables() error {
 		return fmt.Errorf("database configuration missing: run 'quark init' or specify --dialect and configure DSN")
 	}
 
-	sqlDB, err := sql.Open(dialect, dsn)
+	// dialect stays as configured for GetTableInfo (which understands dialect
+	// names); only sql.Open needs the registered driver name.
+	sqlDB, err := sql.Open(clidb.DriverName(dialect), dsn)
 	if err != nil {
 		return fmt.Errorf("connecting to database: %w", err)
 	}

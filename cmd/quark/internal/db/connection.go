@@ -15,7 +15,7 @@ func GetQuarkClient() (*quark.Client, error) {
 		return nil, fmt.Errorf("database configuration missing")
 	}
 
-	return quark.New(driver, dsn, quark.WithLimits(quark.Limits{AllowRawQueries: true}))
+	return quark.New(DriverName(driver), dsn, quark.WithLimits(quark.Limits{AllowRawQueries: true}))
 }
 
 func GetAdminQuarkClient() (*quark.Client, error) {
@@ -26,5 +26,5 @@ func GetAdminQuarkClient() (*quark.Client, error) {
 		return nil, fmt.Errorf("admin database configuration missing")
 	}
 
-	return quark.New(driver, dsn, quark.WithLimits(quark.Limits{AllowRawQueries: true}))
+	return quark.New(DriverName(driver), dsn, quark.WithLimits(quark.Limits{AllowRawQueries: true}))
 }

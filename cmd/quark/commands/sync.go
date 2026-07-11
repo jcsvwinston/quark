@@ -1,9 +1,7 @@
 package commands
 
 import (
-	"context"
 	"fmt"
-	"os"
 
 	"github.com/fatih/color"
 	"github.com/jcsvwinston/quark"
@@ -11,90 +9,62 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	syncDryRun bool
-	syncNoTx   bool
-	syncSafe   bool
-	syncModels []string
-)
-
 func init() {
-	syncCmd.Flags().BoolVar(&syncDryRun, "dry-run", false, "Preview SQL without executing")
-	syncCmd.Flags().BoolVar(&syncNoTx, "no-transaction", false, "Skip wrapping sync in a transaction")
-	syncCmd.Flags().BoolVar(&syncSafe, "safe", true, "Safe mode: skip destructive DROP COLUMN operations")
-	syncCmd.Flags().StringArrayVar(&syncModels, "models", nil, "Specific table names to sync (default: all registered models)")
-
 	rootCmd.AddCommand(syncCmd)
 }
 
+// Schema sync needs your compiled Go model types, which a standalone CLI
+// binary cannot load — so this command does NOT diff or apply anything.
+// It verifies the configured connection and prints how to wire
+// client.Sync(...) in your application. It used to advertise --dry-run /
+// --safe / --no-transaction / --models while ignoring all of them; those
+// flags are gone (H-Q3) — the real knobs live on quark.SyncOptions.
 var syncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Sync database schema with registered models (auto-migration)",
-	Long: `Sync compares your Go model structs against the live database schema and applies
-the necessary changes: CREATE TABLE if missing, ADD COLUMN for new fields,
-RENAME COLUMN when quark:"rename:old" tag is present, and DROP COLUMN
-for removed fields (only when --safe=false).`,
-	Run: func(cmd *cobra.Command, args []string) {
-		runSync()
+	Short: "Check the DB connection and explain how to run schema sync",
+	Long: `Schema sync (auto-migration) compares Go model structs against the live
+database schema and applies CREATE TABLE / ADD COLUMN / RENAME COLUMN /
+DROP COLUMN as needed. Because it needs your compiled model types, sync runs
+programmatically via client.Sync(ctx, opts, &Model{}, ...) inside your
+application — not from this CLI.
+
+This command only verifies that the configured database is reachable and
+prints the exact call to add to your code, including the SyncOptions that
+control dry-run, safe mode and transactional DDL.`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSync()
 	},
 }
 
-func runSync() {
+func runSync() error {
 	client, err := db.GetQuarkClient()
 	if err != nil {
-		color.Red("Error connecting to database: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("connecting to database: %w", err)
 	}
 	defer client.Close()
 
-	opts := quark.SyncOptions{
-		DryRun:        syncDryRun,
-		NoTransaction: syncNoTx,
-	}
-
-	if syncDryRun {
-		color.Yellow("Dry-run mode: no changes will be applied.")
-	}
-
-	// When --models is provided, filter by table name.
-	// We cannot dynamically load Go structs from table names at CLI level,
-	// so we inform the user and show what Sync would do via the registered schema.
-	if len(syncModels) > 0 {
-		color.Yellow("Note: --models filter is advisory. Sync operates on models registered at runtime.")
-		fmt.Printf("Filtering for tables: %v\n", syncModels)
-	}
-
-	// sync.go in quark requires concrete model instances.
-	// The CLI exposes sync as a no-arg command that projects call after embedding
-	// their models. Here we perform the schema introspection check and report gaps.
-	color.Cyan("Running schema sync...")
-
-	ctx := context.Background()
-	_ = opts
-	_ = ctx
-
-	// Sync is primarily driven programmatically (client.Sync(ctx, opts, &User{}, &Order{})).
-	// The CLI version inspects the DB and reports drift without needing compiled models,
-	// by comparing quark_migrations history vs live schema.
 	printSyncGuidance(client)
+	return nil
 }
 
 func printSyncGuidance(client *quark.Client) {
 	fmt.Println()
-	color.Green("quark sync is ready.")
+	color.Green("Database connection OK.")
 	fmt.Println()
-	fmt.Println("To trigger a full schema sync programmatically in your application:")
+	fmt.Println("Schema sync runs inside your application, where your model types live:")
 	fmt.Println()
 	color.Cyan(`  err := client.Sync(ctx, quark.SyncOptions{DryRun: false}, &User{}, &Order{})`)
 	fmt.Println()
 	fmt.Println("Sync capabilities:")
-	fmt.Printf("  %-40s %s\n", "CREATE TABLE IF NOT EXISTS", "✓ creates missing tables")
-	fmt.Printf("  %-40s %s\n", "ALTER TABLE ... ADD COLUMN", "✓ adds new fields")
-	fmt.Printf("  %-40s %s\n", `quark:"rename:old_name"`, "✓ renames columns non-destructively")
-	fmt.Printf("  %-40s %s\n", "ALTER TABLE ... DROP COLUMN", "✓ drops removed fields (safe=false)")
-	fmt.Printf("  %-40s %s\n", "Transactional DDL", "✓ wraps in TX on supported dialects")
+	fmt.Printf("  %-40s %s\n", "CREATE TABLE IF NOT EXISTS", "creates missing tables")
+	fmt.Printf("  %-40s %s\n", "ALTER TABLE ... ADD COLUMN", "adds new fields")
+	fmt.Printf("  %-40s %s\n", `quark:"rename:old_name"`, "renames columns non-destructively")
+	fmt.Printf("  %-40s %s\n", "ALTER TABLE ... DROP COLUMN", "drops removed fields (Limits.SafeMigrations: false)")
+	fmt.Printf("  %-40s %s\n", "Transactional DDL", "wraps in TX on supported dialects (SyncOptions.NoTransaction)")
 	fmt.Println()
 	fmt.Printf("  Connected dialect: %s\n", client.Dialect().Name())
 	fmt.Println()
-	color.Yellow("Tip: use --dry-run to preview SQL before applying changes.")
+	color.Yellow("Tip: SyncOptions{DryRun: true} previews the SQL without applying it.")
 }

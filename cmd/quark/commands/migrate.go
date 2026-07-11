@@ -42,48 +42,62 @@ var migrateCmd = &cobra.Command{
 	Short: "Manage database migrations",
 }
 
+// The migrate subcommands are exactly what CI pipelines gate on, so a failure
+// must surface as a non-zero exit: RunE hands the error to main.go, which
+// prints it and exits 1. Cobra's own usage/error dump is silenced so that
+// single line is the only output.
 var migrateCreateCmd = &cobra.Command{
-	Use:   "create <name>",
-	Short: "Create a new migration file",
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		runMigrateCreate(args[0])
+	Use:           "create <name>",
+	Short:         "Create a new migration file",
+	Args:          cobra.ExactArgs(1),
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runMigrateCreate(args[0])
 	},
 }
 
 var migrateUpCmd = &cobra.Command{
-	Use:   "up",
-	Short: "Apply pending migrations",
-	Run: func(cmd *cobra.Command, args []string) {
-		runMigrateUp()
+	Use:           "up",
+	Short:         "Apply pending migrations",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runMigrateUp()
 	},
 }
 
 var migrateDownCmd = &cobra.Command{
-	Use:   "down",
-	Short: "Revert the last migration",
-	Run: func(cmd *cobra.Command, args []string) {
-		runMigrateDown()
+	Use:           "down",
+	Short:         "Revert the last migration",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runMigrateDown()
 	},
 }
 
 var migrateStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show migration status",
-	Run: func(cmd *cobra.Command, args []string) {
-		runMigrateStatus()
+	Use:           "status",
+	Short:         "Show migration status",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runMigrateStatus()
 	},
 }
 
 var migrateVersionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Show current migration version",
-	Run: func(cmd *cobra.Command, args []string) {
-		runMigrateVersion()
+	Use:           "version",
+	Short:         "Show current migration version",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runMigrateVersion()
 	},
 }
 
-func runMigrateCreate(name string) {
+func runMigrateCreate(name string) error {
 	timestamp := time.Now().Format("20060102150405")
 	filename := fmt.Sprintf("%s_%s.go", timestamp, name)
 	dir := viper.GetString("paths.migrations")
@@ -92,8 +106,7 @@ func runMigrateCreate(name string) {
 	}
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		color.Red("Error creating migrations directory: %v", err)
-		return
+		return fmt.Errorf("creating migrations directory: %w", err)
 	}
 
 	path := filepath.Join(dir, filename)
@@ -111,89 +124,81 @@ func runMigrateCreate(name string) {
 	tmpl, _ := template.New("migration").Parse(migrationTemplate)
 	file, err := os.Create(path)
 	if err != nil {
-		color.Red("Error creating migration file: %v", err)
-		return
+		return fmt.Errorf("creating migration file: %w", err)
 	}
 	defer file.Close()
 
 	if err := tmpl.Execute(file, data); err != nil {
-		color.Red("Error executing template: %v", err)
-		return
+		return fmt.Errorf("executing template: %w", err)
 	}
 
 	fmt.Printf("Created migration: %s\n", path)
+	return nil
 }
 
-func runMigrateUp() {
+func runMigrateUp() error {
 	client, err := db.GetQuarkClient()
 	if err != nil {
-		color.Red("Error: %v", err)
-		return
+		return err
 	}
+	defer client.Close()
 
 	migrator := migrate.NewMigrator(client)
 	ctx := context.Background()
 
 	if migrateDryRun {
 		color.Yellow("Dry-run mode: no migrations will be applied.")
-		if err := migrator.UpDryRun(ctx, migrateSteps); err != nil {
-			color.Red("Error: %v", err)
-		}
-		return
+		return migrator.UpDryRun(ctx, migrateSteps)
 	}
 
-	if err := migrator.Up(ctx, migrateSteps); err != nil {
-		color.Red("Error applying migrations: %v", err)
-		return
-	}
+	return migrator.Up(ctx, migrateSteps)
 }
 
-func runMigrateDown() {
+func runMigrateDown() error {
 	client, err := db.GetQuarkClient()
 	if err != nil {
-		color.Red("Error: %v", err)
-		return
+		return err
 	}
+	defer client.Close()
 
 	migrator := migrate.NewMigrator(client)
 	if err := migrator.Down(context.Background(), migrateSteps); err != nil {
-		color.Red("Error reverting migrations: %v", err)
-		return
+		return fmt.Errorf("reverting migrations: %w", err)
 	}
+	return nil
 }
 
-func runMigrateStatus() {
+func runMigrateStatus() error {
 	client, err := db.GetQuarkClient()
 	if err != nil {
-		color.Red("Error: %v", err)
-		return
+		return err
 	}
+	defer client.Close()
 
 	migrator := migrate.NewMigrator(client)
 	applied, err := migrator.GetApplied(context.Background())
 	if err != nil {
-		color.Red("Error getting migration status: %v", err)
-		return
+		return fmt.Errorf("getting migration status: %w", err)
 	}
 
 	fmt.Println("Applied migrations:")
 	for id := range applied {
 		fmt.Printf("  [x] %s\n", id)
 	}
+	return nil
 }
 
-func runMigrateVersion() {
+func runMigrateVersion() error {
 	client, err := db.GetQuarkClient()
 	if err != nil {
-		color.Red("Error: %v", err)
-		return
+		return err
 	}
+	defer client.Close()
 
 	migrator := migrate.NewMigrator(client)
 	applied, err := migrator.GetApplied(context.Background())
 	if err != nil {
-		color.Red("Error getting version: %v", err)
-		return
+		return fmt.Errorf("getting version: %w", err)
 	}
 
 	var latest string
@@ -208,4 +213,5 @@ func runMigrateVersion() {
 	} else {
 		fmt.Printf("Current version: %s\n", latest)
 	}
+	return nil
 }

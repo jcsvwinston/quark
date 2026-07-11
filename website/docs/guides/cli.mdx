@@ -19,7 +19,7 @@ go install github.com/jcsvwinston/quark/cmd/quark@latest
 | `migrate` | `create` / `up` / `down` / `status` / `version` for the versioned migrator. |
 | `model generate` | Generate a model struct from a table (`--from-table`) or an inline spec (`--fields`). |
 | `inspect` | `schema` / `table <name>` / `sql` introspection. |
-| `sync` | Diff the live schema against your models (`--dry-run` to preview). |
+| `sync` | Check the connection and print how to wire `client.Sync(...)` — the diff/apply itself needs your compiled model types, so it runs in your app, not the CLI. |
 | `seed` | `create` / `run` / `list` seed scripts. |
 | `tenant` | `provision` / `migrate` / `list` / `migrate-all` for multi-tenant databases. |
 | `validate` | Validate a model's tags against the live schema. |
@@ -65,7 +65,16 @@ is created if missing, and a malformed spec or unwritable output exits non-zero.
 quark inspect schema          # list tables and columns
 quark inspect table users     # describe one table
 quark validate                # check a model's tags against the live schema
-quark sync --dry-run          # preview the schema diff without applying it
+```
+
+`inspect schema` and `inspect table` take `--format table|json|yaml` for
+machine-readable output. Schema sync (auto-migration) is a programmatic API —
+it needs your compiled model types, so it can't run from a standalone CLI.
+`quark sync` just checks the connection and prints the call to embed:
+
+```go
+// DryRun previews the SQL without applying it.
+err := client.Sync(ctx, quark.SyncOptions{DryRun: true}, &User{}, &Order{})
 ```
 
 ## Embedding the same operations in your own binary
@@ -79,7 +88,7 @@ effects and drives the versioned migrator:
 limits := quark.DefaultLimits()
 limits.AllowRawQueries = true
 
-client, err := quark.New("postgres", dsn, quark.WithLimits(limits))
+client, err := quark.New("pgx", dsn, quark.WithLimits(limits))
 if err != nil {
     log.Fatal(err)
 }
