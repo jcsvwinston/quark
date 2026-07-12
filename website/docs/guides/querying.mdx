@@ -402,9 +402,11 @@ privileged, err := adminEmails.UnionAll(ownerEmails).List()
 
 Each operand can't carry `ORDER BY`, `LIMIT`, locks, its own CTEs, or nested
 set-ops; `ORDER BY`/`LIMIT` on the **outer** query apply to the combined result.
-Engine support: PostgreSQL and SQL Server are full; MySQL/MariaDB do only
-`UNION`/`UNION ALL` (others return `ErrUnsupportedFeature` — rewrite as a JOIN);
-SQLite and Oracle lack the `ALL` variants of `INTERSECT`/`EXCEPT`. Applying
+Engine support: PostgreSQL, SQL Server, and MariaDB (10.3+) are full; MySQL
+does only `UNION`/`UNION ALL` — it gained `INTERSECT`/`EXCEPT` in 8.0.31, a
+minor version Quark can't assume without a runtime probe, so those return
+`ErrUnsupportedFeature` there (rewrite as a JOIN); SQLite and Oracle lack the
+`ALL` variants of `INTERSECT`/`EXCEPT`. Applying
 `Limit` without an explicit `OrderBy` is portable — Quark injects a positional
 `ORDER BY 1` where MSSQL/Oracle need one for pagination.
 

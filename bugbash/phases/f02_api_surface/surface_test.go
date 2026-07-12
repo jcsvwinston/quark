@@ -422,9 +422,10 @@ func setOps(t *testing.T, ctx context.Context, c *quark.Client, eng string, fx f
 		r.fail("UnionAll", reporter.SeverityP1, "union all returned %d, want 3", len(list))
 	}
 
-	// INTERSECT/EXCEPT are unsupported on MySQL/MariaDB — expect the sentinel
-	// there rather than reporting a failure.
-	mysqlFamily := eng == tools.MySQL || eng == tools.MariaDB
+	// INTERSECT/EXCEPT are unsupported on MySQL (8.0.31+ can't be assumed
+	// without a version probe) — expect the sentinel there rather than
+	// reporting a failure. MariaDB (10.3+) executes them since QK-P2-2.
+	mysqlOnly := eng == tools.MySQL
 	inA := func() *quark.Query[domain.Order] {
 		return quark.For[domain.Order](ctx, c).Where("customer_id", "=", fx.customerID).WhereIn("status", []any{"paid", "pending"})
 	}
@@ -433,9 +434,9 @@ func setOps(t *testing.T, ctx context.Context, c *quark.Client, eng string, fx f
 	}
 	dialectSetOp := func(name string, err error) {
 		switch {
-		case mysqlFamily && !errors.Is(err, quark.ErrUnsupportedFeature):
+		case mysqlOnly && !errors.Is(err, quark.ErrUnsupportedFeature):
 			r.fail(name, reporter.SeverityP1, "want ErrUnsupportedFeature on %s, got %v", eng, err)
-		case !mysqlFamily && err != nil:
+		case !mysqlOnly && err != nil:
 			r.fail(name, reporter.SeverityP1, "List: %v", err)
 		}
 	}

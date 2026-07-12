@@ -26,13 +26,39 @@ type batchColDef struct {
 // universal safe chunk size covers all supported dialects.
 const batchChunkSize = 1000
 
-// maxBatchBindParams is the per-statement bind-parameter budget for bulk
-// multi-row INSERT (CreateBatch). SQL Server caps a single statement at ~2100
-// parameters — the tightest of the bulk-capable dialects (Oracle takes the
-// single-row INSERT loop and never builds a multi-row statement). Staying
-// under it lets CreateBatch chunk a large slice into statements that are valid
-// on every engine, instead of overrunning the ceiling on the first call.
+// maxBatchBindParams is the fallback per-statement bind-parameter budget for
+// bulk multi-row writes on dialects without a specific entry in
+// batchBindParamCeiling (custom dialects, Oracle's rare multi-row paths).
+// 2000 stays under SQL Server's ~2100 — the tightest documented ceiling —
+// so it is safe everywhere.
 const maxBatchBindParams = 2000
+
+// batchBindParamCeiling returns the per-statement bind-parameter budget for
+// bulk multi-row writes (CreateBatch, UpsertBatch) on the given dialect.
+// Values sit slightly under each engine's documented hard limit so the
+// statement's own overhead (and driver-added parameters) never tips it over:
+//
+//   - PostgreSQL: 65535 (uint16 parameter count in the extended protocol)
+//   - MySQL/MariaDB: 65535 (2-byte num_params in COM_STMT_PREPARE)
+//   - SQLite: 32766 (SQLITE_MAX_VARIABLE_NUMBER default since 3.32)
+//   - SQL Server: ~2100 per sp_executesql call
+//
+// Oracle never builds multi-row statements (identity-sequence limitation —
+// see CreateBatch/upsertBatchOracle) and takes the conservative fallback.
+func batchBindParamCeiling(dialectName string) int {
+	switch dialectName {
+	case "postgres":
+		return 65000
+	case "mysql", "mariadb":
+		return 65000
+	case "sqlite":
+		return 32000
+	case "mssql":
+		return 2000
+	default:
+		return maxBatchBindParams
+	}
+}
 
 // queueOrRunAfterHook is the F5-4 dispatcher for `After*` hooks. It
 // has two modes:
@@ -1534,6 +1560,26 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 		}
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 		defer cancel()
+		// SQL Server: back-fill the generated PK via `OUTPUT INSERTED.<pk>`
+		// (QK-P1-6). The OUTPUT clause sits after the last WHEN clause; in a
+		// MERGE, INSERTED exposes the post-operation row for BOTH branches,
+		// so the id comes back whether the row was inserted or updated —
+		// parity with the RETURNING engines. Only for an auto-generated
+		// integer single PK that is still zero (the same condition
+		// buildMerge uses to skip the IDENTITY column). Oracle's MERGE has
+		// no RETURNING clause, so the PK stays zero there — a documented
+		// limitation (see the Upsert docs).
+		if dialectName == "mssql" && upsertShouldBackfillPK(q, v) {
+			outSQL := strings.TrimSuffix(mergeSQL, ";") +
+				"\nOUTPUT INSERTED." + q.dialect.Quote(q.pk.Column) + ";"
+			var id int64
+			// executeQueryRow pins to q.exec (primary/tx) — this is a write.
+			if scanErr := q.executeQueryRow(ctx, outSQL, mergeArgs).Scan(&id); scanErr != nil {
+				return wrapDBError(scanErr)
+			}
+			setPKValue(v, q.pk, id)
+			return nil
+		}
 		_, execErr := q.executeExec(ctx, mergeSQL, mergeArgs)
 		return execErr
 	default:
@@ -1559,6 +1605,23 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 			}
 		}
 		return nil
+	}
+}
+
+// upsertShouldBackfillPK reports whether an MSSQL Upsert should read the
+// generated key back: a single (non-composite) integer PK whose value is
+// still zero — the same condition under which buildMerge omits the IDENTITY
+// column from the INSERT branch.
+func upsertShouldBackfillPK[T any](q *Query[T], v reflect.Value) bool {
+	if q.pk.Column == "" || q.meta.HasCompositePK || !isZeroPKValue(v.Field(q.pk.Index)) {
+		return false
+	}
+	switch q.pk.Kind {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1812,18 +1875,19 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		return q.createBatchBackfillPerRow(entities, columns, colIndexes, colTags)
 	}
 
-	// Chunk the multi-row INSERT so each statement stays within the dialect's
-	// bind-parameter ceiling (maxBatchBindParams). Without this, a CreateBatch
-	// of a few hundred wide rows overruns SQL Server's ~2100-parameter limit,
-	// and a few thousand overruns SQLite/Postgres/MySQL — the statement simply
-	// fails. Chunks loop on the bound executor (q.exec), so an explicit tx or a
-	// native-RLS executor still routes correctly; like DeleteBatch, chunks are
-	// not wrapped in an implicit transaction, so callers needing all-or-nothing
-	// across chunks should run CreateBatch inside client.Tx.
-	rowsPerChunk := maxBatchBindParams / len(columns)
+	// Chunk the multi-row INSERT so each statement stays within THIS dialect's
+	// bind-parameter ceiling (batchBindParamCeiling). Without this, a
+	// CreateBatch of a few hundred wide rows overruns SQL Server's
+	// ~2100-parameter limit, and a few thousand overruns SQLite — the
+	// statement simply fails. Chunks loop on the bound executor (q.exec), so
+	// an explicit tx or a native-RLS executor still routes correctly; like
+	// DeleteBatch, chunks are not wrapped in an implicit transaction, so
+	// callers needing all-or-nothing across chunks should run CreateBatch
+	// inside client.Tx.
+	rowsPerChunk := batchBindParamCeiling(q.dialect.Name()) / len(columns)
 	if rowsPerChunk < 1 {
-		// Only a model with more than maxBatchBindParams (2000) insertable
-		// columns lands here — vanishingly rare. It degrades to one row per
+		// Only a model with more insertable columns than the whole budget
+		// lands here — vanishingly rare. It degrades to one row per
 		// statement (safe, just slower); the guard keeps rowsPerChunk ≥ 1.
 		rowsPerChunk = 1
 	}
@@ -2108,14 +2172,35 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	switch q.dialect.Name() {
-	case "oracle":
+	// Oracle upserts row-at-a-time (identity-sequence limitation, see below)
+	// and needs no chunking.
+	if q.dialect.Name() == "oracle" {
 		return q.upsertBatchOracle(ctx, entities, conflictCols, updateCols)
-	case "mssql":
-		return q.upsertBatchMSSQLBulk(ctx, entities, cols, conflictCols, updateCols)
-	default:
-		return q.upsertBatchStandard(ctx, entities, cols, conflictCols, updateCols)
 	}
+
+	// Chunk to the dialect's bind-parameter ceiling, exactly like CreateBatch
+	// (QK-P1-4): a large UpsertBatch used to build one giant statement and
+	// blow SQL Server's ~2100-parameter cap (and the other engines' higher
+	// ones). Same non-transactional chunk contract as CreateBatch — wrap in
+	// client.Tx for all-or-nothing across chunks.
+	rowsPerChunk := batchBindParamCeiling(q.dialect.Name()) / len(cols)
+	if rowsPerChunk < 1 {
+		rowsPerChunk = 1
+	}
+	for start := 0; start < len(entities); start += rowsPerChunk {
+		end := min(start+rowsPerChunk, len(entities))
+		chunk := entities[start:end]
+		var err error
+		if q.dialect.Name() == "mssql" {
+			err = q.upsertBatchMSSQLBulk(ctx, chunk, cols, conflictCols, updateCols)
+		} else {
+			err = q.upsertBatchStandard(ctx, chunk, cols, conflictCols, updateCols)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // upsertBatchStandard handles Postgres, SQLite, MySQL and MariaDB via multi-row

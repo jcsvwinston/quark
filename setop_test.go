@@ -174,15 +174,13 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	})
 
 	t.Run("IntersectFiltersCommonRows", func(t *testing.T) {
-		// INTERSECT isn't supported by MySQL/MariaDB; the API returns
+		// INTERSECT isn't supported on MySQL (pre-8.0.31 can't be ruled
+		// out without a version probe); the API returns
 		// ErrUnsupportedFeature there (see setop.go:setOpKeyword). The
-		// happy-path semantic test only applies to engines that accept
-		// the operator — skip on the ones that reject it. Engines that
-		// do support it (PostgreSQL, MSSQL, Oracle, SQLite) verify the
-		// row-set arithmetic below.
-		switch baseClient.Dialect().Name() {
-		case "mysql", "mariadb":
-			t.Skip("INTERSECT not supported on MySQL/MariaDB — covered by the rejection contract")
+		// happy-path semantic test applies to every other engine —
+		// PostgreSQL, MSSQL, Oracle, SQLite, and (since QK-P2-2) MariaDB.
+		if baseClient.Dialect().Name() == "mysql" {
+			t.Skip("INTERSECT not supported on MySQL — covered by the rejection contract")
 		}
 
 		// Two operands selecting overlapping email subsets. INTERSECT
@@ -217,14 +215,12 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	})
 
 	t.Run("ExceptFiltersUnique", func(t *testing.T) {
-		// Same as IntersectFiltersCommonRows: MySQL/MariaDB don't
-		// support EXCEPT, the dialect surfaces ErrUnsupportedFeature
-		// in those cases — happy-path semantic test only applies to
-		// the engines that accept the operator. Oracle spells it MINUS
+		// Same as IntersectFiltersCommonRows: MySQL doesn't get EXCEPT
+		// (ErrUnsupportedFeature); every other engine — MariaDB included
+		// since QK-P2-2 — runs the semantics. Oracle spells it MINUS
 		// (handled in setOpKeyword) but the Go-level API stays Except.
-		switch baseClient.Dialect().Name() {
-		case "mysql", "mariadb":
-			t.Skip("EXCEPT not supported on MySQL/MariaDB — covered by the rejection contract")
+		if baseClient.Dialect().Name() == "mysql" {
+			t.Skip("EXCEPT not supported on MySQL — covered by the rejection contract")
 		}
 
 		// EXCEPT: rows in LHS not in RHS, deduplicated.
@@ -313,15 +309,13 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	})
 
 	t.Run("IntersectExceptRejectedOnMySQL", func(t *testing.T) {
-		// Mirror image of the happy-path subtests above: on MySQL and
-		// MariaDB, the dialect should reject Intersect / Except with
-		// ErrUnsupportedFeature. The other engines accept the operator
-		// — skip there because there's nothing to assert.
-		switch baseClient.Dialect().Name() {
-		case "mysql", "mariadb":
-			// expected to error
-		default:
-			t.Skip("dialect supports INTERSECT/EXCEPT — this rejection contract only applies to MySQL/MariaDB")
+		// Mirror image of the happy-path subtests above: on MySQL the
+		// dialect should reject Intersect / Except with
+		// ErrUnsupportedFeature (8.0.31+ cannot be assumed). Every other
+		// engine — MariaDB included since QK-P2-2 — accepts the operator,
+		// so there's nothing to assert there.
+		if baseClient.Dialect().Name() != "mysql" {
+			t.Skip("dialect supports INTERSECT/EXCEPT — this rejection contract only applies to MySQL")
 		}
 
 		lhs := quark.For[setUserA](ctx, baseClient).Select("email")
@@ -329,12 +323,12 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 
 		_, err := lhs.Intersect(rhs).List()
 		if err == nil || !errors.Is(err, quark.ErrUnsupportedFeature) {
-			t.Errorf("Intersect on MySQL/MariaDB should return ErrUnsupportedFeature, got %v", err)
+			t.Errorf("Intersect on MySQL should return ErrUnsupportedFeature, got %v", err)
 		}
 
 		_, err = lhs.Except(rhs).List()
 		if err == nil || !errors.Is(err, quark.ErrUnsupportedFeature) {
-			t.Errorf("Except on MySQL/MariaDB should return ErrUnsupportedFeature, got %v", err)
+			t.Errorf("Except on MySQL should return ErrUnsupportedFeature, got %v", err)
 		}
 	})
 }

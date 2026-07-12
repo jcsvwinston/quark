@@ -12,7 +12,7 @@ generates the right dialect-specific SQL and chunks large inputs for you.
 | Method | SQL shape | Atomicity |
 |---|---|---|
 | `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked; per-row back-fill for auto-PKs on Oracle/MySQL/SQL Server | One statement per chunk |
-| `UpsertBatch` | Dialect-specific bulk upsert | One statement (N `MERGE` on Oracle) |
+| `UpsertBatch` | Dialect-specific bulk upsert, chunked | One statement per chunk (N `MERGE` on Oracle) |
 | `UpdateBatch` | N `UPDATE` statements | Single transaction |
 | `DeleteBatch` | `DELETE … WHERE pk IN (…)`, chunked | One statement per chunk |
 
@@ -37,8 +37,9 @@ fmt.Println(users[0].ID, users[1].ID, users[2].ID)
 ```
 
 Large slices are **chunked automatically** so each statement stays under the
-engine's bind-parameter ceiling (SQL Server caps a statement at ~2100 parameters),
-so you can pass tens of thousands of rows without a "too many parameters" error.
+engine's own bind-parameter ceiling — ~65k on PostgreSQL/MySQL/MariaDB, ~32k on
+SQLite, ~2100 on SQL Server — so you can pass tens of thousands of rows without
+a "too many parameters" error, in as few statements as the engine allows.
 Chunks run on whatever executor the query is bound to (the pool, or an explicit
 transaction), but they are **not** wrapped in an implicit transaction — for
 all-or-nothing semantics, run `CreateBatch` inside [`client.Tx`](transactions):

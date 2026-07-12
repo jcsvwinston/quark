@@ -1039,6 +1039,53 @@ func testP1Features(ctx context.Context, t *testing.T, client *quark.Client) {
 		}
 	})
 
+	// ── Upsert insert-branch PK back-fill (QK-P1-6) ──────────────────────────
+	t.Run("UpsertBackfillsGeneratedPK", func(t *testing.T) {
+		// A model with a UNIQUE non-PK conflict column, so the insert branch
+		// runs with a zero auto-PK. The generated key must be written back on
+		// every engine except Oracle, whose MERGE has no RETURNING clause —
+		// a documented limitation.
+		type P1SuiteUpsertUser struct {
+			ID    int64  `db:"id" pk:"true"`
+			Email string `db:"email" quark:"unique,size=190"`
+			Name  string `db:"name"`
+		}
+		dropTable(client, "p1_suite_upsert_users")
+		if err := client.Migrate(ctx, &P1SuiteUpsertUser{}); err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+
+		u := &P1SuiteUpsertUser{Email: "backfill-suite@test.com", Name: "First"}
+		if err := quark.For[P1SuiteUpsertUser](ctx, client).Upsert(u, []string{"email"}, []string{"name"}); err != nil {
+			t.Fatalf("upsert insert-branch: %v", err)
+		}
+		if client.Dialect().Name() != "oracle" && u.ID == 0 {
+			t.Error("upsert insert-branch did not back-fill the generated PK")
+		}
+
+		// Conflict branch: same email, zero PK again — must update, not
+		// duplicate. On the engines that read the row back directly
+		// (RETURNING / OUTPUT), the back-filled id must match the original
+		// row; MySQL's LastInsertId is only defined for the insert branch.
+		u2 := &P1SuiteUpsertUser{Email: "backfill-suite@test.com", Name: "Second"}
+		if err := quark.For[P1SuiteUpsertUser](ctx, client).Upsert(u2, []string{"email"}, []string{"name"}); err != nil {
+			t.Fatalf("upsert update-branch: %v", err)
+		}
+		count, err := quark.For[P1SuiteUpsertUser](ctx, client).Count()
+		if err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if count != 1 {
+			t.Errorf("expected 1 row after upsert on same email, got %d", count)
+		}
+		switch client.Dialect().Name() {
+		case "postgres", "sqlite", "mariadb", "mssql":
+			if u.ID != 0 && u2.ID != u.ID {
+				t.Errorf("update-branch back-fill: got id %d, want %d", u2.ID, u.ID)
+			}
+		}
+	})
+
 	// ── CreateBatch ──────────────────────────────────────────────────────────
 	t.Run("CreateBatch", func(t *testing.T) {
 		batch := []*P1SuiteUser{
