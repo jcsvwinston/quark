@@ -656,6 +656,15 @@ func (q *Query[T]) Count() (int64, error) {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
 
+	// A compound select (UNION / INTERSECT / EXCEPT) cannot be counted by
+	// the flat `SELECT COUNT(*) FROM table [JOIN…] [WHERE…]` built below —
+	// that counts only the base operand and silently ignores the set-op
+	// (Paginate then reports the same wrong total). Count the combined
+	// result instead.
+	if len(q.setOps) > 0 {
+		return q.countCompound()
+	}
+
 	var sqlBuf strings.Builder
 	var args []any
 
@@ -714,6 +723,52 @@ func (q *Query[T]) Count() (int64, error) {
 		return 0, fmt.Errorf("count failed: %w", wrapDBError(err))
 	}
 
+	return count, nil
+}
+
+// countCompound counts a set-op (UNION/INTERSECT/EXCEPT) query by wrapping
+// the full compound select in a derived table: SELECT COUNT(*) FROM (…) qk_count.
+// ORDER BY / LIMIT / OFFSET are stripped from the wrapped select — they don't
+// change the total, and MSSQL/Oracle reject ORDER BY inside a derived table.
+// Any CTE prefix is hoisted outside the derived table (`WITH … SELECT COUNT(*)
+// FROM (…)`) because MSSQL does not accept WITH inside a subquery.
+func (q *Query[T]) countCompound() (int64, error) {
+	cq := q.clone()
+	cq.orderBy = nil
+	cq.limit = 0
+	cq.hasLimit = false
+	cq.offset = 0
+
+	fullSQL, args, err := cq.buildSelect()
+	if err != nil {
+		return 0, err
+	}
+
+	var sqlBuf strings.Builder
+	inner := fullSQL
+	// buildSelect writes the buildCTEPrefix output verbatim at the start of
+	// the statement, so re-rendering the prefix identifies the exact prefix
+	// to hoist. Alias `qk_count` is unquoted lowercase — valid (and required
+	// by MySQL/MSSQL for derived tables) on all six dialects; Oracle accepts
+	// an alias without AS.
+	if cteSQL, _, cteErr := cq.buildCTEPrefix(1); cteErr != nil {
+		return 0, cteErr
+	} else if cteSQL != "" {
+		inner = strings.TrimPrefix(fullSQL, cteSQL)
+		sqlBuf.WriteString(cteSQL)
+	}
+	sqlBuf.WriteString("SELECT COUNT(*) FROM (")
+	sqlBuf.WriteString(inner)
+	sqlBuf.WriteString(") qk_count")
+
+	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+	defer cancel()
+
+	var count int64
+	// Same replica routing as the flat Count path — a genuine read.
+	if err := q.executeReadRow(ctx, sqlBuf.String(), args, &count); err != nil {
+		return 0, fmt.Errorf("count failed: %w", wrapDBError(err))
+	}
 	return count, nil
 }
 

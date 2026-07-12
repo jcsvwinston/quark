@@ -329,6 +329,13 @@ func (m *MySQLDialect) LimitOffset(limit, offset int) string {
 	if limit > 0 {
 		return fmt.Sprintf("LIMIT %d", limit)
 	}
+	if offset > 0 {
+		// MySQL has no OFFSET-without-LIMIT form; the manual's documented
+		// idiom for "skip n, read to the end" is LIMIT with the max
+		// unsigned-64 row count. Without this the offset was silently
+		// dropped and the query returned rows the caller asked to skip.
+		return fmt.Sprintf("LIMIT 18446744073709551615 OFFSET %d", offset)
+	}
 	return ""
 }
 
@@ -394,6 +401,12 @@ func (m *MySQLDialect) SupportsTransactionalDDL() bool {
 // UpsertSQL for MySQL: INSERT … ON DUPLICATE KEY UPDATE col = VALUES(col)
 func (m *MySQLDialect) UpsertSQL(conflictCols, updateCols []string, _ int) string {
 	if len(updateCols) == 0 {
+		if len(conflictCols) == 0 {
+			// Defensive: Upsert/UpsertBatch reject empty conflictCols before
+			// reaching any dialect, but indexing conflictCols[0] here must
+			// never be a panic path for a future caller that doesn't.
+			return ""
+		}
 		return " ON DUPLICATE KEY UPDATE " + m.Quote(conflictCols[0]) + " = VALUES(" + m.Quote(conflictCols[0]) + ")"
 	}
 	sets := make([]string, len(updateCols))
@@ -440,7 +453,10 @@ func (s *SQLiteDialect) LimitOffset(limit, offset int) string {
 		return fmt.Sprintf("LIMIT %d", limit)
 	}
 	if offset > 0 {
-		return fmt.Sprintf("OFFSET %d", offset)
+		// SQLite's grammar has no bare OFFSET — it must hang off a LIMIT,
+		// and a negative LIMIT means "no limit". The previous bare
+		// `OFFSET n` was a syntax error at exec time.
+		return fmt.Sprintf("LIMIT -1 OFFSET %d", offset)
 	}
 	return ""
 }
@@ -918,7 +934,10 @@ func (m *MariaDBDialect) LimitOffset(limit, offset int) string {
 		return fmt.Sprintf("LIMIT %d", limit)
 	}
 	if offset > 0 {
-		return fmt.Sprintf("OFFSET %d", offset)
+		// Like MySQL, MariaDB's OFFSET only exists as part of LIMIT; the
+		// bare `OFFSET n` this used to emit is a syntax error. Same
+		// max-uint64 sentinel idiom as MySQLDialect.LimitOffset.
+		return fmt.Sprintf("LIMIT 18446744073709551615 OFFSET %d", offset)
 	}
 	return ""
 }
