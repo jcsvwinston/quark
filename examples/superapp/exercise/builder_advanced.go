@@ -237,9 +237,8 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 		return fmt.Errorf("UnionAll: %d filas, esperaba 2 (duplicados conservados)", len(rows))
 	}
 	rec.Note(QM("UnionAll"))
-	// INTERSECT/EXCEPT: feature gateada por Quark (setop.go) — MySQL devuelve
-	// ErrUnsupportedFeature (8.0.31+ no asumible); se asierta el sentinel ahí.
-	// MariaDB (10.3+) los ejecuta desde QK-P2-2.
+	// INTERSECT/EXCEPT: feature gateada por Quark (setop.go) — MySQL/MariaDB
+	// devuelven ErrUnsupportedFeature; se asierta el sentinel ahí.
 	if control.Supports(control.FeatIntersectExcept, conn.Engine) {
 		if rows, err := all.Intersect(admins2).Limit(10).List(); err != nil {
 			return fmt.Errorf("Intersect: %w", err)
