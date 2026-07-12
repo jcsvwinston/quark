@@ -1,0 +1,175 @@
+---
+sidebar_position: 1
+title: Installation
+description: Requirements, database drivers, optional packages, pool configuration, and a smoke test.
+---
+
+# Installation
+
+Quark is a regular Go module built on `database/sql`. You install the ORM once,
+then add the driver for the database engine you use — Quark doesn't wrap or
+replace driver DSNs.
+
+```bash
+go get github.com/jcsvwinston/quark
+```
+
+| Requirement | Notes |
+| --- | --- |
+| Go 1.25+ | Quark declares `go 1.25.7` in `go.mod`; build with Go 1.25 or newer. |
+| A `database/sql` driver | Owns the wire protocol and DSN format; added with a blank import. |
+| Driver name for `quark.New` | The dialect is auto-detected from it; override with `WithDialect`. |
+
+Quark is on the stable `v1.x` line. There's also a `quark` CLI for migrations,
+model generation, schema inspection, and tenant jobs —
+`go install github.com/jcsvwinston/quark/cmd/quark@latest` (see
+[Operational Workflows](cli)) — but you don't need it to use the library.
+
+## Pick a driver
+
+Install exactly the driver you need:
+
+| Engine | Driver | Dialect |
+| --- | --- | --- |
+| SQLite | `modernc.org/sqlite` | `quark.SQLite()` |
+| PostgreSQL | `github.com/lib/pq` | `quark.PostgreSQL()` |
+| MySQL | `github.com/go-sql-driver/mysql` | `quark.MySQL()` |
+| MariaDB | `github.com/go-sql-driver/mysql` | `quark.MariaDB()` |
+| SQL Server | `github.com/microsoft/go-mssqldb` | `quark.MSSQL()` |
+| Oracle | `github.com/sijms/go-ora/v2` | `quark.Oracle()` |
+
+SQLite is the easiest place to start — no external service. For PostgreSQL,
+`lib/pq` covers everything except the inbound `LISTEN/NOTIFY` listener
+([Events](../advanced/events)) — that one feature requires
+`github.com/jackc/pgx/v5/stdlib` (`quark.New("pgx", dsn)`); if you plan to use
+it, start with pgx directly. For MySQL/MariaDB,
+add `parseTime=true` to the DSN when you scan `time.Time` fields. MariaDB speaks
+the MySQL wire protocol through the same `"mysql"` driver; Quark detects it
+automatically (it checks the server version once at `New()` and switches to the
+MariaDB dialect), so `quark.New("mysql", dsn)` is correct for both.
+
+## A minimal program
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    "github.com/jcsvwinston/quark"
+    _ "modernc.org/sqlite"
+)
+
+type User struct {
+    ID    int64  `db:"id" pk:"true"`
+    Email string `db:"email" quark:"unique,not_null"`
+    Name  string `db:"name" quark:"not_null"`
+}
+
+func main() {
+    client, err := quark.New("sqlite", "file:quark.db?cache=shared")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Close()
+
+    ctx := context.Background()
+    if err := client.Migrate(ctx, &User{}); err != nil {
+        log.Fatal(err)
+    }
+
+    user := User{Email: "alice@example.com", Name: "Alice"}
+    if err := quark.For[User](ctx, client).Create(&user); err != nil {
+        log.Fatal(err)
+    }
+    log.Printf("created user id=%d", user.ID)
+    // => created user id=1
+}
+```
+
+`quark.New` pings the database during construction, so treat a returned error as
+a startup failure: wrong DSN, unreachable database, rejected credentials, or a
+driver/dialect mismatch.
+
+## Switching engines
+
+Only the import and the driver name change — your models and queries don't:
+
+```go
+import (
+    "github.com/jcsvwinston/quark"
+    _ "github.com/lib/pq"
+)
+
+client, err := quark.New("postgres", "postgres://user:pass@localhost/app?sslmode=disable")
+```
+
+The auto-detected dialect drives placeholder syntax, identifier quoting,
+`RETURNING`, upsert fragments, JSON expressions, pagination, and DDL.
+
+## Optional packages
+
+| Package | Purpose |
+| --- | --- |
+| `…/quark/cache/memory` | In-process `CacheStore` with tag invalidation. |
+| `…/quark/cache/redis` | Redis-backed `CacheStore`. |
+| `…/quark/otel` | OpenTelemetry middleware. |
+| `…/quark/migrate` | Versioned migration registry and migrator. |
+
+The core package has no framework dependency — use it from HTTP handlers,
+workers, CLIs, or any layer that can pass a `context.Context`.
+
+## Pool configuration
+
+Quark owns the `*sql.DB` it creates; tune the pool with options:
+
+```go
+client, err := quark.New("postgres", dsn,
+    quark.WithMaxOpenConns(25),
+    quark.WithMaxIdleConns(25),
+    quark.WithConnMaxLifetime(30*time.Minute),
+)
+```
+
+For database-per-tenant routing, each tenant can own its own pool — see
+[Multi-Tenant](../advanced/multi-tenant) before setting high limits.
+
+## Smoke test
+
+A quick check that the driver, dialect, migration helper, insert, and PK
+write-back all work end to end:
+
+```go
+func Smoke(ctx context.Context, client *quark.Client) error {
+    type HealthCheck struct {
+        ID   int64  `db:"id" pk:"true"`
+        Name string `db:"name" quark:"not_null"`
+    }
+    if err := client.Migrate(ctx, &HealthCheck{}); err != nil {
+        return err
+    }
+    row := HealthCheck{Name: "ok"}
+    if err := quark.For[HealthCheck](ctx, client).Create(&row); err != nil {
+        return err
+    }
+    _, err := quark.For[HealthCheck](ctx, client).Find(row.ID)
+    return err
+}
+```
+
+## Running the test suite
+
+The upstream tests use environment variables for the external engines (SQLite
+runs offline):
+
+```bash
+export QUARK_TEST_POSTGRES_DSN="postgres://user:pass@localhost:5432/testdb?sslmode=disable"
+export QUARK_TEST_MYSQL_DSN="user:pass@tcp(localhost:3306)/testdb?parseTime=true"
+export QUARK_TEST_MSSQL_DSN="sqlserver://sa:Pass@localhost:1433?database=testdb"
+export QUARK_TEST_ORACLE_DSN="oracle://user:pass@localhost:1521/XE"
+```
+
+A local tool that runs raw DDL through `client.Exec` needs the client configured
+with `AllowRawQueries: true`; the high-level `Migrate`, `Sync`, `CreateIndex`,
+and `AddForeignKey` helpers don't.
