@@ -26,7 +26,7 @@ Quark is **v1.2.1** on the stable `v1.x` line (v1.1.0 was the hardening minor; v
 
 The **v1.2.1** patch closes the 2026-07 audit findings: the CLI works out of the box (`quark init` wrote a driver name `sql.Open` did not recognise), failing commands exit non-zero, `quark sync` no longer advertises flags it ignored, `inspect --format json|yaml` and `quark version` exist, dialect `Quote()` is self-escaping, and the raw-query guard no longer rejects `--` inside string literals. CLI/docs/guard only — no query-builder or CRUD changes.
 
-**v1.1** (hardening): the post-v1.0 bug-bash (phases F0–F14, a systematic cross-engine pass over the whole surface) plus the correctness fixes it surfaced — `CreateBatch` now chunks to each dialect's bind-parameter ceiling, versioned migrations work on SQL Server, a MariaDB schema-diff false positive is gone, dialect-aware savepoints, multi-tenant `SchemaPerTenant` write routing, and three eager-loading fixes, plus `--` rejected in raw queries (BB-5…BB-13). Adds automatic MariaDB detection and an inbound PostgreSQL `LISTEN/NOTIFY` listener (ADR-0019). No breaking changes.
+**v1.1** (hardening): the post-v1.0 bug-bash (phases F0–F14, a systematic cross-engine pass over the whole surface) plus the correctness fixes it surfaced — `CreateBatch` now chunks multi-row INSERTs to a safe universal 2,000-bind-parameter constant, versioned migrations work on SQL Server, a MariaDB schema-diff false positive is gone, dialect-aware savepoints, multi-tenant `SchemaPerTenant` write routing, and three eager-loading fixes, plus `--` rejected in raw queries (BB-5…BB-13). Adds automatic MariaDB detection and an inbound PostgreSQL `LISTEN/NOTIFY` listener (ADR-0019). No breaking changes.
 
 The **v1.1.1–v1.1.5** patches carry cross-engine correctness fixes — `CreateBatch` primary-key back-fill on Oracle/MySQL/SQL Server, recursive CTEs and set-op pagination on Oracle/SQL Server, `BeforeCreate`/`BeforeUpdate` hooks on the batch and upsert paths, and `ErrInvalidQuery` wrapping for rejected operators and raw queries — detailed in the [`CHANGELOG`](CHANGELOG.md). All non-breaking.
 
@@ -428,6 +428,7 @@ github.com/jcsvwinston/quark
 ```go
 client, err := quark.New("postgres", "postgres://user:pass@localhost/db",
     quark.WithLimits(quark.Limits{
+        MaxQueryLength:     10 * 1024,       // reject generated SQL above this byte length
         MaxResults:         10_000,          // hard cap on List() results
         MaxWhereConditions: 20,              // prevent runaway WHERE chains
         MaxJoins:           5,
@@ -440,6 +441,11 @@ client, err := quark.New("postgres", "postgres://user:pass@localhost/db",
     quark.WithQueryObserver(myObserver),     // query logging / metrics
 )
 ```
+
+More knobs — deadlock retry, slow-query logging, default timezone, cache
+jitter/XFetch/cross-instance stampede control, read replicas and their
+selection strategy/cooldown, pool idle-time — are covered in the
+[Configuration Reference](https://jcsvwinston.github.io/quantum/quark/reference/configuration/).
 
 ---
 

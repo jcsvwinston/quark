@@ -1,0 +1,250 @@
+# Querying API Reference
+
+Reference for read execution methods on `*quark.Query[T]`.
+
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `First` | `First() (T, error)` | First matching row, or `ErrNotFound`. |
+| `Find` | `Find(id any) (T, error)` | One row by single-column primary key. |
+| `List` | `List() ([]T, error)` | Scan all matching rows into `[]T`. |
+| `Count` | `Count() (int64, error)` | Count matching rows. |
+| `Sum` | `Sum(column string) (float64, error)` | Sum of a column over matching rows. |
+| `Avg` | `Avg(column string) (float64, error)` | Average of a column. |
+| `Min` | `Min(column string) (float64, error)` | Minimum of a column. |
+| `Max` | `Max(column string) (float64, error)` | Maximum of a column. |
+| `Paginate` | `Paginate(pageSize, page int) (*Page[T], error)` | Count + limited select into a `*Page[T]`. |
+| `Cursor` | `Cursor() (*Cursor[T], error)` | Type-safe cursor over `sql.Rows`. |
+| `Iter` | `Iter(fn func(T) error) error` | Stream rows through a callback. |
+
+## First
+
+### `First() (T, error)`
+
+Returns the first matching row or `quark.ErrNotFound`.
+
+```go
+user, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    OrderBy("created_at", "DESC").
+    First()
+```
+
+Behavior:
+
+| Case | Return |
+| --- | --- |
+| Row exists | `(entity, nil)` |
+| No row | `(zero, quark.ErrNotFound)` |
+| Query or scan error | `(zero, error)` |
+
+`First` sets `Limit(1)` internally.
+
+## Find
+
+### `Find(id any) (T, error)`
+
+Finds one row by simple primary key.
+
+```go
+user, err := quark.For[User](ctx, client).Find(42)
+```
+
+`Find` is for single-column primary keys. For composite primary keys, use
+`Where(...).First()`:
+
+```go
+item, err := quark.For[OrderItem](ctx, client).
+    Where("order_id", "=", orderID).
+    Where("product_id", "=", productID).
+    First()
+```
+
+Soft-delete filters and tenant filters still apply.
+
+## List
+
+### `List() ([]T, error)`
+
+Executes the select and scans matching rows into `[]T`.
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    OrderBy("name", "ASC").
+    Limit(100).
+    List()
+```
+
+If no explicit limit has been set, `List` applies a safe default limit of 100 and
+logs a warning. Use `Iter` or `Cursor` for intentionally unbounded reads.
+
+`List` respects:
+
+| Feature | Behavior |
+| --- | --- |
+| Soft deletes | Adds `deleted_at IS NULL` unless `Unscoped()` is set. |
+| Tenant router | Applies schema or row-level isolation. |
+| Cache | Reads and writes cache entries when `.Cache(...)` is enabled. |
+| Preload | Loads requested relations after parent rows are scanned. |
+| Middleware | Executes through registered query middleware. |
+| Observers | Emits a `QueryEvent` after execution. |
+
+## Count
+
+### `Count() (int64, error)`
+
+Counts matching rows.
+
+```go
+count, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Count()
+// => count is the number of matching rows, e.g. 2; err is nil
+```
+
+`Count` includes `Where`, joins, soft-delete filters, and tenant filters. It does
+not apply `Limit` or `Offset`.
+
+## Aggregates
+
+### `Sum(column string) (float64, error)`
+
+```go
+total, err := quark.For[Order](ctx, client).
+    Where("status", "=", "paid").
+    Sum("amount")
+```
+
+### `Avg(column string) (float64, error)`
+
+```go
+avg, err := quark.For[Order](ctx, client).Avg("amount")
+```
+
+### `Min(column string) (float64, error)`
+
+```go
+min, err := quark.For[Product](ctx, client).
+    Where("stock", ">", 0).
+    Min("price")
+```
+
+### `Max(column string) (float64, error)`
+
+```go
+max, err := quark.For[Product](ctx, client).
+    Where("stock", ">", 0).
+    Max("price")
+```
+
+For two paid orders of `100.5` and `49.5`, `Sum("amount")` returns `150`.
+Aggregate column names are validated as identifiers. The helpers return `0`
+when the database aggregate result is `NULL`.
+
+## Paginate
+
+### `Paginate(pageSize, page int) (*Page[T], error)`
+
+Runs a count query and a limited select.
+
+```go
+page, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    OrderBy("id", "ASC").
+    Paginate(20, 0)
+
+fmt.Println(len(page.Items)) // => rows in this page (≤ pageSize)
+fmt.Println(page.Total)      // => total matching rows across all pages
+fmt.Println(page.TotalPages) // => ceil(Total / pageSize)
+```
+
+With three matching rows and `Paginate(2, 0)`, `page.Items` has length 2,
+`page.Total` is 3, and `page.TotalPages` is 2.
+
+`page` is zero-indexed. Negative pages are treated as `0`. A non-positive
+`pageSize` defaults to `100`.
+
+```go
+type Page[T any] struct {
+    Items      []T
+    Total      int64
+    Page       int
+    PageSize   int
+    TotalPages int64
+}
+```
+
+## Cursor
+
+### `Cursor() (*Cursor[T], error)`
+
+Returns a type-safe cursor over `sql.Rows`.
+
+```go
+cursor, err := quark.For[LogEntry](ctx, client).
+    Where("level", "=", "error").
+    OrderBy("id", "ASC").
+    Cursor()
+if err != nil {
+    return err
+}
+defer cursor.Close()
+
+for cursor.Next() {
+    var entry LogEntry
+    if err := cursor.Scan(&entry); err != nil {
+        return err
+    }
+    process(entry)
+}
+
+return cursor.Err()
+```
+
+Cursor methods:
+
+| Method | Description |
+| --- | --- |
+| `Next() bool` | Advances to the next row. |
+| `Scan(dest *T) error` | Scans the current row into `dest`. |
+| `Close() error` | Closes rows, cancels the query context, and emits an observer event. |
+| `Err() error` | Returns the underlying row iteration error. |
+
+Always call `Close`.
+
+## Iter
+
+### `Iter(fn func(T) error) error`
+
+Streams rows through a callback.
+
+```go
+err := quark.For[Event](ctx, client).
+    Where("processed", "=", false).
+    OrderBy("id", "ASC").
+    Iter(func(event Event) error {
+        if err := processEvent(event); err != nil {
+            return err
+        }
+        return nil
+    })
+```
+
+Iteration stops on the first callback error, scan error, query error, or rows
+error.
+
+## Scanning Rules
+
+Rows are scanned by matching result columns to model fields:
+
+| Match source | Notes |
+| --- | --- |
+| `db` tag | Fast path through cached metadata. |
+| snake-cased field name | Fallback for columns without a metadata hit. |
+| exact field name | Fallback for matching driver column names. |
+
+Unknown result columns are discarded. For custom projections, define a dedicated
+read model with matching `db` tags or use raw SQL and manual scanning.
+
+`time.Time` and `*time.Time` fields include scanner wrappers for drivers that
+return datetime values as strings or byte slices.

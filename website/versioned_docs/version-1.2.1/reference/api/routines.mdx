@@ -1,0 +1,87 @@
+# Stored Routines API Reference
+
+Quark can call database functions and stored procedures through `Routine[T]`
+and `Call`.
+
+## NewRoutine
+
+### `NewRoutine[T](ctx context.Context, provider ClientProvider, routine string, args ...any) *Routine[T]`
+
+Creates a routine builder.
+
+```go
+type UserStats struct {
+    UserID     int64   `db:"user_id"`
+    OrderCount int     `db:"order_count"`
+    TotalSpent float64 `db:"total_spent"`
+}
+
+stats, err := quark.NewRoutine[UserStats](
+    ctx,
+    client,
+    "get_user_stats",
+    30,
+).List()
+```
+
+The routine name is validated as an identifier. Arguments are passed as driver
+parameters.
+
+## List
+
+### `List() ([]T, error)`
+
+Executes the routine and scans all rows.
+
+```go
+rows, err := quark.NewRoutine[UserStats](ctx, client, "get_user_stats", 30).List()
+```
+
+If `T` is a struct, Quark scans by `db` tags. If `T` is a scalar type, each row
+is scanned into that scalar.
+
+## First
+
+### `First() (T, error)`
+
+Returns the first row or `sql.ErrNoRows`.
+
+```go
+stat, err := quark.NewRoutine[UserStats](ctx, client, "get_user_stats", 30).First()
+```
+
+## Scalar
+
+### `Scalar() (T, error)`
+
+Alias for `First` when `T` is a primitive type.
+
+```go
+tax, err := quark.NewRoutine[float64](ctx, client, "calculate_tax", 100.00).Scalar()
+```
+
+## Call
+
+### `Call(ctx context.Context, provider ClientProvider, procedure string, args ...any) error`
+
+Calls a stored procedure that does not return a row set.
+
+```go
+err := quark.Call(ctx, client, "process_order", orderID, userID)
+```
+
+The procedure name is validated as an identifier.
+
+## Dialect SQL Shapes
+
+| Dialect | Routine returning rows | Procedure call |
+| --- | --- | --- |
+| PostgreSQL | `SELECT * FROM "routine"($1, $2)` | `CALL "procedure"($1, $2)` |
+| MySQL / MariaDB | `CALL \`routine\`(?, ?)` | `CALL \`procedure\`(?, ?)` |
+| SQLite | `SELECT * FROM "routine"(?, ?)` | `SELECT "procedure"(?, ?)` |
+| SQL Server | `SELECT * FROM [routine](@p1, @p2)` | `EXEC [procedure] @p1, @p2` |
+| Oracle | `SELECT * FROM TABLE("ROUTINE"(:1, :2))` | `BEGIN "PROCEDURE"(:1, :2); END;` |
+
+Routine execution currently bypasses Quark query middleware and observers. Use
+driver-level instrumentation when routine calls need the same telemetry as model
+queries.

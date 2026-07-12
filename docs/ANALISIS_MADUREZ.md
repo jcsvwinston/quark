@@ -262,7 +262,7 @@ Versionado contradictorio (v1.0 anunciado vs CHANGELOG en 0.1.1 vs SECURITY pre-
 ### **Fase 2 — Query builder componible y locking (6–8 semanas)**
 > *Objetivo: que cualquier consulta enterprise se escriba sin caer en `RawQuery`.*
 
-- **AST de expresiones**: tipo `Expr` con `Col(...)`, `Lit(...)`, `Func(name, args…)`, `And/Or/Not`, `Cast`, `In(subquery)`, `Exists(subquery)`. `Where` y `Having` aceptan `Expr`.
+- **AST de expresiones**: tipo `Expr` con `Col(...)`, `Lit(...)`, `Func(name, args…)`, `And/Or/Not`, `In(subquery)`, `Exists(subquery)`. `Where` y `Having` aceptan `Expr`.
 - **Subqueries tipadas componibles**: `For[Order](ctx, c).Where(...).AsSubquery()` integrable en otro `Where`/`Join`.
 - **CTEs**: `With("t", subq).For[T]().Where(...)`. `WithRecursive`.
 - **Window functions**: `OverWindow(name).PartitionBy(...).OrderBy(...)` y método `RowNumber()/Rank()/Lag()`.
