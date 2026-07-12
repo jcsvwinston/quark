@@ -20,9 +20,13 @@ type setOpEntry struct {
 }
 
 // setOpKeyword maps the canonical SQL set-op keyword to the dialect's
-// spelling. PostgreSQL, MSSQL, SQLite, and MySQL/MariaDB use the SQL
-// standard names; Oracle spells EXCEPT as MINUS. MySQL and MariaDB
-// don't support INTERSECT or EXCEPT at all (returns ErrUnsupportedFeature).
+// spelling. PostgreSQL, MSSQL, SQLite, and MariaDB use the SQL standard
+// names; Oracle spells EXCEPT as MINUS. MySQL is the one holdout: it only
+// gained INTERSECT/EXCEPT in 8.0.31 (2022-10), and quark cannot assume a
+// minimum *minor* version without a runtime probe, so those two return
+// ErrUnsupportedFeature on the mysql dialect. MariaDB has had them since
+// 10.3 (ALL variants since 10.5) — within the 10.5 floor the dialect
+// already assumes for RETURNING — so they are enabled there (QK-P2-2).
 //
 // Kept as a package-level helper rather than a Dialect method so adding
 // set-op support doesn't break custom Dialect implementations sitting
@@ -43,9 +47,9 @@ func setOpKeyword(d Dialect, kind string, all bool) (string, error) {
 				return "", fmt.Errorf("%w: Oracle does not support INTERSECT ALL", ErrUnsupportedFeature)
 			}
 		}
-	case "mysql", "mariadb":
+	case "mysql":
 		if kind == "INTERSECT" || kind == "EXCEPT" {
-			return "", fmt.Errorf("%w: %s does not support %s — use a JOIN-based rewrite", ErrUnsupportedFeature, name, kind)
+			return "", fmt.Errorf("%w: %s requires MySQL 8.0.31+ for %s, which quark cannot assume without a version probe — use a JOIN-based rewrite (MariaDB 10.3+ is supported)", ErrUnsupportedFeature, name, kind)
 		}
 	case "sqlite":
 		if all && (kind == "INTERSECT" || kind == "EXCEPT") {

@@ -309,9 +309,17 @@ err := quark.For[Product](ctx, client).Upsert(
 )
 ```
 
-`conflictCols` should match a unique constraint or primary key. Pass
-`updateCols` explicitly for portable behavior. Empty `updateCols` is dialect
-specific and should not be treated as “update all columns”.
+`conflictCols` should match a unique constraint or primary key (empty
+`conflictCols` returns `ErrInvalidQuery`). Pass `updateCols` explicitly for
+portable behavior. Empty `updateCols` is dialect specific and should not be
+treated as “update all columns”.
+
+**Generated-key back-fill:** when the entity's single integer PK is zero,
+`Upsert` writes the generated key back on PostgreSQL/SQLite/MariaDB
+(`RETURNING`), MySQL (`LAST_INSERT_ID`, insert branch only), and SQL Server
+(`MERGE … OUTPUT INSERTED.<pk>`, both branches). **Oracle is the exception**:
+its `MERGE` has no `RETURNING` clause, so the PK stays zero — re-query by the
+conflict columns if you need it.
 
 | Dialect | Shape |
 | --- | --- |
