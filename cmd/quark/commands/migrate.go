@@ -18,9 +18,32 @@ import (
 var (
 	migrateSteps   int
 	migrateDryRun  bool
-	migrateForce   bool
 	migrateMessage string
 )
+
+// errNoMigrationsRegistered is returned by up/down when this binary's
+// migration registry is empty. Migrations register through init() side
+// effects, so the installed standalone `quark` binary can never see the
+// project's migration files — pretending "No pending migrations" there was
+// the QK-P1-1 lie. Fail loudly with the embed recipe instead.
+func errNoMigrationsRegistered(verb string) error {
+	return fmt.Errorf(`no migrations are registered in this binary — cannot %s.
+
+Migration files register themselves via init(), which only runs when their
+package is compiled into the executing binary. The standalone 'quark' binary
+does not (and cannot) import your project's migrations package.
+
+Build a small runner that does, and drive it from there:
+
+    // cmd/quark/main.go (in YOUR project)
+    import (
+        _ "github.com/you/yourapp/migrations" // side-effect: registers migrations
+        "github.com/jcsvwinston/quark/cmd/quark/commands"
+    )
+    func main() { commands.Execute() }
+
+See the CLI guide ("Embedding the same operations in your own binary")`, verb)
+}
 
 func init() {
 	migrateCmd.AddCommand(migrateCreateCmd)
@@ -137,6 +160,9 @@ func runMigrateCreate(name string) error {
 }
 
 func runMigrateUp() error {
+	if migrate.RegisteredCount() == 0 {
+		return errNoMigrationsRegistered("apply")
+	}
 	client, err := db.GetQuarkClient()
 	if err != nil {
 		return err
@@ -155,6 +181,9 @@ func runMigrateUp() error {
 }
 
 func runMigrateDown() error {
+	if migrate.RegisteredCount() == 0 {
+		return errNoMigrationsRegistered("revert")
+	}
 	client, err := db.GetQuarkClient()
 	if err != nil {
 		return err

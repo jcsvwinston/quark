@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/fatih/color"
+	"github.com/jcsvwinston/quark"
 	"github.com/jcsvwinston/quark/cmd/quark/internal/db"
 	"github.com/jcsvwinston/quark/migrate"
 	"github.com/spf13/cobra"
@@ -17,20 +19,12 @@ import (
 // outside this alphabet is rejected before any SQL is built.
 var validTenantID = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
-var (
-	tenantID string
-	skipSeed bool
-	forceOp  bool
-)
-
 func init() {
 	tenantCmd.AddCommand(tenantProvisionCmd)
 	tenantCmd.AddCommand(tenantMigrateCmd)
 	tenantCmd.AddCommand(tenantListCmd)
 	tenantCmd.AddCommand(tenantMigrateAllCmd)
 
-	tenantProvisionCmd.Flags().BoolVar(&skipSeed, "skip-seed", false, "Skip seeders after provision")
-	tenantMigrateCmd.Flags().StringVar(&tenantID, "tenant-id", "", "ID of the tenant")
 	tenantMigrateAllCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Preview SQL")
 
 	rootCmd.AddCommand(tenantCmd)
@@ -151,11 +145,17 @@ func runTenantProvision(id string) error {
 }
 
 func runTenantMigrate(id string) error {
+	if !validTenantID.MatchString(id) {
+		return fmt.Errorf("invalid tenant id %q: must match %s", id, validTenantID.String())
+	}
+	if migrate.RegisteredCount() == 0 {
+		return errNoMigrationsRegistered("migrate tenant " + id)
+	}
 	fmt.Printf("Migrating tenant: %s...\n", id)
 
-	// In a real implementation, we would resolve the tenant DSN/Schema here.
-	// For this CLI version, we'll assume the default client can be used with a router or DSN adjustment.
-	client, err := db.GetQuarkClient()
+	// Resolve the client FOR THIS TENANT. The previous implementation used
+	// the default client, silently migrating the wrong database (QK-P1-3).
+	client, err := db.GetTenantQuarkClient(id)
 	if err != nil {
 		return fmt.Errorf("connecting to tenant database: %w", err)
 	}
@@ -283,13 +283,41 @@ func runTenantMigrateAll() error {
 	return nil
 }
 
-func ensureTenantRegistry(ctx context.Context, client interface {
-	Exec(context.Context, string, ...any) error
-}) error {
-	query := `CREATE TABLE IF NOT EXISTS quark_tenants (
-		id          VARCHAR(255) PRIMARY KEY,
-		strategy    VARCHAR(50)  NOT NULL DEFAULT 'db_per_tenant',
-		created_at  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
-	)`
-	return client.Exec(ctx, query)
+// ensureTenantRegistry creates the quark_tenants bookkeeping table if needed.
+// The DDL is dialect-aware, mirroring migrate.Migrator.Init: SQL Server has no
+// CREATE TABLE IF NOT EXISTS, and Oracle has neither IF NOT EXISTS nor the
+// VARCHAR/TIMESTAMP-default spelling the generic form uses (QK-P2-4).
+func ensureTenantRegistry(ctx context.Context, client *quark.Client) error {
+	var ddl string
+	switch client.Dialect().Name() {
+	case "mssql":
+		ddl = `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'quark_tenants')
+			CREATE TABLE quark_tenants (
+				id          NVARCHAR(255) NOT NULL PRIMARY KEY,
+				strategy    NVARCHAR(50)  NOT NULL DEFAULT 'db_per_tenant',
+				created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`
+	case "oracle":
+		ddl = `CREATE TABLE quark_tenants (
+			id          VARCHAR2(255) NOT NULL,
+			strategy    VARCHAR2(50)  DEFAULT 'db_per_tenant' NOT NULL,
+			created_at  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP NOT NULL,
+			CONSTRAINT pk_quark_tenants PRIMARY KEY (id)
+		)`
+	default: // postgres, mysql, mariadb, sqlite
+		ddl = `CREATE TABLE IF NOT EXISTS quark_tenants (
+			id          VARCHAR(255) PRIMARY KEY,
+			strategy    VARCHAR(50)  NOT NULL DEFAULT 'db_per_tenant',
+			created_at  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+		)`
+	}
+	if err := client.Exec(ctx, ddl); err != nil {
+		// Oracle has no IF NOT EXISTS; ORA-00955 means the table already
+		// exists — the idempotent success case (same as migrate.Init).
+		if client.Dialect().Name() == "oracle" && strings.Contains(err.Error(), "ORA-00955") {
+			return nil
+		}
+		return err
+	}
+	return nil
 }

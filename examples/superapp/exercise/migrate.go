@@ -414,6 +414,12 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 		},
 		Down: func(ctx context.Context, c *quark.Client) error { return execRaw(ctx, c, "DELETE FROM "+vNotesTable) },
 	})
+	// RegisteredCount es el guard con el que la CLI rechaza el no-op de
+	// 'migrate up' con registro vacío (QK-P1-1): tras registrar dos, cuenta 2.
+	if n := migrate.RegisteredCount(); n != 2 {
+		return fmt.Errorf("RegisteredCount: %d, esperaba 2", n)
+	}
+	rec.Note(MIG("RegisteredCount"))
 	m := migrate.NewMigrator(admin)
 	if err := m.Init(rec.Mark(ctx, MIG("(*Migrator).Init"))); err != nil {
 		return fmt.Errorf("migrator init: %w", err)

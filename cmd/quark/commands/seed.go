@@ -17,7 +17,6 @@ import (
 
 var (
 	seedName string
-	seedEnv  string
 )
 
 // SeederFunc is the signature for a registered seeder function.
@@ -39,7 +38,6 @@ func init() {
 
 	seedCreateCmd.Flags().StringVar(&seedName, "name", "", "Name of the seeder")
 	seedRunCmd.Flags().StringVar(&seedName, "name", "", "Name of the specific seeder to run (default: all)")
-	seedRunCmd.Flags().StringVar(&seedEnv, "env", "development", "Environment")
 
 	rootCmd.AddCommand(seedCmd)
 }
@@ -126,13 +124,18 @@ func runSeedCreate(name string) error {
 }
 
 func runSeedRun() error {
+	// Same contract as migrate up/down (QK-P1-1): the standalone binary has
+	// no way to see the project's seeders, so a "successful" run that seeded
+	// nothing must exit non-zero, not 0.
 	if len(seederRegistry) == 0 {
-		color.Yellow("No seeders registered.")
-		color.Yellow("Register seeders before calling Execute():")
-		fmt.Println()
-		fmt.Println("  commands.RegisterSeeder(\"users\", seeders.SeedUsers)")
-		fmt.Println("  commands.Execute()")
-		return nil
+		return fmt.Errorf(`no seeders are registered in this binary — cannot run.
+
+Seeders register via commands.RegisterSeeder from YOUR main before Execute():
+
+    commands.RegisterSeeder("users", seeders.SeedUsers)
+    commands.Execute()
+
+See the CLI guide ("Embedding the same operations in your own binary")`)
 	}
 
 	client, err := clidb.GetQuarkClient()
@@ -148,7 +151,7 @@ func runSeedRun() error {
 		if !ok {
 			return fmt.Errorf("seeder %q not found; use 'seed list' to see available seeders", seedName)
 		}
-		color.Cyan("Running seeder: %s [env=%s]", seedName, seedEnv)
+		color.Cyan("Running seeder: %s", seedName)
 		if err := fn(ctx, client); err != nil {
 			return fmt.Errorf("seeder %q failed: %w", seedName, err)
 		}
@@ -157,7 +160,7 @@ func runSeedRun() error {
 	}
 
 	// Run all seeders in registration order
-	color.Cyan("Running all seeders [env=%s]...", seedEnv)
+	color.Cyan("Running all seeders...")
 	success, failed := 0, 0
 	for name, fn := range seederRegistry {
 		fmt.Printf("  Running %s...", name)

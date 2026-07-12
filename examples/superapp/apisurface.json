@@ -3157,6 +3157,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
+      "name": "RegisteredCount",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "Reset",
       "kind": "func"
     },

@@ -199,6 +199,12 @@ func runInspectTable(name string) error {
 	if err != nil {
 		return fmt.Errorf("introspecting table %s: %w", name, err)
 	}
+	// Introspection returns an empty column set for a nonexistent table on
+	// most engines — rendering an empty report with exit 0 read as success
+	// (QK-P1-5). Same guard as validate.
+	if len(info.Columns) == 0 {
+		return fmt.Errorf("table %q not found or has no columns", name)
+	}
 
 	if inspectFormat != "table" {
 		return renderStructured(newTableReport(info, name))
