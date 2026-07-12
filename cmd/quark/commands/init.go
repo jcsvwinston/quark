@@ -22,14 +22,16 @@ func init() {
 }
 
 var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize a new Quark project",
-	Run: func(cmd *cobra.Command, args []string) {
-		runInit()
+	Use:           "init",
+	Short:         "Initialize a new Quark project",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runInit()
 	},
 }
 
-func runInit() {
+func runInit() error {
 	fmt.Printf("Initializing Quark project in %s...\n", initDir)
 
 	// Create directories
@@ -42,8 +44,7 @@ func runInit() {
 	for _, d := range dirs {
 		path := filepath.Join(initDir, d)
 		if err := os.MkdirAll(path, 0755); err != nil {
-			color.Red("Error creating directory %s: %v", path, err)
-			return
+			return fmt.Errorf("creating directory %s: %w", path, err)
 		}
 		fmt.Printf("  Created %s/\n", d)
 	}
@@ -92,13 +93,13 @@ func runInit() {
 
 		data, _ := yaml.Marshal(config)
 		if err := os.WriteFile(configPath, data, 0644); err != nil {
-			color.Red("Error creating .quark.yml: %v", err)
-			return
+			return fmt.Errorf("creating .quark.yml: %w", err)
 		}
 		fmt.Println("  Created .quark.yml")
 	}
 
 	color.Green("\nQuark project initialized successfully!")
+	return nil
 }
 
 func getDSNPlaceholder(dialect string) string {
@@ -112,7 +113,9 @@ func getDSNPlaceholder(dialect string) string {
 	case "mssql", "sqlserver":
 		return "sqlserver://user:pass@localhost:1433?database=myapp"
 	case "oracle":
-		return "user/pass@localhost:1521/xe"
+		// go-ora URL form; the legacy user/pass@host:port/service form is a
+		// godror-ism and go-ora (the driver this CLI links) rejects it.
+		return "oracle://user:pass@localhost:1521/xe"
 	default:
 		return ""
 	}

@@ -35,48 +35,58 @@ var tenantCmd = &cobra.Command{
 	Short: "Manage multi-tenant environments",
 }
 
+// Tenant jobs are batch/automation territory: a provision or migrate that
+// fails must exit non-zero (RunE → main.go prints and exits 1).
 var tenantProvisionCmd = &cobra.Command{
-	Use:   "provision <tenant-id>",
-	Short: "Provision a new tenant",
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		runTenantProvision(args[0])
+	Use:           "provision <tenant-id>",
+	Short:         "Provision a new tenant",
+	Args:          cobra.ExactArgs(1),
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runTenantProvision(args[0])
 	},
 }
 
 var tenantMigrateCmd = &cobra.Command{
-	Use:   "migrate <tenant-id>",
-	Short: "Run migrations for a specific tenant",
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		runTenantMigrate(args[0])
+	Use:           "migrate <tenant-id>",
+	Short:         "Run migrations for a specific tenant",
+	Args:          cobra.ExactArgs(1),
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runTenantMigrate(args[0])
 	},
 }
 
 var tenantListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List active tenants",
-	Run: func(cmd *cobra.Command, args []string) {
-		runTenantList()
+	Use:           "list",
+	Short:         "List active tenants",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runTenantList()
 	},
 }
 
 var tenantMigrateAllCmd = &cobra.Command{
-	Use:   "migrate-all",
-	Short: "Run migrations for all tenants",
-	Run: func(cmd *cobra.Command, args []string) {
-		runTenantMigrateAll()
+	Use:           "migrate-all",
+	Short:         "Run migrations for all tenants",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runTenantMigrateAll()
 	},
 }
 
-func runTenantProvision(id string) {
+func runTenantProvision(id string) error {
 	fmt.Printf("Provisioning tenant: %s...\n", id)
 
 	adminClient, err := db.GetAdminQuarkClient()
 	if err != nil {
-		color.Red("Error connecting to admin database: %v", err)
-		return
+		return fmt.Errorf("connecting to admin database: %w", err)
 	}
+	defer adminClient.Close()
 
 	strategy := viper.GetString("tenant.strategy")
 	if strategy == "" {
@@ -90,27 +100,23 @@ func runTenantProvision(id string) {
 		// Create Database
 		query := fmt.Sprintf("CREATE DATABASE %s", id)
 		if err := adminClient.Exec(ctx, query); err != nil {
-			color.Red("Error creating database: %v", err)
-			return
+			return fmt.Errorf("creating database: %w", err)
 		}
 		fmt.Printf("  Created database: %s\n", id)
 	case "schema_per_tenant":
 		// Create Schema
 		query := fmt.Sprintf("CREATE SCHEMA %s", id)
 		if err := adminClient.Exec(ctx, query); err != nil {
-			color.Red("Error creating schema: %v", err)
-			return
+			return fmt.Errorf("creating schema: %w", err)
 		}
 		fmt.Printf("  Created schema: %s\n", id)
 	default:
-		color.Red("Unsupported strategy: %s", strategy)
-		return
+		return fmt.Errorf("unsupported strategy: %s", strategy)
 	}
 
 	// Register tenant in quark_tenants registry
 	if err := ensureTenantRegistry(ctx, adminClient); err != nil {
-		color.Red("Error initializing tenant registry: %v", err)
-		return
+		return fmt.Errorf("initializing tenant registry: %w", err)
 	}
 	regQuery := fmt.Sprintf("INSERT INTO quark_tenants (id, strategy) VALUES ('%s', '%s')", id, strategy)
 	if err := adminClient.Exec(ctx, regQuery); err != nil {
@@ -120,35 +126,37 @@ func runTenantProvision(id string) {
 	}
 
 	// Run migrations
-	runTenantMigrate(id)
+	if err := runTenantMigrate(id); err != nil {
+		return err
+	}
 
 	color.Green("Tenant %s provisioned successfully!", id)
+	return nil
 }
 
-func runTenantMigrate(id string) {
+func runTenantMigrate(id string) error {
 	fmt.Printf("Migrating tenant: %s...\n", id)
 
 	// In a real implementation, we would resolve the tenant DSN/Schema here.
 	// For this CLI version, we'll assume the default client can be used with a router or DSN adjustment.
 	client, err := db.GetQuarkClient()
 	if err != nil {
-		color.Red("Error connecting to tenant database: %v", err)
-		return
+		return fmt.Errorf("connecting to tenant database: %w", err)
 	}
+	defer client.Close()
 
 	migrator := migrate.NewMigrator(client)
 	if err := migrator.Up(context.Background(), 0); err != nil {
-		color.Red("Error migrating tenant %s: %v", id, err)
-		return
+		return fmt.Errorf("migrating tenant %s: %w", id, err)
 	}
 	fmt.Printf("  Migrations complete for %s\n", id)
+	return nil
 }
 
-func runTenantList() {
+func runTenantList() error {
 	client, err := db.GetQuarkClient()
 	if err != nil {
-		color.Red("Error connecting to database: %v", err)
-		return
+		return err
 	}
 	defer client.Close()
 
@@ -156,14 +164,12 @@ func runTenantList() {
 
 	// Ensure tenant registry table exists
 	if err := ensureTenantRegistry(ctx, client); err != nil {
-		color.Red("Error initializing tenant registry: %v", err)
-		return
+		return fmt.Errorf("initializing tenant registry: %w", err)
 	}
 
 	rows, err := client.Raw().QueryContext(ctx, "SELECT id, strategy, created_at FROM quark_tenants ORDER BY created_at DESC")
 	if err != nil {
-		color.Red("Error listing tenants: %v", err)
-		return
+		return fmt.Errorf("listing tenants: %w", err)
 	}
 	defer rows.Close()
 
@@ -179,15 +185,17 @@ func runTenantList() {
 			CreatedAt string
 		}
 		if err := rows.Scan(&t.ID, &t.Strategy, &t.CreatedAt); err != nil {
-			color.Red("Error reading tenant row: %v", err)
-			return
+			return fmt.Errorf("reading tenant row: %w", err)
 		}
 		tenants = append(tenants, t)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reading tenant rows: %w", err)
 	}
 
 	if len(tenants) == 0 {
 		color.Yellow("No tenants found in registry.")
-		return
+		return nil
 	}
 
 	color.Cyan("Active tenants (%d):\n", len(tenants))
@@ -196,27 +204,25 @@ func runTenantList() {
 	for _, t := range tenants {
 		fmt.Printf("  %-20s %-20s %s\n", t.ID, t.Strategy, t.CreatedAt)
 	}
+	return nil
 }
 
-func runTenantMigrateAll() {
+func runTenantMigrateAll() error {
 	client, err := db.GetQuarkClient()
 	if err != nil {
-		color.Red("Error connecting to database: %v", err)
-		return
+		return err
 	}
 	defer client.Close()
 
 	ctx := context.Background()
 
 	if err := ensureTenantRegistry(ctx, client); err != nil {
-		color.Red("Error initializing tenant registry: %v", err)
-		return
+		return fmt.Errorf("initializing tenant registry: %w", err)
 	}
 
 	rows, err := client.Raw().QueryContext(ctx, "SELECT id FROM quark_tenants ORDER BY created_at ASC")
 	if err != nil {
-		color.Red("Error reading tenants: %v", err)
-		return
+		return fmt.Errorf("reading tenants: %w", err)
 	}
 
 	var ids []string
@@ -224,8 +230,7 @@ func runTenantMigrateAll() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			color.Red("Error reading tenant id: %v", err)
-			return
+			return fmt.Errorf("reading tenant id: %w", err)
 		}
 		ids = append(ids, id)
 	}
@@ -233,7 +238,7 @@ func runTenantMigrateAll() {
 
 	if len(ids) == 0 {
 		color.Yellow("No tenants found in registry.")
-		return
+		return nil
 	}
 
 	color.Cyan("Migrating %d tenant(s)...\n", len(ids))
@@ -244,7 +249,11 @@ func runTenantMigrateAll() {
 			color.Yellow(" [dry-run skipped]")
 			continue
 		}
-		runTenantMigrate(id)
+		if err := runTenantMigrate(id); err != nil {
+			color.Red(" FAILED: %v", err)
+			failed++
+			continue
+		}
 		color.Green(" OK")
 		success++
 	}
@@ -252,6 +261,10 @@ func runTenantMigrateAll() {
 	if !migrateDryRun {
 		fmt.Printf("\nDone: %d succeeded, %d failed.\n", success, failed)
 	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d tenant migrations failed", failed, len(ids))
+	}
+	return nil
 }
 
 func ensureTenantRegistry(ctx context.Context, client interface {
