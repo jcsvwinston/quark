@@ -86,8 +86,9 @@ func TestMariaDBDialect(t *testing.T) {
 	if got := d.LimitOffset(5, 0); got != "LIMIT 5" {
 		t.Errorf("LimitOffset(5,0): expected 'LIMIT 5', got %q", got)
 	}
-	if got := d.LimitOffset(0, 10); got != "OFFSET 10" {
-		t.Errorf("LimitOffset(0,10): expected 'OFFSET 10', got %q", got)
+	// Offset without limit: MariaDB, like MySQL, has no bare OFFSET.
+	if got := d.LimitOffset(0, 10); got != "LIMIT 18446744073709551615 OFFSET 10" {
+		t.Errorf("LimitOffset(0,10): expected sentinel LIMIT + OFFSET, got %q", got)
 	}
 
 	// RETURNING is supported (10.5+)

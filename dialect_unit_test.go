@@ -116,7 +116,8 @@ func TestMySQLDialect(t *testing.T) {
 	}
 	assertLO(t, d, 5, 10, "LIMIT 10, 5") // MySQL uses LIMIT offset, count
 	assertLO(t, d, 5, 0, "LIMIT 5")
-	assertLO(t, d, 0, 5, "")
+	// Offset without limit: MySQL has no bare OFFSET — max-uint64 sentinel.
+	assertLO(t, d, 0, 5, "LIMIT 18446744073709551615 OFFSET 5")
 	assertLO(t, d, 0, 0, "")
 	if d.SupportsReturning() {
 		t.Error("SupportsReturning")
@@ -186,7 +187,8 @@ func TestSQLiteDialect(t *testing.T) {
 	}
 	assertLO(t, d, 5, 10, "LIMIT 5 OFFSET 10")
 	assertLO(t, d, 5, 0, "LIMIT 5")
-	assertLO(t, d, 0, 5, "OFFSET 5")
+	// Offset without limit: SQLite's OFFSET must hang off a LIMIT; -1 = no cap.
+	assertLO(t, d, 0, 5, "LIMIT -1 OFFSET 5")
 	assertLO(t, d, 0, 0, "")
 	if !d.SupportsReturning() {
 		t.Error("SupportsReturning")
@@ -410,7 +412,8 @@ func TestMariaDBDialect_Full(t *testing.T) {
 	// MariaDB overrides LimitOffset to LIMIT x OFFSET y
 	assertLO(t, d, 5, 10, "LIMIT 5 OFFSET 10")
 	assertLO(t, d, 5, 0, "LIMIT 5")
-	assertLO(t, d, 0, 10, "OFFSET 10")
+	// Offset without limit: MariaDB, like MySQL, has no bare OFFSET.
+	assertLO(t, d, 0, 10, "LIMIT 18446744073709551615 OFFSET 10")
 	assertLO(t, d, 0, 0, "")
 	if !d.SupportsReturning() {
 		t.Error("SupportsReturning")

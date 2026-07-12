@@ -1480,6 +1480,12 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
+	// An empty conflict target has no portable meaning and used to diverge
+	// wildly by engine (PG: DO NOTHING, MySQL: panic on conflictCols[0],
+	// MSSQL/Oracle: invalid MERGE). Fail the same way everywhere.
+	if len(conflictCols) == 0 {
+		return fmt.Errorf("%w: Upsert requires at least one conflict column", ErrInvalidQuery)
+	}
 	if err := q.client.Validate(q.ctx, entity); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
@@ -2043,6 +2049,11 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols []string) error {
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+	}
+	// Same contract as Upsert: an empty conflict target is an error, not an
+	// engine-dependent surprise (see Upsert).
+	if len(conflictCols) == 0 {
+		return fmt.Errorf("%w: UpsertBatch requires at least one conflict column", ErrInvalidQuery)
 	}
 	if len(entities) == 0 {
 		return nil

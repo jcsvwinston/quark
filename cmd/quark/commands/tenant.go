@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/fatih/color"
 	"github.com/jcsvwinston/quark/cmd/quark/internal/db"
@@ -10,6 +11,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// validTenantID mirrors the TenantRouter's tenant-id contract (tenant_router.go).
+// The id reaches CREATE DATABASE / CREATE SCHEMA statements, so anything
+// outside this alphabet is rejected before any SQL is built.
+var validTenantID = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 var (
 	tenantID string
@@ -80,6 +86,20 @@ var tenantMigrateAllCmd = &cobra.Command{
 }
 
 func runTenantProvision(id string) error {
+	// Validate BEFORE connecting or building any SQL: id lands in DDL
+	// (CREATE DATABASE/SCHEMA can't take bind parameters) and strategy is
+	// config-driven — both are attacker-reachable via argv/config.
+	if !validTenantID.MatchString(id) {
+		return fmt.Errorf("invalid tenant id %q: must match %s", id, validTenantID.String())
+	}
+	strategy := viper.GetString("tenant.strategy")
+	if strategy == "" {
+		strategy = "db_per_tenant"
+	}
+	if strategy != "db_per_tenant" && strategy != "schema_per_tenant" {
+		return fmt.Errorf("unsupported strategy: %s", strategy)
+	}
+
 	fmt.Printf("Provisioning tenant: %s...\n", id)
 
 	adminClient, err := db.GetAdminQuarkClient()
@@ -88,38 +108,34 @@ func runTenantProvision(id string) error {
 	}
 	defer adminClient.Close()
 
-	strategy := viper.GetString("tenant.strategy")
-	if strategy == "" {
-		strategy = "db_per_tenant"
-	}
-
 	ctx := context.Background()
+	dialect := adminClient.Dialect()
 
 	switch strategy {
 	case "db_per_tenant":
-		// Create Database
-		query := fmt.Sprintf("CREATE DATABASE %s", id)
+		// Create Database — DDL takes no bind params; the regexp above plus
+		// dialect quoting make the identifier inert.
+		query := fmt.Sprintf("CREATE DATABASE %s", dialect.Quote(id))
 		if err := adminClient.Exec(ctx, query); err != nil {
 			return fmt.Errorf("creating database: %w", err)
 		}
 		fmt.Printf("  Created database: %s\n", id)
 	case "schema_per_tenant":
 		// Create Schema
-		query := fmt.Sprintf("CREATE SCHEMA %s", id)
+		query := fmt.Sprintf("CREATE SCHEMA %s", dialect.Quote(id))
 		if err := adminClient.Exec(ctx, query); err != nil {
 			return fmt.Errorf("creating schema: %w", err)
 		}
 		fmt.Printf("  Created schema: %s\n", id)
-	default:
-		return fmt.Errorf("unsupported strategy: %s", strategy)
 	}
 
 	// Register tenant in quark_tenants registry
 	if err := ensureTenantRegistry(ctx, adminClient); err != nil {
 		return fmt.Errorf("initializing tenant registry: %w", err)
 	}
-	regQuery := fmt.Sprintf("INSERT INTO quark_tenants (id, strategy) VALUES ('%s', '%s')", id, strategy)
-	if err := adminClient.Exec(ctx, regQuery); err != nil {
+	regQuery := fmt.Sprintf("INSERT INTO quark_tenants (id, strategy) VALUES (%s, %s)",
+		dialect.Placeholder(1), dialect.Placeholder(2))
+	if err := adminClient.Exec(ctx, regQuery, id, strategy); err != nil {
 		color.Yellow("Warning: could not register tenant in quark_tenants: %v", err)
 	} else {
 		fmt.Printf("  Registered tenant in quark_tenants registry.\n")
