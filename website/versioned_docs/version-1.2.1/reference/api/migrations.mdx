@@ -1,0 +1,193 @@
+# Migrations API Reference
+
+Reference for schema creation, schema sync, indexes, foreign keys, and versioned
+migrations.
+
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `Client.Migrate` | `Migrate(ctx, models ...any) error` | Creates missing tables (and m2m join tables). |
+| `Client.Sync` | `Sync(ctx, opts SyncOptions, models ...any) error` | Reconciles existing tables with model metadata. |
+| `Client.CreateIndex` | `CreateIndex(ctx, table, indexName string, columns []string, unique bool) error` | Creates a simple index. |
+| `Client.AddForeignKey` | `AddForeignKey(ctx, table, constraintName string, columns []string, refTable string, refColumns []string, onDelete, onUpdate string) error` | Adds a foreign key constraint. |
+| `migrate.Register` | `Register(m *Migration)` | Registers a migration in the global registry. |
+| `migrate.Reset` | `Reset()` | Clears the registry (tests). |
+| `migrate.NewMigrator` | `NewMigrator(client *quark.Client) *Migrator` | Binds a migrator to a client. |
+| `Migrator.Init` | `Init(ctx) error` | Creates the `quark_migrations` tracking table. |
+| `Migrator.Up` | `Up(ctx, steps int) error` | Applies pending migrations (ID order). |
+| `Migrator.UpDryRun` | `UpDryRun(ctx, steps int) error` | Prints pending migrations without running them. |
+| `Migrator.Down` | `Down(ctx, steps int) error` | Reverts applied migrations (reverse ID order). |
+
+## Client Schema Helpers
+
+### `Migrate(ctx context.Context, models ...any) error`
+
+Creates missing tables for the given models.
+
+```go
+err := client.Migrate(ctx, &User{}, &Order{}, &Product{})
+```
+
+`Migrate` also creates many-to-many join tables for relations tagged
+`rel:"many_to_many"` with an `m2m` tag.
+
+### `Sync(ctx context.Context, opts SyncOptions, models ...any) error`
+
+Synchronizes existing tables with model metadata.
+
+```go
+err := client.Sync(ctx, quark.SyncOptions{}, &User{})
+```
+
+Supported sync operations:
+
+| Change | Support |
+| --- | --- |
+| Missing table | Calls `Migrate` unless `DryRun` is true. |
+| New column | Adds the column. |
+| Renamed column | Uses `quark:"rename:old_col"`. |
+| Removed column | Drops only when the client's `Limits.SafeMigrations` is `false`. |
+
+```go
+type SyncOptions struct {
+    DryRun        bool // Log the SQL but don't execute it.
+    NoTransaction bool // Don't wrap the sync in a transaction.
+}
+```
+
+Dropping a removed column is gated by `Limits.SafeMigrations`, not by
+`SyncOptions`. `DefaultLimits()` sets `SafeMigrations: true`, so removed
+columns are left in place until you opt into destructive sync:
+
+```go
+limits := quark.DefaultLimits()
+limits.SafeMigrations = false // allow DROP COLUMN
+client, _ := quark.New("postgres", dsn, quark.WithLimits(limits))
+```
+
+### `CreateIndex(ctx, table, indexName string, columns []string, unique bool) error`
+
+Creates a simple index.
+
+```go
+err := client.CreateIndex(
+    ctx,
+    "users",
+    "idx_users_email",
+    []string{"email"},
+    true,
+)
+```
+
+### `AddForeignKey(ctx, table, constraintName string, columns []string, refTable string, refColumns []string, onDelete, onUpdate string) error`
+
+Adds a foreign key constraint.
+
+```go
+err := client.AddForeignKey(
+    ctx,
+    "orders",
+    "fk_orders_user",
+    []string{"user_id"},
+    "users",
+    []string{"id"},
+    "CASCADE",
+    "",
+)
+```
+
+## Versioned Migrations
+
+### `migrate.Register(m *Migration)`
+
+Registers a migration in the global migration registry.
+
+```go
+migrate.Register(&migrate.Migration{
+    ID:   "202605050001_add_email_index",
+    Name: "add email index",
+    Up: func(ctx context.Context, client *quark.Client) error {
+        return client.CreateIndex(ctx, "users", "idx_users_email", []string{"email"}, true)
+    },
+    Down: func(ctx context.Context, client *quark.Client) error {
+        return client.Exec(ctx, "DROP INDEX idx_users_email")
+    },
+})
+```
+
+Migration IDs are sorted lexicographically. Use timestamp-like IDs.
+
+```go
+type Migration struct {
+    ID      string
+    Name    string
+    Message string
+    Up      func(ctx context.Context, client *quark.Client) error
+    Down    func(ctx context.Context, client *quark.Client) error
+}
+```
+
+### `migrate.Reset()`
+
+Clears the migration registry. Intended for tests.
+
+## Migrator
+
+### `migrate.NewMigrator(client *quark.Client) *Migrator`
+
+Creates a migrator bound to a client.
+
+```go
+migrator := migrate.NewMigrator(client)
+```
+
+The migrator stores applied migration IDs in `quark_migrations`.
+
+### `Init(ctx context.Context) error`
+
+Creates the migration tracking table if needed.
+
+```go
+err := migrator.Init(ctx)
+```
+
+### `Up(ctx context.Context, steps int) error`
+
+Applies pending migrations in ID order.
+
+```go
+err := migrator.Up(ctx, 0) // apply all pending
+err = migrator.Up(ctx, 2)  // apply at most two
+```
+
+### `UpDryRun(ctx context.Context, steps int) error`
+
+Prints pending migrations without executing their `Up` functions.
+
+```go
+err := migrator.UpDryRun(ctx, 0)
+```
+
+### `Down(ctx context.Context, steps int) error`
+
+Reverts applied migrations in reverse ID order.
+
+```go
+err := migrator.Down(ctx, 1)
+```
+
+## Raw SQL Requirement
+
+`migrate.Migrator` uses `client.Exec` for its tracking table changes. Configure
+the migration client with `AllowRawQueries: true`:
+
+```go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true
+
+client, err := quark.New("postgres", dsn,
+    quark.WithLimits(limits),
+)
+```
+
+High-level helpers such as `Migrate`, `Sync`, `CreateIndex`, and `AddForeignKey`
+do not require `AllowRawQueries`.

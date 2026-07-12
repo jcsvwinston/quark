@@ -6,7 +6,7 @@ description: Implemented Quark capabilities and planned future work, aligned wit
 
 # Roadmap
 
-Quark is **v1.1.5** on the stable `v1.x` line (v1.1.0 was the hardening minor). This page
+Quark is **v1.2.0** on the stable `v1.x` line (v1.1.0 was the hardening minor, v1.2.0 the scaling minor). This page
 separates what already ships from what is planned, so the docs do not read like a promise
 that every idea is already in `main`.
 
@@ -18,7 +18,7 @@ The operational backlog lives at
 ### Type-safe builder + composable query AST
 
 - Type-safe `Query[T]` builders, immutable composition (clone-per-method).
-- Typed expression AST (`Col`/`Lit`/`Func`/`And`/`Or`/`Not`/`Cast`/`In`/`Exists`).
+- Typed expression AST (`Col`/`Lit`/`Func`/`And`/`Or`/`Not`/`In`/`Exists`).
 - Subqueries composable through `AsSubquery`.
 - **CTEs** (`With`, `WithRecursive`).
 - **Window functions** (`OVER (PARTITION BY … ORDER BY …)`, `RowNumber`/`Rank`/`Lag`).

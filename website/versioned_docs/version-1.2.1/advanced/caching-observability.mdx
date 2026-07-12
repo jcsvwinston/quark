@@ -1,0 +1,244 @@
+---
+sidebar_position: 5
+title: Caching and Observability
+description: Add a query cache with tag invalidation, plus middleware, observers, slow-query logging, and OpenTelemetry — without touching model code.
+---
+
+# Caching and Observability
+
+Quark's extension points wrap the normal `database/sql` path, so you can add a
+cache and full observability without changing a single model. This page has two
+halves: **caching** first, then **observability** (middleware, observers,
+slow-query logging, OpenTelemetry).
+
+# Caching
+
+## Cache a query
+
+Attach a `CacheStore` to the client, then opt a query into the cache with
+`.Cache(ttl)`:
+
+```go
+import "github.com/jcsvwinston/quark/cache/memory"
+
+store := memory.New()
+defer store.Close()
+
+client, _ := quark.New("postgres", dsn, quark.WithCacheStore(store))
+
+users, _ := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Cache(5 * time.Minute).
+    List()
+```
+
+A cached query returns the decoded `[]T` without touching the database. The cache
+key is the dialect, tenant ID, schema, SQL string, and bound arguments together —
+so two tenants, or two different filters, never collide.
+
+## Tags and invalidation
+
+`.Cache(ttl)` tags the entry with the table name **and** a per-row tag
+`<table>:<pk>` for the rows it touches. A write invalidates both, so the cache
+stays correct on its own:
+
+```go
+quark.For[User](ctx, client).Create(&User{Name: "a", Active: true})
+warm, _ := quark.For[User](ctx, client).Where("active", "=", true).Cache(5 * time.Minute).List()
+
+quark.For[User](ctx, client).Create(&User{Name: "b", Active: true}) // invalidates the "users" tag
+after, _ := quark.For[User](ctx, client).Where("active", "=", true).Cache(5 * time.Minute).List()
+
+fmt.Println(len(warm), "->", len(after))
+// => 1 -> 2   (the write invalidated the cached list, so the re-read sees the new row)
+```
+
+`Create` / `Update` / `UpdateFields` / `Tracked.Save` / `Delete` register the
+affected PK on top of the table tag. The per-row tag keeps a single-row write from
+blowing away every cached query on the table. Composite PKs fall back to the table
+tag, as do the bulk and WHERE-based methods (`UpdateBatch`, `DeleteBatch`,
+`DeleteBy`) — their affected PKs aren't enumerable.
+
+When you pass **custom** tags, include the table tag too if you still want
+automatic write-invalidation to reach the entry:
+
+```go
+quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Cache(5*time.Minute, "users", "users:active"). // "users" keeps write-invalidation working
+    List()
+
+_ = store.InvalidateTags(ctx, "users:active") // and you can invalidate your own tag
+```
+
+## Stampede protection
+
+Every store installed via `WithCacheStore` is automatically wrapped with three
+in-process protections, so a cold hot key doesn't stampede the database:
+
+- **Singleflight** — concurrent callers for the same key collapse to one compute; the rest wait on the result.
+- **TTL jitter** — each `Set` randomizes the TTL by ±`jitterPct` (default ±10%) so batch-warmed entries don't expire together.
+- **Early refresh (XFetch)** — near expiry, a read may recompute the value while the cached copy is still valid, flattening the load curve.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithCacheStore(redisStore),
+    quark.WithCacheJitter(0.2),     // ±20% (default 0.1; 0 disables jitter only)
+    quark.WithCacheXFetchBeta(0.5), // higher = earlier refresh (0 disables XFetch only)
+)
+```
+
+These are **per-process**: each instance collapses its own callers, but N
+instances can still each compute the same hot key once. To coordinate across a
+fleet, add `WithCacheCrossInstance()` — on a hot-key miss, instances race for a
+per-key distributed lock so only the winner recomputes and the rest re-read. It
+takes effect only when the store implements the optional `CacheLocker` capability
+(the bundled Redis store does; the memory store is single-process); otherwise it's
+a no-op. Opt in when you run multiple instances against a shared cache and a
+recompute is expensive.
+
+## Stores
+
+The bundled **memory** store is thread-safe, keeps a tag→keys reverse index, and
+evicts expired entries about once a minute — ideal for tests, single-process
+services, and short TTLs:
+
+```go
+store := memory.New()
+defer store.Close()
+```
+
+The **Redis** store keys entries under `quark:cache:` and tag-sets under
+`quark:tag:` (the tag-set TTL takes the MAX across writes, so a newer entry can't
+have its window shortened by an older one):
+
+```go
+import rediscache "github.com/jcsvwinston/quark/cache/redis"
+
+store := rediscache.New(rediscache.Options{Addr: "localhost:6379"})
+if err := store.Ping(ctx); err != nil {
+    return err
+}
+client, _ := quark.New("postgres", dsn, quark.WithCacheStore(store))
+```
+
+For any other backend (Memcached, Ristretto, an encrypted cache), implement:
+
+```go
+type CacheStore interface {
+    Get(ctx context.Context, key string) ([]byte, error)
+    Set(ctx context.Context, key string, val []byte, ttl time.Duration, tags ...string) error
+    Delete(ctx context.Context, key string) error
+    InvalidateTags(ctx context.Context, tags ...string) error
+}
+```
+
+# Observability
+
+## Middleware
+
+Middleware wraps SQL execution — it can wrap exec, multi-row query, and
+single-row query paths independently:
+
+```go
+type LogMiddleware struct {
+    quark.BaseMiddleware
+}
+
+func (m *LogMiddleware) WrapExec(next quark.ExecFunc) quark.ExecFunc {
+    return func(ctx context.Context, exec quark.Executor, sqlStr string, args []any) (sql.Result, error) {
+        start := time.Now()
+        res, err := next(ctx, exec, sqlStr, args)
+        log.Printf("exec %s sql=%s err=%v", time.Since(start), sqlStr, err)
+        return res, err
+    }
+}
+
+client, _ := quark.New("postgres", dsn, quark.WithMiddleware(&LogMiddleware{}))
+```
+
+Embed `quark.BaseMiddleware` and override only the methods you need (`WrapExec`,
+`WrapQuery`, `WrapQueryRow`). Middleware runs in registration order, with the
+first-registered wrapping the rest.
+
+## Query observers
+
+An observer receives a `QueryEvent` after each execution — a clean spot for
+metrics and structured logging:
+
+```go
+type MetricsObserver struct{}
+
+func (o *MetricsObserver) ObserveQuery(e quark.QueryEvent) {
+    metrics.RecordQuery(e.Table, e.Operation, e.Duration, e.Rows, e.Error)
+}
+
+client, _ := quark.New("postgres", dsn, quark.WithQueryObserver(&MetricsObserver{}))
+```
+
+`QueryEvent` carries `SQL`, `Args`, `Duration`, `Rows`, `Error`, `Table`, and
+`Operation` (`SELECT`, `EXEC`, `QUERY_ROW`, `RAW_QUERY`, `RAW_EXEC`). Redact
+sensitive `Args` before exporting them.
+
+## Slow-query logging
+
+The quickest way to catch a regression — set a threshold and Quark logs any
+operation that exceeds it through the client logger:
+
+```go
+client, _ := quark.New("pgx", dsn, quark.WithSlowQueryThreshold(100*time.Millisecond))
+```
+
+Each slow operation emits a structured WARN with `duration_ms`, `threshold_ms`,
+`operation`, `table`, `rows`, and `sql` (parameterized — bind args are never
+included). Threshold `0` disables it.
+
+## OpenTelemetry
+
+The `otel` subpackage is a middleware that emits spans and metrics:
+
+```go
+import quarkotel "github.com/jcsvwinston/quark/otel"
+
+client, _ := quark.New("postgres", dsn,
+    quark.WithMiddleware(quarkotel.New(quarkotel.WithDBSystem("postgres"))),
+)
+```
+
+Spans are named `quark.exec` / `quark.query` / `quark.query_row` and carry
+`db.statement` (parameterized SQL) and `db.operation`. **Bind arguments are
+redacted by default**; opt in only for local debugging:
+
+```go
+quarkotel.New(quarkotel.WithSpanRedaction(quarkotel.IncludeArgs))
+```
+
+It also emits three metrics on the `github.com/jcsvwinston/quark` meter:
+`quark.queries.total` (counter), `quark.queries.duration` (histogram, ms), and
+`quark.queries.rows` (histogram, Exec only — counting SELECT rows would mean
+wrapping `*sql.Rows`). Install your `MeterProvider`/`TracerProvider` before the
+first query; the middleware resolves them lazily from the OTel globals. (For the
+full field-level contract, see the
+[Observability API reference](/docs/reference/api/observability).)
+
+## PostgreSQL notifications
+
+`quark.Notify(ctx, client, channel, payload)` sends a `pg_notify` (PostgreSQL).
+The **inbound** listener (`ListenerFactory.CreateListener`) and **outbound** CRUD
+events (`Client.UseEventBus`) both live in the [Event Bus](events) guide.
+
+## Putting it together
+
+```go
+client, _ := quark.New("postgres", dsn,
+    quark.WithCacheStore(memory.New()),
+    quark.WithMiddleware(quarkotel.New()),     // 1. behavior around execution (tracing)
+    quark.WithMiddleware(&LogMiddleware{}),
+    quark.WithQueryObserver(&MetricsObserver{}), // 2. post-execution telemetry
+    quark.WithSlowQueryThreshold(100*time.Millisecond),
+)
+```
+
+A practical order of reach: middleware for behavior around execution, observers
+for telemetry after it, model hooks for entity lifecycle, and cache tags applied
+intentionally (especially when you add custom ones).

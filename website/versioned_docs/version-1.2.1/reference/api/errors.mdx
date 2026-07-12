@@ -1,0 +1,114 @@
+# Errors API Reference
+
+## Sentinel Errors
+
+```go
+var (
+    ErrNotFound            = errors.New("record not found")
+    ErrInvalidModel        = errors.New("invalid model")
+    ErrInvalidQuery        = errors.New("invalid query")
+    ErrInvalidIdentifier   = errors.New("invalid identifier")
+    ErrInvalidJSONPath     = errors.New("invalid JSON path")
+    ErrInvalidJoin         = errors.New("invalid JOIN ON clause")
+    ErrStaleEntity         = errors.New("stale entity (optimistic-locking conflict)")
+    ErrUnsupportedFeature  = errors.New("feature not supported by dialect")
+    ErrInvalidTimezone     = errors.New("invalid column timezone")
+    ErrDialectNotSupported = errors.New("dialect not supported")
+    ErrConnection          = errors.New("database connection error")
+    ErrTimeout             = errors.New("query timeout")
+    ErrConstraintViolation = errors.New("constraint violation")
+
+    // Event bus + inbound LISTEN/NOTIFY listener
+    ErrEventEmitFailed = errors.New("event emit failed after commit")
+    ErrListenerClosed  = errors.New("event listener closed")
+    ErrNoSubscription  = errors.New("event listener has no channel subscribed")
+)
+```
+
+`ErrInvalidIdentifier` is returned when a table or column identifier — a
+`Where`/`OrderBy`/`GroupBy` column, a table name, a CTE name, an event channel,
+a migration target — fails `internal/guard.ValidateIdentifier` (must match
+`^[a-zA-Z_][a-zA-Z0-9_]*$`, be at most 64 chars, and not be a reserved SQL
+keyword). Identifiers cannot be bound as parameters, so a rejected one never
+reaches the SQL. The sentinel is wrapped with `%w` at the guard, so
+`errors.Is(err, quark.ErrInvalidIdentifier)` holds regardless of which call site
+produced it.
+
+`ErrInvalidJSONPath` is returned when [`WhereJSON`](/docs/guides/querying#json-predicates)
+receives a path that does not match the dotted identifier grammar
+`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$` (max 256 chars). Quark
+binds the path as a parameter in every dialect, but rejects malformed paths
+at the API surface so callers fail fast with a clear error rather than
+producing surprising SQL.
+
+`ErrUnsupportedFeature` is returned by builder methods (e.g.
+[`ForUpdate`](/docs/guides/querying#pessimistic-locking) on SQLite,
+`NoWait` on SQL Server) when the active dialect does not implement the
+requested feature. The error message includes the dialect name and the
+specific gap so callers can branch by dialect or fall back to a different
+strategy. Useful with `errors.Is` to check whether a soft fallback is
+appropriate (e.g. drop down to a transaction-level lock).
+
+`ErrStaleEntity` is returned when an `Update` / `UpdateFields` / `Tracked.Save`
+on a model carrying a `quark:"version"` field would have written an
+already-advanced row — the version predicate didn't match, no rows were
+written, and the caller must reload + replay or surface the conflict. See
+[Optimistic Locking](/docs/guides/modeling#optimistic-locking) for the
+column-tag contract and an example retry pattern.
+
+`ErrInvalidJoin` is returned when the `ON` clause built by [`Join`/`LeftJoin`/`RightJoin`](/docs/guides/querying#joins)
+— whether via `.On(left, op, right)` or `.OnRaw(clause)` — does not match the minimal
+identifier-only grammar that `internal/guard.ValidateJoinOn` enforces at execution
+time. The grammar accepts identifier-to-identifier comparisons (`a.b = c.d`) joined by
+`AND`/`OR` and the operators `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Literals, function
+calls, subqueries, and parentheses are rejected. The structured `.On(...)` builder
+is the preferred form; `.OnRaw` is the escape hatch for clauses
+outside the simple binary shape.
+
+`ErrInvalidTimezone` is returned by `Client.RegisterModel` and
+`Client.Migrate` when a model field carries a `quark:"tz=..."` tag whose
+value is not a valid IANA timezone name (`time.LoadLocation` rejected it).
+It is surfaced fail-fast — the model is rejected at registration or
+migration time, not on the first query that binds or scans the column.
+The wrapped error names the field, the column and the offending timezone
+string. See [Timezones](/docs/guides/modeling#timezones) for the
+per-column timezone contract.
+
+`ErrEventEmitFailed`, `ErrListenerClosed`, and `ErrNoSubscription` cover the
+event subsystem. `ErrEventEmitFailed` wraps an `EventBus.Publish` failure that
+happens *after* the transaction commits — the commit stands, but the post-commit
+emit could not be delivered. `ErrListenerClosed` and `ErrNoSubscription` come
+from the inbound PostgreSQL `LISTEN/NOTIFY` listener: calling `Listen` after the
+listener is closed, or `Receive` before any channel has been subscribed. See
+[Events](/docs/advanced/events) for the bus and listener contracts.
+
+## Error Checking
+
+```go
+user, err := quark.For[User](ctx, client).Find(id)
+if errors.Is(err, quark.ErrNotFound) {
+    return nil, fmt.Errorf("user %d not found", id)
+}
+if errors.Is(err, quark.ErrTimeout) {
+    // Retry with backoff
+}
+if errors.Is(err, quark.ErrConstraintViolation) {
+    // Handle duplicate key, FK violation, etc.
+}
+```
+
+## Error Wrapping
+
+Quark wraps database errors with context:
+
+```go
+// Timeout errors wrap context.DeadlineExceeded
+if errors.Is(err, context.DeadlineExceeded) {
+    // Detected as ErrTimeout
+}
+
+// Constraint violations detected across dialects
+// PostgreSQL: "unique constraint", "foreign key constraint"
+// MySQL: "duplicate entry", "foreign key constraint fails"
+// SQLite: "unique constraint failed"
+```

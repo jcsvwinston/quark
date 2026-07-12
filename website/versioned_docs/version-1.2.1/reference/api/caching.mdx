@@ -1,0 +1,246 @@
+# Caching API Reference
+
+Quark cache support is opt-in per client and per query.
+
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `Query.Cache` | `Cache(ttl time.Duration, tags ...string) *Query[T]` | Enables result caching for one query. |
+| `WithCacheStore` | `WithCacheStore(s CacheStore) Option` | Attaches a cache store to a client. |
+| `WithCacheJitter` | `WithCacheJitter(pct float64) Option` | Sets the ±TTL jitter factor (default `0.1`). |
+| `WithCacheXFetchBeta` | `WithCacheXFetchBeta(beta float64) Option` | Tunes early-refresh aggressiveness (default `1.0`). |
+| `WithCacheCrossInstance` | `WithCacheCrossInstance() Option` | Coordinates stampede across instances when the store implements `CacheLocker`. |
+| `CacheStore` | interface | Get / Set / Delete / InvalidateTags. |
+| `memory.New` | `memory.New() *Store` | Process-local in-memory store. |
+| `rediscache.New` | `rediscache.New(Options) *Store` | Redis-backed store. |
+
+## Query Cache
+
+### `Cache(ttl time.Duration, tags ...string) *Query[T]`
+
+Enables result caching for a query.
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("active", "=", true).
+    Limit(100).
+    Cache(5*time.Minute, "users", "users:active").
+    List()
+```
+
+The query will only use caching if the client has a cache store:
+
+```go
+client, err := quark.New("postgres", dsn,
+    quark.WithCacheStore(store),
+)
+```
+
+Cache keys include:
+
+| Component | Purpose |
+| --- | --- |
+| Dialect name | Separates SQL syntax by engine. |
+| Tenant ID | Prevents row-level tenant cache leaks. |
+| Schema | Prevents schema-per-tenant cache leaks. |
+| SQL string | Separates query shapes. |
+| Arguments | Separates parameter values. |
+
+## Tags
+
+If no tags are passed, Quark tags the cache entry with the model table name:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Cache(5*time.Minute).
+    List()
+```
+
+If custom tags are passed, Quark uses exactly those tags. Include the table tag
+when you want automatic invalidation on writes to catch the entry:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Cache(5*time.Minute, "users", "users:active").
+    List()
+```
+
+Successful write executions invalidate the model table tag.
+
+### Per-row invalidation (`<table>:<pk>`)
+
+When a mutation knows the affected primary key — `Update`, `UpdateFields`,
+`Tracked.Save`, the by-PK delete paths, and `Create` once the new ID is
+populated — Quark **also** invalidates the `<table>:<pk>` tag in the
+same `InvalidateTags` call. Cache by-PK queries with that tag to avoid
+flushing the whole table on every row write:
+
+```go
+user, err := quark.For[User](ctx, client).
+    Where("id", "=", 1).
+    Cache(5*time.Minute, "users", "users:1"). // both tags
+    First()
+```
+
+A later `UpdateFields(&u, "name")` on the row with `id = 1` invalidates
+both tags; an update on a different row leaves `users:1` intact:
+
+```go
+quark.For[User](ctx, client).UpdateFields(&u, "name") // u.ID == 1
+// => invalidates "users" (all listings) and "users:1"
+
+quark.For[User](ctx, client).UpdateFields(&v, "name") // v.ID == 2
+// => invalidates "users" and "users:2"; "users:1" survives
+```
+
+Which tags a mutation emits depends on whether it can identify the
+affected rows:
+
+| Mutation | Tags invalidated |
+| --- | --- |
+| `Update`, `UpdateFields`, `Tracked.Save`, `Create`, by-PK `Delete` | table tag + `<table>:<pk>` |
+| `UpdateBatch` | table tag + `<table>:<pk>` per affected row |
+| `CreateBatch` | table tag + `<table>:<pk>` per back-filled PK (RETURNING dialects) |
+| `DeleteBatch` (complex WHERE), raw `Exec`, `Upsert`, `UpsertBatch` | table tag only |
+| Composite-primary-key models | table tag only |
+
+:::note Tag format is opaque
+The `<table>:<pk>` shape is implementation. Treat it as an opaque
+identifier — pass it whole to `Cache(...)`, don't parse it. A string PK
+that contains `:` is preserved verbatim (`orders:abc:def`); equality
+matching still works, but splitting on `:` does not.
+:::
+
+## Stampede protection
+
+Every `CacheStore` passed to `WithCacheStore` is wrapped automatically
+with singleflight + TTL jitter + XFetch. The wrapper implements
+`CacheStore`, so existing third-party stores keep working unchanged
+inside it. Two `Option`s tune the wrapper; both are optional.
+
+### `WithCacheJitter(pct float64) Option`
+
+Sets the ±jitter factor applied to every TTL. Default `0.1` (±10%).
+Range `[0, 1]`; values outside are clamped. Setting to `0` disables
+jitter — singleflight and XFetch stay active.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithCacheStore(memory.New()),
+    quark.WithCacheJitter(0.2), // ±20%
+)
+```
+
+### `WithCacheXFetchBeta(beta float64) Option`
+
+Tunes the XFetch probabilistic-early-refresh threshold (Vattani et al.).
+Default `1.0`. Range `β ≥ 0`. Higher β triggers earlier refresh; `β = 0`
+disables XFetch — singleflight and jitter stay active.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithCacheStore(memory.New()),
+    quark.WithCacheXFetchBeta(0),  // XFetch off
+)
+```
+
+### `WithCacheCrossInstance() Option`
+
+Singleflight and XFetch are in-process: on their own they collapse
+concurrent recomputes within a single instance, but not across instances
+sharing one cache. `WithCacheCrossInstance` coordinates recompute across
+instances **when the store implements the `CacheLocker` interface** — on a
+hot-key miss, one caller acquires a short-lived lock and recomputes while
+the others wait and re-read its value. It costs one lock round-trip per
+hot-key miss; opt in when you run multiple instances against a shared
+cache and a hot key's recompute is expensive.
+
+```go
+client, _ := quark.New("pgx", dsn,
+    quark.WithCacheStore(redisStore), // must implement CacheLocker
+    quark.WithCacheCrossInstance(),
+)
+```
+
+If the store does not implement `CacheLocker` (or `WithCacheStore` is
+absent), this Option has no effect — the wrapper falls back to in-process
+singleflight + XFetch unchanged.
+
+```go
+type CacheLocker interface {
+    // AcquireLock claims per-key recompute rights without blocking.
+    // The single winner gets acquired=true and a release func; every
+    // other caller gets acquired=false and should wait-and-reread.
+    AcquireLock(ctx context.Context, key string, ttl time.Duration) (acquired bool, release func() error, err error)
+}
+```
+
+See [Caching and Observability — Stampede protection](/docs/advanced/caching-observability#stampede-protection)
+for the design rationale and the cross-instance gap.
+
+{/* Design: ADR-0011 (stampede wrapper), ADR-0020 (cross-instance CacheLocker). */}
+
+
+## CacheStore
+
+```go
+type CacheStore interface {
+    Get(ctx context.Context, key string) ([]byte, error)
+    Set(ctx context.Context, key string, val []byte, ttl time.Duration, tags ...string) error
+    Delete(ctx context.Context, key string) error
+    InvalidateTags(ctx context.Context, tags ...string) error
+}
+```
+
+Cached values are JSON-encoded `[]T` results.
+
+## Memory Store
+
+```go
+import "github.com/jcsvwinston/quark/cache/memory"
+
+store := memory.New()
+defer store.Close()
+
+client, err := quark.New("sqlite", "file:app.db?cache=shared",
+    quark.WithCacheStore(store),
+)
+```
+
+The memory store is process-local, thread-safe, and supports tag invalidation
+through an in-memory reverse index.
+
+## Redis Store
+
+```go
+import rediscache "github.com/jcsvwinston/quark/cache/redis"
+
+store := rediscache.New(rediscache.Options{
+    Addr:     "localhost:6379",
+    Password: "",
+    DB:       0,
+})
+
+if err := store.Ping(ctx); err != nil {
+    return err
+}
+
+client, err := quark.New("postgres", dsn,
+    quark.WithCacheStore(store),
+)
+```
+
+Redis keys use these prefixes:
+
+| Prefix | Purpose |
+| --- | --- |
+| `quark:cache:` | Cached query payloads. |
+| `quark:tag:` | Redis set mapping tags to cache keys. |
+
+## Manual Invalidation
+
+```go
+err := store.InvalidateTags(ctx, "users:active")
+```
+
+Use manual invalidation when a cache entry is tagged by a business concept or
+when writes happen outside Quark.

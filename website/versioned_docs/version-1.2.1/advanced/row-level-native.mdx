@@ -1,0 +1,179 @@
+---
+sidebar_position: 2
+title: PostgreSQL Native RLS
+description: Engine-enforced row-level security on PostgreSQL via set_config + CREATE POLICY, so even raw SQL can't escape tenant isolation.
+---
+
+# PostgreSQL Native Row-Level Security
+
+`RowLevelSecurityNative` pushes tenant isolation **into PostgreSQL**. Each query
+runs in a transaction that first calls `set_config('app.tenant_id', <tenant>, true)`,
+and a `CREATE POLICY` on each tenant table filters rows against that setting. The
+payoff over the client-side strategy: Quark **cannot bypass the policy even from
+`client.Raw()`** — the engine itself enforces isolation.
+
+It's PostgreSQL-only. On the other five engines, use
+[`RowLevelSecurityClient`](multi-tenant#row-level-isolation) (client-side WHERE
+injection); attempting Native elsewhere fails at construction:
+
+```go
+_, err := quark.For[Order](tenantCtx, nativeRouter).List() // non-PG base client
+// errors.Is(err, quark.ErrUnsupportedFeature) == true
+```
+
+## Native vs Client — when to use which
+
+| Concern | `RowLevelSecurityNative` | `RowLevelSecurityClient` |
+| --- | --- | --- |
+| Where the filter runs | PostgreSQL engine | Quark query builder |
+| `client.Raw()` / `Exec()` | Filtered by the policy | Bypasses the predicate |
+| Dialects | PostgreSQL only | All six |
+| Setup | One `CREATE POLICY` per table | None |
+| Per-query cost | Implicit transaction + `set_config` | None |
+| Use when | Production; bypass risk matters | Cross-dialect dev / staging |
+
+They're mutually exclusive per router — Native isn't a drop-in upgrade of Client.
+(Design rationale: [ADR-0012](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0012-rls-real-postgres-set-local-plus-policies.md).)
+
+## Setup
+
+### 1. Install the policy on each tenant table
+
+Either run the DDL yourself, or embed the `quarktenant` library and let it emit
+the DDL from your registered models.
+
+**Option A — `quarktenant` (recommended).** A tiny `main.go` registers your
+models and delegates to `quarktenant.Run`, which emits one
+`ALTER TABLE … ENABLE/FORCE ROW LEVEL SECURITY` pair plus one
+`CREATE POLICY <table>_tenant_isolation` per table:
+
+```go
+func main() {
+    client, _ := quark.New("pgx", os.Getenv("QUARK_DSN"),
+        quark.WithLimits(quark.Limits{AllowRawQueries: true}))
+    defer client.Close()
+
+    _ = client.RegisterModel(&models.Order{}, &models.Invoice{})
+    os.Exit(quarktenant.Run(context.Background(), os.Args[1:], client))
+}
+```
+
+```bash
+go run ./cmd/tenant install-rls-policies --dry-run   # print the DDL, no change
+go run ./cmd/tenant install-rls-policies             # apply (takes a migration lock first)
+go run ./cmd/tenant install-rls-policies --tenant-col=org_id --native-rls-var=app.org_id
+```
+
+A runnable example is at
+[`examples/tenant-rls-native/`](https://github.com/jcsvwinston/quark/blob/main/examples/tenant-rls-native/main.go).
+
+**Option B — manual DDL** through your normal migration pipeline:
+
+```sql
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY orders_tenant_isolation ON orders
+    USING (tenant_id = current_setting('app.tenant_id', true)::text)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::text);
+```
+
+Two parts matter: `WITH CHECK` stops a tenant from *writing* rows for another
+tenant (without it, isolation is read-only), and `FORCE ROW LEVEL SECURITY`
+removes PostgreSQL's default exemption for the table owner — which your app role
+usually is, so without `FORCE` the policy would be decorative.
+
+:::caution UUID / BIGINT tenant IDs need an explicit cast
+`current_setting()` returns TEXT. A TEXT/VARCHAR tenant column works with the
+default `::text`; a `UUID` or `BIGINT` column needs `--cast=uuid` (or `::uuid` /
+`::bigint` in manual DDL), or the comparison fails and the policy returns zero
+rows.
+:::
+
+### 2. Configure the router
+
+```go
+cfg := quark.DefaultTenantConfig()
+cfg.Strategy = quark.RowLevelSecurityNative
+cfg.BaseClient = pgClient
+// cfg.NativeRLSVar = "app.tenant_id"  // default; override to match your policy
+router := quark.NewTenantRouter(cfg, ResolveTenant, nil)
+```
+
+### 3. Query — both paths set the tenant transparently
+
+```go
+// Recommended for multi-step work: one transaction, one set_config.
+err := router.Tx(tenantCtx, func(tx *quark.Tx) error {
+    orders, err := quark.ForTx[Order](tenantCtx, tx).Where("status", "=", "paid").List()
+    // ...
+    return err
+})
+
+// Single short read: implicit transaction per call.
+orders, _ := quark.For[Order](tenantCtx, router).Where("status", "=", "paid").List()
+```
+
+Both reach PostgreSQL with `app.tenant_id` set to the resolved tenant; the policy
+filters server-side.
+
+:::note Use `router.Tx` for anything non-trivial
+`For[T](ctx, router)` wraps each call in an implicit transaction (needed because
+`set_config(..., is_local=true)` only applies inside one). That transaction
+commits when the **caller's `ctx`** ends, not when rows close — fine for a
+request-scoped HTTP handler, but a long-lived CLI `ctx` would hold a connection
+per query and can saturate the pool. So for batch jobs and for `Iter`/`Cursor`
+streaming, run inside `router.Tx`.
+:::
+
+## Raw SQL under Native
+
+`client.RawQuery` / `client.Exec` go straight to the pool, so they skip the
+implicit transaction that sets `app.tenant_id`. Unlike the client-side strategy,
+this is **not a hole** under Native: with no tenant set, the policy's `USING`
+returns zero rows and an `INSERT` fails `WITH CHECK` — the engine stays in
+control. It's still rarely what you want (you lose the tenant scope and the
+builder), so a Native router's base client logs a warning when raw SQL runs with a
+resolvable tenant:
+
+```
+event=quark.tenant.raw_under_native_rls op=RawQuery tenant=acme
+```
+
+For tenant-scoped access, use the builder against the router (`For[T]` or
+`router.Tx` + `ForTx[T]`). `client.Raw()` takes no context, so it's never routed
+through `set_config` — reserve it for schema/maintenance, not tenant data.
+
+## Troubleshooting
+
+**Query returns zero rows when it shouldn't** — the usual sign Native isn't fully
+wired:
+
+1. The policy isn't installed — check `SELECT * FROM pg_policies WHERE tablename = '<table>'`.
+2. `set_config` never ran for this query — raw SQL outside `router.Tx` / `For[T]`; the setting reads `NULL` and filters everything out.
+3. `FORCE ROW LEVEL SECURITY` is missing and the caller owns the table — re-emit the DDL with `FORCE`.
+
+**`ErrUnsupportedFeature: RowLevelSecurityNative requires PostgreSQL`** — the
+router's base client isn't on PG. Switch to `RowLevelSecurityClient` for non-PG.
+
+**`new row violates row-level security policy`** — the row's `tenant_id` disagrees
+with `current_setting('app.tenant_id')`; make sure the field is set and matches
+the resolver for the current context.
+
+## Migrating from the client-side strategy
+
+1. Install the policy + `FORCE ROW LEVEL SECURITY`.
+2. Switch the router to `RowLevelSecurityNative` on the next deploy.
+3. Re-audit `client.Raw()` callers — under Client they bypassed the builder's
+   filter; under Native the engine's policy now catches them.
+4. Update any test that asserted the literal `WHERE tenant_id = ?` text — the SQL
+   no longer carries it (the engine does).
+
+## Limitations
+
+- **No `LISTEN/NOTIFY` integration here** — outbound CRUD events ship via
+  [`Client.UseEventBus`](events).
+- **Policies aren't auto-removed** when you drop the router; manage them in your
+  schema migrations.
+- **The implicit-`For[T]` transaction holds its connection until `ctx` ends** —
+  fine for request scope, not for long-lived CLI contexts. Use `router.Tx` there.
