@@ -1,0 +1,108 @@
+# Dialects API Reference
+
+Dialects isolate database-specific SQL generation.
+
+## Built-In Constructors
+
+```go
+postgres := quark.PostgreSQL()
+mysql := quark.MySQL()
+mariadb := quark.MariaDB()
+sqlite := quark.SQLite()
+mssql := quark.MSSQL()
+oracle := quark.Oracle()
+```
+
+| Constructor | `Name()` |
+| --- | --- |
+| `quark.PostgreSQL()` | `postgres` |
+| `quark.MySQL()` | `mysql` |
+| `quark.MariaDB()` | `mariadb` |
+| `quark.SQLite()` | `sqlite` |
+| `quark.MSSQL()` | `mssql` |
+| `quark.Oracle()` | `oracle` |
+
+## Interface
+
+```go
+type Dialect interface {
+    Name() string
+    Placeholder(index int) string
+    Quote(identifier string) string
+    Placeholders(n int) []string
+    LimitOffset(limit, offset int) string
+    SupportsReturning() bool
+    Returning(columns ...string) string
+    SupportsLastInsertID() bool
+    LastInsertIDQuery(table, pkColumn string) string
+    CurrentTimestamp() string
+    BuildRoutineQuery(routine string, argCount int) string
+    BuildProcedureCall(procedure string, argCount int) string
+    JSONExtract(column, path string) (sql string, args []any, err error)
+    AlterTableAddColumn(table, column, dataType string) string
+    AlterTableDropColumn(table, column string) string
+    AlterTableAlterColumn(table, column, newDataType string) string
+    RenameColumn(table, oldName, newName string) string
+    RenameTable(oldName, newName string) string
+    SupportsTransactionalDDL() bool
+    LockSuffix(opts LockOptions) (tableHint, suffix string, err error)
+    UpsertSQL(conflictCols, updateCols []string, argOffset int) string
+}
+```
+
+## Placeholder Examples
+
+| Dialect | Placeholder |
+| --- | --- |
+| PostgreSQL | `$1`, `$2` |
+| MySQL / MariaDB | `?` |
+| SQLite | `?` |
+| SQL Server | `@p1`, `@p2` |
+| Oracle | `:1`, `:2` |
+
+## Returning and Insert IDs
+
+| Dialect | Preferred generated-ID path |
+| --- | --- |
+| PostgreSQL | `RETURNING` |
+| SQLite | `RETURNING` |
+| MariaDB | `RETURNING` |
+| MySQL | `LastInsertId` |
+| SQL Server | `SCOPE_IDENTITY()` |
+| Oracle | `RETURNING ... INTO` handling in Quark write path |
+
+## Upsert
+
+| Dialect | Shape |
+| --- | --- |
+| PostgreSQL | `ON CONFLICT (...) DO UPDATE SET ...` |
+| SQLite | `ON CONFLICT (...) DO UPDATE SET ...` |
+| MySQL / MariaDB | `ON DUPLICATE KEY UPDATE ...` |
+| SQL Server | `MERGE` built by Quark's CRUD layer. |
+| Oracle | `MERGE` built by Quark's CRUD layer. |
+
+## Detection
+
+```go
+d, err := quark.DetectDialect("postgres")
+d, err = quark.DetectDialectByName("mariadb")
+```
+
+`DetectDialectByName` first checks custom dialect registrations, then falls back
+to built-in detection.
+
+## Custom Dialects
+
+```go
+quark.RegisterDialect("cockroach", myDialect)
+
+d, err := quark.DetectDialectByName("cockroach")
+if err != nil {
+    return err
+}
+
+client, err := quark.New("pgx", dsn, quark.WithDialect(d))
+```
+
+Custom dialects must implement the full `Dialect` interface. A partial dialect
+will fail at compile time if assigned to a `quark.Dialect` variable.

@@ -1,0 +1,170 @@
+---
+sidebar_position: 5
+title: Batch Operations
+description: Create, upsert, update, and delete many rows in one call — chunked and dialect-aware across all six engines.
+---
+
+# Batch Operations
+
+Four bulk methods cut round-trips when you're writing many rows at once. Each one
+generates the right dialect-specific SQL and chunks large inputs for you.
+
+| Method | SQL shape | Atomicity |
+|---|---|---|
+| `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked; per-row back-fill for auto-PKs on Oracle/MySQL/SQL Server | One statement per chunk |
+| `UpsertBatch` | Dialect-specific bulk upsert, chunked | One statement per chunk (N `MERGE` on Oracle) |
+| `UpdateBatch` | N `UPDATE` statements | Single transaction |
+| `DeleteBatch` | `DELETE … WHERE pk IN (…)`, chunked | One statement per chunk |
+
+## CreateBatch
+
+Inserts many rows and writes each generated primary key **back into the entity**
+on every engine:
+
+```go
+users := []*User{
+    {Name: "Alice", Email: "alice@example.com"},
+    {Name: "Bob", Email: "bob@example.com"},
+    {Name: "Carol", Email: "carol@example.com"},
+}
+
+if err := quark.For[User](ctx, client).CreateBatch(users); err != nil {
+    return err
+}
+
+fmt.Println(users[0].ID, users[1].ID, users[2].ID)
+// => 1 2 3
+```
+
+Large slices are **chunked automatically** so each statement stays under the
+engine's own bind-parameter ceiling — ~65k on PostgreSQL/MySQL/MariaDB, ~32k on
+SQLite, ~2100 on SQL Server — so you can pass tens of thousands of rows without
+a "too many parameters" error, in as few statements as the engine allows.
+Chunks run on whatever executor the query is bound to (the pool, or an explicit
+transaction), but they are **not** wrapped in an implicit transaction — for
+all-or-nothing semantics, run `CreateBatch` inside [`client.Tx`](transactions):
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    return quark.ForTx[User](ctx, tx).CreateBatch(users)
+})
+```
+
+:::note Auto-generated keys on Oracle, MySQL, SQL Server
+These engines can't read a generated key back from a multi-row `INSERT`, so when
+the primary key is auto-generated Quark inserts one row at a time and back-fills
+each key (Oracle via `RETURNING … INTO`, MySQL via `LastInsertId`, SQL Server via
+`SCOPE_IDENTITY`) — same result, just more round-trips. Supply the primary keys
+yourself and every engine keeps the faster chunked multi-row form.
+:::
+
+`CreateBatch` runs `BeforeCreate` once per entity, so timestamp / default /
+derived-field hooks apply to batched rows just like single writes. `After*` hooks
+don't fire for batch operations — see [Hooks › Limitations](hooks#limitations).
+
+## UpsertBatch
+
+Inserts new rows and updates the ones that conflict on a chosen unique key:
+
+```go
+records := []*Product{
+    {SKU: "WIDGET-A", Name: "Widget A", Price: 9.99},
+    {SKU: "WIDGET-B", Name: "Widget B", Price: 14.99},
+}
+
+err := quark.For[Product](ctx, client).UpsertBatch(
+    records,
+    []string{"sku"},           // conflict column(s) — must have a UNIQUE constraint
+    []string{"name", "price"}, // columns to update on conflict
+)
+```
+
+Pass `updateCols` explicitly: an empty slice isn't a portable "update everything"
+signal (PostgreSQL/SQLite emit `DO NOTHING`, MySQL/MariaDB update the
+duplicate-key column, MERGE dialects infer non-conflict columns). When the first
+entity has a zero primary key, Quark omits the PK column so the database assigns
+it — just like `CreateBatch`. Each dialect gets its native form:
+
+| Dialect | SQL generated |
+|---|---|
+| PostgreSQL | `INSERT … ON CONFLICT (sku) DO UPDATE SET …` |
+| SQLite | `INSERT … ON CONFLICT (sku) DO UPDATE SET col = excluded.col` |
+| MySQL / MariaDB | `INSERT … ON DUPLICATE KEY UPDATE name = VALUES(name), …` |
+| SQL Server | `MERGE INTO products … WHEN MATCHED … WHEN NOT MATCHED …` |
+| Oracle | N individual `MERGE INTO … USING (SELECT …)` (identity columns aren't compatible with the multi-row MERGE shape) |
+
+Like `CreateBatch`, `UpsertBatch` runs `BeforeCreate` per entity (insert-prep);
+on conflict the `updateCols` win.
+
+## UpdateBatch
+
+Updates many rows by primary key. Each entity gets a **partial update** —
+zero-value fields are skipped, exactly like [`Update`](getting-started#update-a-row) —
+and **all updates run in a single transaction**: if any row fails, the whole
+batch rolls back.
+
+```go
+users, _ := quark.For[User](ctx, client).Where("active", "=", true).List()
+for i := range users {
+    users[i].Score += 100
+    ptrs[i] = &users[i]
+}
+
+if err := quark.For[User](ctx, client).UpdateBatch(ptrs); err != nil {
+    return err // every change rolled back
+}
+```
+
+To write an explicit zero value, use `UpdateMap` on the individual row.
+
+## DeleteBatch
+
+Hard-deletes rows by primary key, chunked to the engine's `IN`-list limit
+(Oracle caps `IN` at 1000 elements, so 2500 IDs become three statements:
+1000 + 1000 + 500). IDs that don't exist aren't an error — `affected` is just the
+count actually removed:
+
+```go
+affected, err := quark.For[User](ctx, client).DeleteBatch([]any{10, 11, 12})
+fmt.Println(affected)
+// => 1   (only one of those IDs still existed)
+
+missing, _ := quark.For[User](ctx, client).DeleteBatch([]any{99999})
+fmt.Println(missing)
+// => 0
+```
+
+`DeleteBatch` is always a hard delete. For a bulk **soft** delete, use `UpdateMap`
+to set `deleted_at` under an explicit predicate. WHERE-based deletes bypass
+lifecycle hooks — load the rows and loop through `Delete` if you need them.
+
+## A data-sync workflow
+
+The four together make a typical sync readable end to end:
+
+```go
+// 1. Insert new records.
+if err := quark.For[Product](ctx, client).CreateBatch(newProducts); err != nil {
+    return err
+}
+// 2. Upsert the catalog feed (insert-or-update by SKU).
+if err := quark.For[Product](ctx, client).UpsertBatch(
+    catalogFeed, []string{"sku"}, []string{"name", "price", "stock"},
+); err != nil {
+    return err
+}
+// 3. Re-price in memory, then bulk-update.
+for _, p := range productsToReprice {
+    p.Price = newPrice(p.SKU)
+}
+if err := quark.For[Product](ctx, client).UpdateBatch(productsToReprice); err != nil {
+    return err
+}
+// 4. Remove discontinued SKUs.
+if _, err := quark.For[Product](ctx, client).DeleteBatch(discontinuedIDs); err != nil {
+    return err
+}
+```
+
+For a sync that must be all-or-nothing, wrap the whole thing in
+[`client.Tx`](transactions) and use `ForTx`.

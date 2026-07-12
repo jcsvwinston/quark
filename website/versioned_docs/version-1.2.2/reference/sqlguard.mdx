@@ -1,0 +1,157 @@
+---
+sidebar_position: 1
+title: SQLGuard
+description: Identifier validation, injection prevention, and AllowRawQueries opt-in.
+---
+
+# SQLGuard — Security by Default
+
+SQLGuard is Quark's built-in layer that validates every SQL identifier — column names,
+table names, and operators — **before any SQL is assembled**. It is not a replacement
+for parameterized queries; it is a complementary layer that covers the attack surface
+that parameterized queries cannot reach.
+
+## Why identifier validation matters
+
+Parameterized queries protect *values* (the `?` or `$N` placeholders). They do **not**
+protect identifiers: column names, table names, and operators that must appear literally
+in the SQL text.
+
+```go
+// This is safe in GORM/ent — the value "x" is parameterized
+db.Where("name = ?", userInput)
+
+// But this is NOT protected by parameterization in any ORM:
+db.Order(userInput)  // userInput = "name; DROP TABLE users--"
+```
+
+Quark validates every identifier at the API layer before it reaches the SQL builder.
+A malformed identifier, an operator outside the allowed set, or a suspicious raw
+pattern is rejected and the statement is never executed. These are **lexical** checks
+— identifier shape, reserved words, length — not a lookup against your model or schema.
+
+## What gets validated
+
+SQLGuard's checks are **lexical**, not semantic. It verifies that each identifier is
+well-formed and not a reserved word; it does **not** check that a column or table
+actually exists on your model or schema. A well-formed but unknown column passes the
+guard and is rejected by the database engine at execution time, not by Quark.
+
+| Category | Examples | Validation |
+|----------|----------|-----------|
+| Column / table names | `"name"`, `"created_at"`, `"users"` | Lexical: must match `[A-Za-z_][A-Za-z0-9_]*`, not be a reserved SQL keyword, and be ≤64 characters. Rejections return `ErrInvalidIdentifier`. |
+| Operators | `"="`, `">="`, `"LIKE"`, `"IN"` | Checked against an allowed operator set; anything else returns `ErrInvalidQuery`. |
+| Keywords | `"ASC"`, `"DESC"` | Checked against an allowed keyword list. |
+
+## Runtime examples
+
+```go
+// Operator outside the whitelist → ErrInvalidQuery
+_, err := quark.For[User](ctx, client).
+    Where("name", "drop_table", "x").
+    List()
+// → invalid query: operator "drop_table" is not allowed
+//   errors.Is(err, quark.ErrInvalidQuery) == true
+
+// Malformed column identifier → ErrInvalidIdentifier
+_, err = quark.For[User](ctx, client).
+    Where("name; DROP TABLE users--", "=", "x").
+    List()
+// → invalid identifier: identifier "name; DROP TABLE users--" contains invalid characters
+//   errors.Is(err, quark.ErrInvalidIdentifier) == true
+```
+
+:::note
+SQLGuard validates identifiers **lexically**, so a *well-formed but unknown* column
+(e.g. `Where("nonexistent_column", "=", "x")`) passes the guard and is rejected by the
+database engine at execution time, not by Quark. The guard's job is to block
+injection-shaped input, not to mirror your schema.
+:::
+
+## Raw subqueries require explicit opt-in
+
+```go
+// This will fail unless AllowRawQueries is true
+_, err = quark.For[User](ctx, client).
+    WhereSubquery("id", "IN", "SELECT user_id FROM orders WHERE total > 100").
+    List()
+// → invalid query: WhereSubquery requires AllowRawQueries to be enabled
+//   errors.Is(err, quark.ErrInvalidQuery) == true
+```
+
+## Enabling raw queries
+
+Raw queries should only be enabled when you deliberately need them and can vouch for the
+safety of the raw SQL:
+
+```go
+lims := quark.DefaultLimits()
+lims.AllowRawQueries = true
+
+client, _ := quark.New("postgres", dsn,
+    quark.WithLimits(lims),
+)
+```
+
+When raw queries are enabled, Quark still applies a **best-effort** check
+(`ValidateRawQuery`): since v1.1.0 it rejects the SQL line-comment tail `--`
+(a classic injection-truncation vector). The structural checks (`--`, stacked
+`;DROP`/`;DELETE`/`;UPDATE`, `UNION SELECT`) skip the *contents* of
+single-quoted string literals, so a legitimate literal like `'range--max'` is
+accepted while the same marker outside a literal is still rejected. Block
+comments (`/* … */`) stay allowed — they are legitimate optimizer hints
+(`/*+ … */`). This check is a heuristic backstop, **not a complete filter**:
+the real safety boundary for raw SQL is keeping `AllowRawQueries` off by
+default and binding *values* through placeholders, never string-concatenating
+user input.
+
+## Comparison with other ORMs
+
+| Injection surface | Quark | GORM | ent | sqlx |
+|-------------------|:-----:|:----:|:---:|:----:|
+| Value injection (parameterized) | ✅ | ✅ | ✅ | ✅ |
+| Identifier injection (column/table names) | ✅ | ❌ | ❌ | ❌ (manual) |
+| Operator injection | ✅ | ❌ | ❌ | ❌ (manual) |
+| Raw subquery guard | ✅ (opt-in) | ❌ | ❌ | N/A |
+
+GORM and ent use parameterized queries that protect *values* against SQL injection.
+Quark additionally validates *identifiers* (column and table names) and *operators* at
+the API layer. `sqlx` provides no guard at all — the caller is responsible for sanitizing
+every string that enters a query.
+
+## Error sentinels
+
+SQLGuard violations are reported through specific sentinels, each reachable with
+`errors.Is`, so you can distinguish a rejected input from a database error and
+branch on the kind of violation:
+
+- **`quark.ErrInvalidIdentifier`** — a rejected table or column identifier
+  (a `Where`/`OrderBy`/`GroupBy` column, a table name, …).
+- **`quark.ErrInvalidJSONPath`** — a malformed `WhereJSON` path.
+- **`quark.ErrInvalidJoin`** — a `JOIN ... ON` clause outside the
+  identifier-only grammar.
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where(untrustedColumn, "=", value).
+    List()
+
+if errors.Is(err, quark.ErrInvalidIdentifier) {
+    http.Error(w, "invalid query parameters", http.StatusBadRequest)
+    return
+}
+```
+
+`quark.ErrInvalidQuery` is separate: it signals a malformed *query structure* or a
+disallowed element — an operator outside the whitelist, a raw query missing
+placeholders or matching a suspicious pattern, a raw subquery used without opting in,
+limits exceeded, or an uninitialised client — not an identifier/path/join validation
+failure.
+
+## Design intent
+
+SQLGuard is not designed to replace careful input validation in your application layer.
+Its purpose is to make the ORM itself the last line of defense — so that even if an
+identifier slips through your application's validation, Quark refuses to execute it.
+This defense-in-depth approach is especially valuable in dynamic query builders where
+column names or sort fields come from user-controlled input.

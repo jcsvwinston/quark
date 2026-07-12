@@ -1,0 +1,202 @@
+---
+sidebar_position: 7
+title: Transactions
+description: Callback and manual transactions, savepoints, commit/rollback side-effects, isolation levels, and deadlock retry.
+---
+
+# Transactions
+
+Use the callback style for the common case, and manual transactions when a larger
+workflow owns the transaction's lifetime.
+
+## Callback transactions
+
+The callback commits when it returns `nil` and rolls back when it returns an
+error (or panics):
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    user := User{Name: "Charlie", Email: "charlie@example.com"}
+    if err := quark.ForTx[User](ctx, tx).Create(&user); err != nil {
+        return err
+    }
+    order := Order{UserID: user.ID, Total: 42}
+    return quark.ForTx[Order](ctx, tx).Create(&order)
+})
+// err == nil → both rows committed. Return an error from the closure and
+// neither row is written.
+```
+
+Inside the closure, build queries with `quark.ForTx[T](ctx, tx)` instead of
+`quark.For[T](ctx, client)` so they run on the transaction.
+
+## Savepoints
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    if err := tx.Savepoint("before_optional_work"); err != nil {
+        return err
+    }
+    if err := runOptionalWork(ctx, tx); err != nil {
+        return tx.RollbackTo("before_optional_work") // undo just the optional work
+    }
+    return nil
+})
+```
+
+Savepoints work on all six engines through a uniform `Savepoint` / `RollbackTo` /
+`ReleaseSavepoint` API. PostgreSQL, MySQL, MariaDB, and SQLite use ANSI
+`SAVEPOINT` statements; SQL Server (`SAVE TRANSACTION`) and Oracle (no
+`RELEASE SAVEPOINT`) use their own forms transparently.
+
+Rolling back to a savepoint unwinds more than the SQL: any model `After*` hooks
+and `OnCommit`/`OnRollback` callbacks queued *after* that savepoint are discarded
+with it, so work that was rolled back never fires the side-effects that would
+have followed it. A savepoint rollback is a *partial* rollback, so it does **not**
+fire the scope's `OnRollback` callbacks — react to it through the error your
+nested code returns. `ReleaseSavepoint` keeps the queued work, merging it into the
+surrounding transaction.
+
+## Side-effects on commit or rollback
+
+`Tx.OnCommit` and `Tx.OnRollback` register callbacks that fire only once the
+transaction reaches its terminal state — the honest place for work that must wait
+for a durable commit (publish an event, invalidate a cache) or that should happen
+*because* the transaction aborted (release a reservation, emit a "cancelled"
+signal):
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    order := &Order{SKU: "A-1", Qty: 3}
+    if err := quark.ForTx[Order](ctx, tx).Create(order); err != nil {
+        return err // rolls back; the OnCommit below never fires
+    }
+    tx.OnCommit(func(ctx context.Context) error {
+        return bus.Publish(ctx, OrderCreated{ID: order.ID})
+    })
+    tx.OnRollback(func(ctx context.Context) error {
+        metrics.Inc("orders.create.rolled_back")
+        return nil
+    })
+    return nil
+})
+```
+
+| | On commit | On rollback |
+| --- | --- | --- |
+| Model `After*` hooks | fire (FIFO) | discarded |
+| `OnCommit` callbacks | fire (FIFO, after the `After*` hooks) | discarded |
+| `OnRollback` callbacks | discarded | fire (FIFO) |
+
+- Callbacks run in **registration order**.
+- A callback that returns an error is **logged** (`quark.hook.on_commit_error` /
+  `quark.hook.on_rollback_error`) but doesn't stop the others and doesn't change
+  what `Client.Tx` returns — once the database has committed, no application
+  handler can undo it.
+- Each callback gets the transaction's context. If you set a tight deadline on it,
+  derive a fresh context from `context.Background()` inside the callback when the
+  work must outlive the transaction.
+- Registering another `OnCommit` from *inside* an `OnCommit` callback is a no-op
+  for the current commit — the queue is already draining, so the new callback
+  won't run this time. (The same holds for `OnRollback`.)
+
+### Registering from inside a hook
+
+A lifecycle hook only receives a `context.Context`, not the `*Tx`. Reach the
+active transaction with `quark.TxFromContext(ctx)`:
+
+```go
+func (o *Order) AfterCreate(ctx context.Context) error {
+    if tx := quark.TxFromContext(ctx); tx != nil {
+        tx.OnCommit(func(ctx context.Context) error {
+            return bus.Publish(ctx, OrderCreated{ID: o.ID})
+        })
+    }
+    return nil
+}
+```
+
+`TxFromContext` returns `nil` outside a transaction (plain `For[T]` CRUD), so
+nil-check it. This is the building block the [`EventBus`](../advanced/events)
+integration wires automatically.
+
+## Manual transactions
+
+```go
+tx, err := client.BeginTx(ctx, nil)
+if err != nil {
+    return err
+}
+defer tx.Rollback()
+
+if err := quark.ForTx[User](ctx, tx).Create(&user); err != nil {
+    return err
+}
+return tx.Commit()
+```
+
+Useful when the transaction's lifetime belongs to a larger workflow or framework
+integration.
+
+## Isolation levels
+
+```go
+tx, err := client.BeginTx(ctx, &sql.TxOptions{
+    Isolation: sql.LevelSerializable,
+    ReadOnly:  false,
+})
+```
+
+Quark passes the level straight through to `database/sql`; which ones an engine
+honors:
+
+| Level | PostgreSQL | MySQL / MariaDB | SQL Server | Oracle | SQLite |
+|---|---|---|---|---|---|
+| `LevelReadUncommitted` | ✓ | ✓ | ✓ | — | — |
+| `LevelReadCommitted` | ✓ | ✓ | ✓ | ✓ | — |
+| `LevelRepeatableRead` | ✓ | ✓ | ✓ | — | — |
+| `LevelSerializable` | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Mark a transaction read-only to let the engine optimize non-mutating queries:
+
+```go
+tx, _ := client.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+defer tx.Rollback()
+users, _ := quark.ForTx[User](ctx, tx).Where("active", "=", true).List()
+_ = tx.Commit()
+```
+
+## Batch operations in a transaction
+
+`UpdateBatch` already wraps its updates in one transaction. To make `CreateBatch`
+and `DeleteBatch` share a transaction, use `ForTx`:
+
+```go
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    if err := quark.ForTx[Order](ctx, tx).CreateBatch(newOrders); err != nil {
+        return err
+    }
+    _, err := quark.ForTx[Order](ctx, tx).DeleteBatch(cancelledIDs)
+    return err
+})
+```
+
+## Retrying deadlocks
+
+Callback transactions roll back on any non-nil error. For deadlocks specifically,
+turn on `WithDeadlockRetry` — it re-runs the closure when the engine reports a
+deadlock (PostgreSQL `40P01`, MySQL `1213`, SQL Server `1205`, Oracle `ORA-00060`)
+with exponential backoff and jitter. It's opt-in, context-aware, and off by
+default:
+
+```go
+client, _ := quark.New("pgx", dsn, quark.WithDeadlockRetry(3))
+
+err := client.Tx(ctx, func(tx *quark.Tx) error {
+    // ...operations that might deadlock with a concurrent transaction...
+    return nil
+})
+```
+
+For non-deadlock transient failures, wrap the call in your own retry loop with
+whatever backoff and classifier your application uses.

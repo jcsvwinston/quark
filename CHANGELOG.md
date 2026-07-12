@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2](https://github.com/jcsvwinston/quark/compare/v1.2.1...v1.2.2) (2026-07-12)
+
+
+### Fixed
+
+* **cli:** no-ops honestos, validate real, migración por tenant y flags fantasma fuera (QK-P1-1/2/3/5, QK-P2-1/4/5) ([#245](https://github.com/jcsvwinston/quark/issues/245)) ([03850aa](https://github.com/jcsvwinston/quark/commit/03850aa5b0ff6a530cc40839c8f28f4ecee0bfde))
+* P0 backlog — tenant-provision SQL injection, compound Count, empty-conflict Upsert, offset-only LIMIT (QK-P0-1..4) ([#242](https://github.com/jcsvwinston/quark/issues/242)) ([d779e2b](https://github.com/jcsvwinston/quark/commit/d779e2b5794e563d810a9af4dde95d64d0edea03))
+* **query:** chunking de UpsertBatch, techos por dialecto, back-fill de PK en MSSQL y set-ops en MariaDB (QK-P1-4/P1-6, QK-P2-2/P2-3) ([#246](https://github.com/jcsvwinston/quark/issues/246)) ([e52c7b0](https://github.com/jcsvwinston/quark/commit/e52c7b0f79b8e45b82b6b18664b672871aeeb32d))
+
 ## [1.2.1](https://github.com/jcsvwinston/quark/compare/v1.2.0...v1.2.1) (2026-07-12)
 
 
