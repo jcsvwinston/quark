@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 * **query:** warn only on skipped scalar zero-values in Update, not nil pointers ([4f261bc](https://github.com/jcsvwinston/quark/commit/4f261bc6de41ddd591551fc582de397451610d47))
-* **security:** pin toolchain go1.26.5 + pgx v5.9.2 (11 advisories reached at v1.1.5) ([#235](https://github.com/jcsvwinston/quark/issues/235)) ([85cd55e](https://github.com/jcsvwinston/quark/commit/85cd55e98fc6ad630c74ceefb6a966ce18e75b6e))
+* **security:** pin toolchain go1.26.5 + pgx v5.9.2 — upstream security fixes accumulated against the v1.1.5 pins. The commit title's "11 advisories" was a point-in-time module-level `govulncheck` count (11→0) recorded in the umbrella repo's session log, not anything tracked in this repo — the count is omitted here because it goes stale as the vulnerability database moves; SECURITY.md now names govulncheck-in-CI as the standing source of truth. ([#235](https://github.com/jcsvwinston/quark/issues/235)) ([85cd55e](https://github.com/jcsvwinston/quark/commit/85cd55e98fc6ad630c74ceefb6a966ce18e75b6e))
 
 
 ### Performance

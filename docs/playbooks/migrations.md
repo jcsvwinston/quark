@@ -197,7 +197,9 @@ Anti-pattern explícitamente prohibido por `CLAUDE.md` regla #7. Si tu test sól
 - **Fase 1**: `SQLType` extensible, longitud por tag, mapeo de decimal/UUID/Duration.
 - **Fase 3**: 
   - Schema diff real (tipos, NOT NULL, defaults, índices, FKs, checks).
-  - `quark schema diff` que emite migración up+down candidata.
+  - `quark schema diff` que emite migración up+down candidata. *(Pendiente a
+    fecha de v1.2.0: el subcomando CLI no existe — el motor de diff sí, vía
+    `quarkmigrate` / `PlanMigration`.)*
   - Lock distribuido (PG `pg_advisory_xact_lock`, MySQL `GET_LOCK`, MSSQL `sp_getapplock`, Oracle `DBMS_LOCK.REQUEST`).
   - Migración transaccional con resume en MySQL via state checkpointing.
   - Dry-run con plan de cambios estilo `terraform plan`.

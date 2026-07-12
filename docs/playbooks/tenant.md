@@ -95,7 +95,7 @@ Mitigación pendiente: `singleflight` por tenant ID. Hasta entonces, mantén fac
 
 Hoy el caller debe crear el schema manualmente al onboardear un tenant (`CREATE SCHEMA tenant_xxx`) antes de usar el router. No hay automatismo. Y las migraciones no se aplican automáticamente al schema nuevo — eso es responsabilidad del caller también.
 
-Plan (deuda heredada, fuera de scope explícito de los F5-N pero seguramente cae en algún PR de F5-2/F5-3): `quark tenant onboard <tenantID>` que crea el schema + aplica migraciones. No bloquea la apertura formal de Fase 5.
+Plan (deuda heredada, fuera de scope explícito de los F5-N pero seguramente cae en algún PR de F5-2/F5-3): `quark tenant onboard <tenantID>` que crea el schema + aplica migraciones. No bloquea la apertura formal de Fase 5. *(Sigue pendiente a fecha de v1.2.0: el subcomando no existe; lo más cercano hoy es `quark tenant provision`.)*
 
 ## Anti-patterns a vigilar
 
@@ -183,7 +183,8 @@ Es disciplina aplicada por el ORM, no aislamiento del motor. No publicites como 
   - ~~F5-3~~ — `quark tenant install-rls-policies` CLI generador de
     DDL. Cerrado en esta sesión: paquete `quarktenant` con
     `InstallRLSPolicies` + `Run` library-style; ejemplo runnable en
-    `examples/tenant-rls-native/main.go`.
+    `examples/tenant-rls-native/main.go`. (El subcomando CLI del
+    título nunca se implementó — la forma entregada es la librería.)
   - F5-4..F5-7 — hooks transaccionales + EventBus + audit log.
   - (Fuera de scope explícito de F5) `quark tenant onboard <tenantID>`
     para `SchemaPerTenant`, `singleflight` en factory — deuda menor

@@ -77,7 +77,7 @@ No source-code changes required — v0.6 is additive. Existing code that uses `C
 If you want the new migration workflow:
 
 1. Embed `quarkmigrate.Run` in a thin `migrations/main.go` that imports both `quarkmigrate` and your models package — see [`examples/migrations/main.go`](https://github.com/jcsvwinston/quark/blob/main/examples/migrations/main.go) for a complete wrapper.
-2. Use `quark schema verify` (or `quarkmigrate.Run(ctx, "verify", ...)` directly) as a CI gate before deploying — non-zero exit when the live DB drifts from your models.
+2. Use `quarkmigrate.Run(ctx, "verify", ...)` as a CI gate before deploying — non-zero exit when the live DB drifts from your models. (This originally recommended a `quark schema verify` CLI wrapper that never shipped; the CLI's introspection lives under `quark inspect` / `quark validate`.)
 3. For production deploys, wrap `ApplyPlan` with `AcquireMigrationLock` so concurrent instances serialise. `Plan.Hash()` plus `quark_migration_state` give you a resume-from-checkpoint contract on non-transactional engines (MySQL / MariaDB / Oracle).
 
 ## Versioned docs
