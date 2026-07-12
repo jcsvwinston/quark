@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1](https://github.com/jcsvwinston/quark/compare/v1.2.0...v1.2.1) (2026-07-12)
+
+
+### Fixed
+
+* **cli:** working init defaults, real exit codes, honest sync, version cmd ([#237](https://github.com/jcsvwinston/quark/issues/237)) ([4afdd65](https://github.com/jcsvwinston/quark/commit/4afdd65855ebe2b927a6256c9d131fd5f1f42ccf))
+* **security:** self-escaping Quote in all dialects + literal-aware raw-query guard ([#239](https://github.com/jcsvwinston/quark/issues/239)) ([f1c1b21](https://github.com/jcsvwinston/quark/commit/f1c1b21cae46d57792a47b6c1add38a2eba50339))
+
 ## [1.2.0](https://github.com/jcsvwinston/quark/compare/v1.1.5...v1.2.0) (2026-07-11)
 
 

@@ -6,7 +6,7 @@ description: Quark ORM release notes and compatibility notes.
 
 # Release Notes
 
-Quark is **v1.2.0** on the stable `v1.x` line (v1.1.0 was the hardening
+Quark is **v1.2.1** on the stable `v1.x` line (v1.1.0 was the hardening
 minor; v1.2.0 adds the scaling follow-ups). `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
@@ -21,6 +21,28 @@ short summary below. Migration steps for the most recent breaking changes are
 at
 [`docs/MIGRATION_v0.9.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md);
 v0.10 through v1.2.x introduced **no breaking changes**.
+
+## v1.2.1
+
+Patch release: the 2026-07 audit findings, all in the CLI, docs and the
+raw-query guard — no query-builder or CRUD changes.
+
+- **CLI works out of the box**: `quark init` wrote `driver: postgresql`, but
+  the registered PostgreSQL driver is `pgx`, so every DB command failed with
+  `unknown driver` (the Oracle driver was not even linked into the binary).
+  The CLI now maps dialect names to registered drivers and links go-ora.
+- **Real exit codes**: `migrate` / `inspect` / `tenant` / `seed` / `init`
+  failures exit non-zero (they printed the error and exited 0, silently
+  breaking CI gates).
+- **Honest `sync`**: its `--dry-run/--safe/--no-transaction/--models` flags
+  were no-ops and are gone; the command checks the connection and prints how
+  to wire `client.Sync(...)` (schema sync needs your compiled model types).
+- `inspect --format json|yaml` implemented; `quark version` / `--version`
+  added; `inspect sql` relabeled (it reconstructs DDL from a live table).
+- **Hardening**: dialect `Quote()` doubles embedded closing quotes (defense
+  in depth under the identifier allowlist), and the raw-query guard no longer
+  rejects `--` inside single-quoted string literals (`'range--max'`) while
+  still rejecting it outside.
 
 ## v1.2.0
 
