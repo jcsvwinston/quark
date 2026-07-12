@@ -55,9 +55,11 @@ const (
 	FeatDBPerTenantProvision Feature = "db_per_tenant_provision"
 
 	// FeatIntersectExcept marca los motores cuyo dialecto renderiza INTERSECT
-	// y EXCEPT (Oracle vía MINUS). MySQL/MariaDB no los modelan en quark
-	// (setop.go devuelve ErrUnsupportedFeature) — feature gateada por Quark:
-	// el exerciser ASERTA el sentinel donde falta, como con el migration lock.
+	// y EXCEPT (Oracle vía MINUS). MariaDB los soporta desde 10.3 y quark los
+	// habilita (QK-P2-2); MySQL sigue sin modelarlos (los ganó en 8.0.31 y
+	// quark no puede asumir esa minor sin probe — setop.go devuelve
+	// ErrUnsupportedFeature) — feature gateada por Quark: el exerciser
+	// ASERTA el sentinel donde falta, como con el migration lock.
 	FeatIntersectExcept Feature = "intersect_except"
 
 	// FeatDeadlock marca los motores donde un deadlock por orden de locks
@@ -89,7 +91,7 @@ var supported = map[Feature]map[Engine]bool{
 	FeatSchemaPerTenant:      {Postgres: true, MSSQL: true},
 	FeatDBPerTenantProvision: {SQLite: true, Postgres: true, MySQL: true, MariaDB: true, MSSQL: true},
 	FeatDeadlock:             {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true, Oracle: true},
-	FeatIntersectExcept:      {SQLite: true, Postgres: true, MSSQL: true, Oracle: true},
+	FeatIntersectExcept:      {SQLite: true, Postgres: true, MariaDB: true, MSSQL: true, Oracle: true},
 }
 
 // Supports indica si el motor e soporta la feature f. Si devuelve false, el
