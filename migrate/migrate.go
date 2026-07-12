@@ -23,6 +23,14 @@ func Register(m *Migration) {
 	registry[m.ID] = m
 }
 
+// RegisteredCount reports how many migrations are registered in this binary.
+// The CLI uses it to refuse a no-op `migrate up`/`down`: a standalone binary
+// that never imported the project's migrations package has an empty registry,
+// and "No pending migrations" there would be a lie.
+func RegisteredCount() int {
+	return len(registry)
+}
+
 // Reset clears all registered migrations. Intended for use in tests only.
 func Reset() {
 	registry = make(map[string]*Migration)

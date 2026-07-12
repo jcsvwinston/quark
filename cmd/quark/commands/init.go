@@ -17,7 +17,7 @@ var (
 
 func init() {
 	initCmd.Flags().StringVar(&initDir, "dir", ".", "Base directory for initialization")
-	initCmd.Flags().StringVar(&initDialect, "dialect", "postgresql", "Default database dialect (postgresql|mysql|sqlite|mssql|oracle)")
+	initCmd.Flags().StringVar(&initDialect, "dialect", "postgresql", "Default database dialect (postgresql|postgres|mysql|mariadb|sqlite|mssql|sqlserver|oracle)")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -32,6 +32,16 @@ var initCmd = &cobra.Command{
 }
 
 func runInit() error {
+	// Validate the dialect BEFORE writing anything: `--dialect bogus` used to
+	// write a config with an unknown driver and an empty DSN, exit 0, and
+	// blow up later at `quark migrate up` (QK-P2-5). The accepted names are
+	// the ones getDSNPlaceholder/DriverName understand.
+	switch initDialect {
+	case "postgresql", "postgres", "mysql", "mariadb", "sqlite", "mssql", "sqlserver", "oracle":
+	default:
+		return fmt.Errorf("unknown dialect %q: expected one of postgresql|postgres|mysql|mariadb|sqlite|mssql|sqlserver|oracle", initDialect)
+	}
+
 	fmt.Printf("Initializing Quark project in %s...\n", initDir)
 
 	// Create directories
@@ -106,7 +116,7 @@ func getDSNPlaceholder(dialect string) string {
 	switch dialect {
 	case "postgresql", "postgres":
 		return "postgres://user:pass@localhost/myapp?sslmode=disable"
-	case "mysql":
+	case "mysql", "mariadb":
 		return "user:pass@tcp(localhost:3306)/myapp?parseTime=true"
 	case "sqlite":
 		return "myapp.db"

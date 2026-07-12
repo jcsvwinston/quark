@@ -114,6 +114,15 @@ func generateFromTables() error {
 			}
 			continue
 		}
+		// A nonexistent table introspects as zero columns on most engines;
+		// generating an empty struct with exit 0 read as success (QK-P1-5).
+		if len(info.Columns) == 0 {
+			color.Red("Error: table %s not found or has no columns", tableName)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("table %s not found or has no columns", tableName)
+			}
+			continue
+		}
 
 		genTable := gen.TableInfo{
 			Name:    info.Name,

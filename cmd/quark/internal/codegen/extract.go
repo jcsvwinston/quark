@@ -69,7 +69,15 @@ func qualifier(p *types.Package) string { return p.Name() }
 // contain at least one model. Patterns use go/packages syntax (e.g.
 // "./...", an import path, or a directory).
 func Load(patterns ...string) ([]PackageModels, error) {
-	pkgs, err := packages.Load(&packages.Config{Mode: loadMode}, patterns...)
+	return LoadDir("", patterns...)
+}
+
+// LoadDir is Load with an explicit working directory for module resolution.
+// go/packages resolves "./..."-style patterns against the process cwd's
+// module; when the models live in another module (e.g. `quark validate
+// --models /path/to/project/models`), dir anchors resolution there instead.
+func LoadDir(dir string, patterns ...string) ([]PackageModels, error) {
+	pkgs, err := packages.Load(&packages.Config{Mode: loadMode, Dir: dir}, patterns...)
 	if err != nil {
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
