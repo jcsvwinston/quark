@@ -63,8 +63,7 @@ _ = quark.For[User](ctx, router).Create(&user) // → the shard owning user.Tena
 It applies to **writes**, where you hold the entity; reads carry no entity, so
 they keep passing the key to `WithShardKey` directly. An entity whose
 `ShardKey()` returns the empty string fails to route — like a missing key, never
-a silent fan-out. See
-[ADR-0021](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0021-shard-key-from-entity.md).
+a silent fan-out.
 
 ## How routing works
 
@@ -108,8 +107,10 @@ n, err := quark.ScatterCount[Account](ctx, router, nil) // total across all shar
 
 If any shard errors, the call returns that error rather than a silently partial
 result. Aggregates beyond count (`AVG`/`MIN`/`MAX`) and cross-shard `GROUP BY`
-are **not** merged — run those per shard. See
-[ADR-0022](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0022-scatter-gather-cross-shard-reads.md).
+are **not** merged — run those per shard. Merging them correctly needs more than
+the per-shard result rows (an average needs each shard's count as well as its
+mean, for instance), so Quark returns nothing rather than a plausible-looking
+wrong number.
 
 ## Limits
 
@@ -125,6 +126,6 @@ are **not** merged — run those per shard. See
   task; the shard set is fixed at construction.
 
 Multi-tenancy composes orthogonally: a shard's `*Client` can itself sit behind
-a `TenantRouter`. See
-[ADR-0016](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0016-sharding-shardrouter.md)
-for the full rationale.
+a `TenantRouter`. Sharding is a router in front of ordinary clients rather than
+a mode inside the client, which is what lets the two stack without either
+knowing about the other.

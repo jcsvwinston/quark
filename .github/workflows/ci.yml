@@ -30,6 +30,17 @@ jobs:
             exit 1
           fi
 
+      - name: docs product voice
+        # Keeps internal engineering vocabulary out of the published site.
+        # A reader evaluating Quark does not know what ADR-0021 is, what "P0"
+        # means, or what a "v1 gate" gates — those are artefacts of how we
+        # build the thing, not of how anyone uses it. When they leak into
+        # website/docs/** the docs read like our ticket queue instead of a
+        # product. The internal tree (docs/adr/, SPEC.md, CLAUDE.md) is
+        # untouched by this rule; only what we publish has to speak the
+        # reader's language.
+        run: bash scripts/ci/check_docs_product_voice.sh
+
       - name: lint docs
         # F0-10. Catches doc drift before it lands on main:
         # marketing language ("production-ready" / "enterprise-grade"

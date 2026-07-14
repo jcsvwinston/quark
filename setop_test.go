@@ -251,6 +251,94 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 		}
 	})
 
+	// IntersectAllAndExceptAll pins the multiset variants against every live
+	// engine. They were reachable only from the internal renderer until now —
+	// there were no IntersectAll/ExceptAll methods on Query, so the `ALL`
+	// branches of setOpKeyword (including its dialect rejections) were dead
+	// code that no test could reach. Support is narrower than the plain
+	// variants: only PostgreSQL and MariaDB (10.5+) run them. SQL Server, SQLite
+	// and Oracle have no ALL variants, and MySQL has no INTERSECT or EXCEPT at
+	// all. This subtest asserts both halves of that contract — it
+	// runs the query where it is supported and requires ErrUnsupportedFeature
+	// where it is not, so a dialect quietly losing support cannot pass.
+	t.Run("IntersectAllAndExceptAll", func(t *testing.T) {
+		dialect := baseClient.Dialect().Name()
+
+		var supported bool
+		switch dialect {
+		case "postgres", "mariadb":
+			supported = true
+		}
+
+		newLHS := func() *quark.Query[setUserA] {
+			return quark.For[setUserA](ctx, baseClient).
+				Select("email").
+				WhereIn("email", []any{"alice@x", "bob@x", "carol@x"}).
+				OrderBy("email", "ASC")
+		}
+		newRHS := func(emails ...any) *quark.Query[setUserA] {
+			return quark.For[setUserA](ctx, baseClient).
+				Select("email").
+				WhereIn("email", emails)
+		}
+
+		// INTERSECT ALL — the base rows are distinct here, so the multiset
+		// result matches the deduplicated one; what is under test is that the
+		// statement renders and executes on this engine at all.
+		gotIntersect, errIntersect := newLHS().
+			IntersectAll(newRHS("bob@x", "carol@x", "dave@x")).
+			List()
+
+		// EXCEPT ALL.
+		gotExcept, errExcept := newLHS().
+			ExceptAll(newRHS("bob@x", "dave@x")).
+			List()
+
+		if !supported {
+			if !errors.Is(errIntersect, quark.ErrUnsupportedFeature) {
+				t.Errorf("IntersectAll on %s: expected ErrUnsupportedFeature, got %v", dialect, errIntersect)
+			}
+			if !errors.Is(errExcept, quark.ErrUnsupportedFeature) {
+				t.Errorf("ExceptAll on %s: expected ErrUnsupportedFeature, got %v", dialect, errExcept)
+			}
+			return
+		}
+
+		if errIntersect != nil {
+			t.Fatalf("IntersectAll on %s: %v", dialect, errIntersect)
+		}
+		seen := map[string]struct{}{}
+		for _, r := range gotIntersect {
+			seen[r.Email] = struct{}{}
+		}
+		if _, ok := seen["bob@x"]; !ok {
+			t.Errorf("IntersectAll on %s: expected bob@x in %v", dialect, seen)
+		}
+		if _, ok := seen["carol@x"]; !ok {
+			t.Errorf("IntersectAll on %s: expected carol@x in %v", dialect, seen)
+		}
+		if _, ok := seen["alice@x"]; ok {
+			t.Errorf("IntersectAll on %s: alice@x is not in both operands, got %v", dialect, seen)
+		}
+
+		if errExcept != nil {
+			t.Fatalf("ExceptAll on %s: %v", dialect, errExcept)
+		}
+		seenEx := map[string]struct{}{}
+		for _, r := range gotExcept {
+			seenEx[r.Email] = struct{}{}
+		}
+		if _, ok := seenEx["alice@x"]; !ok {
+			t.Errorf("ExceptAll on %s: expected alice@x in %v", dialect, seenEx)
+		}
+		if _, ok := seenEx["carol@x"]; !ok {
+			t.Errorf("ExceptAll on %s: expected carol@x in %v", dialect, seenEx)
+		}
+		if _, ok := seenEx["bob@x"]; ok {
+			t.Errorf("ExceptAll on %s: bob@x is in the right operand and must be subtracted, got %v", dialect, seenEx)
+		}
+	})
+
 	t.Run("RejectsLockOnBase", func(t *testing.T) {
 		// Pessimistic locking on the base + set-ops is an unsupported
 		// combination because the dialect-specific lock suffix would

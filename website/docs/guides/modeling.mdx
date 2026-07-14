@@ -423,8 +423,7 @@ is always UTC: a zoned column is converted to UTC on the way to the database and
 back to the configured location when scanned, so the tag changes only how the
 field reads in Go, never what's stored. Invalid IANA names fail fast at
 `RegisterModel` / `Migrate` with `ErrInvalidTimezone`, so a typo breaks startup
-rather than a later query. (Design rationale:
-[ADR-0010](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0010-per-column-timezone-override.md).)
+rather than a later query.
 
 ## Relation fields
 
