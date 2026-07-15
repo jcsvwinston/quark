@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0](https://github.com/jcsvwinston/quark/compare/v1.2.2...v1.3.0) (2026-07-15)
+
+
+### Added
+
+* **setop:** expone IntersectAll/ExceptAll y corrige el soporte por dialecto ([61f4bec](https://github.com/jcsvwinston/quark/commit/61f4becae2dbf22333c031e1bd5364ac40ffdade))
+* **setop:** IntersectAll/ExceptAll + soporte por dialecto corregido; docs de producto ([6d2c26d](https://github.com/jcsvwinston/quark/commit/6d2c26d7305fc970254333264b298298a58dde16))
+
 ## [1.2.2](https://github.com/jcsvwinston/quark/compare/v1.2.1...v1.2.2) (2026-07-12)
 
 
