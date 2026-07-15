@@ -113,14 +113,12 @@ Allocations per operation (allocs/op, lower is better):
   and it trades ergonomics for that (no batch helper on SQLite, hand-written
   SQL, no model lifecycle).
 - This is exactly why Quark's own code generation (shipped v0.11.0) was
-  reframed. Profiled against this baseline, the generated scanners/binders
-  recover only ~1–5% (`benchmarks/PROFILING.md`): they remove reflection but
-  the cost is architectural allocation plus the driver round-trip — the same
-  reason ent (codegen + a runtime) stays in the reflect class. So codegen in
-  Quark is a **type-safety** feature, not a speedup, and the earlier ≥3×
-  performance gate was retired.
-
-{/* Design: [ADR-0017](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0017-codegen-type-safety-not-perf-gate.md) — codegen is type-safety, not a speed gate (supersedes the ≥3× target from ADR-0002). */}
+  reframed. Profiled against this baseline, the generated scanners and binders
+  recover only ~2–5% on scan and ~1% on insert: they remove reflection, but the
+  cost that remains is architectural allocation plus the driver round-trip — the
+  same reason ent (codegen + a runtime) stays in the reflect class. So codegen in
+  Quark is a **type-safety** feature, not a speedup, and we no longer claim a
+  multiple-times speedup for it.
 
 
 These results are not a claim of fastest-in-class. The per-operation figures

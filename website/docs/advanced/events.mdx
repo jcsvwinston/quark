@@ -62,7 +62,9 @@ Events publish synchronously **after** the write commits, and there's no
 transactional outbox. If the process dies between commit and publish, the data is
 durable but the event is lost. For guaranteed delivery, write your own outbox and
 publish from a poller, or make subscribers idempotent and accept at-least-once.
-(Design: [ADR-0013](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0013-transactional-hooks-and-sync-eventbus.md).)
+Quark publishes synchronously on purpose: a built-in outbox would need its own
+table, poller and delivery guarantees, and those belong to your infrastructure,
+not to the ORM.
 :::
 
 Inside `client.Tx` (with `ForTx[T]`), the publish is registered via
@@ -163,5 +165,8 @@ one goroutine; to stop, cancel the `Receive` context, then `Close`. PostgreSQL
 `LISTEN/NOTIFY` has **no durable buffer**: notifications emitted while the
 connection is down are lost, so reconnect on error and reconcile state yourself.
 The listener holds one connection from the pool for its lifetime — size the pool
-accordingly or give it its own `Client`. ([ADR-0019](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0019-inbound-listen-notify-dedicated-conn.md).)
+accordingly or give it its own `Client`. A dedicated connection is required:
+`LISTEN` registers on a specific session, so a listener sharing the general pool
+would silently stop receiving notifications the moment its connection was
+recycled.
 :::

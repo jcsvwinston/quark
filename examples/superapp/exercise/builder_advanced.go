@@ -260,6 +260,25 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 		}
 	}
 	rec.Note(QM("Intersect"), QM("Except"))
+	// INTERSECT ALL / EXCEPT ALL: soporte más estrecho (sólo PG y MariaDB); en
+	// el resto — incluido MSSQL/Oracle, que sí tienen las variantes distinct —
+	// Quark devuelve ErrUnsupportedFeature y se asierta el sentinel.
+	if control.Supports(control.FeatIntersectExceptAll, conn.Engine) {
+		if _, err := all.IntersectAll(admins2).Limit(10).List(); err != nil {
+			return fmt.Errorf("IntersectAll: %w", err)
+		}
+		if _, err := all.ExceptAll(admins2).Limit(10).List(); err != nil {
+			return fmt.Errorf("ExceptAll: %w", err)
+		}
+	} else {
+		if _, err := all.IntersectAll(admins2).Limit(10).List(); !errors.Is(err, quark.ErrUnsupportedFeature) {
+			return fmt.Errorf("IntersectAll en %s: esperaba ErrUnsupportedFeature, got %v", conn.Engine, err)
+		}
+		if _, err := all.ExceptAll(admins2).Limit(10).List(); !errors.Is(err, quark.ErrUnsupportedFeature) {
+			return fmt.Errorf("ExceptAll en %s: esperaba ErrUnsupportedFeature, got %v", conn.Engine, err)
+		}
+	}
+	rec.Note(QM("IntersectAll"), QM("ExceptAll"))
 
 	// --- 6. Locking pesimista, por capability. --------------------------------
 	if control.Supports(control.FeatSkipLocked, conn.Engine) {

@@ -55,6 +55,15 @@ func setOpKeyword(d Dialect, kind string, all bool) (string, error) {
 		if all && (kind == "INTERSECT" || kind == "EXCEPT") {
 			return "", fmt.Errorf("%w: SQLite does not support INTERSECT ALL / EXCEPT ALL", ErrUnsupportedFeature)
 		}
+	case "mssql", "sqlserver":
+		// T-SQL has INTERSECT and EXCEPT but no ALL variants of either.
+		// Without this guard the renderer emitted `INTERSECT ALL`, which
+		// SQL Server rejects with a misleading parse error rather than a
+		// clean "unsupported" — reject it here so the caller gets the same
+		// ErrUnsupportedFeature every other unsupported dialect returns.
+		if all && (kind == "INTERSECT" || kind == "EXCEPT") {
+			return "", fmt.Errorf("%w: SQL Server does not support INTERSECT ALL / EXCEPT ALL", ErrUnsupportedFeature)
+		}
 	}
 	if all {
 		return kind + " ALL", nil
@@ -83,17 +92,48 @@ func (q *Query[T]) UnionAll(other *Query[T]) *Query[T] {
 	return q.attachSetOp("UNION", true, other)
 }
 
-// Intersect renders `INTERSECT` between the base and the operand. Not
-// supported on MySQL / MariaDB — those return ErrUnsupportedFeature
-// from setOpKeyword at render time.
+// Intersect renders `INTERSECT` between the base and the operand: the rows
+// present in both, deduplicated.
+//
+// Supported on PostgreSQL, MariaDB (10.3+), MSSQL, Oracle and SQLite. MySQL
+// returns ErrUnsupportedFeature at render time — INTERSECT needs 8.0.31+ and
+// Quark will not assume the server version without probing it.
 func (q *Query[T]) Intersect(other *Query[T]) *Query[T] {
 	return q.attachSetOp("INTERSECT", false, other)
 }
 
-// Except renders `EXCEPT` (or `MINUS` on Oracle). Not supported on
-// MySQL / MariaDB.
+// IntersectAll is the multiset variant: `INTERSECT ALL` keeps duplicate rows
+// rather than collapsing them, so a row appearing twice on both sides comes
+// back twice.
+//
+// Narrower support than Intersect: PostgreSQL and MariaDB (10.5+) only.
+// SQL Server, SQLite and Oracle have no INTERSECT ALL, and MySQL has no
+// INTERSECT at all; every one of them returns ErrUnsupportedFeature at render
+// time.
+func (q *Query[T]) IntersectAll(other *Query[T]) *Query[T] {
+	return q.attachSetOp("INTERSECT", true, other)
+}
+
+// Except renders `EXCEPT` (spelled `MINUS` on Oracle): the rows in the base
+// that are not in the operand, deduplicated.
+//
+// Supported on PostgreSQL, MariaDB (10.3+), MSSQL, Oracle and SQLite. MySQL
+// returns ErrUnsupportedFeature at render time, for the same version-probe
+// reason as Intersect.
 func (q *Query[T]) Except(other *Query[T]) *Query[T] {
 	return q.attachSetOp("EXCEPT", false, other)
+}
+
+// ExceptAll is the multiset variant: `EXCEPT ALL` subtracts by multiplicity
+// instead of deduplicating — a row present three times on the left and once on
+// the right comes back twice.
+//
+// Narrower support than Except: PostgreSQL and MariaDB (10.5+) only. SQL Server
+// has no EXCEPT ALL, Oracle has no MINUS ALL, SQLite has no EXCEPT ALL, and
+// MySQL has no EXCEPT at all; every one of them returns ErrUnsupportedFeature
+// at render time.
+func (q *Query[T]) ExceptAll(other *Query[T]) *Query[T] {
+	return q.attachSetOp("EXCEPT", true, other)
 }
 
 // attachSetOp captures `other` as a qmark-rendered core (SELECT through

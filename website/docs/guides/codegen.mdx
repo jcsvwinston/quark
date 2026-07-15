@@ -130,6 +130,7 @@ asserts the generator and runtime agree on every model's shape.
   reflection path also matches untagged fields by snake-cased name). Give every
   persisted field a `db` tag so both paths agree.
 
-Design rationale: [ADR-0014](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0014-codegen-coexistence-typed-registry.md)
-(coexistence) and [ADR-0002](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0002-reflect-default-codegen-fase-6.md)
-(reflect default).
+Reflection stays the default, and generated code is an accelerator layered on top
+of it rather than a replacement: the two coexist model by model. That is why every
+limitation above is a silent fallback to reflection instead of an error — deleting
+the generated file changes performance, never behaviour.

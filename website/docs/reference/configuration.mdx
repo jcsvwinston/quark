@@ -56,11 +56,11 @@ expired query contexts in the current implementation.
 | `WithQueryObserver(o QueryObserver)` | Adds post-execution query observers. |
 | `WithDeadlockRetry(maxAttempts int)` | Transparent retry of `Client.Tx` when the engine kills the transaction as a deadlock victim (PG `40P01`, MySQL 1213, MSSQL 1205, Oracle `ORA-00060`). Retries the whole closure with backoff + jitter; disabled by default. |
 | `WithSlowQueryThreshold(d time.Duration)` | Logs any query/exec exceeding `d` at WARN with structured attributes (parameterised SQL only — never bind args). `0` (default) disables. |
-| `WithDefaultTZ(loc *time.Location)` | Fallback timezone for `time.Time` columns without a `quark:"tz=..."` tag. Values are stored as UTC; `loc` only affects how scanned values read in Go (ADR-0010). |
-| `WithCacheJitter(pct float64)` | ±jitter factor applied to cache TTLs (anti-stampede, ADR-0011). Default `0.1`; clamped to `[0, 1]`. Needs `WithCacheStore`. |
-| `WithCacheXFetchBeta(beta float64)` | XFetch probabilistic early-refresh parameter (ADR-0011). Default `1.0`; `0` disables XFetch (singleflight + jitter stay on). Needs `WithCacheStore`. |
-| `WithCacheCrossInstance()` | Cross-instance cache-stampede coordination via a `CacheLocker` store (ADR-0020). Off by default; falls back to in-process singleflight when the store can't lock. |
-| `WithReplicas(dsns ...string)` | Read-replica DSNs (ADR-0015): reads route to replicas, writes stay on the primary; transient replica failures fail over to the primary. |
+| `WithDefaultTZ(loc *time.Location)` | Fallback timezone for `time.Time` columns without a `quark:"tz=..."` tag. Values are stored as UTC; `loc` only affects how scanned values read in Go. |
+| `WithCacheJitter(pct float64)` | ±jitter factor applied to cache TTLs (anti-stampede). Default `0.1`; clamped to `[0, 1]`. Needs `WithCacheStore`. |
+| `WithCacheXFetchBeta(beta float64)` | XFetch probabilistic early-refresh parameter. Default `1.0`; `0` disables XFetch (singleflight + jitter stay on). Needs `WithCacheStore`. |
+| `WithCacheCrossInstance()` | Cross-instance cache-stampede coordination via a `CacheLocker` store. Off by default; falls back to in-process singleflight when the store can't lock. |
+| `WithReplicas(dsns ...string)` | Read-replica DSNs: reads route to replicas, writes stay on the primary; transient replica failures fail over to the primary. |
 | `WithReplicaStrategy(s ReplicaStrategy)` | Replica selection: `ReplicaRoundRobin` (default), `ReplicaRandom`, or `ReplicaLeastConn`. Needs `WithReplicas`. |
 | `WithReplicaDownCooldown(d time.Duration)` | How long a failed replica stays out of rotation before re-probing (default 5s). Needs `WithReplicas`. |
 | `WithMaxOpenConns(n int)` | Sets `*sql.DB.SetMaxOpenConns`. |
