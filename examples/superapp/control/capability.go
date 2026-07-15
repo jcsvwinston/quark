@@ -62,6 +62,14 @@ const (
 	// ASERTA el sentinel donde falta, como con el migration lock.
 	FeatIntersectExcept Feature = "intersect_except"
 
+	// FeatIntersectExceptAll marca los motores que renderizan las variantes
+	// multiset INTERSECT ALL / EXCEPT ALL. Soporte más estrecho que la variante
+	// distinct: sólo PostgreSQL y MariaDB (10.5+). SQL Server y Oracle tienen
+	// INTERSECT/EXCEPT pero no sus ALL; SQLite tampoco; MySQL no tiene ninguno.
+	// Como FeatIntersectExcept, es una feature gateada por Quark: el exerciser
+	// ASERTA quark.ErrUnsupportedFeature donde falta.
+	FeatIntersectExceptAll Feature = "intersect_except_all"
+
 	// FeatDeadlock marca los motores donde un deadlock por orden de locks
 	// invertido puede MANIFESTARSE (los 5 con servidor). SQLite serializa
 	// escrituras (SQLITE_BUSY no es un código de deadlock), así que el
@@ -92,6 +100,7 @@ var supported = map[Feature]map[Engine]bool{
 	FeatDBPerTenantProvision: {SQLite: true, Postgres: true, MySQL: true, MariaDB: true, MSSQL: true},
 	FeatDeadlock:             {Postgres: true, MySQL: true, MariaDB: true, MSSQL: true, Oracle: true},
 	FeatIntersectExcept:      {SQLite: true, Postgres: true, MariaDB: true, MSSQL: true, Oracle: true},
+	FeatIntersectExceptAll:   {Postgres: true, MariaDB: true},
 }
 
 // Supports indica si el motor e soporta la feature f. Si devuelve false, el

@@ -822,6 +822,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).ExceptAll",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Find",
       "kind": "method"
     },
@@ -868,6 +873,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Intersect",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).IntersectAll",
       "kind": "method"
     },
     {
