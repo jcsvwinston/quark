@@ -419,4 +419,99 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 			t.Errorf("Except on MySQL should return ErrUnsupportedFeature, got %v", err)
 		}
 	})
+
+	t.Run("MixedKindChainRejectedOnList", func(t *testing.T) {
+		// QK5-1: A.Union(B).Intersect(C) renders flat, and the engines
+		// disagree on how a flat mix parses — PostgreSQL, MySQL, MariaDB
+		// and SQL Server give INTERSECT higher precedence, SQLite and
+		// Oracle evaluate left to right — so the same chain would
+		// silently return different rows per engine. attachSetOp rejects
+		// the mix at attach time, on every dialect, before any SQL is
+		// rendered.
+		a := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			WhereIn("email", []any{"bob@x", "carol@x"})
+		b := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			Where("email", "=", "carol@x")
+
+		_, err := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			WhereIn("email", []any{"alice@x", "bob@x"}).
+			Union(a).
+			Intersect(b).
+			List()
+		if err == nil {
+			t.Fatalf("expected ErrUnsupportedFeature for a mixed UNION+INTERSECT chain, got nil")
+		}
+		if !errors.Is(err, quark.ErrUnsupportedFeature) {
+			t.Errorf("expected ErrUnsupportedFeature, got %v", err)
+		}
+	})
+
+	t.Run("MixedKindChainRejectedOnCount", func(t *testing.T) {
+		// Same contract through Count: the attach-time error must
+		// surface there too, not only through List. Uses UNION+EXCEPT —
+		// the other cross-kind pair — so both mixes are pinned.
+		a := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			WhereIn("email", []any{"bob@x", "carol@x"})
+		b := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			Where("email", "=", "carol@x")
+
+		_, err := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			WhereIn("email", []any{"alice@x", "bob@x"}).
+			Union(a).
+			Except(b).
+			Count()
+		if err == nil {
+			t.Fatalf("expected ErrUnsupportedFeature for a mixed UNION+EXCEPT chain, got nil")
+		}
+		if !errors.Is(err, quark.ErrUnsupportedFeature) {
+			t.Errorf("expected ErrUnsupportedFeature, got %v", err)
+		}
+	})
+
+	t.Run("SameKindChainStillWorks", func(t *testing.T) {
+		// No-regression for the mixed-kind guard: chaining the SAME
+		// operator kind — including its ALL variant, which shares the
+		// operator word and its precedence — must keep working. The
+		// guard keys on the operator kind (UNION/INTERSECT/EXCEPT), not
+		// on the `all` flag, so Union followed by UnionAll is one kind.
+		// (A UNION B) UNION ALL C evaluates left to right on every
+		// engine (equal precedence associates left), so the result is
+		// deterministic:
+		//   {alice, bob} UNION {bob, carol}  → {alice, bob, carol}
+		//   ... UNION ALL {carol}            → 4 rows, carol twice
+		lhs := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			WhereIn("email", []any{"alice@x", "bob@x"}).
+			OrderBy("email", "ASC")
+		mid := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			WhereIn("email", []any{"bob@x", "carol@x"})
+		tail := quark.For[setUserA](ctx, baseClient).
+			Select("email").
+			Where("email", "=", "carol@x")
+
+		got, err := lhs.Union(mid).UnionAll(tail).List()
+		if err != nil {
+			t.Fatalf("same-kind chain (Union then UnionAll) must not trip the mixed-kind guard: %v", err)
+		}
+		if len(got) != 4 {
+			t.Errorf("expected 4 rows ((A UNION B) UNION ALL C), got %d: %v", len(got), got)
+		}
+		counts := map[string]int{}
+		for _, r := range got {
+			counts[r.Email]++
+		}
+		if len(counts) != 3 {
+			t.Errorf("expected 3 distinct emails, got %v", counts)
+		}
+		if counts["carol@x"] != 2 {
+			t.Errorf("expected carol@x twice (UNION dedups, UNION ALL re-appends), got %v", counts)
+		}
+	})
 }

@@ -152,6 +152,10 @@ func (q *Query[T]) ExceptAll(other *Query[T]) *Query[T] {
 //   - The operand cannot carry ORDER BY, LIMIT, OFFSET, lock options,
 //     CTEs, or its own set-ops. ORDER BY and LIMIT on the combined
 //     result come from the outer (base) query instead.
+//   - The chain cannot mix operator kinds (UNION vs INTERSECT vs
+//     EXCEPT) — engines disagree on the precedence of a flat mix; see
+//     the mixed-kind guard below. ALL variants of the already-chained
+//     kind are fine.
 func (q *Query[T]) attachSetOp(kind string, all bool, other *Query[T]) *Query[T] {
 	c := q.clone()
 	if other == nil {
@@ -176,6 +180,29 @@ func (q *Query[T]) attachSetOp(kind string, all bool, other *Query[T]) *Query[T]
 	}
 	if len(other.setOps) > 0 {
 		c.err = fmt.Errorf("%w: nested set-ops on a %s operand are not supported", ErrUnsupportedFeature, kind)
+		return c
+	}
+	// Mixed-kind guard (QK5-1). A chain like A.Union(B).Intersect(C)
+	// renders flat, and the engines disagree on how a flat mix parses:
+	// PostgreSQL, MySQL, MariaDB and SQL Server give INTERSECT higher
+	// precedence than UNION/EXCEPT, while SQLite and Oracle evaluate
+	// strictly left to right — the same statement silently returns
+	// different rows depending on the engine. A statement may therefore
+	// chain only ONE operator kind.
+	//
+	// "Kind" is the operator word (UNION / INTERSECT / EXCEPT); the
+	// `all` flag is deliberately not part of it. UNION and UNION ALL
+	// (and the other ALL variants) carry the same precedence as their
+	// distinct form on every engine, so Union+UnionAll chains remain
+	// legal and deterministic (equal precedence associates left).
+	// Cross-kind mixes are rejected wholesale — including UNION↔EXCEPT,
+	// which the SQL standard parses left-to-right at equal precedence —
+	// because a single uniform rule is easier to reason about than a
+	// per-pair matrix, and Oracle documents that MINUS/INTERSECT
+	// precedence may change in a future release. Every earlier entry
+	// passed this same guard, so checking the first one suffices.
+	if len(c.setOps) > 0 && c.setOps[0].kind != kind {
+		c.err = fmt.Errorf("%w: mixing %s with %s in one statement is not supported — engines disagree on set-op precedence; materialize each step into its own query instead", ErrUnsupportedFeature, c.setOps[0].kind, kind)
 		return c
 	}
 	// Render the operand using the qmarkDialect so its `?` markers can be
