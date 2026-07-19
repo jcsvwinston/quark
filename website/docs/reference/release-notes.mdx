@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.3.0** on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.3.1** on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade:
@@ -17,6 +17,34 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.3.1
+
+A correctness patch. Upgrade if you chain different set operators in one
+query, or if you use the native row-level-security strategy with writes.
+
+### Fixed
+
+- **Mixed set-operator chains are rejected honestly.** `A.Union(B).Intersect(C)`
+  used to emit flat SQL whose meaning depends on the engine (SQLite and Oracle
+  evaluate left-to-right; PostgreSQL, SQL Server, MySQL and MariaDB give
+  `INTERSECT` precedence) — the same query silently returned different rows on
+  different engines. Chains that mix operators now return
+  `ErrUnsupportedFeature`; materialize intermediate results in steps instead.
+  Chaining the same operator, `UNION` with `UNION ALL` included, keeps working.
+- **Native row-level security no longer loses writes.** Under the
+  `RowLevelSecurityNative` strategy, an `INSERT … RETURNING` ran inside an
+  implicit transaction whose lifecycle was tied to the caller's context — and
+  cancelling that context (which is how every request context ends) made the
+  database roll the insert back instead of committing it. The transaction's
+  lifecycle is now detached from the request context, so the deferred commit
+  is deterministic. Per-statement cancellation still applies.
+
+### Upgrade notes
+
+If you relied on mixed set-operator chains, split them into explicit steps —
+the previous behaviour differed per engine, so results were only ever
+trustworthy on one of them.
 
 ## v1.3.0
 
