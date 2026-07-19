@@ -37,14 +37,18 @@ func setOpKeyword(d Dialect, kind string, all bool) (string, error) {
 	switch name {
 	case "oracle":
 		switch kind {
+		// Oracle gained INTERSECT ALL / MINUS ALL in 21c. The rejection
+		// below is quark's gating, not a universal Oracle limitation:
+		// quark cannot assume a 21c+ server without a version probe, the
+		// same policy that keeps INTERSECT/EXCEPT off MySQL (8.0.31+).
 		case "EXCEPT":
 			if all {
-				return "", fmt.Errorf("%w: Oracle does not support MINUS ALL — use distinct EXCEPT instead", ErrUnsupportedFeature)
+				return "", fmt.Errorf("%w: MINUS ALL requires Oracle 21c+, which quark cannot assume without a version probe — use distinct Except instead", ErrUnsupportedFeature)
 			}
 			return "MINUS", nil
 		case "INTERSECT":
 			if all {
-				return "", fmt.Errorf("%w: Oracle does not support INTERSECT ALL", ErrUnsupportedFeature)
+				return "", fmt.Errorf("%w: INTERSECT ALL requires Oracle 21c+, which quark cannot assume without a version probe", ErrUnsupportedFeature)
 			}
 		}
 	case "mysql":
@@ -107,7 +111,8 @@ func (q *Query[T]) Intersect(other *Query[T]) *Query[T] {
 // back twice.
 //
 // Narrower support than Intersect: PostgreSQL and MariaDB (10.5+) only.
-// SQL Server, SQLite and Oracle have no INTERSECT ALL, and MySQL has no
+// SQL Server and SQLite have no INTERSECT ALL, Oracle only gained it in 21c —
+// a version quark does not assume without a runtime probe — and MySQL has no
 // INTERSECT at all; every one of them returns ErrUnsupportedFeature at render
 // time.
 func (q *Query[T]) IntersectAll(other *Query[T]) *Query[T] {
@@ -129,9 +134,10 @@ func (q *Query[T]) Except(other *Query[T]) *Query[T] {
 // the right comes back twice.
 //
 // Narrower support than Except: PostgreSQL and MariaDB (10.5+) only. SQL Server
-// has no EXCEPT ALL, Oracle has no MINUS ALL, SQLite has no EXCEPT ALL, and
-// MySQL has no EXCEPT at all; every one of them returns ErrUnsupportedFeature
-// at render time.
+// and SQLite have no EXCEPT ALL, Oracle only gained MINUS ALL in 21c — a
+// version quark does not assume without a runtime probe — and MySQL has no
+// EXCEPT at all; every one of them returns ErrUnsupportedFeature at render
+// time.
 func (q *Query[T]) ExceptAll(other *Query[T]) *Query[T] {
 	return q.attachSetOp("EXCEPT", true, other)
 }

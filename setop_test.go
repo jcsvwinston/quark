@@ -256,9 +256,10 @@ func testSetOp(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	// there were no IntersectAll/ExceptAll methods on Query, so the `ALL`
 	// branches of setOpKeyword (including its dialect rejections) were dead
 	// code that no test could reach. Support is narrower than the plain
-	// variants: only PostgreSQL and MariaDB (10.5+) run them. SQL Server, SQLite
-	// and Oracle have no ALL variants, and MySQL has no INTERSECT or EXCEPT at
-	// all. This subtest asserts both halves of that contract — it
+	// variants: only PostgreSQL and MariaDB (10.5+) run them. SQL Server and
+	// SQLite have no ALL variants, Oracle only gained them in 21c (which quark
+	// does not assume without a version probe), and MySQL has no INTERSECT or
+	// EXCEPT at all. This subtest asserts both halves of that contract — it
 	// runs the query where it is supported and requires ErrUnsupportedFeature
 	// where it is not, so a dialect quietly losing support cannot pass.
 	t.Run("IntersectAllAndExceptAll", func(t *testing.T) {
