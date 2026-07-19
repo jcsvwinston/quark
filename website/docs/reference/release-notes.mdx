@@ -38,7 +38,14 @@ query, or if you use the native row-level-security strategy with writes.
   cancelling that context (which is how every request context ends) made the
   database roll the insert back instead of committing it. The transaction's
   lifecycle is now detached from the request context, so the deferred commit
-  is deterministic. Per-statement cancellation still applies.
+  is deterministic. **This changes cancellation semantics on the query paths**:
+  each statement still honours the context while it runs, but once a statement
+  has executed, cancelling the request no longer reverts the write — the
+  implicit transaction commits when the context ends, after control has
+  returned to the caller (the exec path is unchanged: it commits synchronously
+  before returning). See
+  [PostgreSQL Native RLS → Limitations](../advanced/row-level-native#limitations)
+  for the full write-semantics contract.
 
 ### Upgrade notes
 
