@@ -320,7 +320,7 @@ Per-dialect implementation:
 | PostgreSQL | `pg_advisory_lock(hashtext(name))` + `pg_advisory_unlock`. Timeout via `SET lock_timeout`. SQLSTATE `55P03` mapped to `ErrLockTimeout`. |
 | MySQL / MariaDB | `GET_LOCK(name, timeout_seconds)` + `RELEASE_LOCK`. Return value 0 mapped to `ErrLockTimeout`. |
 | SQL Server | `sp_getapplock @LockMode='Exclusive', @LockOwner='Session'` + `sp_releaseapplock`. Status code `-1` mapped to `ErrLockTimeout`. |
-| Oracle | `DBMS_LOCK.ALLOCATE_UNIQUE` + `REQUEST(X_MODE, release_on_commit => FALSE)` — session-scoped, survives the implicit commits of DDL. Result code `1` mapped to `ErrLockTimeout`. **Requires `GRANT EXECUTE ON DBMS_LOCK TO <user>`** (not granted to schema users by default; see ADR-0018). |
+| Oracle | `DBMS_LOCK.ALLOCATE_UNIQUE` + `REQUEST(X_MODE, release_on_commit => FALSE)` — session-scoped, survives the implicit commits of DDL. Result code `1` mapped to `ErrLockTimeout`. **Requires `GRANT EXECUTE ON DBMS_LOCK TO <user>`** (not granted to schema users by default). |
 | SQLite | Not supported — single-writer model; use `BEGIN IMMEDIATE` inside the process. Returns `ErrUnsupportedFeature`. |
 
 Implementation notes:
@@ -701,7 +701,7 @@ Safe for concurrent use.
 **Note**: the registry **appends** — calling `RegisterModel` with the
 same type twice gives you two entries. That's a deliberate design
 choice; the registry doesn't try to be clever about identity.
-Multi-tenant deployments (per ADR-0007) where each tenant Client
+Multi-tenant deployments where each tenant Client
 manages its own set of models benefit from per-Client state here
 — the registry doesn't leak across Clients.
 

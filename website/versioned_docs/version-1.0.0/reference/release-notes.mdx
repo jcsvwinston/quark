@@ -19,15 +19,14 @@ v0.10 through v1.0 introduced **no breaking changes**.
 
 ## v1.0.0
 
-The first stable release. v1.0 closes the qualitative
-[v1.0 gate](https://github.com/jcsvwinston/quark/blob/main/docs/V1_GATE.md) §A
-(5/5) — most notably Oracle joining the blocking CI matrix (216/0), which
+The first stable release. v1.0 closes a qualitative release checklist —
+most notably Oracle joining the blocking CI matrix, which
 completes cross-engine coverage across all six dialects. No new public API
 beyond the v0.13 surface and **no breaking changes** since v0.9.0; v1.0 is the
 SemVer commitment to that surface. The benchmark harness gained the
-code-generation tier (ent + sqlc, F6-8b), confirming codegen is a type-safety
-feature rather than a speedup ([ADR-0017](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0017-codegen-type-safety-not-perf-gate.md)
-retired the ≥3× p99 gate). Known limitations consciously deferred to v1.1+ are
+code-generation tier (ent + sqlc), confirming codegen is a type-safety
+feature rather than a speedup — the earlier ≥3× performance goal was
+retired. Known limitations consciously deferred to v1.1+ are
 listed in the release notes.
 See [`RELEASE_NOTES_v1.0.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.0.0.md).
 
@@ -35,7 +34,7 @@ See [`RELEASE_NOTES_v1.0.0.md`](https://github.com/jcsvwinston/quark/blob/main/d
 
 Phase 6 HA cut: opt-in **read replicas** (F6-5/F6-6). `WithReplicas(dsns...)`
 opens read-only pools and routes multi-row reads across them round-robin while
-writes stay on the primary (ADR-0015); `Sticky(ctx)` pins a read to the primary
+writes stay on the primary; `Sticky(ctx)` pins a read to the primary
 for read-your-writes. A read to a replica that hits a transient connection error
 **fails over to the primary**, and the replica is taken out of rotation for a
 cooldown (`WithReplicaDownCooldown`, default 5s). Performance: a copy-on-write
@@ -52,8 +51,8 @@ Phase 6 sliver: opt-in **compile-time column type-safety** on top of the
 code generator (F6-4). `quark gen` emits, per model, a `<Model>Columns`
 value of typed column handles, and the query builder gains `Query.WhereP`
 — `WHERE` conditions without magic column strings, with compile-time
-checking of both the column and the bound value. Pure compile-time sugar
-(ADR-0014); the string `Where(...)` API stays valid and interchangeable.
+checking of both the column and the bound value. Pure compile-time sugar;
+the string `Where(...)` API stays valid and interchangeable.
 Performance: the audit row diff is now built only when an audit sink is
 configured (~9% allocation drop on `InsertOne`). No breaking changes.
 See [`RELEASE_NOTES_v0.12.0.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v0.12.0.md).
@@ -65,12 +64,12 @@ subcommand of `cmd/quark` parses your model package (`go/packages` +
 `go/types`) and emits a `quark_gen.go` per package that registers typed
 implementations into a runtime registry — read path (F6-2 typed
 scanners) and INSERT for single-integer-PK models (F6-3a typed
-binder). The reflection path stays the permanent default (ADR-0002);
-codegen is fully opt-in (ADR-0014).
+binder). The reflection path stays the permanent default;
+codegen is fully opt-in.
 
 Comes with a reproducible `benchmarks/` module (F6-8a) — Quark vs
 hand-written `database/sql` vs GORM — and an **honest profiling
-finding** in `benchmarks/PROFILING.md`: codegen ~2–5% on scan, ~1% on
+finding**: codegen ~2–5% on scan, ~1% on
 INSERT. Quark's per-op CPU is dominated by `database/sql` and the
 engine, not reflection. **Generate for correctness and forward
 compatibility, not for speed.** No breaking changes.
@@ -111,8 +110,8 @@ notes are in-repo under `docs/RELEASE_NOTES_v0.{4,5,6,7,8}.0.md`.
 
 ## v0.3.0
 
-First proper tag since v0.1.1. Bundles Phase 0 P0 fixes (security,
-correctness) with the Phase 1 deliverables (rich types, dirty tracking,
+First proper tag since v0.1.1. Bundles the critical security and
+correctness fixes from Phase 0 with the Phase 1 deliverables (rich types, dirty tracking,
 optimistic locking, soft-delete scopes). See the in-repo release notes for
 the full breakdown.
 

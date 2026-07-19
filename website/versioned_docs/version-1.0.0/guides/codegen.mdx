@@ -35,11 +35,9 @@ compatibility, not for a dramatic speedup** — removing reflection from these
 paths is not, on its own, where Quark's per-operation cost lives.
 :::
 
-The design is recorded in
-[ADR-0014](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0014-codegen-coexistence-typed-registry.md)
-(coexistence mechanism) and
-[ADR-0002](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0002-reflect-default-codegen-fase-6.md)
-(reflect default, codegen opt-in).
+Reflection stays the permanent default, and generated code is an accelerator
+layered on top of it rather than a replacement: the two coexist model by
+model.
 
 ## Install
 
@@ -190,7 +188,7 @@ AccountColumns.Age.Eq("x")    // compile error: Age wants an int, got string
   `NotIn` / `Between` / `IsNull` / `IsNotNull`, all typed to the field. String
   columns use `TypedStringColumn`, which adds `Like` / `NotLike`.
 - `WhereP` is **pure compile-time sugar**: each predicate lowers to exactly
-  the condition `Where("email", "=", v)` produces (ADR-0014), so the two APIs
+  the condition `Where("email", "=", v)` produces, so the two APIs
   are interchangeable and mix on one query
   (`.WhereP(AccountColumns.Age.Gte(18)).Where("active", "=", true)`). The
   string `Where` form stays fully valid.

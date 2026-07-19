@@ -17,9 +17,10 @@ Native is **PostgreSQL-only**. Other dialects continue to use
 [`RowLevelSecurityClient`](multi-tenant#row-level-isolation), which
 is client-side WHERE injection on the Quark builder.
 
-See [ADR-0012](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0012-rls-real-postgres-set-local-plus-policies.md)
-for the design rationale and the trade-offs against the legacy
-client-side strategy.
+The two enforce isolation in different places: Native leans on real PostgreSQL
+policies and a transaction-scoped session variable, so the database itself
+rejects rows the tenant may not see, even through raw SQL. The client-side
+strategy only adds a predicate to the queries Quark builds.
 
 ## When to use Native vs Client
 
@@ -284,7 +285,7 @@ The legacy `RowLevelSecurity` alias still resolves to
 ## Limitations and roadmap
 
 - **No `LISTEN/NOTIFY` integration.** Inbound channel listening stays
-  out of scope (ADR-0013). Outbound CRUD events ship via
+  out of scope. Outbound CRUD events ship via
   [`Client.UseEventBus`](events).
 - **No automatic `pg_temp` cleanup.** The policy stays on the table
   even after dropping the router; manage the policies in your normal
@@ -293,8 +294,3 @@ The legacy `RowLevelSecurity` alias still resolves to
   for HTTP handlers; not acceptable for long-lived CLI ctx. Documented
   above. A follow-up may add an opt-out flag or a streaming-friendly
   executor.
-
-The full Phase 5 roadmap is in
-[TASKS.md](https://github.com/jcsvwinston/quark/blob/main/TASKS.md)
-under §"Fase 5" — F5-3 (CLI generator), F5-4..F5-6 (transactional
-hooks + EventBus), and F5-7 (audit log).

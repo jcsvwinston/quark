@@ -33,7 +33,11 @@ _, err := quark.For[Order](tenantCtx, nativeRouter).List() // non-PG base client
 | Use when | Production; bypass risk matters | Cross-dialect dev / staging |
 
 They're mutually exclusive per router — Native isn't a drop-in upgrade of Client.
-(Design rationale: [ADR-0012](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0012-rls-real-postgres-set-local-plus-policies.md).)
+The two enforce isolation in different places: Native leans on real PostgreSQL
+policies and a transaction-scoped session variable, so the database itself
+rejects rows the tenant may not see, even through raw SQL. Client mode only adds
+a predicate to queries Quark builds. Switching means installing policies, not
+flipping a stricter flag.
 
 ## Setup
 

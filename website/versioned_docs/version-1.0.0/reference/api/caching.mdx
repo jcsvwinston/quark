@@ -94,7 +94,7 @@ matching still works, but splitting on `:` does not.
 ## Stampede protection
 
 Every `CacheStore` passed to `WithCacheStore` is wrapped automatically
-with singleflight + TTL jitter + XFetch (ADR-0011). The wrapper
+with singleflight + TTL jitter + XFetch. The wrapper
 implements `CacheStore`, so existing third-party stores keep working
 unchanged inside it. Two `Option`s tune the wrapper; both are optional.
 

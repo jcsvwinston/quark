@@ -64,6 +64,6 @@ querying every shard).
   task; the shard set is fixed at construction.
 
 Multi-tenancy composes orthogonally: a shard's `*Client` can itself sit behind
-a `TenantRouter`. See
-[ADR-0016](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0016-sharding-shardrouter.md)
-for the full rationale.
+a `TenantRouter`. Sharding is a router in front of ordinary clients rather than
+a mode inside the client, which is what lets the two stack without either
+knowing about the other.

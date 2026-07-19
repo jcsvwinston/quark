@@ -91,11 +91,11 @@ In a multi-replica deployment each replica collapses its own concurrent
 callers, but N replicas can still each compute the same hot key once —
 much less severe than an in-process stampede, but real. Cross-instance
 coordination (an optional distributed-lock hook) is a tracked v1.0 known
-limitation, planned **post-v1.0** (ADR-0011 §"Cuándo reabrir").
+limitation, planned **post-v1.0**.
 :::
 
 Every CacheStore installed via `WithCacheStore` is wrapped automatically
-with three in-process protections (ADR-0011):
+with three in-process protections:
 
 - **Singleflight** — `N` concurrent callers for the same key collapse to
   one compute. The others wait on the result. A miss never produces a

@@ -83,5 +83,9 @@ fresh, _ := quark.For[User](quark.Sticky(ctx), client).
 
 `Sticky` is a no-op when no replicas are configured.
 
-See [ADR-0015](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0015-read-replicas-routing.md)
-for the routing model and its rationale.
+Routing is decided per statement, not per session: Quark sends a read to a
+replica unless something about that read requires the primary — it is inside a
+transaction, it is a write, it runs under native row-level security, or you
+marked it `Sticky`. Replication lag is therefore something you opt out of at the
+call sites that cannot tolerate it, rather than a global mode you have to reason
+about everywhere.

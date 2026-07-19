@@ -82,7 +82,9 @@ crashes between the commit and the publish, the event is lost — the
 data is durable but the event never went out. If you need
 exactly-once or guaranteed delivery, write your own outbox table and
 publish from a poller, or make your subscriber idempotent and accept
-at-least-once. See [ADR-0013](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0013-transactional-hooks-and-sync-eventbus.md).
+at-least-once. Quark publishes synchronously on purpose: a built-in outbox
+would need its own table, poller and delivery guarantees, and those belong to
+your infrastructure, not to the ORM.
 
 :::
 
@@ -169,8 +171,7 @@ dedicated connection from the pool.
 PostgreSQL `NOTIFY` messages. It pins one connection from the `Client`
 pool (acquired lazily on the first `Listen`) for the listener's
 lifetime, because a `LISTEN` registration lives on the physical
-connection and the pool rotates connections freely
-([ADR-0019](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0019-inbound-listen-notify-dedicated-conn.md)).
+connection and the pool rotates connections freely.
 Every non-PostgreSQL dialect returns `ErrDialectNotSupported`.
 
 ```go

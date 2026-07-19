@@ -27,11 +27,11 @@ v0.10 through v1.2.x introduced **no breaking changes**.
 Patch release: the v1.2.1 audit **backlog** executed — correctness and
 security this time, not just the CLI.
 
-- **P0 / security**: `quark tenant provision` concatenated the tenant id and
+- **Security**: `quark tenant provision` concatenated the tenant id and
   strategy into `CREATE DATABASE` / `CREATE SCHEMA` / `INSERT` SQL — the id
   is now validated against the TenantRouter contract before any SQL, DDL
   identifiers are dialect-quoted, and the registry INSERT is parameterized.
-- **P0 / correctness**: `Count()`/`Paginate` on a compound select counted
+- **Correctness**: `Count()`/`Paginate` on a compound select counted
   only the base operand (`List()=4`, `Count()=2`) — now wrapped as
   `SELECT COUNT(*) FROM (<compound>)`; `Upsert`/`UpsertBatch` with empty
   `conflictCols` return `ErrInvalidQuery` on every engine instead of
@@ -83,15 +83,15 @@ raw-query guard — no query-builder or CRUD changes.
 
 Minor release: the scaling follow-ups deferred at v1.1.
 
-- **Cross-instance cache-stampede coordination** (ADR-0020): opt-in
+- **Cross-instance cache-stampede coordination**: opt-in
   `WithCacheCrossInstance()` + the optional `CacheLocker` store capability
   (implemented by the `memory` and `redis` stores). The lock winner recomputes
   and writes; losers wait-and-reread. A lock-backend failure degrades to the
   previous in-process behavior, never to an error.
-- **Shard key from the entity** (ADR-0021): entities implementing `ShardKeyer`
+- **Shard key from the entity**: entities implementing `ShardKeyer`
   route with `WithShardKeyOf(ctx, entity)` — a caller-side helper, not a
   router hook.
-- **Scatter-gather cross-shard reads** (ADR-0022): `ScatterGather` /
+- **Scatter-gather cross-shard reads**: `ScatterGather` /
   `ScatterCount` with an explicit caller-side `ScatterMerge`; COUNT is the
   only aggregate merged for you.
 - **Security**: toolchain pinned to go1.26.5 and pgx to v5.9.2 (upstream
@@ -213,8 +213,8 @@ See [`RELEASE_NOTES_v1.1.0.md`](https://github.com/jcsvwinston/quark/blob/main/d
 
 ## v1.0.0
 
-The first stable release. v1.0 closes the qualitative
-[v1.0 gate](https://github.com/jcsvwinston/quark/blob/main/docs/V1_GATE.md) — most
+The first stable release. v1.0 closes a qualitative
+release checklist — most
 notably Oracle joining the blocking CI matrix, which completes cross-engine
 coverage across all six dialects. No new public API beyond the v0.13 surface and
 **no breaking changes** since v0.9.0; v1.0 is the SemVer commitment to that
@@ -261,8 +261,8 @@ INSERT binder for single-integer-PK models. The reflection path stays the
 permanent default; codegen is fully opt-in.
 
 Comes with a reproducible `benchmarks/` module — Quark vs hand-written
-`database/sql` vs GORM — and a **calibrated profiling finding** in
-`benchmarks/PROFILING.md`: codegen recovers ~2–5% on scan and ~1% on
+`database/sql` vs GORM — and a **calibrated profiling finding**:
+codegen recovers ~2–5% on scan and ~1% on
 INSERT. Quark's per-op CPU is dominated by `database/sql` and the engine,
 not reflection. **Generate for correctness and forward compatibility, not
 for speed.** No breaking changes.
