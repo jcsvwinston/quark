@@ -49,6 +49,16 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Operations',
+      collapsed: false,
+      items: [
+        'operations/deployment',
+        'operations/security',
+        'operations/upgrade',
+      ],
+    },
+    {
+      type: 'category',
       label: 'API Reference',
       collapsed: false,
       items: [
@@ -111,6 +121,7 @@ const sidebars: SidebarsConfig = {
         'reference/release-notes',
       ],
     },
+    'faq',
   ],
 };
 

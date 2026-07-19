@@ -1,0 +1,159 @@
+---
+sidebar_position: 2
+title: Security
+description: Quark's practical security model — injection defenses, tenancy as a boundary, secrets in DSNs, least-privilege database users, and what ends up in your logs.
+---
+
+# Security
+
+This page is the operator's view of Quark security: what the ORM defends by
+itself, where the boundaries are, and what remains your job. The honest
+summary — Quark binds every value, validates every identifier, and disables
+raw SQL by default; you own secrets, database privileges, and log retention.
+
+## SQL injection
+
+Quark's defense has three layers:
+
+**Values are always bound.** Every value that reaches the database through the
+query builder travels as a bind parameter (`?` / `$N` / named, per dialect) —
+never interpolated into SQL text. There is no string-concatenation path in the
+builder API.
+
+**Identifiers are validated.** Parameterization cannot protect column names,
+table names, or operators — they appear literally in the SQL. Quark validates
+every identifier lexically before any SQL is assembled and rejects anything
+malformed with `ErrInvalidIdentifier` or `ErrInvalidQuery`. The
+[SQLGuard](../reference/sqlguard) reference documents exactly what is checked.
+
+**Raw SQL is off by default.** `client.RawQuery(...)` and `client.Exec(...)`
+fail unless you opt in:
+
+```go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true
+
+client, err := quark.New("pgx", dsn, quark.WithLimits(limits))
+```
+
+Even with `AllowRawQueries: true`, raw statements pass through the guard's
+raw-query validation, and values must still go through placeholders:
+
+```go
+rows, err := client.RawQuery(ctx,
+    "SELECT id, email FROM users WHERE created_at > $1", since)
+```
+
+The one true escape hatch is `client.Raw()`, which returns the underlying
+`*sql.DB` and bypasses every Quark check. Treat calls to it the way you treat
+`unsafe` in Go: rare, reviewed, and commented.
+
+## Multi-tenancy as a security boundary
+
+If tenants must not see each other's data, choose your isolation strategy by
+where it is enforced — because that determines what can bypass it:
+
+| Strategy | Enforced by | Can raw SQL bypass it? |
+| --- | --- | --- |
+| `DatabasePerTenant` | Separate database per tenant | No — wrong database entirely |
+| `SchemaPerTenant` | Schema-qualified tables | Only SQL that names another schema |
+| `RowLevelSecurityClient` | Quark's query builder (injected `WHERE`) | **Yes** — `Raw()` / `Exec()` skip the predicate |
+| `RowLevelSecurityNative` (PostgreSQL) | The database engine (`CREATE POLICY`) | No — the policy filters server-side |
+
+The practical rule: `RowLevelSecurityClient` is a correctness convenience, not
+a hard boundary — one raw query in the codebase steps around it. When tenant
+isolation is a security requirement and you are on PostgreSQL, use
+[`RowLevelSecurityNative`](../advanced/row-level-native), where the engine
+enforces the policy even against raw SQL. On the other engines, prefer
+database- or schema-per-tenant if the boundary matters. The
+[Multi-Tenant](../advanced/multi-tenant) guide covers setup for all of them;
+the native page also documents its write semantics (each query runs in an
+implicit transaction that scopes the tenant setting).
+
+Quark helps you notice drift: a raw query executed under a native-RLS router
+logs a WARN (`quark.tenant.raw_under_native_rls`) — isolation still holds,
+because PostgreSQL enforces the policy, but the call sidestepped the
+tenant-scoped builder and deserves a look.
+
+## Keep secrets out of DSNs
+
+The DSN contains credentials, and it is a plain string — so the risks are
+mundane: committed config files, shell history, and log lines.
+
+- Build the DSN from the environment (or your secret manager's injected
+  files) at startup. Never commit one with a real password:
+
+  ```go
+  dsn := os.Getenv("DATABASE_URL")
+  client, err := quark.New("pgx", dsn)
+  ```
+
+- The `quark` CLI reads `QUARK_DATABASE_DEFAULT_DRIVER` and
+  `QUARK_DATABASE_DEFAULT_DSN` from the environment — use those in CI instead
+  of writing credentials into `.quark.yml`.
+- Quark never logs the DSN, but your own code might — audit any place that
+  prints configuration.
+- Use TLS so credentials and data don't cross the network in clear text — the
+  per-engine parameters are in
+  [Production Deployment](deployment#encrypt-the-wire-dsns-per-engine).
+
+## Least-privilege database users
+
+Your application does not need to own the schema at runtime. Split the
+privileges:
+
+| User | Needs | Used by |
+| --- | --- | --- |
+| `app_runtime` | `SELECT` / `INSERT` / `UPDATE` / `DELETE` on application tables | The application (`quark.New` in your services) |
+| `app_migrate` | The above plus DDL — `CREATE` / `ALTER` / `DROP` | The migration step of your deploy only |
+
+This means a compromised application credential cannot alter the schema, drop
+tables, or grant itself anything. Concretely:
+
+- Point your migration runner (`quark migrate up`, `quarkmigrate apply`,
+  `client.Migrate` / `client.Sync`) at the `app_migrate` user; everything else
+  uses `app_runtime`.
+- On Oracle, the migration user also needs `GRANT EXECUTE ON DBMS_LOCK` if
+  you use [`AcquireMigrationLock`](../guides/migrations#coordinating-concurrent-deploys);
+  the advisory-lock primitives on PostgreSQL, MySQL/MariaDB, and SQL Server
+  need no extra grants.
+- Keep `Limits.SafeMigrations` at its default `true`: schema sync then adds
+  columns but refuses to drop ones it no longer recognizes, so a
+  misconfigured deploy cannot silently destroy data.
+
+## What Quark writes to your logs
+
+Be deliberate about logs — they outlive the request and often leave your
+security perimeter. Quark's rule: **parameterized SQL may be logged; bind
+arguments are not**, because argument values are user data.
+
+What each surface actually emits:
+
+- **Slow-query log** (`WithSlowQueryThreshold`): one WARN per slow operation
+  with duration, operation, table, row count, and the parameterized SQL —
+  placeholders, not values. Bind arguments are deliberately omitted.
+- **OpenTelemetry spans** (`quarkotel`): redact arguments by default; putting
+  values on spans is an explicit opt-in
+  (`quarkotel.WithSpanRedaction(quarkotel.IncludeArgs)`) that you should pair
+  with your trace-retention policy.
+- **Operational warnings** (missing `Limit()`, deadlock retries, replica
+  cooldowns, skipped zero-value updates): metadata only — no SQL values.
+- **Query observers** (`WithQueryObserver`): the `QueryEvent` your observer
+  receives **does include `Args`** — the raw bind values. That is the point
+  (it's your metrics/audit hook), but it makes your observer part of your
+  data-handling surface: apply your own redaction and retention before
+  shipping events anywhere.
+
+## Checklist
+
+Before going to production:
+
+- [ ] `AllowRawQueries` is `false`, or every raw call site is reviewed and uses placeholders
+- [ ] No `client.Raw()` usage outside reviewed, commented exceptions
+- [ ] Tenant isolation strategy chosen by enforcement point — native RLS or physical separation where isolation is a security requirement
+- [ ] DSNs come from the environment or a secret manager; none committed, none logged
+- [ ] TLS configured in every DSN (`sslmode=verify-full`, `tls=true`, `encrypt=true`, or driver equivalent)
+- [ ] Separate runtime and migration database users; runtime user has no DDL
+- [ ] `SafeMigrations` left at `true`
+- [ ] Query observers and any `IncludeArgs` telemetry reviewed against your data-retention policy
+- [ ] `Limits` guardrails (`QueryTimeout`, `MaxResults`, `MaxJoins`, `MaxWhereConditions`) set consciously, not disabled

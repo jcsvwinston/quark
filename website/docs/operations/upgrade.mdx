@@ -1,0 +1,108 @@
+---
+sidebar_position: 3
+title: Upgrading
+description: Quark's semantic-versioning promise, a step-by-step upgrade procedure, the breaking-change policy, and how Quark relates to the Quantum suite.
+---
+
+# Upgrading
+
+Quark is a standard Go module on the stable `v1.x` line. Upgrading is `go get`
+plus a few minutes of reading — this page tells you what to read and in what
+order.
+
+## The versioning promise
+
+Quark follows semantic versioning:
+
+- **Patch and minor releases (`v1.x.y`) keep API compatibility.** Code that
+  compiles against `v1.3` compiles against every later `v1.x`. New features
+  arrive as new options and methods, not as changed signatures.
+- **Breaking changes go to `v2`.** If that day comes, `v2` will be a new
+  module path (`github.com/jcsvwinston/quark/v2`, per Go convention), released
+  with a migration guide — you will never be broken by a routine `go get -u`.
+- Behavior fixes are called out. When a bug fix changes observable behavior
+  (for example, a query that used to silently produce wrong results now
+  returns an error), the release notes say so explicitly, per release.
+
+## Before you upgrade: read the notes
+
+The [Release Notes](../reference/release-notes) are written to be read
+top-down before an upgrade: each version has its own section describing what
+changed and what to check. If you are skipping versions, read every section
+between your current version and the target — upgrade implications don't
+repeat themselves in later entries.
+
+Commit-level detail lives on
+[GitHub Releases](https://github.com/jcsvwinston/quark/releases), which is
+also the place to watch (or subscribe to) for new versions.
+
+To find out what you are running now:
+
+```bash
+go list -m github.com/jcsvwinston/quark
+```
+
+## Step by step
+
+```bash
+# 1. Pin the new version (use an explicit tag, not "latest", in anything scripted)
+go get github.com/jcsvwinston/quark@v1.3.1
+go mod tidy
+
+# 2. Compile and run your test suite
+go build ./...
+go test ./...
+```
+
+Then:
+
+3. **Run your integration tests against a real database.** Quark is tested
+   against all six engines, but your models and queries are yours — the
+   engine-specific paths (upserts, locking, set operations) deserve a real
+   round-trip, not just unit tests.
+4. **Upgrade the CLI to the same version**, if you use it:
+
+   ```bash
+   go install github.com/jcsvwinston/quark/cmd/quark@v1.3.1
+   quark version
+   ```
+
+   Keeping the library and CLI on the same tag avoids chasing differences
+   between what your code does and what the tooling assumes.
+5. **Verify the schema before rolling out.** If you use the model-diff flow,
+   `quarkmigrate verify` exits non-zero when the database has drifted from
+   your models — run it in CI so an upgrade that changes type mapping or
+   introspection surfaces as a failed pipeline, not a surprise in production.
+   See [the migrations guide](../guides/migrations#a-ci-drift-gate-with-quarkmigrate).
+
+Rolling back a library upgrade is the same procedure with an older tag —
+within `v1.x` there are no compatibility cliffs in either direction. Database
+**migrations** you applied are a separate concern: rolling back the Go module
+does not un-apply them, so treat schema rollbacks with the care described in
+[Production Deployment](deployment#migrations-at-deploy-time).
+
+## If you are on v0.x
+
+The last breaking change was in v0.9.0; every release from v0.10.0 through
+current `v1.x` is a drop-in upgrade. Coming from v0.8 or earlier, follow the
+v0.9.0 migration notes linked from the
+[Release Notes](../reference/release-notes) first, then jump straight to the
+latest `v1.x`.
+
+## Quark and the Quantum suite
+
+Quark is developed as part of **Quantum**, a small suite of Go modules by the
+same author. The [suite repository](https://github.com/jcsvwinston/quantum)
+publishes a `versions.yaml` manifest; each suite release certifies a specific
+set of module versions (Quark among them) that were tested together.
+
+What this means for you:
+
+- **Quark is standalone.** It has its own releases, its own versioning
+  promise, and no dependency on the rest of the suite. If you only use Quark
+  — the common case — the suite changes nothing about how you install or
+  upgrade it.
+- **If you use other Quantum modules**, prefer the combination certified in
+  the current `versions.yaml` over mixing arbitrary versions. A newer Quark
+  than the certified one is usually fine (minor releases are compatible), but
+  the certified set is the one that was exercised end to end.
