@@ -118,6 +118,14 @@ type Client struct {
 	// Set once at setup via EnableAuditLog.
 	audit *auditState
 
+	// deferredCommitFailures counts implicit-tx deferred commits (the
+	// RowLevelSecurityNative QueryContext/QueryRowContext paths) that
+	// failed after the request ctx ended. Incremented from the
+	// context.AfterFunc in rls_native.go; read via
+	// [Client.DeferredCommitFailures]. Each increment means a write that
+	// appeared to succeed was NOT committed (QK6-3).
+	deferredCommitFailures atomic.Uint64
+
 	// nativeTenantResolver is set by [NewTenantRouter] when this Client
 	// is the BaseClient of a RowLevelSecurityNative router. When
 	// non-nil, RawQuery/Exec emit a quark.tenant.raw_under_native_rls

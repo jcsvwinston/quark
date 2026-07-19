@@ -15,6 +15,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -228,4 +229,95 @@ func TestNativeRLSImplicitTxReturnsConnToPool(t *testing.T) {
 		t.Fatalf("pool conn not returned after implicit-tx finished: %v", err)
 	}
 	_ = conn.Close()
+}
+
+// --- QK6-3: a failed deferred commit must leave a trace ---------------
+
+// waitForCounter polls fn until it returns want or the deadline passes.
+func waitForCounter(t *testing.T, want uint64, fn func() uint64) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if fn() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("counter = %d, want %d (deferred-commit failure left no trace)", fn(), want)
+}
+
+// TestNativeRLSDeferredCommitFailureLeavesTrace forces the deferred
+// commit (the context.AfterFunc that finalizes the implicit tx after the
+// request ctx ends) to fail, and asserts the failure is not swallowed:
+// an ERROR log line through the Client's logger plus one increment of
+// Client.DeferredCommitFailures. Pre-QK6-3 the failure only produced a
+// Warn IF a logger happened to be non-nil, and no counter existed — an
+// operator had no aggregate signal that committed-looking writes were
+// being rolled back.
+func TestNativeRLSDeferredCommitFailureLeavesTrace(t *testing.T) {
+	db := fakeRLSDB(t, "failcommit")
+
+	var buf syncBuffer
+	c := &Client{logger: slog.New(slog.NewTextHandler(&buf, nil))}
+	e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id", client: c}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rows, err := e.QueryContext(ctx, "SELECT 1")
+	if err != nil {
+		cancel()
+		t.Fatalf("QueryContext: %v", err)
+	}
+	_ = rows.Close()
+
+	if got := c.DeferredCommitFailures(); got != 0 {
+		cancel()
+		t.Fatalf("counter moved before the deferred commit ran: %d", got)
+	}
+
+	cancel() // end of "request" → AfterFunc → Commit fails
+
+	waitForCounter(t, 1, c.DeferredCommitFailures)
+	if out := buf.String(); !strings.Contains(out, "implicit-tx deferred commit failed") ||
+		!strings.Contains(out, "commit refused") {
+		t.Fatalf("commit failure not logged through the client logger; log output:\n%s", out)
+	}
+
+	// Second failure accumulates — the counter is an aggregate, not a flag.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	var v int64
+	_ = e.QueryRowContext(ctx2, "SELECT 1").Scan(&v)
+	cancel2()
+	waitForCounter(t, 2, c.DeferredCommitFailures)
+}
+
+// TestNativeRLSDeferredCommitFailureFallbackLogger pins the "never
+// silent" half of QK6-3: with a nil Client logger (or no Client at all)
+// the failure must still be logged — through slog.Default(), the same
+// fallback New() installs — and, when a Client exists, still counted.
+func TestNativeRLSDeferredCommitFailureFallbackLogger(t *testing.T) {
+	db := fakeRLSDB(t, "failcommit")
+
+	// Capture slog's default output. Serial test (no t.Parallel): the
+	// default logger is process-global.
+	var buf syncBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	c := &Client{} // logger nil: the pre-QK6-3 code stayed silent here
+	e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id", client: c}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rows, err := e.QueryContext(ctx, "SELECT 1")
+	if err != nil {
+		cancel()
+		t.Fatalf("QueryContext: %v", err)
+	}
+	_ = rows.Close()
+	cancel()
+
+	waitForCounter(t, 1, c.DeferredCommitFailures)
+	if out := buf.String(); !strings.Contains(out, "implicit-tx deferred commit failed") {
+		t.Fatalf("nil client logger silenced the commit failure; default-logger output:\n%s", out)
+	}
 }
