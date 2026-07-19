@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1](https://github.com/jcsvwinston/quark/compare/v1.3.0...v1.3.1) (2026-07-19)
+
+
+### Fixed
+
+* guard de mezcla de set-ops, lanes de integración y docs honestas (QK5-1/2/3/4/5) ([5735205](https://github.com/jcsvwinston/quark/commit/5735205c13ae2986e059b5d89674e7c6978838f1))
+* **rls:** el commit diferido del implicit-tx nativo ya no pierde escrituras ([854643d](https://github.com/jcsvwinston/quark/commit/854643dffac69c8313aa6179311a8cd0a714b272))
+* **setop:** rechaza mezclas de kinds de set-ops en una misma cadena (QK5-1) ([e423a96](https://github.com/jcsvwinston/quark/commit/e423a96191b39c8006049d5905f2d81e88466369))
+* **setop:** reformula el claim falso sobre Oracle e INTERSECT ALL (QK5-5) ([fc41c69](https://github.com/jcsvwinston/quark/commit/fc41c6945269493ac6ca573748fd44de721dfe79))
+
 ## [1.3.0](https://github.com/jcsvwinston/quark/compare/v1.2.2...v1.3.0) (2026-07-15)
 
 
