@@ -37,14 +37,18 @@ func setOpKeyword(d Dialect, kind string, all bool) (string, error) {
 	switch name {
 	case "oracle":
 		switch kind {
+		// Oracle gained INTERSECT ALL / MINUS ALL in 21c. The rejection
+		// below is quark's gating, not a universal Oracle limitation:
+		// quark cannot assume a 21c+ server without a version probe, the
+		// same policy that keeps INTERSECT/EXCEPT off MySQL (8.0.31+).
 		case "EXCEPT":
 			if all {
-				return "", fmt.Errorf("%w: Oracle does not support MINUS ALL — use distinct EXCEPT instead", ErrUnsupportedFeature)
+				return "", fmt.Errorf("%w: MINUS ALL requires Oracle 21c+, which quark cannot assume without a version probe — use distinct Except instead", ErrUnsupportedFeature)
 			}
 			return "MINUS", nil
 		case "INTERSECT":
 			if all {
-				return "", fmt.Errorf("%w: Oracle does not support INTERSECT ALL", ErrUnsupportedFeature)
+				return "", fmt.Errorf("%w: INTERSECT ALL requires Oracle 21c+, which quark cannot assume without a version probe", ErrUnsupportedFeature)
 			}
 		}
 	case "mysql":
@@ -107,7 +111,8 @@ func (q *Query[T]) Intersect(other *Query[T]) *Query[T] {
 // back twice.
 //
 // Narrower support than Intersect: PostgreSQL and MariaDB (10.5+) only.
-// SQL Server, SQLite and Oracle have no INTERSECT ALL, and MySQL has no
+// SQL Server and SQLite have no INTERSECT ALL, Oracle only gained it in 21c —
+// a version quark does not assume without a runtime probe — and MySQL has no
 // INTERSECT at all; every one of them returns ErrUnsupportedFeature at render
 // time.
 func (q *Query[T]) IntersectAll(other *Query[T]) *Query[T] {
@@ -129,9 +134,10 @@ func (q *Query[T]) Except(other *Query[T]) *Query[T] {
 // the right comes back twice.
 //
 // Narrower support than Except: PostgreSQL and MariaDB (10.5+) only. SQL Server
-// has no EXCEPT ALL, Oracle has no MINUS ALL, SQLite has no EXCEPT ALL, and
-// MySQL has no EXCEPT at all; every one of them returns ErrUnsupportedFeature
-// at render time.
+// and SQLite have no EXCEPT ALL, Oracle only gained MINUS ALL in 21c — a
+// version quark does not assume without a runtime probe — and MySQL has no
+// EXCEPT at all; every one of them returns ErrUnsupportedFeature at render
+// time.
 func (q *Query[T]) ExceptAll(other *Query[T]) *Query[T] {
 	return q.attachSetOp("EXCEPT", true, other)
 }
@@ -152,6 +158,10 @@ func (q *Query[T]) ExceptAll(other *Query[T]) *Query[T] {
 //   - The operand cannot carry ORDER BY, LIMIT, OFFSET, lock options,
 //     CTEs, or its own set-ops. ORDER BY and LIMIT on the combined
 //     result come from the outer (base) query instead.
+//   - The chain cannot mix operator kinds (UNION vs INTERSECT vs
+//     EXCEPT) — engines disagree on the precedence of a flat mix; see
+//     the mixed-kind guard below. ALL variants of the already-chained
+//     kind are fine.
 func (q *Query[T]) attachSetOp(kind string, all bool, other *Query[T]) *Query[T] {
 	c := q.clone()
 	if other == nil {
@@ -176,6 +186,29 @@ func (q *Query[T]) attachSetOp(kind string, all bool, other *Query[T]) *Query[T]
 	}
 	if len(other.setOps) > 0 {
 		c.err = fmt.Errorf("%w: nested set-ops on a %s operand are not supported", ErrUnsupportedFeature, kind)
+		return c
+	}
+	// Mixed-kind guard (QK5-1). A chain like A.Union(B).Intersect(C)
+	// renders flat, and the engines disagree on how a flat mix parses:
+	// PostgreSQL, MySQL, MariaDB and SQL Server give INTERSECT higher
+	// precedence than UNION/EXCEPT, while SQLite and Oracle evaluate
+	// strictly left to right — the same statement silently returns
+	// different rows depending on the engine. A statement may therefore
+	// chain only ONE operator kind.
+	//
+	// "Kind" is the operator word (UNION / INTERSECT / EXCEPT); the
+	// `all` flag is deliberately not part of it. UNION and UNION ALL
+	// (and the other ALL variants) carry the same precedence as their
+	// distinct form on every engine, so Union+UnionAll chains remain
+	// legal and deterministic (equal precedence associates left).
+	// Cross-kind mixes are rejected wholesale — including UNION↔EXCEPT,
+	// which the SQL standard parses left-to-right at equal precedence —
+	// because a single uniform rule is easier to reason about than a
+	// per-pair matrix, and Oracle documents that MINUS/INTERSECT
+	// precedence may change in a future release. Every earlier entry
+	// passed this same guard, so checking the first one suffices.
+	if len(c.setOps) > 0 && c.setOps[0].kind != kind {
+		c.err = fmt.Errorf("%w: mixing %s with %s in one statement is not supported — engines disagree on set-op precedence; materialize each step into its own query instead", ErrUnsupportedFeature, c.setOps[0].kind, kind)
 		return c
 	}
 	// Render the operand using the qmarkDialect so its `?` markers can be

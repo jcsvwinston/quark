@@ -32,11 +32,13 @@ per-engine behaviour honest.
 ### Fixed
 
 - **Set operators now report unsupported engines cleanly.** SQL Server and
-  Oracle have `INTERSECT` / `EXCEPT` but no `ALL` variant, and SQLite has
-  neither `ALL` variant; asking for one there now returns
-  `ErrUnsupportedFeature` instead of emitting SQL the engine rejects with a
-  confusing parser error. The documentation for `Intersect` / `Except` also no
-  longer claims MariaDB is unsupported — it has been supported since 10.3.
+  SQLite have `INTERSECT` / `EXCEPT` but no `ALL` variants, and Oracle only
+  gained `INTERSECT ALL` / `MINUS ALL` in 21c — a version Quark does not
+  assume without a runtime probe; asking for an `ALL` variant on any of them
+  now returns `ErrUnsupportedFeature` instead of emitting SQL the engine
+  rejects with a confusing parser error. The documentation for `Intersect` /
+  `Except` also no longer claims MariaDB is unsupported — it has been
+  supported since 10.3.
 
 ### Upgrade notes
 
