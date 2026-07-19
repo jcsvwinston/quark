@@ -3,7 +3,6 @@ package quark_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -55,32 +54,44 @@ func (o *metricsObserver) Summary() {
 	}
 }
 
+// TestBenchmarkEngines: smoke de volumen (10k inserts + lecturas + 5k
+// updates/deletes) por engine.
+//
+// QK6-1: cada pata resuelve su DSN DENTRO del subtest vía resolve<Engine>DSN.
+// Con `-tags=integration` el resolver levanta el contenedor solo para la pata
+// que `-run` selecciona (así cada lane de CI ejecuta la suya); sin el tag, la
+// pata hace Skip explícito con motivo — nunca un `continue` silencioso. La
+// pata MariaDB faltaba (único engine sin ella); añadida para que la lane
+// mariadb no seleccione un test vacío.
 func TestBenchmarkEngines(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping benchmark in short mode")
 	}
 
 	engines := []struct {
-		name string
-		dsn  string
-		drv  string
-		dial quark.Dialect
+		name    string
+		env     string
+		resolve func(*testing.T) string
+		drv     string
+		dial    quark.Dialect
 	}{
-		{"SQLite", ":memory:", "sqlite", quark.SQLite()},
-		{"Postgres", os.Getenv("QUARK_TEST_POSTGRES_DSN"), "pgx", quark.PostgreSQL()},
-		{"MySQL", os.Getenv("QUARK_TEST_MYSQL_DSN"), "mysql", quark.MySQL()},
-		{"MSSQL", os.Getenv("QUARK_TEST_MSSQL_DSN"), "sqlserver", quark.MSSQL()},
-		{"Oracle", os.Getenv("QUARK_TEST_ORACLE_DSN"), "oracle", quark.Oracle()},
+		{"SQLite", "", func(*testing.T) string { return ":memory:" }, "sqlite", quark.SQLite()},
+		{"Postgres", "QUARK_TEST_POSTGRES_DSN", resolvePostgresDSN, "pgx", quark.PostgreSQL()},
+		{"MySQL", "QUARK_TEST_MYSQL_DSN", resolveMySQLDSN, "mysql", quark.MySQL()},
+		{"MariaDB", "QUARK_TEST_MARIADB_DSN", resolveMariaDBDSN, "mysql", quark.MariaDB()},
+		{"MSSQL", "QUARK_TEST_MSSQL_DSN", resolveMSSQLDSN, "sqlserver", quark.MSSQL()},
+		{"Oracle", "QUARK_TEST_ORACLE_DSN", resolveOracleDSN, "oracle", quark.Oracle()},
 	}
 
 	for _, eng := range engines {
-		if eng.dsn == "" && eng.name != "SQLite" {
-			continue
-		}
-
 		t.Run(eng.name, func(t *testing.T) {
+			dsn := eng.resolve(t)
+			if dsn == "" {
+				t.Skipf("%s not set (rebuild with -tags=integration to spin up a container); %s leg skipped", eng.env, eng.name)
+			}
+
 			obs := &metricsObserver{}
-			client, err := quark.New(eng.drv, eng.dsn, quark.WithQueryObserver(obs))
+			client, err := quark.New(eng.drv, dsn, quark.WithQueryObserver(obs))
 			if err != nil {
 				t.Fatalf("failed to create client for %s: %v", eng.name, err)
 			}
