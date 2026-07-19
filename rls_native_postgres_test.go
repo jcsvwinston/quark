@@ -292,20 +292,41 @@ func TestRowLevelSecurityNativePostgresIsolation(t *testing.T) {
 
 	// --- ExecContext path: Create under Native via For[T] hits ExecContext / QueryRowContext ---
 	t.Run("For_T_Create_under_native_inserts_for_correct_tenant", func(t *testing.T) {
+		// The Create runs in its own "request" scope; ending that scope
+		// (cancel) is what lets the implicit tx commit. On pre-fix code the
+		// cancellation ROLLED THE INSERT BACK instead (database/sql aborts a
+		// tx whose BeginTx ctx is canceled), so the poll below never saw the
+		// 4th row — this subtest is the regression pin for that silent write
+		// loss, not just an insert smoke test.
+		ctxCreate, endRequest := context.WithCancel(ctxTA)
 		newRow := RLSNativeOrder{TenantID: "ta", Status: "delivered"}
-		if err := quark.For[RLSNativeOrder](scoped(t, ctxTA), router).Create(&newRow); err != nil {
+		if err := quark.For[RLSNativeOrder](ctxCreate, router).Create(&newRow); err != nil {
+			endRequest()
 			t.Fatalf("Create under Native (ta): %v", err)
 		}
 		if newRow.ID == 0 {
+			endRequest()
 			t.Fatal("Create did not populate PK from RETURNING")
 		}
-		// ta now has 4 rows; tb still sees 2.
-		n, err := quark.For[RLSNativeOrder](scoped(t, ctxTA), router).Count()
-		if err != nil {
-			t.Fatalf("Count after insert (ta): %v", err)
+		endRequest()
+
+		// The deferred commit lands asynchronously after the scope ends
+		// (context.AfterFunc); poll briefly instead of asserting instantly.
+		deadline := time.Now().Add(5 * time.Second)
+		var n int64
+		var err error
+		for time.Now().Before(deadline) {
+			n, err = quark.For[RLSNativeOrder](scoped(t, ctxTA), router).Count()
+			if err != nil {
+				t.Fatalf("Count after insert (ta): %v", err)
+			}
+			if n == 4 {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
 		if n != 4 {
-			t.Fatalf("ta Count after insert = %d, want 4", n)
+			t.Fatalf("ta Count after insert = %d, want 4 (implicit-tx commit never landed — write lost?)", n)
 		}
 		n, err = quark.For[RLSNativeOrder](scoped(t, ctxTB), router).Count()
 		if err != nil {
