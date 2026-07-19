@@ -336,4 +336,64 @@ func TestRowLevelSecurityNativePostgresIsolation(t *testing.T) {
 			t.Fatalf("tb Count after insert = %d, want 2", n)
 		}
 	})
+
+	// --- CreateBatch path: the multi-row INSERT … RETURNING goes through
+	// QueryContext (executeQueryPrimary), not QueryRowContext — a different
+	// implicit-tx branch than row-by-row Create, with the same deferred-commit
+	// regime. QK6-4: the QK5-4 write-loss pin above only covered Create; this
+	// subtest extends it to the batch write. ---
+	t.Run("For_T_CreateBatch_under_native_inserts_for_correct_tenant", func(t *testing.T) {
+		// Same pattern as the Create subtest: the batch runs in its own
+		// "request" scope; ending that scope (cancel) is what lets the
+		// implicit tx commit. On pre-v1.3.1 semantics the cancellation would
+		// roll the WHOLE batch back instead, so the poll below would never
+		// reach the expected count — write-loss pin, not just a smoke test.
+		baseline, err := quark.For[RLSNativeOrder](scoped(t, ctxTA), router).Count()
+		if err != nil {
+			t.Fatalf("baseline Count (ta): %v", err)
+		}
+
+		ctxBatch, endRequest := context.WithCancel(ctxTA)
+		batch := []*RLSNativeOrder{
+			{TenantID: "ta", Status: "backordered"},
+			{TenantID: "ta", Status: "returned"},
+		}
+		if err := quark.For[RLSNativeOrder](ctxBatch, router).CreateBatch(batch); err != nil {
+			endRequest()
+			t.Fatalf("CreateBatch under Native (ta): %v", err)
+		}
+		for i, row := range batch {
+			if row.ID == 0 {
+				endRequest()
+				t.Fatalf("CreateBatch did not populate PK from RETURNING for row %d", i)
+			}
+		}
+		endRequest()
+
+		// The deferred commit lands asynchronously after the scope ends
+		// (context.AfterFunc); poll briefly instead of asserting instantly.
+		want := baseline + int64(len(batch))
+		deadline := time.Now().Add(5 * time.Second)
+		var n int64
+		for time.Now().Before(deadline) {
+			n, err = quark.For[RLSNativeOrder](scoped(t, ctxTA), router).Count()
+			if err != nil {
+				t.Fatalf("Count after batch insert (ta): %v", err)
+			}
+			if n == want {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if n != want {
+			t.Fatalf("ta Count after batch insert = %d, want %d (implicit-tx commit never landed — batch write lost?)", n, want)
+		}
+		n, err = quark.For[RLSNativeOrder](scoped(t, ctxTB), router).Count()
+		if err != nil {
+			t.Fatalf("Count after batch insert (tb): %v", err)
+		}
+		if n != 2 {
+			t.Fatalf("tb Count after batch insert = %d, want 2", n)
+		}
+	})
 }

@@ -96,6 +96,15 @@ func surfaceClientMethods(ctx context.Context, client *quark.Client, rec *record
 	if c2, err := client.WithOptions(quark.WithMaxOpenConns(4)); err != nil || c2 == nil {
 		return fmt.Errorf("surface WithOptions: err=%v", err)
 	}
+	// DeferredCommitFailures (QK6-3) cuenta commits diferidos fallidos del
+	// implicit-tx del RLS nativo. El harness no fuerza fallos de commit (eso
+	// exige un driver que rechace Commit; cubierto en
+	// rls_native_internal_test.go), así que la invocación genuina es leerlo y
+	// asertar que el client compartido sigue a cero — el exerciser RLSNATIVE
+	// sólo usa router.Tx (commit síncrono), nunca el camino diferido.
+	if n := client.DeferredCommitFailures(); n != 0 {
+		return fmt.Errorf("surface DeferredCommitFailures: %d fallos de commit diferido en el client del harness", n)
+	}
 
 	// Clients efímeros para lo que muta estado / necesita flags (no contaminar
 	// el client compartido ni otros exercisers). Exec y RawQuery son raw queries:
@@ -150,6 +159,7 @@ func surfaceClientMethods(ctx context.Context, client *quark.Client, rec *record
 	rec.Note(
 		CM("Validate"), CM("GetClient"), CM("Exec"), CM("WithOptions"), CM("RawQuery"),
 		CM("BeginTx"), CM("EnableAuditLog"), CM("DisableAuditLog"), CM("UseEventBus"), CM("AddForeignKey"),
+		CM("DeferredCommitFailures"),
 	)
 	return nil
 }

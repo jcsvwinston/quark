@@ -181,3 +181,22 @@ the resolver for the current context.
   schema migrations.
 - **The implicit-`For[T]` transaction holds its connection until `ctx` ends** —
   fine for request scope, not for long-lived CLI contexts. Use `router.Tx` there.
+- **Write semantics under the implicit `For[T]` transaction (since v1.3.1).**
+  A write that goes through the query paths — `Create`, which runs
+  `INSERT … RETURNING` — executes inside an implicit transaction that commits
+  when the request context **ends**. Once the statement has executed,
+  cancelling the request does **not** roll the write back. This diverges from
+  the exec path (`Update` / `Delete`), which commits synchronously before
+  returning and is rolled back like any interrupted statement. Two
+  consequences to plan for:
+  - The deferred commit lands *after* control returns to your handler. An
+    immediate read through another connection (a follow-up request, another
+    service) may not see the write yet; a read in the same request scope does.
+  - If the deferred commit fails, the operation has already reported success.
+    Quark logs the failure at `ERROR` through the client logger and increments
+    [`Client.DeferredCommitFailures`](../reference/api/client#deferredcommitfailures)
+    — alert on that counter; each unit is a write the engine rolled back after
+    the caller saw it succeed.
+
+  `router.Tx` has none of this: it commits synchronously inside the callback.
+  Prefer it for any write whose durability must be settled before you answer.

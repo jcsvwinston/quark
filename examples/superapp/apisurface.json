@@ -42,6 +42,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Client).DeferredCommitFailures",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Dialect",
       "kind": "method"
     },

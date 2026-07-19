@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 )
 
 // nativeRLSExecutor wraps an Executor (typically *sql.DB) so every
@@ -57,6 +58,45 @@ func newNativeRLSExecutor(client *Client, tenantID, varName string) *nativeRLSEx
 	}
 }
 
+// log returns the logger for executor-internal events: the owning
+// Client's logger when present, slog.Default() otherwise — the same
+// fallback New() installs. Failures on the deferred implicit-tx path
+// happen after control returned to the caller, so the log line is the
+// only inline signal; it must never be silenced by a nil logger (QK6-3).
+func (e *nativeRLSExecutor) log() *slog.Logger {
+	if e.client != nil && e.client.logger != nil {
+		return e.client.logger
+	}
+	return slog.Default()
+}
+
+// noteDeferredCommitFailure records a failed deferred commit: an ERROR
+// log (the write in that implicit tx was NOT committed — the caller
+// already got a success, so this line is the honest correction) plus the
+// operator-facing counter surfaced by [Client.DeferredCommitFailures].
+func (e *nativeRLSExecutor) noteDeferredCommitFailure(cerr error) {
+	e.log().Error("native rls: implicit-tx deferred commit failed after ctx ended; the write in that tx was not committed",
+		"err", cerr, "var", e.varName)
+	if e.client != nil {
+		e.client.deferredCommitFailures.Add(1)
+	}
+}
+
+// DeferredCommitFailures reports how many deferred implicit-transaction
+// commits have failed on this Client since it was created. Deferred
+// commits only exist under the RowLevelSecurityNative strategy: the
+// For[T] query/QueryRow paths commit their implicit transaction when the
+// request context ends (see nativeRLSExecutor), so a commit failure
+// happens AFTER the operation already returned success to the caller —
+// each unit here is a write (or read snapshot) that was silently rolled
+// back by the engine. The failure is also logged at ERROR level through
+// the Client's logger at the moment it happens; this counter is the
+// aggregate for operators to alert on. It never resets; it is safe for
+// concurrent use.
+func (c *Client) DeferredCommitFailures() uint64 {
+	return c.deferredCommitFailures.Load()
+}
+
 // setConfigSQL returns the SQL that emits the per-tx tenant variable.
 // We use the set_config function form rather than `SET LOCAL <name> = $1`
 // because the latter does not accept parameter binding in PostgreSQL —
@@ -69,6 +109,12 @@ func (e *nativeRLSExecutor) setConfigSQL() string {
 // ExecContext begins an implicit transaction, sets the tenant variable,
 // executes the statement, and commits. Failure at any point rolls back
 // and surfaces the original error.
+//
+// Unlike QueryContext/QueryRowContext there is no lifecycle split here:
+// BeginTx receives the caller's ctx directly, so both the pool wait and
+// the tx honour cancellation/deadline — the commit is synchronous, so
+// the QK5-4 deferred-commit race does not apply to this path (verified
+// under QK6-2).
 func (e *nativeRLSExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	tx, err := e.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -99,6 +145,15 @@ func (e *nativeRLSExecutor) ExecContext(ctx context.Context, query string, args 
 // queries before ctx ends): each query holds a connection until ctx
 // terminates. Callers in that regime should use TenantRouter.Tx.
 func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	// Acquire the connection with the CALLER's ctx so the pool wait
+	// honours cancellation/deadline. Passing WithoutCancel straight to
+	// db.BeginTx also detached the pool-acquisition wait — with a
+	// saturated pool the goroutine kept blocking past the request
+	// timeout (QK6-2). Only the transaction below is detached.
+	conn, err := e.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("native rls: acquire conn: %w", err)
+	}
 	// The tx lifecycle is detached from the caller's ctx on purpose:
 	// database/sql auto-ROLLS BACK a transaction whose BeginTx ctx is
 	// canceled, and a request ctx always ends by cancellation — so binding
@@ -107,24 +162,30 @@ func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args
 	// Detached, the deferred commit is deterministic; per-statement
 	// cancellation still applies through the ctx each query receives.
 	// Surfaced by QK5-4, the first time a CI lane executed this path.
-	tx, err := e.db.BeginTx(context.WithoutCancel(ctx), nil)
+	tx, err := conn.BeginTx(context.WithoutCancel(ctx), nil)
 	if err != nil {
+		_ = conn.Close()
 		return nil, fmt.Errorf("native rls: begin tx: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, e.setConfigSQL(), e.varName, e.tenantID); err != nil {
 		_ = tx.Rollback()
+		_ = conn.Close()
 		return nil, fmt.Errorf("native rls: set_config: %w", err)
 	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		_ = tx.Rollback()
+		_ = conn.Close()
 		return nil, err
 	}
 	context.AfterFunc(ctx, func() {
-		if cerr := tx.Commit(); cerr != nil && e.client != nil && e.client.logger != nil {
-			e.client.logger.Warn("native rls: implicit-tx commit failed after ctx ended",
-				"err", cerr, "var", e.varName)
+		if cerr := tx.Commit(); cerr != nil {
+			e.noteDeferredCommitFailure(cerr)
 		}
+		// With sql.Conn the pool hand-back is manual: Close returns the
+		// connection once the tx above has finalized. Without it the
+		// conn leaks from the pool permanently.
+		_ = conn.Close()
 	})
 	return rows, nil
 }
@@ -135,11 +196,23 @@ func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args
 // Scan returns the error; we leverage the QueryRowContext-on-tx
 // helper to surface those errors honestly.
 func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	// Detached lifecycle ctx — see QueryContext for why (a canceled BeginTx
-	// ctx means database/sql rolls the tx back, which for INSERT … RETURNING
+	// Caller-ctx acquisition + detached tx, same split as QueryContext
+	// (QK6-2): the pool wait must honour the request deadline; only the
+	// tx lifecycle is detached (a canceled BeginTx ctx means
+	// database/sql rolls the tx back, which for INSERT … RETURNING
 	// silently discarded the write).
-	tx, err := e.db.BeginTx(context.WithoutCancel(ctx), nil)
+	conn, err := e.db.Conn(ctx)
 	if err != nil {
+		e.log().Error("native rls: acquire conn failed for QueryRow",
+			"err", err, "var", e.varName)
+		// Like the BeginTx failure below: surface the failure through the
+		// returned *sql.Row. With ctx already canceled/expired (the QK6-2
+		// regime) this Row's Scan reports ctx.Err() directly.
+		return e.db.QueryRowContext(ctx, "SELECT NULL WHERE FALSE")
+	}
+	tx, err := conn.BeginTx(context.WithoutCancel(ctx), nil)
+	if err != nil {
+		_ = conn.Close()
 		// Return a *sql.Row that surfaces the error on Scan. The
 		// simplest way is to call db.QueryRowContext with an
 		// intentionally-failing query that captures err; but the
@@ -150,26 +223,24 @@ func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, a
 		// We can't construct *sql.Row directly. Workaround: emit a
 		// QueryRowContext that the caller's Scan will surface as
 		// "no rows" or driver error, plus log the begin failure.
-		if e.client != nil && e.client.logger != nil {
-			e.client.logger.Error("native rls: begin tx failed for QueryRow",
-				"err", err, "var", e.varName)
-		}
+		e.log().Error("native rls: begin tx failed for QueryRow",
+			"err", err, "var", e.varName)
 		return e.db.QueryRowContext(ctx, "SELECT NULL WHERE FALSE")
 	}
 	if _, err := tx.ExecContext(ctx, e.setConfigSQL(), e.varName, e.tenantID); err != nil {
 		_ = tx.Rollback()
-		if e.client != nil && e.client.logger != nil {
-			e.client.logger.Error("native rls: set_config failed for QueryRow",
-				"err", err, "var", e.varName)
-		}
+		_ = conn.Close()
+		e.log().Error("native rls: set_config failed for QueryRow",
+			"err", err, "var", e.varName)
 		return e.db.QueryRowContext(ctx, "SELECT NULL WHERE FALSE")
 	}
 	row := tx.QueryRowContext(ctx, query, args...)
 	context.AfterFunc(ctx, func() {
-		if cerr := tx.Commit(); cerr != nil && e.client != nil && e.client.logger != nil {
-			e.client.logger.Warn("native rls: implicit-tx commit failed after ctx ended",
-				"err", cerr, "var", e.varName)
+		if cerr := tx.Commit(); cerr != nil {
+			e.noteDeferredCommitFailure(cerr)
 		}
+		// Manual pool hand-back — see QueryContext.
+		_ = conn.Close()
 	})
 	return row
 }
