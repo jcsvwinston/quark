@@ -100,6 +100,21 @@ jobs:
   test:
     name: Test (SQLite)
     runs-on: ubuntu-latest
+    # QK6-1: real Redis for the CacheLocker contract tests (ADR-0020,
+    # cache/redis TestAcquireLock_*) and for the Redis cache subtests that
+    # probe localhost:6379 (SharedSuite Caching/Redis, TestCacheAllEngines
+    # FASE 4). This job runs `go test ./...` unfiltered, so exporting
+    # QUARK_TEST_REDIS_ADDR is the whole gate — no -run pattern to update.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -109,6 +124,8 @@ jobs:
           cache: true
 
       - name: Run tests
+        env:
+          QUARK_TEST_REDIS_ADDR: localhost:6379
         run: go test ./... -timeout 5m -v -count=1
 
   # F6-8: the benchmark harness is its own module (separate go.mod with a
@@ -159,9 +176,23 @@ jobs:
     name: Integration (${{ matrix.engine }})
     runs-on: ubuntu-latest
     # Job-level cap covers the slowest engine (Oracle: ~3-6 min cold boot
-    # + suite). Per-engine test execution is bounded by the run step's
-    # own timeout below; this only sizes the wall-clock envelope.
-    timeout-minutes: 35
+    # + suite) plus the second run step (all-engines legs, QK6-1). Per-step
+    # execution is bounded by each step's own timeout below; this only
+    # sizes the wall-clock envelope.
+    timeout-minutes: 45
+    # QK6-1: real Redis in every lane. TestMariaDBCache/Redis and the
+    # SharedSuite Caching/Redis subtest probe localhost:6379 and skipped
+    # in every previous run of the matrix; with the service they execute.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     strategy:
       fail-fast: false
       matrix:
@@ -174,16 +205,31 @@ jobs:
           # DSN is resolvable, so leaving them out of the filter meant
           # no lane ever executed them. Keep the filter itself: it is
           # what bounds lane time.
+          #
+          # QK6-1: the filter is applied as `^(…)$` (see the run step) —
+          # the previous `^…$` form anchored only the first and last
+          # alternatives. `leg` names this lane's subtest in the
+          # all-engines tests (TestCacheAllEngines / TestOtelAllEngines /
+          # TestBenchmarkEngines), executed by the second run step so the
+          # per-engine legs stop being dead code without fragmenting the
+          # matrix into more jobs.
           - engine: postgres
             run: 'TestSuitePostgres|TestPostgresReplicaRouting|TestDeadlockRetryPostgres|TestPgListener_RoundTrip|TestRowLevelSecurityNativePostgresIsolation|TestInstallRLSPolicies_Postgres|TestInstallRLSPolicies_Postgres_NoTenantColumn'
+            leg: Postgres
           - engine: mysql
             run: 'TestSuiteMySQL|TestDeadlockRetryMySQL'
+            leg: MySQL
           - engine: mariadb
-            run: 'TestSuiteMariaDB|TestMariaDBCache|TestDeadlockRetryMariaDB'
+            # QK6-1: TestMariaDBOtel and TestMariaDBStress were outside
+            # the filter (and read the raw env var) — never executed.
+            run: 'TestSuiteMariaDB|TestMariaDBCache|TestMariaDBOtel|TestMariaDBStress|TestDeadlockRetryMariaDB'
+            leg: MariaDB
           - engine: mssql
             run: TestSuiteMSSQL
+            leg: MSSQL
           - engine: oracle
             run: TestSuiteOracle
+            leg: Oracle
             # Oracle does a full DB init from scratch (~3 min cold) on
             # plain `:23-slim`; budget extra wall-clock for boot + suite.
             timeout: 30
@@ -238,7 +284,17 @@ jobs:
 
       - name: Run ${{ matrix.engine }} suite
         timeout-minutes: ${{ matrix.timeout || 20 }}
-        run: go test -tags=integration -timeout 25m -count=1 -run '^${{ matrix.run }}$' -v ./...
+        run: go test -tags=integration -timeout 25m -count=1 -run '^(${{ matrix.run }})$' -v ./...
+
+      # QK6-1: this lane's leg of the all-engines tests. The `/` in the
+      # pattern splits it into (top-level regex)/(subtest regex), so only
+      # the ${{ matrix.leg }} subtest body runs — under -tags=integration
+      # its resolver boots this engine's container (or reuses the DSN the
+      # oracle setup step exported). Root package only: all three tests
+      # live there.
+      - name: Run ${{ matrix.engine }} all-engines legs
+        timeout-minutes: 15
+        run: go test -tags=integration -timeout 14m -count=1 -run '^(TestCacheAllEngines|TestOtelAllEngines|TestBenchmarkEngines)$/^${{ matrix.leg }}$' -v .
 
   # S7-coverage: the superapp acceptance harness exercises Quark's public API
   # surface across all 6 engines in one process and gates on a manifest
