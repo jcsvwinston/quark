@@ -293,8 +293,6 @@ app at startup rather than on the first query that touches the column.
 
 A column with neither a tag nor a client default is untouched — the
 feature is fully opt-in and adds nothing for callers that don't use it.
-See [ADR-0010](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0010-per-column-timezone-override.md)
-for the design rationale.
 
 :::note
 A custom type that wraps `time.Time` and is registered via

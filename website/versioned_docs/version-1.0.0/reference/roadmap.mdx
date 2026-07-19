@@ -10,11 +10,6 @@ Quark is **v1.0.0** — the first stable release under SemVer, with Phases 0–6
 complete. This page separates what already ships from what is planned, so the
 docs do not read like a promise that every idea is already in `main`.
 
-The canonical roadmap (with the phased plan and trade-offs) lives at
-[`docs/ANALISIS_MADUREZ.md` §4](https://github.com/jcsvwinston/quark/blob/main/docs/ANALISIS_MADUREZ.md);
-the operational backlog lives at
-[`TASKS.md`](https://github.com/jcsvwinston/quark/blob/main/TASKS.md).
-
 ## Implemented core (shipping today)
 
 ### Type-safe builder + composable query AST
@@ -81,7 +76,7 @@ the operational backlog lives at
   `quark_migration_state` checkpoints.
 - **Distributed migration lock**: PG `pg_advisory_lock`, MySQL/MariaDB
   `GET_LOCK`, MSSQL `sp_getapplock`, Oracle `DBMS_LOCK` (needs `GRANT
-  EXECUTE ON DBMS_LOCK`, see ADR-0018). SQLite returns
+  EXECUTE ON DBMS_LOCK`). SQLite returns
   `ErrUnsupportedFeature`.
 - **Orchestrated `Backfill`** with PK-based batching and resume tokens
   in `quark_backfill_state`.
@@ -107,7 +102,7 @@ the operational backlog lives at
 
 - Pluggable `CacheStore` (memory, Redis).
 - **Stampede protection**: `stampedeStore` wrapper (singleflight +
-  ±jitter + Vattani XFetch) — ADR-0011. Knobs: `WithCacheJitter`,
+  ±jitter + Vattani XFetch). Knobs: `WithCacheJitter`,
   `WithCacheXFetchBeta`.
 - **Per-row invalidation**: `<table>:<pk>` tag on top of the table tag;
   mutations register the affected PKs.
@@ -140,7 +135,7 @@ the operational backlog lives at
   connection/transaction as the write**, atomically.
 - **`Client.UseEventBus(bus)`** — real `EventBus` publishing `created`
   / `updated` / `deleted` events synchronously post-commit
-  (at-least-once, no outbox — ADR-0013).
+  (at-least-once, no outbox).
 
 ### Code generation (Phase 6, opt-in)
 
@@ -167,18 +162,18 @@ the operational backlog lives at
   cooldown shipped with F6-6. See
   [Read replicas](../advanced/read-replicas).
 - **Primary failover** (F6-6) — **delivered** (v0.13.0): replica failover +
-  health cooldown (ADR-0015).
+  health cooldown.
 - **Sharding** (`ShardRouter`, F6-7) — **delivered**: routes per query by
-  shard key (ADR-0016), with a runnable example in `examples/sharding/`.
+  shard key, with a runnable example in `examples/sharding/`.
   Scatter-gather and shard-key-from-entity are deferred to v1.1.
 - **Stress testing harness** (F6-9) — **delivered** (v0.13.0) in
   `benchmarks/stress/`.
 - **ent + sqlc in the benchmarks harness** (F6-8b) — **delivered** (v1.0.0):
   the code-generation tier in the comparison harness; informational, not a
-  v1.0 gate (the ≥3× gate was retired by ADR-0017). See
+  v1.0 release gate (the earlier ≥3× goal was retired). See
   [Benchmarks](./benchmarks).
 - **UPDATE / partial / batch binder codegen** (F6-3b) — **deferred** to v1.1;
-  measured payoff ~1% (`benchmarks/PROFILING.md`), reopened only if motivated
+  measured payoff ~1%, reopened only if motivated
   by type-safety.
 
 ## Known current boundaries
@@ -187,13 +182,13 @@ the operational backlog lives at
   dialects validated on every PR). The Oracle job boots `gvenzl/oracle-free`
   via `docker run` instead of testcontainers, whose lifecycle exited code 1
   on hosted runners; the suite gets a DSN via `QUARK_TEST_ORACLE_DSN`.
-- **The ADR-0002 ≥3× p99 codegen gate has been retired** (ADR-0017).
-  Scan/bind codegen measured ~2–5% (scan) / ~1% (INSERT); per-op CPU is
+- **Code generation is a type-safety feature, not a speedup.** Scan/bind
+  codegen measured ~2–5% (scan) / ~1% (INSERT); per-op CPU is
   dominated by `database/sql` and the engine, not reflection, so the
-  gate was unreachable by scan/bind codegen. The codegen layer remains
-  valuable for type-safety (F6-4) and forward compatibility — it is not
-  a speed feature, and v1.0 no longer gates on a speedup target. See
-  `benchmarks/PROFILING.md` and ADR-0017.
+  earlier speedup target was unreachable by scan/bind codegen. The codegen
+  layer remains valuable for compile-time type-safety and forward
+  compatibility — it is not a speed feature, and v1.0 no longer gates on a
+  speedup target.
 - The **versioned migration registry** in `migrate/migrate.go` is still
   global. The model registry has been per-Client since v0.6 (F3-7); the
   versioned registry stays as documented debt.
@@ -216,7 +211,7 @@ the operational backlog lives at
   shipped in v0.6 is the foundation; the schema-first DSL is the next
   layer if demand justifies it.
 - **Cross-instance stampede coordination** (distributed lock hook for
-  the cache layer). Documented in ADR-0011 §"Cuándo reabrir"; only
+  the cache layer). Only
   reopened if user demand surfaces.
 - **Pluggable ID strategies** (UUID v7, ULID, Snowflake) as built-ins.
 - **Outbound CRUD lifecycle events to NATS/Kafka/Redis Streams** as

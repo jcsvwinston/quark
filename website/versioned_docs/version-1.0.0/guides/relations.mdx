@@ -231,8 +231,7 @@ returns `nil` so callers don't have to dedupe their input.
 Every other driver error — foreign-key violations, missing tables, broken
 connections — is wrapped with the prefix `linkM2M:` and propagated. The
 underlying driver error remains reachable via `errors.Unwrap`. This was
-[P0-3](https://github.com/jcsvwinston/quark/issues?q=P0-3) fixed in v0.2.0;
-before the fix every error was silently swallowed.
+fixed in v0.2.0; before the fix every error was silently swallowed.
 
 `rel:"m2m"` is recognized by the eager-loading path for compatibility, but
 `Migrate` and recursive association persistence expect `rel:"many_to_many"`.

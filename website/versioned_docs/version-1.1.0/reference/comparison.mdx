@@ -40,7 +40,7 @@ in the main repository.
 > ² GORM and ent use parameterized queries that protect *values* against injection. Quark additionally validates *identifiers* (column/table names, operators, JSON paths, JOIN-ON clauses) at the API layer. See [SQLGuard](sqlguard) for a detailed breakdown.
 > ³ GORM queries can mutate shared state when chained; `Session(&gorm.Session{NewDB: true})` mitigates this but is opt-in.
 > ⁴ GORM supports `CreateInBatches`; batch DELETE and batch UPDATE require custom loops. Ent supports batch create; batch UPDATE/DELETE require raw queries or custom extensions.
-> ⁵ Quark wraps the cache backing with `stampedeStore` (singleflight + ±jitter + Vattani XFetch — [ADR-0011](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0011-cache-stampede-protection-wrapper.md)), so a hot key never produces a database stampede on miss. No competitor in this matrix ships stampede protection out of the box.
+> ⁵ Quark wraps the cache backing with `stampedeStore` (singleflight + ±jitter + Vattani XFetch), so a hot key never produces a database stampede on miss. No competitor in this matrix ships stampede protection out of the box.
 
 ---
 

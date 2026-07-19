@@ -82,7 +82,7 @@ Zero values are skipped:
 | `false` | yes |
 | `nil` pointer/slice/map | yes |
 
-:::caution Zero-value trap (P0-4)
+:::caution Zero-value trap
 Because `Update` filters out zero values, it **cannot** write `false`, `0`,
 `""`, or `nil` to a column. To put `active = false` into the database use
 [`Track + Save`](#track--save-dirty-tracking) (recommended; the snapshot-driven
@@ -140,7 +140,7 @@ Rules:
 | The configured tenant column is never written. | RLS isolation boundary; a `Save` cannot move a row across tenants. |
 | The tenant predicate from the loading query is added to the `WHERE`. | Same isolation guarantee as the rest of the multi-tenant API. |
 | Hooks `BeforeUpdate` / `AfterUpdate` run, just like on `Update`. | Behaviour parity with the partial-update path. |
-| Save is the permanent fix for the [P0-4 zero-value trap](#update). | `Update`'s zero-value filter doesn't apply — values are written based on the diff, not on whether they're zero. |
+| Save is the permanent fix for the [zero-value trap](#update). | `Update`'s zero-value filter doesn't apply — values are written based on the diff, not on whether they're zero. |
 
 The snapshot lives on the wrapper, not in the Client, so there is no
 shared map to grow or evict. Each `Tracked` is independent — pass it

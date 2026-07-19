@@ -10,9 +10,6 @@ Quark is **v1.2.2** on the stable `v1.x` line (v1.1.0 was the hardening minor, v
 separates what already ships from what is planned, so the docs do not read like a promise
 that every idea is already in `main`.
 
-The operational backlog lives at
-[`TASKS.md`](https://github.com/jcsvwinston/quark/blob/main/TASKS.md).
-
 ## Implemented core (shipping today)
 
 ### Type-safe builder + composable query AST
@@ -174,14 +171,13 @@ The operational backlog lives at
 - **Sharding** (`ShardRouter`): routes each query by shard key, with a
   runnable example in `examples/sharding/`. Cross-shard scatter-gather
   (`ScatterGather`/`ScatterCount`) and deriving the shard key from the
-  entity (`WithShardKeyOf`/`ShardKeyer`) are delivered (v1.2,
-  ADR-0022 / ADR-0021).
+  entity (`WithShardKeyOf`/`ShardKeyer`) are delivered (v1.2).
 - **Stress/load harness** (v0.13.0) in `benchmarks/stress/`.
 - **ent and sqlc in the benchmark harness** (v1.0.0): the
   code-generation tier of the comparison harness, informational rather
   than a release gate. See [Benchmarks](./benchmarks).
 - **UPDATE / partial / batch binder codegen** — **deferred** to v1.2+;
-  the measured payoff was ~1% (`benchmarks/PROFILING.md`), so it is
+  the measured payoff was ~1%, so it is
   reopened only if motivated by type-safety, not speed.
 
 ## v1.1.0 — delivered (hardening)
@@ -218,8 +214,7 @@ dialects on every PR (see boundaries below).
   codegen measured ~2–5% (scan) / ~1% (INSERT) in the harness; per-op CPU
   is dominated by `database/sql` and the engine, not reflection. The
   codegen layer remains valuable for compile-time type-safety and forward
-  compatibility, and v1.0 does not gate on a speedup target. See
-  `benchmarks/PROFILING.md`.
+  compatibility, and v1.0 does not gate on a speedup target.
 - The **versioned migration registry** is still global. The model
   registry has been per-Client since v0.6; the versioned registry stays
   as documented debt.
