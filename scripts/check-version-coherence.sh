@@ -45,3 +45,17 @@ if [ "$fail" -ne 0 ]; then
 fi
 
 echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/release-notes, ${minor_notes} present"
+
+# ---------------------------------------------------------------------------
+# Roadmap sin versiones (QK6-5). QK5-2 quitó la versión hardcodeada del
+# roadmap pero no dejó guard de reincidencia: si alguien vuelve a escribir
+# «Quark is vX.Y.Z» ahí, nada lo cazaría hasta la siguiente auditoría.
+# ---------------------------------------------------------------------------
+if grep -nE 'v[0-9]+\.[0-9]+\.[0-9]+' website/docs/reference/roadmap.mdx; then
+  echo "ERROR: website/docs/reference/roadmap.mdx contiene una versión hardcodeada (las versiones viven en release-notes, que sí tiene guard)" >&2
+  fail=1
+fi
+if [ "$fail" -ne 0 ]; then
+  exit 1
+fi
+echo "roadmap OK: sin versiones hardcodeadas"

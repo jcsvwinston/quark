@@ -68,7 +68,7 @@ Cuando se taggea una nueva versión `vX.Y.Z`, **el mismo PR que bumpea la versi�
 7. Si la release tiene breaking changes, escribir/actualizar `docs/MIGRATION_vX.Y.Z.md` y enlazarlo desde el sidebar y el release.
 8. Escribir/actualizar `docs/RELEASE_NOTES_vX.Y.Z.md`. **No añadas marketing.** Lista features, fixes, breaking changes con referencia al issue/PR.
 9. Verificar que el badge de coverage en README refleja un reporte real (no un número hardcoded).
-10. Tras mergear, taggear `vX.Y.Z`. La GitHub Action `.github/workflows/deploy.yml` (build de Docusaurus + `actions/deploy-pages`) publica `website/build/` a **GitHub Pages del repo `quark`** en https://jcsvwinston.github.io/quark/. No usa la rama `gh-pages` ni el repo `quark-docs` (el sitio se movió a este repo en v0.3.0).
+10. Tras mergear, taggear `vX.Y.Z`. Las docs se publican en el **sitio unificado de la suite** (https://jcsvwinston.github.io/quantum/quark/), que el repo `quantum` ensambla desde `website/docs` de este repo en cada deploy; `.github/workflows/deploy.yml` de quark publica solo un REDIRECTOR en Pages de quark hacia el sitio unificado (no el build de Docusaurus — eso fue así hasta el traslado al paraguas).
 
 El comando `/release vX.Y.Z` (`.claude/commands/release.md`) automatiza el checklist y verifica cada paso. **Úsalo siempre.** No taggees a mano.
 
