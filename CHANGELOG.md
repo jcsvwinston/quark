@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2](https://github.com/jcsvwinston/quark/compare/v1.3.1...v1.3.2) (2026-07-19)
+
+
+### Fixed
+
+* RLS nativo — adquisición cancelable, commit fallido con rastro y semántica documentada (QK6-2/3/4) ([d127f61](https://github.com/jcsvwinston/quark/commit/d127f61cfd5e77b8196f6c1db0283d9ab3941f49))
+* **rls:** adquisición cancelable de conexión en el ejecutor nativo implicit-tx ([a97b69c](https://github.com/jcsvwinston/quark/commit/a97b69c5ab31a52f028dffcd4e5fa51adb3853ac))
+* **rls:** el commit diferido fallido deja rastro — log fiable + contador para operadores ([0831ece](https://github.com/jcsvwinston/quark/commit/0831eceebe6b7a06552d3873b9eab9bdc4f9e5cf))
+
 ## [1.3.1](https://github.com/jcsvwinston/quark/compare/v1.3.0...v1.3.1) (2026-07-19)
 
 
