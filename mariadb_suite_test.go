@@ -194,9 +194,9 @@ func TestMariaDBCache(t *testing.T) {
 
 // TestMariaDBOtel verifies that all CRUD operations emit valid OpenTelemetry spans.
 func TestMariaDBOtel(t *testing.T) {
-	dsn := os.Getenv("QUARK_TEST_MARIADB_DSN")
+	dsn := resolveMariaDBDSN(t)
 	if dsn == "" {
-		t.Skip("QUARK_TEST_MARIADB_DSN not set")
+		t.Skip("QUARK_TEST_MARIADB_DSN not set (rebuild with -tags=integration to spin up a container)")
 	}
 
 	db, err := sql.Open("mysql", dsn)
@@ -356,9 +356,9 @@ func TestMariaDBStress(t *testing.T) {
 		t.Skip("skipping MariaDB stress test in short mode")
 	}
 
-	dsn := os.Getenv("QUARK_TEST_MARIADB_DSN")
+	dsn := resolveMariaDBDSN(t)
 	if dsn == "" {
-		t.Skip("QUARK_TEST_MARIADB_DSN not set")
+		t.Skip("QUARK_TEST_MARIADB_DSN not set (rebuild with -tags=integration to spin up a container)")
 	}
 
 	exporter, shutdown := setupTestTelemetry()
