@@ -385,7 +385,8 @@ list automatically, so a subquery composes correctly on every engine.
 
 ## Set operators
 
-`Union`, `UnionAll`, `Intersect`, and `Except` combine two queries:
+`Union`, `UnionAll`, `Intersect`, `IntersectAll`, `Except`, and `ExceptAll`
+combine two queries:
 
 ```go
 adminEmails := quark.For[User](ctx, client).Select("email").Where("role", "=", "admin")
@@ -397,18 +398,45 @@ privileged, err := adminEmails.UnionAll(ownerEmails).List()
 | Method | Renders |
 | --- | --- |
 | `Union` / `UnionAll` | `... UNION [ALL] ...` |
-| `Intersect` | `... INTERSECT ...` |
-| `Except` | `... EXCEPT ...` (Oracle: `MINUS`) |
+| `Intersect` / `IntersectAll` | `... INTERSECT [ALL] ...` |
+| `Except` / `ExceptAll` | `... EXCEPT [ALL] ...` (Oracle: `MINUS`) |
 
 Each operand can't carry `ORDER BY`, `LIMIT`, locks, its own CTEs, or nested
 set-ops; `ORDER BY`/`LIMIT` on the **outer** query apply to the combined result.
-Engine support: PostgreSQL, SQL Server, and MariaDB (10.3+) are full; MySQL
-does only `UNION`/`UNION ALL` — it gained `INTERSECT`/`EXCEPT` in 8.0.31, a
-minor version Quark can't assume without a runtime probe, so those return
-`ErrUnsupportedFeature` there (rewrite as a JOIN); SQLite and Oracle lack the
-`ALL` variants of `INTERSECT`/`EXCEPT`. Applying
-`Limit` without an explicit `OrderBy` is portable — Quark injects a positional
-`ORDER BY 1` where MSSQL/Oracle need one for pagination.
+
+A statement chains **one operator kind only**. `Union` and `UnionAll` mix
+freely (same operator, same precedence — evaluation is left to right on every
+engine), but mixing kinds, as in `a.Union(b).Intersect(c)`, returns
+`ErrUnsupportedFeature`: the combined statement renders flat, and engines
+disagree on how a flat mix parses — PostgreSQL, MySQL, MariaDB, and SQL Server
+give `INTERSECT` higher precedence, while SQLite and Oracle evaluate left to
+right — so the same chain would silently return different rows depending on
+the engine. Materialize each step into its own query instead.
+
+Per-engine support (an unsupported combination returns
+`ErrUnsupportedFeature` instead of emitting SQL the engine rejects):
+
+| Operator | PostgreSQL | MariaDB | MySQL | SQL Server | Oracle | SQLite |
+| --- | --- | --- | --- | --- | --- | --- |
+| `UNION` / `UNION ALL` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `INTERSECT` / `EXCEPT` | ✓ | ✓ | — | ✓ | ✓ (`MINUS`) | ✓ |
+| `INTERSECT ALL` / `EXCEPT ALL` | ✓ | ✓ | — | — | — | — |
+
+- **MySQL** only gained `INTERSECT`/`EXCEPT` in 8.0.31, a minor version Quark
+  can't assume without a runtime probe, so both return `ErrUnsupportedFeature`
+  there (rewrite as a JOIN).
+- **MariaDB** has had `INTERSECT`/`EXCEPT` since 10.3 and their `ALL` variants
+  since 10.5. Quark's MariaDB dialect already assumes 10.5 as its floor (it
+  relies on `RETURNING`, also a 10.5 feature), so all six operators are
+  enabled there.
+- **Oracle** spells `EXCEPT` as `MINUS`. Oracle has had `INTERSECT ALL` and
+  `MINUS ALL` since 21c, but Quark does not assume 21c without a version
+  probe, so the `ALL` variants return `ErrUnsupportedFeature` on Oracle.
+- **SQL Server** and **SQLite** have `INTERSECT`/`EXCEPT` but no `ALL`
+  variants of either.
+
+Applying `Limit` without an explicit `OrderBy` is portable — Quark injects a
+positional `ORDER BY 1` where MSSQL/Oracle need one for pagination.
 
 ## Window functions
 

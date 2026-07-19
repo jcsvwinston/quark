@@ -166,12 +166,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Each lane's `-run` filter must also name the standalone
+          # integration tests that live OUTSIDE the SharedSuite
+          # entrypoints (QK5-4): deadlock retry per engine, and — on
+          # postgres — LISTEN/NOTIFY, native RLS isolation and the
+          # quarktenant RLS install pipeline. They skip silently when no
+          # DSN is resolvable, so leaving them out of the filter meant
+          # no lane ever executed them. Keep the filter itself: it is
+          # what bounds lane time.
           - engine: postgres
-            run: 'TestSuitePostgres|TestPostgresReplicaRouting'
+            run: 'TestSuitePostgres|TestPostgresReplicaRouting|TestDeadlockRetryPostgres|TestPgListener_RoundTrip|TestRowLevelSecurityNativePostgresIsolation|TestInstallRLSPolicies_Postgres|TestInstallRLSPolicies_Postgres_NoTenantColumn'
           - engine: mysql
-            run: TestSuiteMySQL
+            run: 'TestSuiteMySQL|TestDeadlockRetryMySQL'
           - engine: mariadb
-            run: 'TestSuiteMariaDB|TestMariaDBCache'
+            run: 'TestSuiteMariaDB|TestMariaDBCache|TestDeadlockRetryMariaDB'
           - engine: mssql
             run: TestSuiteMSSQL
           - engine: oracle

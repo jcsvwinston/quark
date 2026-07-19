@@ -22,10 +22,12 @@ Docs (1.3.0 is the current version): <https://jcsvwinston.github.io/quark/docs/>
 ## Fixed
 
 - **Set operators reject unsupported engines cleanly instead of emitting
-  invalid SQL.** SQL Server and Oracle have `INTERSECT` / `EXCEPT` but no `ALL`
-  variant of either; SQLite has neither. Requesting `IntersectAll` / `ExceptAll`
-  there now returns `ErrUnsupportedFeature` at render time — the same contract
-  every other unsupported dialect already followed. Previously the SQL Server
+  invalid SQL.** SQL Server and SQLite have `INTERSECT` / `EXCEPT` but no `ALL`
+  variant of either, and Oracle only gained `INTERSECT ALL` / `MINUS ALL` in
+  21c — a version Quark does not assume without a runtime probe. Requesting
+  `IntersectAll` / `ExceptAll` there now returns `ErrUnsupportedFeature` at
+  render time — the same contract every other unsupported dialect already
+  followed. Previously the SQL Server
   path emitted `INTERSECT ALL` and the server answered with a misleading parse
   error (`Invalid usage of the option NEXT in the FETCH statement`) rather than
   a clear "unsupported".

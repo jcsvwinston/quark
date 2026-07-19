@@ -99,7 +99,15 @@ func (e *nativeRLSExecutor) ExecContext(ctx context.Context, query string, args 
 // queries before ctx ends): each query holds a connection until ctx
 // terminates. Callers in that regime should use TenantRouter.Tx.
 func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	tx, err := e.db.BeginTx(ctx, nil)
+	// The tx lifecycle is detached from the caller's ctx on purpose:
+	// database/sql auto-ROLLS BACK a transaction whose BeginTx ctx is
+	// canceled, and a request ctx always ends by cancellation — so binding
+	// the lifecycle to it made the AfterFunc commit RACE an automatic
+	// rollback (for the QueryRow write path, that silently lost the insert).
+	// Detached, the deferred commit is deterministic; per-statement
+	// cancellation still applies through the ctx each query receives.
+	// Surfaced by QK5-4, the first time a CI lane executed this path.
+	tx, err := e.db.BeginTx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		return nil, fmt.Errorf("native rls: begin tx: %w", err)
 	}
@@ -127,7 +135,10 @@ func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args
 // Scan returns the error; we leverage the QueryRowContext-on-tx
 // helper to surface those errors honestly.
 func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	tx, err := e.db.BeginTx(ctx, nil)
+	// Detached lifecycle ctx — see QueryContext for why (a canceled BeginTx
+	// ctx means database/sql rolls the tx back, which for INSERT … RETURNING
+	// silently discarded the write).
+	tx, err := e.db.BeginTx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		// Return a *sql.Row that surfaces the error on Scan. The
 		// simplest way is to call db.QueryRowContext with an
