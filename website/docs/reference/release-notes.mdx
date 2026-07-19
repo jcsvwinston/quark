@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.3.1** on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.3.2** on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade:
@@ -17,6 +17,32 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.3.2
+
+A robustness patch for the native row-level-security strategy. Upgrade if you
+use `RowLevelSecurityNative`, especially with connection pools sized close to
+your concurrency.
+
+### Fixed
+
+- **Connection acquisition under native RLS honours your context.** Waiting
+  for a pooled connection used to be uncancellable: with a saturated pool, a
+  request could keep waiting past its own deadline. Acquisition now aborts
+  with the caller's `ctx.Err()`; only the transaction's lifecycle stays
+  detached from cancellation (the v1.3.1 write-durability behaviour is
+  unchanged, and its semantics are now spelled out in the
+  native row-level security guide's Limitations section).
+- **A failed deferred commit is loud.** If the deferred commit behind a
+  native-RLS write fails, the failure is logged at error level even without a
+  configured logger, and counted — `Client.DeferredCommitFailures()` exposes
+  the count so operators can alert on it. Batch inserts are covered by the
+  same regression tests as row-by-row writes.
+
+### Upgrade notes
+
+Nothing to do. Behaviour changes only affect failure paths that previously
+hung or went silent.
 
 ## v1.3.1
 
