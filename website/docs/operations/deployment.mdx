@@ -1,0 +1,212 @@
+---
+sidebar_position: 1
+title: Production Deployment
+description: Pool sizing, query timeouts, TLS in DSNs, migrations at deploy time, health checks, and observability for Quark in production.
+---
+
+# Production Deployment
+
+Quark in development is one call: `quark.New(driver, dsn)`. Quark in production
+is the same call plus deliberate answers to five questions — how big is the
+connection pool, how long may a query run, is the wire encrypted, who runs
+migrations and when, and how do you see what the ORM is doing. This page walks
+through each one.
+
+## Size the connection pool
+
+Quark builds on `database/sql`, and pool options are applied to the underlying
+`*sql.DB` before the client is created. The `database/sql` defaults are wrong
+for most servers — unlimited open connections and only two idle ones — so set
+them explicitly:
+
+```go
+client, err := quark.New("pgx", dsn,
+    quark.WithMaxOpenConns(25),
+    quark.WithMaxIdleConns(25),
+    quark.WithConnMaxLifetime(30*time.Minute),
+    quark.WithConnMaxIdleTime(5*time.Minute),
+)
+```
+
+| Option | What it sets | Guidance |
+| --- | --- | --- |
+| `WithMaxOpenConns(n)` | `SetMaxOpenConns` | The hard ceiling. Sum this across every instance of your app and keep the total below the server's connection limit (minus headroom for migrations, admin sessions, and other services). |
+| `WithMaxIdleConns(n)` | `SetMaxIdleConns` | Setting it equal to `MaxOpenConns` avoids churn — connections are reused instead of closed and reopened under steady load. |
+| `WithConnMaxLifetime(d)` | `SetConnMaxLifetime` | Recycles connections periodically. Essential behind load balancers and proxies that silently drop long-lived connections; also lets the pool rebalance after a database failover. |
+| `WithConnMaxIdleTime(d)` | `SetConnMaxIdleTime` | Shrinks the pool during quiet periods. |
+
+There is no magic number for `MaxOpenConns`. Start around 25 per instance,
+watch connection wait times under real load, and adjust. A pool much larger
+than the database can serve concurrently just moves queueing from your app
+into the server.
+
+`quark.New` opens the connection and pings it with a five-second timeout, so a
+misconfigured DSN fails at startup, not on the first request.
+
+If you configure [read replicas](../advanced/read-replicas), each replica gets
+its own pool with the same options as the primary — budget server connections
+accordingly.
+
+## Set query timeouts
+
+Every Quark read and write runs under a context timeout taken from
+`Limits.QueryTimeout` — 30 seconds by default. Tighten it to match your
+latency budget:
+
+```go
+limits := quark.DefaultLimits()
+limits.QueryTimeout = 5 * time.Second
+
+client, err := quark.New("pgx", dsn, quark.WithLimits(limits))
+```
+
+Two things to know:
+
+- `WithLimits` replaces the **entire** `Limits` struct. Always start from
+  `quark.DefaultLimits()` and override fields — a zero `QueryTimeout` produces
+  immediately-expired query contexts, not "no timeout".
+- The timeout cancels the Go-side wait. Whether the statement also stops on
+  the server depends on the driver and engine; for defense in depth, set a
+  server-side statement timeout too (for example PostgreSQL's
+  `statement_timeout`).
+
+The other `Limits` fields (`MaxResults`, `MaxJoins`, `MaxWhereConditions`,
+`MaxQueryLength`) are guardrails against runaway queries; the
+[Configuration Reference](../reference/configuration) documents each default.
+
+## Encrypt the wire: DSNs per engine
+
+Quark passes the DSN straight to your `database/sql` driver — the driver owns
+the format, so TLS is configured the way each driver expects:
+
+| Engine | Example production DSN |
+| --- | --- |
+| PostgreSQL | `postgres://app:secret@db.internal:5432/app?sslmode=verify-full` |
+| MySQL | `app:secret@tcp(db.internal:3306)/app?parseTime=true&tls=true` |
+| MariaDB | Same DSN format and driver as MySQL; Quark [detects MariaDB automatically](../faq#i-connected-with-the-mysql-driver-but-quark-says-mariadb--why). |
+| SQL Server | `sqlserver://app:secret@db.internal:1433?database=app&encrypt=true` |
+| Oracle | `oracle://app:secret@db.internal:1521/APPPDB` — TLS and wallet settings are `go-ora` connection options; see that driver's documentation. |
+| SQLite | A file path. No network, no TLS — protect the file with filesystem permissions instead. |
+
+Notes that bite in production:
+
+- **PostgreSQL**: `sslmode=require` encrypts but does not verify the server's
+  identity. Use `verify-full` with the CA certificate available to the client
+  whenever you can.
+- **MySQL / MariaDB**: `tls=true` verifies against the system CA pool. For a
+  private CA or client certificates, register a custom TLS config with
+  `mysql.RegisterTLSConfig` and reference it by name in the DSN. Keep
+  `parseTime=true` — you need it for `time.Time` scanning regardless of TLS.
+- Never commit DSNs with credentials to source control — see
+  [Security](security#keep-secrets-out-of-dsns) for how to inject them.
+
+## Read replicas and failover
+
+If your workload is read-heavy, `WithReplicas` routes reads across replica
+pools while writes stay on the primary. A replica that fails with a transient
+connection error is taken out of rotation for a cooldown and the read fails
+over to the primary — a downed replica degrades performance, not correctness.
+Replication lag is real, though: reads that must observe a just-committed
+write need `quark.Sticky(ctx)`.
+
+The [Read replicas](../advanced/read-replicas) guide covers routing rules,
+selection strategies, and consistency in full.
+
+## Migrations at deploy time
+
+Run migrations as a separate deploy step — before the new application version
+starts serving traffic — not from your request path.
+
+Two mechanics matter:
+
+**Migrations live in your binary, not in the standalone CLI.** Versioned
+migration files register themselves via `init()`, so a `go install`ed `quark`
+binary cannot see them; `quark migrate up` exits non-zero with an explanation
+rather than falsely reporting "nothing pending". Build the small runner
+described in [Operational Workflows](../guides/cli#embedding-the-same-operations-in-your-own-binary)
+— your `main` imports your migrations package and calls `commands.Execute()` —
+and ship that binary (or `go run` it) in your deploy pipeline. For the
+model-diff flow, the [`quarkmigrate`](../guides/migrations#a-ci-drift-gate-with-quarkmigrate)
+package gives you `plan` / `verify` / `apply` as a tiny command you own;
+`verify` exits non-zero on schema drift, which makes it a natural CI gate.
+
+**Concurrent deploys must not race.** If several instances can run migrations
+at once (rolling deploys, multiple replicas of a job), take the cluster-wide
+advisory lock first:
+
+```go
+lock, err := client.AcquireMigrationLock(ctx, "schema-migrations", 30*time.Second)
+if err != nil {
+    return err // quark.ErrLockTimeout if another deploy holds it
+}
+defer lock.Release(ctx)
+```
+
+The lock uses each engine's native primitive (PostgreSQL `pg_advisory_lock`,
+MySQL/MariaDB `GET_LOCK`, SQL Server `sp_getapplock`, Oracle `DBMS_LOCK` —
+which requires `GRANT EXECUTE ON DBMS_LOCK`). SQLite has no cross-process
+lock primitive and returns `quark.ErrUnsupportedFeature`. Details in
+[Coordinating concurrent deploys](../guides/migrations#coordinating-concurrent-deploys).
+
+Keep `Limits.SafeMigrations` at its default (`true`) in production: schema
+sync then never drops columns it no longer recognizes.
+
+## Health checks
+
+Quark does not ship a health endpoint, and doesn't need to: the underlying
+`*sql.DB` is available via `client.Raw()`, and its `PingContext` is the
+standard liveness signal.
+
+```go
+func readyz(client *quark.Client) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+        defer cancel()
+        if err := client.Raw().PingContext(ctx); err != nil {
+            http.Error(w, "database unreachable", http.StatusServiceUnavailable)
+            return
+        }
+        w.WriteHeader(http.StatusOK)
+    }
+}
+```
+
+The ping checks the **primary** connection. Replica health is managed
+internally (failed replicas go into cooldown and reads fail over to the
+primary), so a healthy primary is the right readiness signal even with
+replicas configured.
+
+On shutdown, call `client.Close()` — it closes the primary pool and every
+replica pool, and reports any close error rather than swallowing it.
+
+## See what production is doing
+
+Three layers, all opt-in, all covered in depth in
+[Caching and Observability](../advanced/caching-observability):
+
+- **Structured logging** — pass your `slog` logger with `WithLogger`. Quark
+  logs operational warnings (safe-default row caps, deadlock retries, replica
+  cooldowns) through it, in your format and at your level.
+- **Slow-query log** — `quark.WithSlowQueryThreshold(100*time.Millisecond)`
+  emits a WARN with duration, operation, table, row count, and the
+  parameterized SQL for anything slower. Bind arguments are never logged —
+  see [Security](security#what-quark-writes-to-your-logs) for the exact
+  redaction rules.
+- **OpenTelemetry** — add the
+  [`quarkotel` middleware](../advanced/caching-observability#opentelemetry)
+  for a span per operation, and `WithQueryObserver` for your own metrics
+  (counters, histograms) from the same per-query events.
+
+A reasonable production baseline:
+
+```go
+client, err := quark.New("pgx", dsn,
+    quark.WithMaxOpenConns(25),
+    quark.WithMaxIdleConns(25),
+    quark.WithConnMaxLifetime(30*time.Minute),
+    quark.WithLimits(limits),
+    quark.WithLogger(slog.New(slog.NewJSONHandler(os.Stdout, nil))),
+    quark.WithSlowQueryThreshold(100*time.Millisecond),
+    quark.WithMiddleware(quarkotel.New(quarkotel.WithDBSystem("postgres"))),
+)
+```

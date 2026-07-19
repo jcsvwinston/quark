@@ -1,0 +1,182 @@
+---
+sidebar_position: 6
+title: FAQ & Troubleshooting
+description: Answers to the questions that actually come up — row caps, dialect limitations, migration locks, deadlocks, cache stampedes, and sharding.
+---
+
+# FAQ & Troubleshooting
+
+Real questions, in the form they usually appear: a log line you didn't expect
+or an error you don't recognize.
+
+## Why does `List()` warn about a missing `Limit()`?
+
+The log line:
+
+```
+List() called without explicit Limit(), using safe default of 100.
+Use Iter() for unbounded queries or call Limit() explicitly.
+```
+
+`List()` materializes every row into a slice, so an unbounded `List()` on a
+large table is an out-of-memory incident waiting for data growth. Without an
+explicit `Limit()`, Quark caps the query at 100 rows and tells you. Your
+options:
+
+- You wanted a bounded read → call `.Limit(n)` explicitly.
+- You wanted every row → use `.Iter(fn)`, which streams row by row without
+  loading the table into memory, or `.Paginate(pageSize, page)`.
+
+## Why does a large `List()` top out at 10,000 rows?
+
+`Limits.MaxResults` (default 10,000) is a ceiling on any single `List()`. A
+`Limit(50_000)` runs with the cap instead — Quark clamps the limit rather than
+failing the query. If you genuinely need more rows in one call, raise the
+ceiling via `WithLimits`; if you are processing a big dataset, `Iter()` (not
+subject to `MaxResults`) is usually the better tool. See the
+[Configuration Reference](reference/configuration) for all limits.
+
+## Why do I get "feature not supported by dialect" from set operations?
+
+`Union` works on all six engines, but `Intersect` / `Except` (and their `All`
+variants) are where engines genuinely differ, and Quark returns
+`quark.ErrUnsupportedFeature` instead of shipping SQL that breaks or means
+the wrong thing:
+
+| Engine | What's rejected | Why |
+| --- | --- | --- |
+| MySQL | `Intersect`, `Except` (all forms) | MySQL only gained them in 8.0.31, and Quark won't assume a minor server version without probing. Rewrite as a `JOIN` / `NOT EXISTS`. |
+| MariaDB | Nothing of these — supported | MariaDB has had them since 10.3 (`All` variants since 10.5), within the floor Quark already assumes. |
+| SQLite | `IntersectAll`, `ExceptAll` | The engine has no `ALL` variants of these. |
+| SQL Server | `IntersectAll`, `ExceptAll` | T-SQL has `INTERSECT` / `EXCEPT` but no `ALL` variants. |
+| Oracle | `IntersectAll`, `ExceptAll` | Requires Oracle 21c+, which Quark won't assume. Distinct `Intersect` / `Except` work (Quark emits `MINUS` for except). |
+
+Also engine-independent: **you cannot mix different set operators in one
+statement** (`A.Union(B).Intersect(C)` errors). Engines disagree on set-op
+precedence — some evaluate left to right, others give `INTERSECT` higher
+priority — so the same SQL would return different rows on different engines.
+Materialize each step into its own query instead.
+
+## Why does `RawQuery` fail with "raw queries are disabled by default"?
+
+By design. `client.RawQuery` and `client.Exec` are gated behind
+`Limits.AllowRawQueries`, which defaults to `false` — the safe configuration
+is the default one. Opt in explicitly:
+
+```go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true
+client, err := quark.New("pgx", dsn, quark.WithLimits(limits))
+```
+
+Even then, raw statements are validated and values must go through
+placeholders. See [Security](operations/security#sql-injection) for the whole
+injection model.
+
+## `quark migrate up` says no migrations are registered — why?
+
+Because the standalone `quark` binary genuinely cannot see them. Migration
+files register themselves via `init()`, which only runs when their package is
+compiled into the executing binary — and a `go install`ed CLI never imports
+your project's `migrations/` package. Rather than reporting a bogus "No
+pending migrations", the command exits non-zero and prints the fix: a two-line
+runner in your own repo that imports your migrations package and calls
+`commands.Execute()`. The recipe is in
+[Operational Workflows](guides/cli#embedding-the-same-operations-in-your-own-binary).
+
+## How do I stop two deploys from running migrations at once?
+
+Take the cluster-wide advisory lock before migrating:
+
+```go
+lock, err := client.AcquireMigrationLock(ctx, "schema-migrations", 30*time.Second)
+if err != nil {
+    return err // quark.ErrLockTimeout if another process holds it
+}
+defer lock.Release(ctx)
+```
+
+It maps to each engine's native primitive: PostgreSQL `pg_advisory_lock`,
+MySQL/MariaDB `GET_LOCK`, SQL Server `sp_getapplock`, Oracle `DBMS_LOCK`
+(which needs `GRANT EXECUTE ON DBMS_LOCK` — not granted by default). SQLite
+has no cross-process lock and returns `quark.ErrUnsupportedFeature`. The lock
+is opt-in — `Migrate` does not lock on its own. Details in
+[the migrations guide](guides/migrations#coordinating-concurrent-deploys).
+
+## I connected with the "mysql" driver but Quark says MariaDB — why?
+
+MariaDB has no dedicated `database/sql` driver: it speaks the MySQL wire
+protocol through `go-sql-driver/mysql`, so the driver name alone cannot tell
+the two apart. At `New()`, Quark probes the server version once and switches
+to the MariaDB dialect when it is actually talking to MariaDB — that is what
+makes MariaDB-specific SQL (locking clauses, set operations) come out right.
+`quark.New("mysql", dsn)` is therefore correct for both engines, and an
+explicit `WithDialect(...)` always wins over the probe.
+
+## Why does Oracle reject my row-locking query?
+
+Oracle forbids combining `FOR UPDATE` with a row-limiting clause — the
+database raises `ORA-02014`. Quark surfaces this honestly instead of shipping
+SQL that fails:
+
+- An **explicit** `Limit()`/`Offset()` plus a lock returns
+  `quark.ErrUnsupportedFeature` with the explanation.
+- A `List()` with a lock but **no** explicit limit runs without the implicit
+  100-row cap (Oracle-only), and logs a WARN that the lock spans every
+  matching row.
+
+Either narrow the `WHERE` so locking all matches is intended, or fetch the
+candidate keys first and lock them by ID inside a transaction.
+
+## Does Quark retry deadlocks?
+
+Only if you opt in. With `quark.WithDeadlockRetry(3)`, a `Client.Tx` closure
+that fails with the engine's deadlock error (PostgreSQL `40P01`, MySQL 1213,
+SQL Server 1205, Oracle `ORA-00060`) is re-executed against a fresh
+transaction with exponential backoff and jitter, up to the configured number
+of attempts. The retry wraps the entire closure — a deadlock aborts the whole
+transaction, so retrying a single statement would be wrong. Non-deadlock
+errors never retry. Keep the closure free of non-idempotent side effects (or
+hang them on `OnCommit`); see
+[Transactions](guides/transactions#retrying-deadlocks).
+
+## What stops a cache stampede when a hot key expires?
+
+With `WithCacheStore` installed, three protections are on by default:
+in-process **singleflight** (concurrent misses for one key collapse into one
+database trip), **TTL jitter** (±10%, so keys written together don't expire
+together), and **probabilistic early refresh** (a hot key is recomputed
+slightly before expiry). That covers a single process.
+
+Running several instances against a shared cache (e.g. Redis), each instance
+still recomputes independently. `quark.WithCacheCrossInstance()` closes that
+gap: a per-key lock in the store serializes the recompute across processes —
+one instance computes, the rest briefly wait and re-read the result. It
+requires a store that supports locking (the bundled Redis store does) and
+falls back to in-process protection when the store doesn't. See
+[Caching and Observability](advanced/caching-observability#stampede-protection).
+
+## How do I run one query across all shards?
+
+Deliberately, not by accident. A sharded query without a shard key errors —
+
+```
+no shard key in context — set it with WithShardKey; cross-shard fan-out is not supported
+```
+
+— because Quark never silently turns one query into N. The explicit cross-shard
+read is `quark.ScatterGather` (rows, with optional global ordering and top-N
+merge) or `quark.ScatterCount`: they run the same read on every shard
+concurrently and merge the results, and they are read-only — cross-shard
+writes and transactions don't exist. If any shard fails, you get an error
+rather than a silently incomplete result. See
+[Sharding](advanced/sharding).
+
+## Does Quark log my query parameters?
+
+Not on its own. The slow-query log and the default OpenTelemetry spans carry
+the parameterized SQL only — placeholders, never bind values. The two places
+values do appear are explicit opt-ins you control: span redaction set to
+include arguments, and your own `QueryObserver`, whose events include `Args`
+by design. The full redaction map is in
+[Security](operations/security#what-quark-writes-to-your-logs).
