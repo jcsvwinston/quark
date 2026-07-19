@@ -199,6 +199,21 @@ func TestRowLevelSecurityNativePostgresIsolation(t *testing.T) {
 	ctxTA := context.WithValue(ctx, testTenantKey, "ta")
 	ctxTB := context.WithValue(ctx, testTenantKey, "tb")
 
+	// scoped gives one implicit-tx operation a request-scoped ctx. The Native
+	// implicit-tx design (see nativeRLSExecutor) keeps each operation's
+	// transaction — connection and locks included — open until the caller's
+	// ctx ends; that is the documented request-scoped regime. Reusing the
+	// test-lifetime ctx here leaks those transactions, and their locks
+	// deadlock the DROP TABLE cleanup: exactly how this test hung for 25m the
+	// first time a lane ever executed it (QK5-4). The long-lived-ctx regime
+	// itself remains a real sharp edge of the design, tracked as an issue.
+	scoped := func(t *testing.T, parent context.Context) context.Context {
+		t.Helper()
+		c, cancel := context.WithCancel(parent)
+		t.Cleanup(cancel)
+		return c
+	}
+
 	// --- router.Tx path: explicit transaction, single set_config emit ---
 	t.Run("router.Tx_ta_sees_only_ta_rows", func(t *testing.T) {
 		var got []RLSNativeOrder
@@ -241,7 +256,7 @@ func TestRowLevelSecurityNativePostgresIsolation(t *testing.T) {
 
 	// --- For[T] implicit-tx path: each operation gets its own tx + set_config ---
 	t.Run("For_T_implicit_tx_ta", func(t *testing.T) {
-		got, err := quark.For[RLSNativeOrder](ctxTA, router).List()
+		got, err := quark.For[RLSNativeOrder](scoped(t, ctxTA), router).List()
 		if err != nil {
 			t.Fatalf("For[T].List under Native (ta): %v", err)
 		}
@@ -255,7 +270,7 @@ func TestRowLevelSecurityNativePostgresIsolation(t *testing.T) {
 		}
 	})
 	t.Run("For_T_implicit_tx_tb", func(t *testing.T) {
-		got, err := quark.For[RLSNativeOrder](ctxTB, router).List()
+		got, err := quark.For[RLSNativeOrder](scoped(t, ctxTB), router).List()
 		if err != nil {
 			t.Fatalf("For[T].List under Native (tb): %v", err)
 		}
@@ -266,7 +281,7 @@ func TestRowLevelSecurityNativePostgresIsolation(t *testing.T) {
 
 	// --- Count is QueryRow path: validates the *sql.Row branch of nativeRLSExecutor ---
 	t.Run("For_T_Count_via_QueryRow", func(t *testing.T) {
-		n, err := quark.For[RLSNativeOrder](ctxTA, router).Count()
+		n, err := quark.For[RLSNativeOrder](scoped(t, ctxTA), router).Count()
 		if err != nil {
 			t.Fatalf("Count under Native (ta): %v", err)
 		}
@@ -278,21 +293,21 @@ func TestRowLevelSecurityNativePostgresIsolation(t *testing.T) {
 	// --- ExecContext path: Create under Native via For[T] hits ExecContext / QueryRowContext ---
 	t.Run("For_T_Create_under_native_inserts_for_correct_tenant", func(t *testing.T) {
 		newRow := RLSNativeOrder{TenantID: "ta", Status: "delivered"}
-		if err := quark.For[RLSNativeOrder](ctxTA, router).Create(&newRow); err != nil {
+		if err := quark.For[RLSNativeOrder](scoped(t, ctxTA), router).Create(&newRow); err != nil {
 			t.Fatalf("Create under Native (ta): %v", err)
 		}
 		if newRow.ID == 0 {
 			t.Fatal("Create did not populate PK from RETURNING")
 		}
 		// ta now has 4 rows; tb still sees 2.
-		n, err := quark.For[RLSNativeOrder](ctxTA, router).Count()
+		n, err := quark.For[RLSNativeOrder](scoped(t, ctxTA), router).Count()
 		if err != nil {
 			t.Fatalf("Count after insert (ta): %v", err)
 		}
 		if n != 4 {
 			t.Fatalf("ta Count after insert = %d, want 4", n)
 		}
-		n, err = quark.For[RLSNativeOrder](ctxTB, router).Count()
+		n, err = quark.For[RLSNativeOrder](scoped(t, ctxTB), router).Count()
 		if err != nil {
 			t.Fatalf("Count after insert (tb): %v", err)
 		}
