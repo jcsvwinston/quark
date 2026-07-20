@@ -306,6 +306,13 @@ func (q *Query[T]) List() ([]T, error) {
 		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
 
+	// Strict reads (#247): feed the per-context N+1 detector. Gated here
+	// so StrictReadsOff pays exactly one integer comparison; the point-
+	// read shape checks and the context lookup live in noteNPlusOneRead.
+	if q.client.strictReads != StrictReadsOff {
+		q.noteNPlusOneRead()
+	}
+
 	// F5-4: BeforeFind fires before any SQL is built or cached.
 	// Returning an error from the hook short-circuits the call.
 	if err := q.callBeforeFind(q.ctx); err != nil {
@@ -552,6 +559,12 @@ func (q *Query[T]) Cursor() (*Cursor[T], error) {
 		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
 
+	// Strict reads (#247): warn or reject an unbounded cursor before any
+	// hook fires — a rejected query must not run BeforeFind.
+	if err := q.strictReadCheck("Cursor()"); err != nil {
+		return nil, err
+	}
+
 	// F5-4: BeforeFind fires before the cursor opens. AfterFind
 	// fires from the cursor's Close path (see cursor.go) so
 	// streaming consumers get the same exactly-once contract as
@@ -595,6 +608,12 @@ func (q *Query[T]) Cursor() (*Cursor[T], error) {
 func (q *Query[T]) Iter(fn func(T) error) error {
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+	}
+
+	// Strict reads (#247): warn or reject an unbounded stream before any
+	// hook fires — a rejected query must not run BeforeFind.
+	if err := q.strictReadCheck("Iter()"); err != nil {
+		return err
 	}
 
 	// F5-4: BeforeFind fires before any rows are pulled. AfterFind

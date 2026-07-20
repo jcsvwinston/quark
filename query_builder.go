@@ -63,27 +63,32 @@ type BaseQuery struct {
 	meta *ModelMeta
 
 	// Query state (cloned on each builder method)
-	selectCols  []string
-	where       []condition
-	orderBy     []order
-	joins       []join
-	preloads    []string
-	limit       int
-	offset      int
-	hasLimit    bool   // tracks if Limit() was explicitly called
-	unscoped    bool   // if true, soft-delete filter is dropped (WithTrashed semantics)
-	onlyTrashed bool   // if true, the soft-delete filter is inverted to IS NOT NULL
-	tenantID    string // for RowLevelSecurityClient isolation
-	tenantCol   string // column name for tenant isolation
-	cache       CacheConfig
-	groupBy     []string          // GROUP BY columns
-	having      []condition       // HAVING conditions
-	distinct    bool              // SELECT DISTINCT
-	lock        LockOptions       // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
-	ctes        []cteEntry        // common table expressions (WITH ...) prepended to the SELECT
-	selectExprs []selectExprEntry // AST projections rendered in the SELECT list (window funcs, scalar subqueries, aliased computations)
-	setOps      []setOpEntry      // UNION / INTERSECT / EXCEPT operands appended after the base SELECT
-	err         error             // stores initialization error from ClientProvider
+	selectCols []string
+	where      []condition
+	orderBy    []order
+	joins      []join
+	preloads   []string
+	limit      int
+	offset     int
+	hasLimit   bool // tracks if Limit() was explicitly called
+	// allowUnbounded marks the read as intentionally unbounded (set by
+	// AllowUnbounded): the strict-reads gate (#247) skips the query even
+	// when no explicit Limit() is present. No effect without
+	// WithStrictReads.
+	allowUnbounded bool
+	unscoped       bool   // if true, soft-delete filter is dropped (WithTrashed semantics)
+	onlyTrashed    bool   // if true, the soft-delete filter is inverted to IS NOT NULL
+	tenantID       string // for RowLevelSecurityClient isolation
+	tenantCol      string // column name for tenant isolation
+	cache          CacheConfig
+	groupBy        []string          // GROUP BY columns
+	having         []condition       // HAVING conditions
+	distinct       bool              // SELECT DISTINCT
+	lock           LockOptions       // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
+	ctes           []cteEntry        // common table expressions (WITH ...) prepended to the SELECT
+	selectExprs    []selectExprEntry // AST projections rendered in the SELECT list (window funcs, scalar subqueries, aliased computations)
+	setOps         []setOpEntry      // UNION / INTERSECT / EXCEPT operands appended after the base SELECT
+	err            error             // stores initialization error from ClientProvider
 
 	// typedScanResolved memoizes the F6-2 generated-scanner lookup so the
 	// reflect.Type lookup + registry read happen once per query rather than
@@ -349,6 +354,21 @@ func (q *Query[T]) Limit(n int) *Query[T] {
 func (q *Query[T]) Offset(n int) *Query[T] {
 	c := q.clone()
 	c.offset = n
+	return c
+}
+
+// AllowUnbounded declares this read intentionally unbounded — an export,
+// a backfill, a full-table scan the caller has thought about. Under
+// [WithStrictReads] it exempts the query from the Iter()/Cursor()
+// no-Limit WARN ([StrictReadsWarn]) and rejection ([StrictReadsReject]).
+// It does NOT change what the query returns: List() keeps its safe
+// default cap, and Iter()/Cursor() already stream every matching row.
+// No effect when strict reads is off (#247).
+//
+//	err := quark.For[Event](ctx, client).AllowUnbounded().Iter(export)
+func (q *Query[T]) AllowUnbounded() *Query[T] {
+	c := q.clone()
+	c.allowUnbounded = true
 	return c
 }
 

@@ -29,6 +29,12 @@ type Client struct {
 	driverName string
 	dataSource string
 
+	// strictReads is the opt-in enforcement level for unbounded reads and
+	// N+1 detection (#247, set by WithStrictReads). The zero value
+	// StrictReadsOff keeps the historical behaviour; the read-path gates
+	// check it with a single integer comparison.
+	strictReads StrictReadsMode
+
 	// Read replicas (F6-5, ADR-0015). replicaDSNs is set by WithReplicas;
 	// New() opens one read-only *sql.DB per DSN into replicas. Reads route
 	// to a replica (selected by replicaStrategy) when one is configured and the

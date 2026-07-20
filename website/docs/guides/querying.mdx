@@ -306,6 +306,65 @@ for cursor.Next() {
 return cursor.Err()
 ```
 
+### Strict reads
+
+`Iter` and `Cursor` have no implicit cap: forgetting `Limit` silently streams
+every matching row. `WithStrictReads` makes that visible per client, with two
+levels:
+
+```go
+// Log a structured WARN when Iter/Cursor run without an explicit Limit.
+client, err := quark.New("postgres", dsn,
+    quark.WithStrictReads(quark.StrictReadsWarn),
+)
+
+// Or reject the query outright with ErrInvalidQuery.
+client, err = quark.New("postgres", dsn,
+    quark.WithStrictReads(quark.StrictReadsReject),
+)
+```
+
+Intentionally unbounded reads — exports, backfills — opt out per query:
+
+```go
+err := quark.For[Event](ctx, client).AllowUnbounded().Iter(export)
+```
+
+`List` is unaffected: it keeps its safe default cap of 100 rows and its own
+warning. The default mode (`StrictReadsOff`) leaves all behavior exactly as
+it was.
+
+#### N+1 detection
+
+With strict reads enabled, quark can also flag the classic N+1 pattern — a
+`First`/`Find` by primary key per row of a previous `List`. Because "repeated
+read" only means something within one request, counting is scoped to a
+context you mark at the request boundary:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    ctx := quark.TrackReads(r.Context())
+
+    orders, _ := quark.For[Order](ctx, client).Limit(50).List()
+    for _, o := range orders {
+        // The 10th single-row read by primary key on customers within this
+        // context logs one WARN suggesting Preload. The queries still run.
+        c, _ := quark.For[Customer](ctx, client).Find(o.CustomerID)
+        render(o, c)
+    }
+}
+```
+
+The detector logs one warning per context and table, and never fails the
+query — it is a heuristic. The fix it suggests:
+
+```go
+orders, _ := quark.For[Order](ctx, client).Preload("Customer").Limit(50).List()
+```
+
+Without `TrackReads` (or with strict reads off) nothing is counted and the
+read path stays allocation-free.
+
 ---
 
 ## Composable expressions

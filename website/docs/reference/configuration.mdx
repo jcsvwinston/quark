@@ -56,6 +56,7 @@ expired query contexts in the current implementation.
 | `WithQueryObserver(o QueryObserver)` | Adds post-execution query observers. |
 | `WithDeadlockRetry(maxAttempts int)` | Transparent retry of `Client.Tx` when the engine kills the transaction as a deadlock victim (PG `40P01`, MySQL 1213, MSSQL 1205, Oracle `ORA-00060`). Retries the whole closure with backoff + jitter; disabled by default. |
 | `WithSlowQueryThreshold(d time.Duration)` | Logs any query/exec exceeding `d` at WARN with structured attributes (parameterised SQL only — never bind args). `0` (default) disables. |
+| `WithStrictReads(mode StrictReadsMode)` | Enforcement for unbounded reads: `StrictReadsWarn` logs a structured WARN when `Iter`/`Cursor` run without `Limit`; `StrictReadsReject` returns `ErrInvalidQuery` instead. Enables N+1 detection inside `TrackReads` contexts. Per-query opt-out: `AllowUnbounded()`. Off by default. |
 | `WithDefaultTZ(loc *time.Location)` | Fallback timezone for `time.Time` columns without a `quark:"tz=..."` tag. Values are stored as UTC; `loc` only affects how scanned values read in Go. |
 | `WithCacheJitter(pct float64)` | ±jitter factor applied to cache TTLs (anti-stampede). Default `0.1`; clamped to `[0, 1]`. Needs `WithCacheStore`. |
 | `WithCacheXFetchBeta(beta float64)` | XFetch probabilistic early-refresh parameter. Default `1.0`; `0` disables XFetch (singleflight + jitter stay on). Needs `WithCacheStore`. |
