@@ -128,6 +128,28 @@ jobs:
           QUARK_TEST_REDIS_ADDR: localhost:6379
         run: go test ./... -timeout 5m -v -count=1
 
+  # QK7-2: the race detector had no lane — data races only surfaced when
+  # someone remembered to run -race by hand, and the gate was not even
+  # reproducible (two 11000-row batch tests blew the default per-query
+  # timeout under -race on modest hardware; they now carry their own
+  # budget). -short and no engine containers keep the lane fast; the
+  # SQLite/fake-driver tests are where the executor/pool concurrency
+  # (implicit-tx AfterFunc, deferred commits, replica failover) actually
+  # runs, so this is where -race pays for itself.
+  race:
+    name: Race (-short)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests with the race detector
+        run: go test -race -short -count=1 -timeout 15m ./...
+
   # F6-8: the benchmark harness is its own module (separate go.mod with a
   # local `replace` directive), so the root `go test ./...` above does not
   # build it. This job compiles and smoke-runs it to keep it from rotting.
