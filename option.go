@@ -51,6 +51,19 @@ func WithMiddleware(m Middleware) Option {
 }
 
 // Limits defines security and performance limits for queries.
+//
+// For the numeric fields, zero means "not set": [WithLimits] fills any
+// zero-valued numeric field from [DefaultLimits], so a partial literal such
+// as Limits{MaxResults: 500} raises one limit without silently zeroing the
+// rest. A negative value is passed through untouched — that is the explicit
+// form for "no cap" where a consumer honours it (e.g. MaxQueryLength < 0
+// disables the generated-SQL length check).
+//
+// The boolean fields (AllowRawQueries, SafeMigrations) are NOT normalized:
+// an explicit false is indistinguishable from the zero value, so a partial
+// literal carries AllowRawQueries=false and SafeMigrations=false regardless
+// of the defaults. To change one field while keeping every default —
+// including SafeMigrations=true — start from [DefaultLimits] and modify it.
 type Limits struct {
 	MaxQueryLength     int
 	MaxResults         int
@@ -75,10 +88,48 @@ func DefaultLimits() Limits {
 }
 
 // WithLimits sets the security and performance limits.
+//
+// Zero-valued NUMERIC fields are filled from [DefaultLimits] before the
+// struct is installed: zero means "not touched", never "no limit" or "no
+// timeout". Without this normalization a partial literal — the natural way
+// to raise one limit — left QueryTimeout at 0, and since every builder
+// execution path derives context.WithTimeout from it, every query context
+// was born already expired (#262). Negative values pass through untouched.
+//
+// Asymmetry, on purpose: the boolean fields are NOT normalized (an explicit
+// false is indistinguishable from the zero value). A partial literal
+// therefore keeps AllowRawQueries=false AND SafeMigrations=false — the
+// latter differs from the DefaultLimits value (true), which means Sync may
+// drop columns. When you want the defaults for the booleans, start from
+// [DefaultLimits] and modify only what you need.
 func WithLimits(l Limits) Option {
 	return func(c *Client) {
-		c.limits = l
+		c.limits = l.normalized()
 	}
+}
+
+// normalized returns a copy of l with every zero-valued numeric field
+// replaced by its [DefaultLimits] counterpart (#262). Negative values and
+// the boolean fields pass through unchanged — see the godoc on [Limits]
+// and [WithLimits] for the rationale.
+func (l Limits) normalized() Limits {
+	d := DefaultLimits()
+	if l.MaxQueryLength == 0 {
+		l.MaxQueryLength = d.MaxQueryLength
+	}
+	if l.MaxResults == 0 {
+		l.MaxResults = d.MaxResults
+	}
+	if l.MaxJoins == 0 {
+		l.MaxJoins = d.MaxJoins
+	}
+	if l.MaxWhereConditions == 0 {
+		l.MaxWhereConditions = d.MaxWhereConditions
+	}
+	if l.QueryTimeout == 0 {
+		l.QueryTimeout = d.QueryTimeout
+	}
+	return l
 }
 
 // WithCacheStore sets the caching backend for the client.
