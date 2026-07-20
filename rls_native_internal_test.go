@@ -28,33 +28,59 @@ import (
 // commit failures ("failcommit").
 var errFakeCommit = errors.New("fake rls driver: commit refused")
 
+// errFakeBegin / errFakeSetConfig back the QK7-3 modes below.
+var (
+	errFakeBegin     = errors.New("fake rls driver: begin refused")
+	errFakeSetConfig = errors.New("fake rls driver: exec refused")
+)
+
 type fakeRLSDriver struct{}
 
 func (fakeRLSDriver) Open(name string) (driver.Conn, error) {
-	return &fakeRLSConn{failCommit: name == "failcommit"}, nil
+	return &fakeRLSConn{mode: name}, nil
 }
 
-type fakeRLSConn struct{ failCommit bool }
+// fakeRLSConn's behaviour is selected by the DSN:
+//
+//   - "failcommit":    every tx.Commit fails (QK6-3)
+//   - "failbegin":     BeginTx fails (QK7-3)
+//   - "failsetconfig": ExecContext fails — the first statement inside the
+//     implicit tx is set_config, so this simulates its failure (QK7-3)
+//   - "panicexec":     ExecContext panics — the driver dies on the second
+//     operation of the implicit tx, after BeginTx handed one out (QK7-1)
+//   - "norows":        queries succeed and return zero rows (QK7-3 control)
+type fakeRLSConn struct{ mode string }
 
 func (c *fakeRLSConn) Prepare(string) (driver.Stmt, error) {
 	return nil, errors.New("fake rls driver: prepared statements not supported")
 }
-func (c *fakeRLSConn) Close() error              { return nil }
-func (c *fakeRLSConn) Begin() (driver.Tx, error) { return &fakeRLSTx{conn: c}, nil }
+func (c *fakeRLSConn) Close() error { return nil }
+func (c *fakeRLSConn) Begin() (driver.Tx, error) {
+	return c.BeginTx(context.Background(), driver.TxOptions{})
+}
 func (c *fakeRLSConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
+	if c.mode == "failbegin" {
+		return nil, errFakeBegin
+	}
 	return &fakeRLSTx{conn: c}, nil
 }
 func (c *fakeRLSConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	switch c.mode {
+	case "failsetconfig":
+		return nil, errFakeSetConfig
+	case "panicexec":
+		panic("fake rls driver: exec panic")
+	}
 	return driver.RowsAffected(1), nil
 }
 func (c *fakeRLSConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
-	return &fakeRLSRows{}, nil
+	return &fakeRLSRows{done: c.mode == "norows"}, nil
 }
 
 type fakeRLSTx struct{ conn *fakeRLSConn }
 
 func (t *fakeRLSTx) Commit() error {
-	if t.conn.failCommit {
+	if t.conn.mode == "failcommit" {
 		return errFakeCommit
 	}
 	return nil
@@ -319,5 +345,135 @@ func TestNativeRLSDeferredCommitFailureFallbackLogger(t *testing.T) {
 	waitForCounter(t, 1, c.DeferredCommitFailures)
 	if out := buf.String(); !strings.Contains(out, "implicit-tx deferred commit failed") {
 		t.Fatalf("nil client logger silenced the commit failure; default-logger output:\n%s", out)
+	}
+}
+
+// --- QK7-3: acquisition failures must not read as ErrNoRows ------------
+
+// assertRealRowError asserts the Scan error for a forced infrastructure
+// failure on the QueryRow path: non-nil, NOT sql.ErrNoRows, carrying the
+// driver's original error in its chain, and prefixed with the failing
+// stage.
+func assertRealRowError(t *testing.T, scanErr, want error, stage string) {
+	t.Helper()
+	if scanErr == nil {
+		t.Fatalf("expected the %s failure to surface on Scan, got nil", stage)
+	}
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		t.Fatalf("%s failure masked as sql.ErrNoRows: %v", stage, scanErr)
+	}
+	if want != nil && !errors.Is(scanErr, want) {
+		t.Fatalf("Scan lost the real %s error chain: %v", stage, scanErr)
+	}
+	if !strings.Contains(scanErr.Error(), stage) {
+		t.Fatalf("Scan error does not name the failing stage %q: %v", stage, scanErr)
+	}
+}
+
+// TestNativeRLSQueryRowSurfacesRealErrors forces each pre-statement
+// failure of the QueryRow path (BeginTx, set_config, conn acquisition)
+// and asserts the caller's Scan receives the real error instead of the
+// pre-fix sentinel behaviour, where every one of them scanned as
+// sql.ErrNoRows and the cause survived only in the log.
+func TestNativeRLSQueryRowSurfacesRealErrors(t *testing.T) {
+	t.Run("BeginTx", func(t *testing.T) {
+		db := fakeRLSDB(t, "failbegin")
+		e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id"}
+
+		var v int64
+		err := e.QueryRowContext(context.Background(), "SELECT 1").Scan(&v)
+		assertRealRowError(t, err, errFakeBegin, "native rls: begin tx")
+	})
+
+	t.Run("SetConfig", func(t *testing.T) {
+		db := fakeRLSDB(t, "failsetconfig")
+		e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id"}
+
+		var v int64
+		err := e.QueryRowContext(context.Background(), "SELECT 1").Scan(&v)
+		assertRealRowError(t, err, errFakeSetConfig, "native rls: set_config")
+	})
+
+	t.Run("AcquireConn", func(t *testing.T) {
+		db := fakeRLSDB(t, "")
+		_ = db.Close() // every acquisition now fails with sql: database is closed
+		e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id"}
+
+		var v int64
+		err := e.QueryRowContext(context.Background(), "SELECT 1").Scan(&v)
+		assertRealRowError(t, err, nil, "native rls: acquire conn")
+	})
+}
+
+// TestNativeRLSQueryRowNoRowsIsStillErrNoRows is the control for QK7-3:
+// with the infrastructure healthy and a genuinely empty result, Scan
+// must keep returning sql.ErrNoRows — the fix separates the two cases,
+// it does not repaint them both.
+func TestNativeRLSQueryRowNoRowsIsStillErrNoRows(t *testing.T) {
+	db := fakeRLSDB(t, "norows")
+	e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // ends the "request": deferred commit + conn hand-back
+
+	var v int64
+	err := e.QueryRowContext(ctx, "SELECT 1").Scan(&v)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("empty result must scan as sql.ErrNoRows, got %v", err)
+	}
+}
+
+// --- QK7-1: a panicking driver must not leak the conn/tx ---------------
+
+// TestNativeRLSPanicDuringImplicitTxDoesNotLeakConn kills the driver on
+// the second operation of the implicit tx (the set_config ExecContext,
+// right after BeginTx handed a transaction out) and asserts two things
+// for each executor path: the panic still propagates to the caller, and
+// the pool is NOT left exhausted. Pre-fix there was no defer between
+// acquiring the conn/tx and the point where the AfterFunc (or the
+// synchronous Commit) takes ownership, so the panic abandoned both — on
+// a MaxOpenConns=1 pool every later acquisition blocked forever.
+func TestNativeRLSPanicDuringImplicitTxDoesNotLeakConn(t *testing.T) {
+	paths := []struct {
+		name string
+		op   func(e *nativeRLSExecutor, ctx context.Context)
+	}{
+		{"QueryContext", func(e *nativeRLSExecutor, ctx context.Context) {
+			_, _ = e.QueryContext(ctx, "SELECT 1")
+		}},
+		{"QueryRowContext", func(e *nativeRLSExecutor, ctx context.Context) {
+			var v int64
+			_ = e.QueryRowContext(ctx, "SELECT 1").Scan(&v)
+		}},
+		{"ExecContext", func(e *nativeRLSExecutor, ctx context.Context) {
+			_, _ = e.ExecContext(ctx, "UPDATE t SET x = 1")
+		}},
+	}
+	for _, p := range paths {
+		t.Run(p.name, func(t *testing.T) {
+			db := fakeRLSDB(t, "panicexec")
+			db.SetMaxOpenConns(1)
+			e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id"}
+
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Fatal("expected the driver panic to propagate to the caller")
+					}
+				}()
+				p.op(e, context.Background())
+			}()
+
+			// The panic-path cleanup runs on a detached goroutine, so
+			// give the hand-back a bounded window: if the conn never
+			// returns, this acquisition times out and fails the test.
+			acquireCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			conn, err := db.Conn(acquireCtx)
+			if err != nil {
+				t.Fatalf("pool exhausted after a driver panic mid implicit tx: %v", err)
+			}
+			_ = conn.Close()
+		})
 	}
 }

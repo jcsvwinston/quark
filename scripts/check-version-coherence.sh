@@ -31,6 +31,18 @@ require_mention SECURITY.md
 require_mention CLAUDE.md
 require_mention website/docs/reference/release-notes.mdx
 
+# Guard de heading en release-notes (NU7-1 aplicado a quark). La página usa
+# el patrón «versión actual arriba + una sección '## vX.Y.Z' por release»;
+# el require_mention de arriba solo exige que la cadena v${version} aparezca
+# EN ALGUNA PARTE, así que el estado «release-please subió el manifest pero
+# nadie escribió la sección» pasaba el guard con la mención del índice.
+# Exigimos el heading de la versión del manifest (con o sin título detrás).
+release_notes="website/docs/reference/release-notes.mdx"
+if ! grep -qE "^## v${version//./\\.}( |$)" "$release_notes"; then
+  echo "ERROR: ${release_notes} no tiene una sección '## v${version}' (la versión del manifest necesita sus release notes)" >&2
+  fail=1
+fi
+
 # Narrative release notes must exist for the current minor.
 minor_notes="docs/RELEASE_NOTES_v${version%.*}.0.md"
 if [ ! -f "$minor_notes" ]; then
@@ -44,7 +56,7 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/release-notes, ${minor_notes} present"
+echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/release-notes, '## v${version}' section present, ${minor_notes} present"
 
 # ---------------------------------------------------------------------------
 # Roadmap sin versiones (QK6-5). QK5-2 quitó la versión hardcodeada del

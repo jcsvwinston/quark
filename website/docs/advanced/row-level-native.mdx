@@ -200,3 +200,12 @@ the resolver for the current context.
 
   `router.Tx` has none of this: it commits synchronously inside the callback.
   Prefer it for any write whose durability must be settled before you answer.
+- **Single-row reads distinguish "no rows" from an isolation failure.** When a
+  single-row operation (`Count`, aggregates, `Create` reading back
+  `INSERT … RETURNING`) cannot even set the tenant variable — acquiring the
+  connection, opening the implicit transaction, or the `set_config` call
+  itself fails — the operation returns that error, prefixed with the failing
+  stage (`native rls: begin tx: …`, `native rls: set_config: …`) and with the
+  original cause intact for `errors.Is`. It is never reported as
+  `sql.ErrNoRows`, so an empty result always means exactly that: the policy
+  filtered every row.

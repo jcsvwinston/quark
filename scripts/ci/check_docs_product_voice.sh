@@ -44,6 +44,7 @@ ADR-[0-9]+	Explain the decision in prose. The reader cannot open our ADRs and sh
 \bANALISIS_MADUREZ\.md\b	Internal document. Never reference it from published docs.
 \baudit backlog\b	Internal process vocabulary. Say what changed, not where it was tracked.
 \(#[0-9]+\)	Bare issue number. Readers cannot resolve it; describe the change instead.
+\b(OR|QK|NU|QM)[0-9]+-[0-9]+\b	Internal audit finding ID. Readers cannot look it up; describe the behaviour or the fix in prose.
 EOF
 )
 
