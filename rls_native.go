@@ -97,6 +97,21 @@ func (c *Client) DeferredCommitFailures() uint64 {
 	return c.deferredCommitFailures.Load()
 }
 
+// cleanupAbandonedImplicitTx is the shared body of the QK7-1 defer
+// guards: it runs when an implicit-tx builder exits before ownership of
+// the tx/conn pair transferred (an error return, or a driver panic).
+// Rollback on an already-finalized tx returns ErrTxDone, which is
+// harmless — the guard only has to guarantee that neither resource is
+// left held.
+func cleanupAbandonedImplicitTx(tx *sql.Tx, conn *sql.Conn) {
+	if tx != nil {
+		_ = tx.Rollback()
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
 // setConfigSQL returns the SQL that emits the per-tx tenant variable.
 // We use the set_config function form rather than `SET LOCAL <name> = $1`
 // because the latter does not accept parameter binding in PostgreSQL —
@@ -120,15 +135,34 @@ func (e *nativeRLSExecutor) ExecContext(ctx context.Context, query string, args 
 	if err != nil {
 		return nil, fmt.Errorf("native rls: begin tx: %w", err)
 	}
+	// QK7-1 guard: any exit before Commit takes over — an error return
+	// or a driver panic inside one of the ExecContext calls — must roll
+	// back, or the tx keeps its pooled connection forever. On the panic
+	// path the cleanup runs detached: a panicking driver unwinds through
+	// database/sql code that releases its internal locks via defer on the
+	// exec path but not on every path, so a same-goroutine Rollback could
+	// block forever and turn the panic into a deadlock.
+	finished := false
+	defer func() {
+		if finished {
+			return
+		}
+		if p := recover(); p != nil {
+			go cleanupAbandonedImplicitTx(tx, nil)
+			panic(p)
+		}
+		cleanupAbandonedImplicitTx(tx, nil)
+	}()
 	if _, err := tx.ExecContext(ctx, e.setConfigSQL(), e.varName, e.tenantID); err != nil {
-		_ = tx.Rollback()
 		return nil, fmt.Errorf("native rls: set_config: %w", err)
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, err
 	}
+	// Commit finalizes the tx and releases its connection even when it
+	// returns an error, so the guard must stand down before the call.
+	finished = true
 	if cerr := tx.Commit(); cerr != nil {
 		return nil, fmt.Errorf("native rls: commit: %w", cerr)
 	}
@@ -154,6 +188,26 @@ func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args
 	if err != nil {
 		return nil, fmt.Errorf("native rls: acquire conn: %w", err)
 	}
+	// QK7-1 guard: every exit before the AfterFunc below takes ownership
+	// of the tx+conn pair — an error return or a panicking driver — must
+	// roll back and hand the conn back, or a pool slot leaks permanently.
+	// On the panic path the cleanup runs detached: database/sql's begin
+	// and query internals only release their locks on the error path, so
+	// after a driver panic a same-goroutine Rollback/Close can block
+	// forever — the detached call frees the conn whenever database/sql
+	// left it releasable, and never turns the panic into a deadlock.
+	var tx *sql.Tx
+	owned := false
+	defer func() {
+		if owned {
+			return
+		}
+		if p := recover(); p != nil {
+			go cleanupAbandonedImplicitTx(tx, conn)
+			panic(p)
+		}
+		cleanupAbandonedImplicitTx(tx, conn)
+	}()
 	// The tx lifecycle is detached from the caller's ctx on purpose:
 	// database/sql auto-ROLLS BACK a transaction whose BeginTx ctx is
 	// canceled, and a request ctx always ends by cancellation — so binding
@@ -162,22 +216,18 @@ func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args
 	// Detached, the deferred commit is deterministic; per-statement
 	// cancellation still applies through the ctx each query receives.
 	// Surfaced by QK5-4, the first time a CI lane executed this path.
-	tx, err := conn.BeginTx(context.WithoutCancel(ctx), nil)
+	tx, err = conn.BeginTx(context.WithoutCancel(ctx), nil)
 	if err != nil {
-		_ = conn.Close()
 		return nil, fmt.Errorf("native rls: begin tx: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, e.setConfigSQL(), e.varName, e.tenantID); err != nil {
-		_ = tx.Rollback()
-		_ = conn.Close()
 		return nil, fmt.Errorf("native rls: set_config: %w", err)
 	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		_ = tx.Rollback()
-		_ = conn.Close()
 		return nil, err
 	}
+	owned = true // the AfterFunc owns the tx+conn pair from here
 	context.AfterFunc(ctx, func() {
 		if cerr := tx.Commit(); cerr != nil {
 			e.noteDeferredCommitFailure(cerr)
@@ -210,9 +260,29 @@ func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, a
 		// regime) this Row's Scan reports ctx.Err() directly.
 		return e.db.QueryRowContext(ctx, "SELECT NULL WHERE FALSE")
 	}
-	tx, err := conn.BeginTx(context.WithoutCancel(ctx), nil)
+	// QK7-1 guard — same shape and rationale as QueryContext: cleanup on
+	// every exit until the AfterFunc takes ownership, detached when a
+	// driver panic is unwinding.
+	var tx *sql.Tx
+	owned := false
+	defer func() {
+		if owned {
+			return
+		}
+		if p := recover(); p != nil {
+			go cleanupAbandonedImplicitTx(tx, conn)
+			panic(p)
+		}
+		cleanupAbandonedImplicitTx(tx, conn)
+	}()
+	tx, err = conn.BeginTx(context.WithoutCancel(ctx), nil)
 	if err != nil {
-		_ = conn.Close()
+		// Release inline before minting the sentinel row: it queries
+		// e.db, so it needs a pool slot — the deferred guard only runs
+		// after the return expression, which starves a size-1 pool. The
+		// cleanup is idempotent (ErrTxDone / ErrConnDone), so the guard
+		// re-running it afterwards is harmless.
+		cleanupAbandonedImplicitTx(tx, conn)
 		// Return a *sql.Row that surfaces the error on Scan. The
 		// simplest way is to call db.QueryRowContext with an
 		// intentionally-failing query that captures err; but the
@@ -228,13 +298,14 @@ func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, a
 		return e.db.QueryRowContext(ctx, "SELECT NULL WHERE FALSE")
 	}
 	if _, err := tx.ExecContext(ctx, e.setConfigSQL(), e.varName, e.tenantID); err != nil {
-		_ = tx.Rollback()
-		_ = conn.Close()
+		// Same inline release as the BeginTx branch above.
+		cleanupAbandonedImplicitTx(tx, conn)
 		e.log().Error("native rls: set_config failed for QueryRow",
 			"err", err, "var", e.varName)
 		return e.db.QueryRowContext(ctx, "SELECT NULL WHERE FALSE")
 	}
 	row := tx.QueryRowContext(ctx, query, args...)
+	owned = true // the AfterFunc owns the tx+conn pair from here
 	context.AfterFunc(ctx, func() {
 		if cerr := tx.Commit(); cerr != nil {
 			e.noteDeferredCommitFailure(cerr)
