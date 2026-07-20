@@ -335,8 +335,8 @@ if client.Dialect().Name() == "postgres" {
 Returns how many deferred implicit-transaction commits have failed on this
 client since it was created. Deferred commits only exist under the
 [`RowLevelSecurityNative`](../../advanced/row-level-native) strategy: the
-`For[T]` query paths commit their implicit transaction when the request
-context ends, so a commit failure happens *after* the operation already
+`For[T]` query paths commit their implicit transaction an instant after the
+operation completes, so a commit failure happens *after* the operation already
 returned success — each unit here is a write the engine rolled back after the
 caller saw it succeed. Every failure is also logged at `ERROR` when it
 happens; this counter is the aggregate for operators to alert on. It never

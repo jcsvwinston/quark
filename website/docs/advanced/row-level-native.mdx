@@ -123,11 +123,14 @@ filters server-side.
 
 :::note Use `router.Tx` for anything non-trivial
 `For[T](ctx, router)` wraps each call in an implicit transaction (needed because
-`set_config(..., is_local=true)` only applies inside one). That transaction
-commits when the **caller's `ctx`** ends, not when rows close — fine for a
-request-scoped HTTP handler, but a long-lived CLI `ctx` would hold a connection
-per query and can saturate the pool. So for batch jobs and for `Iter`/`Cursor`
-streaming, run inside `router.Tx`.
+`set_config(..., is_local=true)` only applies inside one). That transaction is
+scoped to the operation: it commits an instant after the call completes — the
+commit is deferred, not part of the statement itself (see the write-semantics
+limitation below). `Iter`/`Cursor` are the exception: their transaction stays
+open until you close the cursor, holding a pooled connection and shared locks
+on the table for as long as the stream lives. For multi-step work, batch jobs
+and streaming, run inside `router.Tx` — one transaction, opened and committed
+exactly where you can see it.
 :::
 
 ## Raw SQL under Native
@@ -157,6 +160,27 @@ wired:
 2. `set_config` never ran for this query — raw SQL outside `router.Tx` / `For[T]`; the setting reads `NULL` and filters everything out.
 3. `FORCE ROW LEVEL SECURITY` is missing and the caller owns the table — re-emit the DDL with `FORCE`.
 
+**A migration or DDL statement hangs** (`ALTER TABLE`, `DROP TABLE`, an index
+build) — something is holding a lock on the table, and under Native the usual
+suspects are implicit transactions that have not finalized yet:
+
+1. An open `Iter`/`Cursor` stream. Its transaction — connection and
+   `ACCESS SHARE` lock included — lives until the cursor closes (an abandoned
+   cursor is reclaimed when `QueryTimeout` expires). Close cursors promptly,
+   or run the stream inside `router.Tx`.
+2. On releases up to 1.3.2, `Create` (and an `Update` falling back to an
+   insert) kept its implicit transaction open until the **caller's** context
+   ended. With a long-lived context — a CLI tool or a batch job on
+   `context.Background()` — every insert parked one `idle in transaction`
+   session, and any later DDL on the table blocked behind their locks
+   indefinitely. Current releases scope that transaction to the operation, so
+   it drains on its own; on affected versions, give each operation a
+   short-lived context or write through `router.Tx`.
+
+To see the culprits:
+`SELECT pid, state, query FROM pg_stat_activity WHERE state = 'idle in transaction'`
+— each row is a transaction holding its locks with no statement running.
+
 **`ErrUnsupportedFeature: RowLevelSecurityNative requires PostgreSQL`** — the
 router's base client isn't on PG. Switch to `RowLevelSecurityClient` for non-PG.
 
@@ -179,19 +203,24 @@ the resolver for the current context.
   [`Client.UseEventBus`](events).
 - **Policies aren't auto-removed** when you drop the router; manage them in your
   schema migrations.
-- **The implicit-`For[T]` transaction holds its connection until `ctx` ends** —
-  fine for request scope, not for long-lived CLI contexts. Use `router.Tx` there.
-- **Write semantics under the implicit `For[T]` transaction (since v1.3.1).**
-  A write that goes through the query paths — `Create`, which runs
-  `INSERT … RETURNING` — executes inside an implicit transaction that commits
-  when the request context **ends**. Once the statement has executed,
+- **Streaming holds its transaction open.** `Iter`/`Cursor` under the
+  implicit-transaction path keep their transaction — connection and shared
+  locks included — until the cursor closes; `QueryTimeout` bounds an abandoned
+  one. Every other operation releases its transaction as the call completes.
+  For long streams, prefer `router.Tx`.
+- **Write semantics under the implicit `For[T]` transaction.** A write that
+  goes through the query paths — `Create`, which runs `INSERT … RETURNING`,
+  and the multi-row `CreateBatch` — executes inside an implicit transaction
+  whose commit is **deferred**: it lands an instant after the operation
+  returns, not inside the call itself. Once the statement has executed,
   cancelling the request does **not** roll the write back. This diverges from
   the exec path (`Update` / `Delete`), which commits synchronously before
   returning and is rolled back like any interrupted statement. Two
   consequences to plan for:
-  - The deferred commit lands *after* control returns to your handler. An
-    immediate read through another connection (a follow-up request, another
-    service) may not see the write yet; a read in the same request scope does.
+  - There is a brief window after the operation returns in which the write is
+    not yet visible to any other transaction — including your own next query.
+    It closes in milliseconds, but "read your own write on the very next
+    line" is only guaranteed inside `router.Tx`.
   - If the deferred commit fails, the operation has already reported success.
     Quark logs the failure at `ERROR` through the client logger and increments
     [`Client.DeferredCommitFailures`](../reference/api/client#deferredcommitfailures)
