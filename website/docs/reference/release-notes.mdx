@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.3.2** on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.3.3** on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade:
@@ -17,6 +17,40 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.3.3
+
+A correctness patch for the native row-level-security strategy. Upgrade if
+you use `RowLevelSecurityNative` — especially if you call `Create` or
+`Update` from long-lived contexts (batch jobs, CLIs, workers).
+
+### Fixed
+
+- **`Create` and `Update` no longer hold their implicit transaction until
+  your context ends.** Both now scope the transaction to the operation, like
+  every other native-RLS entry point already did. Previously, each write
+  from a long-lived context kept one pooled connection idle in transaction
+  (with its locks) until that context finished — enough writes could exhaust
+  the pool, and any later DDL on the touched table (a migration, a
+  `DROP TABLE` in tests) blocked behind those locks. As part of the same
+  fix, a row you just wrote is visible to reads on the same context
+  (read-your-writes), which previously only held across contexts.
+- **The executor no longer leaks its pooled connection if the driver
+  panics.** A panic inside a query or transaction begin used to abandon the
+  connection; the pool now gets it back on every path, including panics the
+  standard library survives.
+- **Driver and transaction errors are no longer masked as `ErrNoRows`.**
+  On the `QueryRow` path, a failure to begin the transaction or set the
+  tenant context used to surface as a generic "no rows" result; the real
+  error now reaches your `Scan` call intact, wrapped with the stage that
+  failed, so `errors.Is`/`errors.As` work.
+
+### Upgrade notes
+
+Nothing to do. If you had sized pools defensively or added per-operation
+contexts to work around hangs during migrations, those workarounds are no
+longer needed — see the troubleshooting entry in the native row-level
+security guide if a DDL statement still hangs on releases before this one.
 
 ## v1.3.2
 
