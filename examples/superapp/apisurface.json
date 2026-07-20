@@ -762,6 +762,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).AllowUnbounded",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Apply",
       "kind": "method"
     },
@@ -2837,6 +2842,26 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "StrictReadsMode",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StrictReadsOff",
+      "kind": "const"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StrictReadsReject",
+      "kind": "const"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StrictReadsWarn",
+      "kind": "const"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "StubBinder",
       "kind": "func"
     },
@@ -2879,6 +2904,11 @@
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TenantStrategy",
       "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "TrackReads",
+      "kind": "func"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3038,6 +3068,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithSlowQueryThreshold",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "WithStrictReads",
       "kind": "func"
     },
     {

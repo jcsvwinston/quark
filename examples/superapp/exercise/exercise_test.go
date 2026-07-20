@@ -68,6 +68,9 @@ func TestExercisersSQLite(t *testing.T) {
 		OTL("IncludeArgs"), OTL("RedactArgs"),
 		OTL("(*Middleware).WrapExec"), OTL("(*Middleware).WrapQuery"), OTL("(*Middleware).WrapQueryRow"),
 		QF("WithMiddleware"), QF("WithLogger"), QF("WithSlowQueryThreshold"),
+		// STRICTREADS: modo estricto de lecturas (#247) — asserts funcionales
+		// sobre el WARN/reject/N+1 en el propio exerciser.
+		QF("WithStrictReads"), QF("TrackReads"), QM("AllowUnbounded"),
 		// BUILDERADV: los ~35 métodos avanzados de Query[T].
 		QM("WhereBetween"), QM("WhereNot"), QM("WhereP"), QM("WhereExpr"), QM("Apply"),
 		QM("UpdateFields"), QM("Track"), QM("LeftJoin"), QM("RightJoin"),
