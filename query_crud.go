@@ -487,7 +487,23 @@ func (q *Query[T]) Create(entity *T) error {
 		}
 	}
 
-	if _, err := q.saveAny(q.ctx, q.exec, entity, false); err != nil {
+	// Operation-scoped ctx, the same pattern every other op in this file
+	// uses. It is load-bearing under RowLevelSecurityNative: the implicit
+	// transaction around INSERT … RETURNING commits when THIS ctx ends, so
+	// the ctx must end with the operation. Passing q.ctx unwrapped tied the
+	// commit to the caller's ctx instead — with a long-lived ctx (batch job
+	// on context.Background(), CLI), every Create left one transaction
+	// idle-in-transaction holding its connection and ACCESS SHARE locks
+	// until the ctx died, any later DDL on the table blocked behind them,
+	// and the write stayed invisible to reads in the same ctx (issue #252;
+	// reproduced against PostgreSQL by
+	// TestRowLevelSecurityNativeCreateReleasesImplicitTx). The wrapped ctx
+	// flows through the whole saveAny cascade (associations included) via
+	// the BaseQuery it builds.
+	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+	defer cancel()
+
+	if _, err := q.saveAny(ctx, q.exec, entity, false); err != nil {
 		return err
 	}
 
@@ -646,7 +662,16 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 		}
 	}
 
-	rowsAffected, err := q.saveAny(q.ctx, q.exec, entity, true)
+	// Operation-scoped ctx — see the twin comment in Create. Update's
+	// fallback branch for a zero PK is an INSERT … RETURNING, which under
+	// RowLevelSecurityNative runs in an implicit transaction that commits
+	// when this ctx ends; unwrapped, that meant "when the caller's ctx
+	// ends" (issue #252). The pure-UPDATE branch commits synchronously and
+	// only gains the standard per-operation timeout bound.
+	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+	defer cancel()
+
+	rowsAffected, err := q.saveAny(ctx, q.exec, entity, true)
 	if err != nil {
 		return rowsAffected, err
 	}

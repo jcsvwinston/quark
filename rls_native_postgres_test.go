@@ -199,14 +199,16 @@ func TestRowLevelSecurityNativePostgresIsolation(t *testing.T) {
 	ctxTA := context.WithValue(ctx, testTenantKey, "ta")
 	ctxTB := context.WithValue(ctx, testTenantKey, "tb")
 
-	// scoped gives one implicit-tx operation a request-scoped ctx. The Native
-	// implicit-tx design (see nativeRLSExecutor) keeps each operation's
-	// transaction — connection and locks included — open until the caller's
-	// ctx ends; that is the documented request-scoped regime. Reusing the
-	// test-lifetime ctx here leaks those transactions, and their locks
-	// deadlock the DROP TABLE cleanup: exactly how this test hung for 25m the
-	// first time a lane ever executed it (QK5-4). The long-lived-ctx regime
-	// itself remains a real sharp edge of the design, tracked as an issue.
+	// scoped gives one implicit-tx operation its own cancelable ctx. On
+	// pre-#252-fix code this was load-bearing: Create handed the caller's
+	// ctx straight to the executor, each operation's transaction — connection
+	// and locks included — stayed open until that ctx ended, and reusing the
+	// test-lifetime ctx leaked those transactions until their locks
+	// deadlocked the DROP TABLE cleanup (this test once hung a lane for 25m
+	// that way, QK5-4). The builder paths now scope every operation's ctx
+	// themselves — TestRowLevelSecurityNativeCreateReleasesImplicitTx pins
+	// that — so scoped is belt-and-braces hygiene, kept to make each subtest
+	// hermetic rather than to protect the cleanup.
 	scoped := func(t *testing.T, parent context.Context) context.Context {
 		t.Helper()
 		c, cancel := context.WithCancel(parent)
@@ -396,4 +398,165 @@ func TestRowLevelSecurityNativePostgresIsolation(t *testing.T) {
 			t.Fatalf("tb Count after batch insert = %d, want 2", n)
 		}
 	})
+}
+
+// TestRowLevelSecurityNativeCreateReleasesImplicitTx pins the fix for
+// issue #252 against a real PostgreSQL engine: under
+// RowLevelSecurityNative, the implicit transaction each For[T] operation
+// opens must be released when the OPERATION completes — not when the
+// caller's ctx ends. Pre-fix, Create (and Update's zero-PK insert branch)
+// handed the caller's ctx straight to the executor, so with a long-lived
+// ctx (batch job on context.Background(), CLI, tests) every Create left
+// one transaction idle-in-transaction, holding its pooled connection and
+// its ACCESS SHARE locks until the ctx died. Consequences pinned here:
+//
+//  1. the retained transactions never drained (one per Create),
+//  2. any later DDL on the table blocked behind their locks — this is
+//     the mechanism that once hung the isolation test's DROP TABLE
+//     cleanup for 25 minutes in CI,
+//  3. the created row stayed invisible to reads in the same ctx (each
+//     read runs in its own transaction; read committed cannot see
+//     another transaction's uncommitted insert).
+//
+// The read paths (List/Count/CreateBatch/aggregates) already scoped their
+// ctx per operation; the fix aligns Create/Update with that pattern. The
+// commit itself remains deferred (context.AfterFunc), so the assertions
+// below poll with a bounded deadline instead of asserting instantly.
+func TestRowLevelSecurityNativeCreateReleasesImplicitTx(t *testing.T) {
+	dsn := resolvePostgresDSN(t)
+	if dsn == "" {
+		t.Skip("QUARK_TEST_POSTGRES_DSN not set (rebuild with -tags=integration to spin up a container)")
+	}
+
+	ctx := context.Background()
+
+	// AllowRawQueries=true: the DDL probe and the pg_stat_activity poll
+	// below go through raw SQL.
+	admin, err := quark.New("pgx", dsn, quark.WithLimits(quark.Limits{
+		AllowRawQueries: true,
+		MaxResults:      1000,
+		QueryTimeout:    30 * time.Second,
+	}))
+	if err != nil {
+		t.Fatalf("new admin pgx client: %v", err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+
+	type RLSRetentionOrder struct {
+		ID       int64  `db:"id" pk:"true"`
+		TenantID string `db:"tenant_id"`
+		Status   string `db:"status"`
+	}
+	table := quark.GetModelMeta[RLSRetentionOrder]().Table
+
+	cleanup := func() {
+		_ = admin.Exec(ctx, `DROP TABLE IF EXISTS `+table+` CASCADE`)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	if err := admin.Migrate(ctx, &RLSRetentionOrder{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	// No CREATE POLICY here on purpose: the retention is a property of the
+	// implicit-tx lifecycle, orthogonal to whether policies filter rows,
+	// and skipping the role/policy setup keeps the pin minimal.
+	base, err := quark.New("pgx", dsn, quark.WithLimits(quark.Limits{
+		MaxResults:   1000,
+		QueryTimeout: 30 * time.Second,
+	}))
+	if err != nil {
+		t.Fatalf("new base pgx client: %v", err)
+	}
+	t.Cleanup(func() { _ = base.Close() })
+
+	cfg := quark.DefaultTenantConfig()
+	cfg.Strategy = quark.RowLevelSecurityNative
+	cfg.BaseClient = base
+	router := quark.NewTenantRouter(cfg,
+		func(c context.Context) string {
+			if v, ok := c.Value(testTenantKey).(string); ok {
+				return v
+			}
+			return ""
+		},
+		nil,
+	)
+
+	// The long-lived ctx: alive for the whole test, ended only by cleanup.
+	// This is exactly the regime the issue describes — and the regime the
+	// isolation test above must AVOID via its scoped() helper on pre-fix
+	// code.
+	longCtx, endBatch := context.WithCancel(context.WithValue(ctx, testTenantKey, "ta"))
+	t.Cleanup(endBatch)
+
+	const creates = 5
+	for i := 0; i < creates; i++ {
+		row := RLSRetentionOrder{TenantID: "ta", Status: "created"}
+		if err := quark.For[RLSRetentionOrder](longCtx, router).Create(&row); err != nil {
+			t.Fatalf("Create %d under Native: %v", i, err)
+		}
+		if row.ID == 0 {
+			t.Fatalf("Create %d did not populate PK from RETURNING", i)
+		}
+	}
+	// A couple of reads on the same long-lived ctx: these paths were
+	// already operation-scoped; they ride along to keep the pin honest
+	// about the whole For[T] surface.
+	if _, err := quark.For[RLSRetentionOrder](longCtx, router).List(); err != nil {
+		t.Fatalf("List under Native: %v", err)
+	}
+
+	// (1) Every implicit tx must drain while longCtx is STILL alive.
+	// pg_stat_activity: a retained tx sits "idle in transaction" with the
+	// INSERT (which names the table) as its last statement. The poll's own
+	// session is 'active' while it runs, so it never matches the filter.
+	retained := func() int {
+		var n int
+		err := admin.Raw().QueryRowContext(ctx,
+			`SELECT count(*) FROM pg_stat_activity
+			  WHERE state = 'idle in transaction' AND query LIKE '%'||$1||'%'`,
+			table).Scan(&n)
+		if err != nil {
+			t.Fatalf("pg_stat_activity poll: %v", err)
+		}
+		return n
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	n := retained()
+	for n != 0 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		n = retained()
+	}
+	if n != 0 {
+		t.Fatalf("%d implicit transaction(s) still idle-in-transaction with the caller ctx alive — implicit txs are retained until ctx end (issue #252)", n)
+	}
+
+	// (2) Read-your-writes on the same ctx: the rows must become visible
+	// to a read in the same long-lived ctx. Pre-fix they never did (the
+	// inserts stayed uncommitted until ctx end).
+	deadline = time.Now().Add(5 * time.Second)
+	var count int64
+	for time.Now().Before(deadline) {
+		count, err = quark.For[RLSRetentionOrder](longCtx, router).Count()
+		if err != nil {
+			t.Fatalf("Count under Native: %v", err)
+		}
+		if count == creates {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if count != creates {
+		t.Fatalf("Count on the same ctx = %d, want %d — writes invisible in-request (retained uncommitted)", count, creates)
+	}
+
+	// (3) DDL on the table proceeds while longCtx is still alive. Pre-fix
+	// this blocked behind the retained ACCESS SHARE locks until the 5s
+	// probe timeout (indefinitely, in the unbounded case).
+	ddlCtx, cancelDDL := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelDDL()
+	if err := admin.Exec(ddlCtx, `ALTER TABLE `+table+` ADD COLUMN retention_probe INT`); err != nil {
+		t.Fatalf("DDL blocked with the caller ctx alive: %v", err)
+	}
 }

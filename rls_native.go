@@ -29,10 +29,9 @@ import (
 //     *sql.Rows produced by the tx. The tx is **left open** because
 //     *sql.Rows is an opaque struct that the wrapper cannot subclass.
 //     A context.AfterFunc registered before returning commits the tx
-//     when the caller's context ends — so the typical request-scoped
-//     usage releases the connection on handler return. The Tx scoped
-//     to that ctx will not be referenced again by the caller; pg
-//     keeps the snapshot consistent until the tx finalizes.
+//     when the received ctx ends. The Tx scoped to that ctx will not
+//     be referenced again by the caller; pg keeps the snapshot
+//     consistent until the tx finalizes.
 //
 //   - QueryRowContext has the same shape as QueryContext: tx left
 //     open, AfterFunc commits on ctx end. *sql.Row is also opaque so
@@ -40,10 +39,25 @@ import (
 //     (conn acquisition, BeginTx, set_config) surface through the
 //     returned Row's Scan as the real error — never as sql.ErrNoRows.
 //
+// CONTRACT — the ctx these methods receive must be OPERATION-scoped,
+// not request- or process-scoped: the implicit tx (its pooled
+// connection and its ACCESS SHARE locks) lives exactly as long as that
+// ctx. Every builder path satisfies this by deriving a per-operation
+// ctx (context.WithTimeout(q.ctx, QueryTimeout), canceled when the
+// operation finishes — or, for Cursor/Iter, when the cursor closes), so
+// the tx drains as each operation completes regardless of how long the
+// caller's own ctx lives. Passing a long-lived ctx directly would
+// resurrect the retention this contract exists to prevent: one
+// idle-in-transaction session per query until the ctx dies, later DDL
+// on the table blocked behind their locks, and writes invisible to
+// reads in the same ctx (issue #252 — Create once leaked the caller's
+// ctx here, reproduced as a 25-minute CI hang and pinned by
+// TestRowLevelSecurityNativeCreateReleasesImplicitTx).
+//
 // For workloads that cannot tolerate the implicit-tx pattern (long
-// streaming via Iter/Cursor; very long-lived ctx that touches many
-// queries), callers should use TenantRouter.Tx directly — that path
-// opens a single tx for the whole callback and never leaks.
+// streaming via Iter/Cursor; multi-step units of work), callers should
+// use TenantRouter.Tx directly — that path opens a single tx for the
+// whole callback and never leaks.
 //
 // See ADR-0012 §"Cómo se ejecuta SET LOCAL por query" for the design
 // rationale.
@@ -91,7 +105,8 @@ func (e *nativeRLSExecutor) noteDeferredCommitFailure(cerr error) {
 // commits have failed on this Client since it was created. Deferred
 // commits only exist under the RowLevelSecurityNative strategy: the
 // For[T] query/QueryRow paths commit their implicit transaction when the
-// request context ends (see nativeRLSExecutor), so a commit failure
+// operation's ctx ends — an instant after the operation completes (see
+// nativeRLSExecutor) — so a commit failure
 // happens AFTER the operation already returned success to the caller —
 // each unit here is a write (or read snapshot) that was silently rolled
 // back by the engine. The failure is also logged at ERROR level through
@@ -237,13 +252,10 @@ func (e *nativeRLSExecutor) ExecContext(ctx context.Context, query string, args 
 
 // QueryContext begins an implicit transaction, sets the tenant
 // variable, and returns the rows. The tx is committed by a
-// context.AfterFunc registered against the caller's ctx. The caller
+// context.AfterFunc registered against the received ctx — which, per
+// the type-level contract, must be operation-scoped. The caller
 // remains responsible for closing the *sql.Rows; the tx commit and
 // the rows close happen independently.
-//
-// Side-effect for very long-lived ctx (CLI batch jobs running many
-// queries before ctx ends): each query holds a connection until ctx
-// terminates. Callers in that regime should use TenantRouter.Tx.
 func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	// Acquire the connection with the CALLER's ctx so the pool wait
 	// honours cancellation/deadline. Passing WithoutCancel straight to
