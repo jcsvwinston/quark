@@ -9,11 +9,26 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jcsvwinston/quark"
 
 	_ "modernc.org/sqlite"
 )
+
+// chunkTestLimits returns the Limits for the 11000-row chunking tests
+// below: DefaultLimits except for QueryTimeout. A single chunked batch
+// pass takes 15-35s under -race even on fast hardware, so the default
+// 30s per-query budget made the -race gate fail on modest machines
+// (QK7-2). What these tests pin is chunking behaviour, not latency —
+// the generous budget keeps them deterministic while go test's own
+// -timeout still bounds a real hang.
+func chunkTestLimits() quark.Limits {
+	l := quark.DefaultLimits()
+	l.AllowRawQueries = true // the CREATE TABLE in each test goes through Exec
+	l.QueryTimeout = 3 * time.Minute
+	return l
+}
 
 type chunkUser struct {
 	ID    int64  `db:"id" pk:"true"`
@@ -27,9 +42,7 @@ type chunkUser struct {
 // default); 11000 rows × 3 bound columns = 33000 params overruns it, so
 // this test fails with "too many SQL variables" without chunking.
 func TestUpsertBatchChunksToDialectCeiling(t *testing.T) {
-	limits := quark.DefaultLimits()
-	limits.AllowRawQueries = true // the CREATE TABLE below goes through Exec
-	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(chunkTestLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,9 +100,7 @@ func TestUpsertBatchChunksToDialectCeiling(t *testing.T) {
 // chunks were tiny; with per-dialect ceilings the statement count drops but
 // the result must be identical.
 func TestCreateBatchLargeSQLite(t *testing.T) {
-	limits := quark.DefaultLimits()
-	limits.AllowRawQueries = true // the CREATE TABLE below goes through Exec
-	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(limits))
+	client, err := quark.New("sqlite", ":memory:", quark.WithLimits(chunkTestLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
