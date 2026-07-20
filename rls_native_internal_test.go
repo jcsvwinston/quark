@@ -348,6 +348,81 @@ func TestNativeRLSDeferredCommitFailureFallbackLogger(t *testing.T) {
 	}
 }
 
+// --- QK7-3: acquisition failures must not read as ErrNoRows ------------
+
+// assertRealRowError asserts the Scan error for a forced infrastructure
+// failure on the QueryRow path: non-nil, NOT sql.ErrNoRows, carrying the
+// driver's original error in its chain, and prefixed with the failing
+// stage.
+func assertRealRowError(t *testing.T, scanErr, want error, stage string) {
+	t.Helper()
+	if scanErr == nil {
+		t.Fatalf("expected the %s failure to surface on Scan, got nil", stage)
+	}
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		t.Fatalf("%s failure masked as sql.ErrNoRows: %v", stage, scanErr)
+	}
+	if want != nil && !errors.Is(scanErr, want) {
+		t.Fatalf("Scan lost the real %s error chain: %v", stage, scanErr)
+	}
+	if !strings.Contains(scanErr.Error(), stage) {
+		t.Fatalf("Scan error does not name the failing stage %q: %v", stage, scanErr)
+	}
+}
+
+// TestNativeRLSQueryRowSurfacesRealErrors forces each pre-statement
+// failure of the QueryRow path (BeginTx, set_config, conn acquisition)
+// and asserts the caller's Scan receives the real error instead of the
+// pre-fix sentinel behaviour, where every one of them scanned as
+// sql.ErrNoRows and the cause survived only in the log.
+func TestNativeRLSQueryRowSurfacesRealErrors(t *testing.T) {
+	t.Run("BeginTx", func(t *testing.T) {
+		db := fakeRLSDB(t, "failbegin")
+		e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id"}
+
+		var v int64
+		err := e.QueryRowContext(context.Background(), "SELECT 1").Scan(&v)
+		assertRealRowError(t, err, errFakeBegin, "native rls: begin tx")
+	})
+
+	t.Run("SetConfig", func(t *testing.T) {
+		db := fakeRLSDB(t, "failsetconfig")
+		e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id"}
+
+		var v int64
+		err := e.QueryRowContext(context.Background(), "SELECT 1").Scan(&v)
+		assertRealRowError(t, err, errFakeSetConfig, "native rls: set_config")
+	})
+
+	t.Run("AcquireConn", func(t *testing.T) {
+		db := fakeRLSDB(t, "")
+		_ = db.Close() // every acquisition now fails with sql: database is closed
+		e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id"}
+
+		var v int64
+		err := e.QueryRowContext(context.Background(), "SELECT 1").Scan(&v)
+		assertRealRowError(t, err, nil, "native rls: acquire conn")
+	})
+}
+
+// TestNativeRLSQueryRowNoRowsIsStillErrNoRows is the control for QK7-3:
+// with the infrastructure healthy and a genuinely empty result, Scan
+// must keep returning sql.ErrNoRows — the fix separates the two cases,
+// it does not repaint them both.
+func TestNativeRLSQueryRowNoRowsIsStillErrNoRows(t *testing.T) {
+	db := fakeRLSDB(t, "norows")
+	e := &nativeRLSExecutor{db: db, tenantID: "ta", varName: "app.tenant_id"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // ends the "request": deferred commit + conn hand-back
+
+	var v int64
+	err := e.QueryRowContext(ctx, "SELECT 1").Scan(&v)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("empty result must scan as sql.ErrNoRows, got %v", err)
+	}
+}
+
 // --- QK7-1: a panicking driver must not leak the conn/tx ---------------
 
 // TestNativeRLSPanicDuringImplicitTxDoesNotLeakConn kills the driver on

@@ -6,8 +6,11 @@ package quark
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 )
 
 // nativeRLSExecutor wraps an Executor (typically *sql.DB) so every
@@ -33,7 +36,9 @@ import (
 //
 //   - QueryRowContext has the same shape as QueryContext: tx left
 //     open, AfterFunc commits on ctx end. *sql.Row is also opaque so
-//     no wrapping is possible.
+//     no wrapping is possible. Failures before the statement runs
+//     (conn acquisition, BeginTx, set_config) surface through the
+//     returned Row's Scan as the real error — never as sql.ErrNoRows.
 //
 // For workloads that cannot tolerate the implicit-tx pattern (long
 // streaming via Iter/Cursor; very long-lived ctx that touches many
@@ -95,6 +100,67 @@ func (e *nativeRLSExecutor) noteDeferredCommitFailure(cerr error) {
 // concurrent use.
 func (c *Client) DeferredCommitFailures() uint64 {
 	return c.deferredCommitFailures.Load()
+}
+
+// --- error-carrying *sql.Row (QK7-3) ----------------------------------
+
+// rowErrDriver is an internal driver with a single purpose: minting
+// *sql.Row values whose Scan returns a specific error. database/sql has
+// no constructor for an errored Row, and the Executor interface fixes
+// QueryRowContext's return type — so before this existed, a failure to
+// acquire the conn / begin the tx / run set_config had to be smuggled
+// through a sentinel query ("SELECT NULL WHERE FALSE"): the caller saw
+// sql.ErrNoRows and the real cause survived only in the log. The driver
+// receives the error as the query's only bind argument (CheckNamedValue
+// accepts anything) and returns it verbatim, so Scan surfaces the
+// original error chain intact — errors.Is/As keep working.
+type rowErrDriver struct{}
+
+func (rowErrDriver) Open(string) (driver.Conn, error) { return rowErrConn{}, nil }
+
+type rowErrConn struct{}
+
+func (rowErrConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("quark: internal row-error driver does not prepare statements")
+}
+func (rowErrConn) Close() error { return nil }
+func (rowErrConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("quark: internal row-error driver does not begin transactions")
+}
+
+// CheckNamedValue accepts any value, so the error travels as a bind
+// argument without the default converter rejecting it.
+func (rowErrConn) CheckNamedValue(*driver.NamedValue) error { return nil }
+
+func (rowErrConn) QueryContext(_ context.Context, _ string, args []driver.NamedValue) (driver.Rows, error) {
+	if len(args) == 1 {
+		if err, ok := args[0].Value.(error); ok {
+			return nil, err
+		}
+	}
+	return nil, errors.New("quark: internal row-error driver queried without an error argument")
+}
+
+// errorRowDB lazily registers and opens the row-error driver. Lazy so a
+// process that never hits a native-RLS QueryRow failure never registers
+// the driver at all.
+var errorRowDB = sync.OnceValue(func() *sql.DB {
+	sql.Register("quark-internal-row-error", rowErrDriver{})
+	db, err := sql.Open("quark-internal-row-error", "")
+	if err != nil {
+		// Unreachable: Open only fails for unregistered driver names.
+		panic("quark: open internal row-error driver: " + err.Error())
+	}
+	return db
+})
+
+// errorRow mints a *sql.Row whose Scan returns exactly err. The context
+// is deliberately context.Background(): with the caller's (possibly
+// already canceled) ctx, database/sql would return ctx.Err() before
+// reaching the driver, replacing the specific wrapped error with a
+// generic one.
+func errorRow(err error) *sql.Row {
+	return errorRowDB().QueryRowContext(context.Background(), "quark internal row error", err)
 }
 
 // cleanupAbandonedImplicitTx is the shared body of the QK7-1 defer
@@ -240,11 +306,14 @@ func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args
 	return rows, nil
 }
 
-// QueryRowContext is the *sql.Row analogue of QueryContext. *sql.Row
-// is opaque so the tx commit relies on the same context.AfterFunc
-// pattern. Errors from BeginTx or set_config produce a *sql.Row whose
-// Scan returns the error; we leverage the QueryRowContext-on-tx
-// helper to surface those errors honestly.
+// QueryRowContext is the *sql.Row analogue of QueryContext: tx left
+// open, deferred commit via the same context.AfterFunc pattern
+// (*sql.Row is opaque, so no wrapping is possible). Failures BEFORE the
+// statement runs — conn acquisition, BeginTx, set_config — surface
+// through the returned Row's Scan as the real error, wrapped with the
+// failing stage ("native rls: acquire conn/begin tx/set_config: …") and
+// never as sql.ErrNoRows: the caller can always distinguish "no rows
+// matched" from "the tenant variable was never set" (QK7-3).
 func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	// Caller-ctx acquisition + detached tx, same split as QueryContext
 	// (QK6-2): the pool wait must honour the request deadline; only the
@@ -253,12 +322,10 @@ func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, a
 	// silently discarded the write).
 	conn, err := e.db.Conn(ctx)
 	if err != nil {
-		e.log().Error("native rls: acquire conn failed for QueryRow",
-			"err", err, "var", e.varName)
-		// Like the BeginTx failure below: surface the failure through the
-		// returned *sql.Row. With ctx already canceled/expired (the QK6-2
-		// regime) this Row's Scan reports ctx.Err() directly.
-		return e.db.QueryRowContext(ctx, "SELECT NULL WHERE FALSE")
+		// In the QK6-2 regime (ctx already canceled/expired) err wraps
+		// ctx.Err(), so errors.Is against the deadline/cancel sentinels
+		// keeps working through the stage prefix.
+		return errorRow(fmt.Errorf("native rls: acquire conn: %w", err))
 	}
 	// QK7-1 guard — same shape and rationale as QueryContext: cleanup on
 	// every exit until the AfterFunc takes ownership, detached when a
@@ -277,32 +344,14 @@ func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, a
 	}()
 	tx, err = conn.BeginTx(context.WithoutCancel(ctx), nil)
 	if err != nil {
-		// Release inline before minting the sentinel row: it queries
-		// e.db, so it needs a pool slot — the deferred guard only runs
-		// after the return expression, which starves a size-1 pool. The
-		// cleanup is idempotent (ErrTxDone / ErrConnDone), so the guard
-		// re-running it afterwards is harmless.
-		cleanupAbandonedImplicitTx(tx, conn)
-		// Return a *sql.Row that surfaces the error on Scan. The
-		// simplest way is to call db.QueryRowContext with an
-		// intentionally-failing query that captures err; but the
-		// cleanest path is to use db.QueryRowContext with a no-op SQL
-		// and rely on the caller seeing nil values — that loses the
-		// error. We instead emit a synthetic row that scans the error:
-		//
-		// We can't construct *sql.Row directly. Workaround: emit a
-		// QueryRowContext that the caller's Scan will surface as
-		// "no rows" or driver error, plus log the begin failure.
-		e.log().Error("native rls: begin tx failed for QueryRow",
-			"err", err, "var", e.varName)
-		return e.db.QueryRowContext(ctx, "SELECT NULL WHERE FALSE")
+		// The deferred guard rolls back and returns the conn; the row
+		// minted here carries the real error to the caller's Scan (it
+		// runs on the internal row-error driver, not on e.db, so it
+		// needs no pool slot).
+		return errorRow(fmt.Errorf("native rls: begin tx: %w", err))
 	}
 	if _, err := tx.ExecContext(ctx, e.setConfigSQL(), e.varName, e.tenantID); err != nil {
-		// Same inline release as the BeginTx branch above.
-		cleanupAbandonedImplicitTx(tx, conn)
-		e.log().Error("native rls: set_config failed for QueryRow",
-			"err", err, "var", e.varName)
-		return e.db.QueryRowContext(ctx, "SELECT NULL WHERE FALSE")
+		return errorRow(fmt.Errorf("native rls: set_config: %w", err))
 	}
 	row := tx.QueryRowContext(ctx, query, args...)
 	owned = true // the AfterFunc owns the tx+conn pair from here
