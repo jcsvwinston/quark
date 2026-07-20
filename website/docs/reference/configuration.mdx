@@ -41,8 +41,13 @@ client, err := quark.New("postgres", dsn,
 ```
 
 Start from `DefaultLimits()` and override fields selectively. `WithLimits`
-replaces the entire `Limits` struct; a zero `QueryTimeout` creates immediately
-expired query contexts in the current implementation.
+fills any numeric field left at zero from `DefaultLimits()`, so a partial
+literal such as `quark.Limits{MaxResults: 500}` raises one limit without
+zeroing the rest — in particular it can no longer leave `QueryTimeout` at 0,
+which used to make every query context expire immediately. The boolean
+fields are not filled in: a partial literal keeps `AllowRawQueries` and
+`SafeMigrations` at `false`, so start from `DefaultLimits()` whenever you
+want to keep `SafeMigrations` enabled.
 
 ## Options
 
@@ -124,6 +129,15 @@ Defaults:
 | `QueryTimeout` | `30 * time.Second` | Applied to ORM query contexts. |
 | `AllowRawQueries` | `false` | Required for `RawQuery`, `Exec`, and `WhereSubquery`. |
 | `SafeMigrations` | `true` | Prevents `Sync` from dropping columns. |
+
+Zero-value semantics: for the numeric fields, zero means "not set" —
+`WithLimits` replaces each zero-valued numeric field with its
+`DefaultLimits()` value before installing the struct. A negative value is
+passed through untouched; `MaxQueryLength: -1` disables the generated-SQL
+length check. The boolean fields are never rewritten, because an explicit
+`false` is indistinguishable from an omitted field: a partial literal
+therefore carries `SafeMigrations: false` (destructive `Sync` allowed) even
+though the default is `true`.
 
 Recommended pattern:
 
