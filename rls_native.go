@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // nativeRLSExecutor wraps an Executor (typically *sql.DB) so every
@@ -66,6 +67,13 @@ type nativeRLSExecutor struct {
 	tenantID string
 	varName  string // e.g. "app.tenant_id"
 	client   *Client
+
+	// panicCleanupDeadline overrides how long the QK8-1 watchdog waits
+	// for a detached panic-path cleanup before counting it as blocked.
+	// Zero (the production value — newNativeRLSExecutor never sets it)
+	// derives the deadline from the client's limits; tests shrink it to
+	// keep the blocked case fast. See cleanupWatchdogDeadline.
+	panicCleanupDeadline time.Duration
 }
 
 func newNativeRLSExecutor(client *Client, tenantID, varName string) *nativeRLSExecutor {
@@ -115,6 +123,86 @@ func (e *nativeRLSExecutor) noteDeferredCommitFailure(cerr error) {
 // concurrent use.
 func (c *Client) DeferredCommitFailures() uint64 {
 	return c.deferredCommitFailures.Load()
+}
+
+// BlockedPanicCleanups reports how many detached panic-path cleanups
+// have overrun the watchdog deadline on this Client since it was
+// created. The cleanup only exists under the RowLevelSecurityNative
+// strategy: when a driver panics inside an implicit transaction, the
+// rollback + connection hand-back runs on a detached goroutine, because
+// after a panic database/sql may still hold internal locks that would
+// turn a same-goroutine rollback into a deadlock (see
+// cleanupAbandonedImplicitTx). The trade-off is that when those locks
+// are never released, the detached cleanup blocks silently and the
+// tx/conn pair stays held. Each unit here is one cleanup that did not
+// finish within the deadline (the client's QueryTimeout — see
+// cleanupWatchdogDeadline); the same event is logged once at ERROR
+// through the Client's logger. The cleanup itself keeps trying — this
+// counter only makes the blockage observable, it does not cancel it. A
+// cleanup that finishes after the deadline is still counted: the
+// counter never resets and is safe for concurrent use.
+func (c *Client) BlockedPanicCleanups() uint64 {
+	return c.blockedPanicCleanups.Load()
+}
+
+// cleanupWatchdogDeadline is how long the QK8-1 watchdog waits before
+// flagging a detached panic cleanup as blocked. The deadline is the
+// client's QueryTimeout: it is the budget every builder operation
+// already lives under, so a rollback + conn hand-back that cannot
+// finish within one full operation budget is anomalous by the client's
+// own definition of "too long". Falls back to
+// DefaultLimits().QueryTimeout when no client is attached or the
+// caller disabled the timeout (QueryTimeout <= 0 means "no cap" for
+// queries, but the watchdog always needs a finite deadline). Tests
+// override via the panicCleanupDeadline field.
+func (e *nativeRLSExecutor) cleanupWatchdogDeadline() time.Duration {
+	if e.panicCleanupDeadline > 0 {
+		return e.panicCleanupDeadline
+	}
+	if e.client != nil && e.client.limits.QueryTimeout > 0 {
+		return e.client.limits.QueryTimeout
+	}
+	return DefaultLimits().QueryTimeout
+}
+
+// noteBlockedPanicCleanup records a detached panic cleanup that
+// overran the watchdog deadline: an ERROR log (the implicit tx and, on
+// the query paths, its pooled connection are still held — on a small
+// pool the next acquisitions may block) plus the operator-facing
+// counter surfaced by [Client.BlockedPanicCleanups].
+func (e *nativeRLSExecutor) noteBlockedPanicCleanup(deadline time.Duration) {
+	e.log().Error("native rls: panic-path cleanup still blocked after the watchdog deadline; the implicit tx and its pooled connection remain held until database/sql releases its locks",
+		"deadline", deadline, "var", e.varName)
+	if e.client != nil {
+		e.client.blockedPanicCleanups.Add(1)
+	}
+}
+
+// detachedPanicCleanup runs cleanupAbandonedImplicitTx on a detached
+// goroutine — the QK7-1 semantics, unchanged: after a driver panic a
+// same-goroutine rollback can block forever on database/sql internals,
+// so the cleanup must not run on the panicking goroutine — and adds
+// the QK8-1 watchdog: if the cleanup has not finished when the
+// deadline passes, the blockage is counted and logged once via
+// noteBlockedPanicCleanup. The cleanup goroutine is never cancelled;
+// it keeps trying so the tx/conn pair is still freed whenever
+// database/sql eventually lets go.
+func (e *nativeRLSExecutor) detachedPanicCleanup(tx *sql.Tx, conn *sql.Conn) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cleanupAbandonedImplicitTx(tx, conn)
+	}()
+	deadline := e.cleanupWatchdogDeadline()
+	go func() {
+		timer := time.NewTimer(deadline)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			e.noteBlockedPanicCleanup(deadline)
+		}
+	}()
 }
 
 // --- error-carrying *sql.Row (QK7-3) ----------------------------------
@@ -222,14 +310,16 @@ func (e *nativeRLSExecutor) ExecContext(ctx context.Context, query string, args 
 	// path the cleanup runs detached: a panicking driver unwinds through
 	// database/sql code that releases its internal locks via defer on the
 	// exec path but not on every path, so a same-goroutine Rollback could
-	// block forever and turn the panic into a deadlock.
+	// block forever and turn the panic into a deadlock. A cleanup that
+	// itself blocks past the watchdog deadline is counted and logged
+	// (QK8-1, see detachedPanicCleanup).
 	finished := false
 	defer func() {
 		if finished {
 			return
 		}
 		if p := recover(); p != nil {
-			go cleanupAbandonedImplicitTx(tx, nil)
+			e.detachedPanicCleanup(tx, nil)
 			panic(p)
 		}
 		cleanupAbandonedImplicitTx(tx, nil)
@@ -273,7 +363,9 @@ func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args
 	// and query internals only release their locks on the error path, so
 	// after a driver panic a same-goroutine Rollback/Close can block
 	// forever — the detached call frees the conn whenever database/sql
-	// left it releasable, and never turns the panic into a deadlock.
+	// left it releasable, and never turns the panic into a deadlock. A
+	// cleanup that itself blocks past the watchdog deadline is counted
+	// and logged (QK8-1, see detachedPanicCleanup).
 	var tx *sql.Tx
 	owned := false
 	defer func() {
@@ -281,7 +373,7 @@ func (e *nativeRLSExecutor) QueryContext(ctx context.Context, query string, args
 			return
 		}
 		if p := recover(); p != nil {
-			go cleanupAbandonedImplicitTx(tx, conn)
+			e.detachedPanicCleanup(tx, conn)
 			panic(p)
 		}
 		cleanupAbandonedImplicitTx(tx, conn)
@@ -340,8 +432,8 @@ func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, a
 		return errorRow(fmt.Errorf("native rls: acquire conn: %w", err))
 	}
 	// QK7-1 guard — same shape and rationale as QueryContext: cleanup on
-	// every exit until the AfterFunc takes ownership, detached when a
-	// driver panic is unwinding.
+	// every exit until the AfterFunc takes ownership, detached (and
+	// watchdog-observed, QK8-1) when a driver panic is unwinding.
 	var tx *sql.Tx
 	owned := false
 	defer func() {
@@ -349,7 +441,7 @@ func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, a
 			return
 		}
 		if p := recover(); p != nil {
-			go cleanupAbandonedImplicitTx(tx, conn)
+			e.detachedPanicCleanup(tx, conn)
 			panic(p)
 		}
 		cleanupAbandonedImplicitTx(tx, conn)
