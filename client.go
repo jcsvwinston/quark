@@ -132,6 +132,15 @@ type Client struct {
 	// appeared to succeed was NOT committed (QK6-3).
 	deferredCommitFailures atomic.Uint64
 
+	// warnPartialLimitsSafeMigrationsOff is set by WithLimits when the
+	// caller passed a partial literal (the numeric normalization of #263
+	// filled at least one zero field) that also left SafeMigrations at
+	// false — the shape where the boolean asymmetry of Limits bites
+	// silently. New() reads it after the options loop (so the WARN goes
+	// through the final logger) and emits one structured WARN per client.
+	// Behaviour is unchanged; the flag only drives the log line.
+	warnPartialLimitsSafeMigrationsOff bool
+
 	// nativeTenantResolver is set by [NewTenantRouter] when this Client
 	// is the BaseClient of a RowLevelSecurityNative router. When
 	// non-nil, RawQuery/Exec emit a quark.tenant.raw_under_native_rls
@@ -280,6 +289,19 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 		if clientOpt, ok := opt.(Option); ok {
 			clientOpt(c)
 		}
+	}
+
+	// One WARN per client when a partial Limits literal left
+	// SafeMigrations=false (#263 follow-up). Emitted here — after the
+	// options loop — so it always goes through the logger the caller
+	// installed, regardless of the WithLogger/WithLimits order. The
+	// condition lives in WithLimits: only a literal whose numeric zeros
+	// were actually filled carries the partial-literal signal; passing a
+	// full literal with SafeMigrations=false on purpose stays silent.
+	if c.warnPartialLimitsSafeMigrationsOff {
+		c.logger.Warn("WithLimits received a partial literal: the zero-valued numeric fields were filled from DefaultLimits, but booleans never are — SafeMigrations stays false on this client, so Sync may drop columns and tables. To keep SafeMigrations=true while changing one limit, start from DefaultLimits() and modify only that field.",
+			"event", "quark.limits.partial_literal_safe_migrations_off",
+		)
 	}
 
 	// Open read replicas (F6-5, ADR-0015) after options, since WithReplicas
