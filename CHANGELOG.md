@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0](https://github.com/jcsvwinston/quark/compare/v1.3.3...v1.4.0) (2026-07-22)
+
+
+### Added
+
+* **option:** WARN estructurado cuando el literal parcial de Limits deja SafeMigrations=false ([#268](https://github.com/jcsvwinston/quark/issues/268)) ([69642cc](https://github.com/jcsvwinston/quark/commit/69642cc148f5bfc3b9a6410a42b9c7aac57ecfde))
+* **query:** modo estricto de lecturas — WARN/reject de Iter/Cursor sin límite y detección N+1 por contexto ([#264](https://github.com/jcsvwinston/quark/issues/264)) ([77bcd7c](https://github.com/jcsvwinston/quark/commit/77bcd7c231dd940626dbc393c2c51eb5ee36b358))
+* **rls:** contador de operador para cleanups de pánico bloqueados (QK8-1) ([#267](https://github.com/jcsvwinston/quark/issues/267)) ([acd10ff](https://github.com/jcsvwinston/quark/commit/acd10fffe8c0db95a9f0de150b7ff64f13d8d362))
+
+
+### Fixed
+
+* **option:** WithLimits normaliza a DefaultLimits los campos numéricos a cero ([#263](https://github.com/jcsvwinston/quark/issues/263)) ([87aa2f8](https://github.com/jcsvwinston/quark/commit/87aa2f843cd2a589567e53212d77e242b1585040)), closes [#262](https://github.com/jcsvwinston/quark/issues/262)
+* **security:** bump golang.org/x/text a v0.39.0 — advisory alcanzable vía database/sql ([#269](https://github.com/jcsvwinston/quark/issues/269)) ([0eeecad](https://github.com/jcsvwinston/quark/commit/0eeecad645db858b46f3c44304b230f0042ee2e9))
+
 ## [1.3.3](https://github.com/jcsvwinston/quark/compare/v1.3.2...v1.3.3) (2026-07-20)
 
 
