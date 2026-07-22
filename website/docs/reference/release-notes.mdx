@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.3.3** on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.4.0** on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade:
@@ -17,6 +17,40 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.4.0
+
+A feature minor for safer reads and clearer limits. Nothing is a breaking
+change; every new behaviour is opt-in or a strictly-more-honest default.
+
+### Added
+
+- **Strict reads.** `WithStrictReads(mode)` flags unbounded `Iter()`/`Cursor()`
+  calls — `StrictReadsWarn` logs them, `StrictReadsReject` returns
+  `ErrInvalidQuery` — and, when tracking is enabled on a context, detects the
+  N+1 access pattern and points at the missing `Preload`. `AllowUnbounded()`
+  on the builder is the explicit escape hatch for exports and back-fills.
+- **Blocked-cleanup visibility.** `Client.BlockedPanicCleanups()` counts
+  native-RLS panic-path cleanups that a stuck `database/sql` never let
+  finish, so a leaked transaction/connection pair is observable instead of
+  only inferable from pool exhaustion — the counterpart to
+  `DeferredCommitFailures()`.
+
+### Fixed
+
+- **`WithLimits` fills zero numeric fields from `DefaultLimits()`.** A partial
+  literal like `Limits{MaxResults: 500}` no longer leaves `QueryTimeout` at
+  zero (which made every query fail with an already-expired context). Booleans
+  are not normalized — a partial literal that leaves `SafeMigrations` false
+  now emits one structured WARN pointing at `DefaultLimits()`.
+- **Security:** `golang.org/x/text` bumped to v0.39.0 (GO-2026-5970,
+  reachable through `database/sql`).
+
+### Upgrade notes
+
+Drop-in. If you built a `Limits` literal by hand and relied on the old
+all-zero behaviour, start from `DefaultLimits()` and override — the WARN will
+tell you if you didn't.
 
 ## v1.3.3
 
