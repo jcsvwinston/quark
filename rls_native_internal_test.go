@@ -48,6 +48,10 @@ func (fakeRLSDriver) Open(name string) (driver.Conn, error) {
 //     implicit tx is set_config, so this simulates its failure (QK7-3)
 //   - "panicexec":     ExecContext panics — the driver dies on the second
 //     operation of the implicit tx, after BeginTx handed one out (QK7-1)
+//   - "panicblockrollback": ExecContext panics AND Rollback blocks until
+//     the test releases blockRollbackGate — the deterministic stand-in
+//     for database/sql internals that never release their locks after a
+//     panic, so the detached cleanup stays blocked (QK8-1)
 //   - "norows":        queries succeed and return zero rows (QK7-3 control)
 type fakeRLSConn struct{ mode string }
 
@@ -68,7 +72,7 @@ func (c *fakeRLSConn) ExecContext(context.Context, string, []driver.NamedValue) 
 	switch c.mode {
 	case "failsetconfig":
 		return nil, errFakeSetConfig
-	case "panicexec":
+	case "panicexec", "panicblockrollback":
 		panic("fake rls driver: exec panic")
 	}
 	return driver.RowsAffected(1), nil
@@ -85,7 +89,36 @@ func (t *fakeRLSTx) Commit() error {
 	}
 	return nil
 }
-func (t *fakeRLSTx) Rollback() error { return nil }
+func (t *fakeRLSTx) Rollback() error {
+	if t.conn.mode == "panicblockrollback" {
+		if ch := getBlockRollbackGate(); ch != nil {
+			<-ch
+		}
+	}
+	return nil
+}
+
+// blockRollbackGate parks every "panicblockrollback" Rollback until the
+// owning test closes it (registered in t.Cleanup so the blocked cleanup
+// goroutines always drain before the process exits). Mutex-guarded
+// because the detached cleanup goroutine reads it while the test — and
+// under -race, later tests — may write it.
+var (
+	blockRollbackMu   sync.Mutex
+	blockRollbackGate chan struct{}
+)
+
+func setBlockRollbackGate(ch chan struct{}) {
+	blockRollbackMu.Lock()
+	defer blockRollbackMu.Unlock()
+	blockRollbackGate = ch
+}
+
+func getBlockRollbackGate() chan struct{} {
+	blockRollbackMu.Lock()
+	defer blockRollbackMu.Unlock()
+	return blockRollbackGate
+}
 
 type fakeRLSRows struct{ done bool }
 
@@ -475,5 +508,145 @@ func TestNativeRLSPanicDuringImplicitTxDoesNotLeakConn(t *testing.T) {
 			}
 			_ = conn.Close()
 		})
+	}
+}
+
+// --- QK8-1: a blocked panic cleanup must leave a trace -----------------
+
+// panicCleanupPaths are the three executor operations whose QK7-1 defer
+// guard detaches the cleanup on a driver panic. Shared by the blocked
+// and the completed QK8-1 tests below.
+var panicCleanupPaths = []struct {
+	name string
+	op   func(e *nativeRLSExecutor, ctx context.Context)
+}{
+	{"QueryContext", func(e *nativeRLSExecutor, ctx context.Context) {
+		_, _ = e.QueryContext(ctx, "SELECT 1")
+	}},
+	{"QueryRowContext", func(e *nativeRLSExecutor, ctx context.Context) {
+		var v int64
+		_ = e.QueryRowContext(ctx, "SELECT 1").Scan(&v)
+	}},
+	{"ExecContext", func(e *nativeRLSExecutor, ctx context.Context) {
+		_, _ = e.ExecContext(ctx, "UPDATE t SET x = 1")
+	}},
+}
+
+// mustPanic runs op and asserts the driver panic still propagates to the
+// caller — the QK8-1 watchdog must not change the QK7-1 semantics.
+func mustPanic(t *testing.T, op func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected the driver panic to propagate to the caller")
+		}
+	}()
+	op()
+}
+
+// TestNativeRLSBlockedPanicCleanupLeavesTrace pins the QK8-1 operator
+// signal: when the detached QK7-1 cleanup cannot finish — here because
+// the driver's Rollback parks on a gate that never opens within the
+// test, the deterministic stand-in for database/sql internals that a
+// panic left locked — the watchdog must increment
+// Client.BlockedPanicCleanups and log once at ERROR. Before QK8-1 the
+// blockage was invisible: the goroutine hung silently and the held
+// tx/conn pair could only be inferred from pool exhaustion.
+func TestNativeRLSBlockedPanicCleanupLeavesTrace(t *testing.T) {
+	for _, p := range panicCleanupPaths {
+		t.Run(p.name, func(t *testing.T) {
+			gate := make(chan struct{})
+			setBlockRollbackGate(gate)
+			t.Cleanup(func() {
+				close(gate) // drain the parked cleanup goroutine
+				setBlockRollbackGate(nil)
+			})
+
+			db := fakeRLSDB(t, "panicblockrollback")
+			var buf syncBuffer
+			c := &Client{logger: slog.New(slog.NewTextHandler(&buf, nil))}
+			e := &nativeRLSExecutor{
+				db: db, tenantID: "ta", varName: "app.tenant_id", client: c,
+				// Short watchdog so the blocked case is fast; production
+				// derives the deadline from QueryTimeout instead.
+				panicCleanupDeadline: 20 * time.Millisecond,
+			}
+
+			mustPanic(t, func() { p.op(e, context.Background()) })
+
+			waitForCounter(t, 1, c.BlockedPanicCleanups)
+			if out := buf.String(); !strings.Contains(out, "panic-path cleanup still blocked") {
+				t.Fatalf("blocked cleanup not logged through the client logger; log output:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestNativeRLSCompletedPanicCleanupLeavesNoTrace is the control: with a
+// driver whose Rollback returns normally (the "panicexec" mode already
+// used by the QK7-1 test), the detached cleanup completes, so the
+// watchdog must NOT count or log anything — the counter stays 0. The
+// deliberately huge deadline makes the assertion deterministic: if the
+// watchdog were to fire despite a completed cleanup, it would be a
+// logic bug, not a timing accident.
+func TestNativeRLSCompletedPanicCleanupLeavesNoTrace(t *testing.T) {
+	for _, p := range panicCleanupPaths {
+		t.Run(p.name, func(t *testing.T) {
+			db := fakeRLSDB(t, "panicexec")
+			db.SetMaxOpenConns(1)
+			var buf syncBuffer
+			c := &Client{logger: slog.New(slog.NewTextHandler(&buf, nil))}
+			e := &nativeRLSExecutor{
+				db: db, tenantID: "ta", varName: "app.tenant_id", client: c,
+				panicCleanupDeadline: time.Hour,
+			}
+
+			mustPanic(t, func() { p.op(e, context.Background()) })
+
+			// Reacquiring the single pooled conn proves the cleanup
+			// COMPLETED (same bounded-window pattern as the QK7-1 test).
+			acquireCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			conn, err := db.Conn(acquireCtx)
+			if err != nil {
+				t.Fatalf("pool exhausted after a driver panic mid implicit tx: %v", err)
+			}
+			_ = conn.Close()
+
+			if got := c.BlockedPanicCleanups(); got != 0 {
+				t.Fatalf("BlockedPanicCleanups = %d after a cleanup that completed, want 0", got)
+			}
+			if out := buf.String(); strings.Contains(out, "panic-path cleanup still blocked") {
+				t.Fatalf("completed cleanup logged as blocked; log output:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestNativeRLSCleanupWatchdogDeadline pins the deadline derivation
+// documented on cleanupWatchdogDeadline: the client's QueryTimeout when
+// positive, DefaultLimits().QueryTimeout when there is no client or the
+// timeout is disabled, and the test override winning over both.
+func TestNativeRLSCleanupWatchdogDeadline(t *testing.T) {
+	def := DefaultLimits().QueryTimeout
+
+	e := &nativeRLSExecutor{client: &Client{limits: Limits{QueryTimeout: 7 * time.Second}}}
+	if got := e.cleanupWatchdogDeadline(); got != 7*time.Second {
+		t.Errorf("client QueryTimeout not used: got %v, want 7s", got)
+	}
+
+	e = &nativeRLSExecutor{} // no client at all
+	if got := e.cleanupWatchdogDeadline(); got != def {
+		t.Errorf("nil client: got %v, want DefaultLimits().QueryTimeout %v", got, def)
+	}
+
+	e = &nativeRLSExecutor{client: &Client{limits: Limits{QueryTimeout: -1}}}
+	if got := e.cleanupWatchdogDeadline(); got != def {
+		t.Errorf("disabled QueryTimeout: got %v, want DefaultLimits().QueryTimeout %v", got, def)
+	}
+
+	e = &nativeRLSExecutor{client: &Client{limits: Limits{QueryTimeout: time.Minute}}, panicCleanupDeadline: time.Millisecond}
+	if got := e.cleanupWatchdogDeadline(); got != time.Millisecond {
+		t.Errorf("test override lost: got %v, want 1ms", got)
 	}
 }

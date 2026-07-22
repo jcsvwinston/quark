@@ -141,6 +141,15 @@ type Client struct {
 	// Behaviour is unchanged; the flag only drives the log line.
 	warnPartialLimitsSafeMigrationsOff bool
 
+	// blockedPanicCleanups counts detached panic-path cleanups (the QK7-1
+	// goroutine that rolls back the implicit tx and returns its pooled
+	// connection after a driver panic) that did not finish within the
+	// watchdog deadline — each unit is a tx/conn pair still held because
+	// database/sql never released the locks the panic left taken.
+	// Incremented from the watchdog in rls_native.go; read via
+	// [Client.BlockedPanicCleanups] (QK8-1).
+	blockedPanicCleanups atomic.Uint64
+
 	// nativeTenantResolver is set by [NewTenantRouter] when this Client
 	// is the BaseClient of a RowLevelSecurityNative router. When
 	// non-nil, RawQuery/Exec emit a quark.tenant.raw_under_native_rls

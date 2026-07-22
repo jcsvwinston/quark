@@ -350,3 +350,34 @@ if n := client.DeferredCommitFailures(); n > 0 {
 
 See [PostgreSQL Native RLS → Limitations](../../advanced/row-level-native#limitations)
 for the full write-semantics contract behind the deferred commit.
+
+## BlockedPanicCleanups
+
+### `BlockedPanicCleanups() uint64`
+
+Returns how many detached panic-path cleanups have overrun their watchdog
+deadline on this client since it was created. The cleanup only exists under
+the [`RowLevelSecurityNative`](../../advanced/row-level-native) strategy:
+when a database driver panics inside an implicit transaction, the rollback
+and connection hand-back run on a detached goroutine, because after a panic
+`database/sql` may still hold internal locks that would turn a
+same-goroutine rollback into a deadlock. The trade-off is that when those
+locks are never released, the detached cleanup blocks and the transaction —
+pooled connection included — stays held.
+
+Each unit here is one cleanup that did not finish within the deadline (the
+client's `QueryTimeout`; `DefaultLimits().QueryTimeout` when the timeout is
+disabled). The same event is logged once at `ERROR` through the client
+logger. The cleanup itself keeps trying — the counter makes the blockage
+observable, it does not cancel the cleanup. It never resets and is safe for
+concurrent use.
+
+```go
+if n := client.BlockedPanicCleanups(); n > 0 {
+    // n panic cleanups are (or were) stuck holding a pooled connection —
+    // check for driver panics in the logs and watch pool saturation.
+}
+```
+
+See [PostgreSQL Native RLS → Limitations](../../advanced/row-level-native#limitations)
+for the panic-cleanup trade-off this counter observes.

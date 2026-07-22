@@ -32,6 +32,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Client).BlockedPanicCleanups",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Close",
       "kind": "method"
     },

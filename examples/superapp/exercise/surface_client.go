@@ -105,6 +105,15 @@ func surfaceClientMethods(ctx context.Context, client *quark.Client, rec *record
 	if n := client.DeferredCommitFailures(); n != 0 {
 		return fmt.Errorf("surface DeferredCommitFailures: %d fallos de commit diferido en el client del harness", n)
 	}
+	// BlockedPanicCleanups (QK8-1) cuenta cleanups detached del panic-path
+	// del RLS nativo que superaron el deadline del watchdog. Mismo criterio:
+	// forzar el bloqueo exige un driver cuyo Rollback nunca responda
+	// (cubierto en rls_native_internal_test.go), así que la invocación
+	// genuina es leerlo y asertar que el client compartido sigue a cero —
+	// ningún exerciser provoca pánicos de driver.
+	if n := client.BlockedPanicCleanups(); n != 0 {
+		return fmt.Errorf("surface BlockedPanicCleanups: %d cleanups de pánico bloqueados en el client del harness", n)
+	}
 
 	// Clients efímeros para lo que muta estado / necesita flags (no contaminar
 	// el client compartido ni otros exercisers). Exec y RawQuery son raw queries:
@@ -159,7 +168,7 @@ func surfaceClientMethods(ctx context.Context, client *quark.Client, rec *record
 	rec.Note(
 		CM("Validate"), CM("GetClient"), CM("Exec"), CM("WithOptions"), CM("RawQuery"),
 		CM("BeginTx"), CM("EnableAuditLog"), CM("DisableAuditLog"), CM("UseEventBus"), CM("AddForeignKey"),
-		CM("DeferredCommitFailures"),
+		CM("DeferredCommitFailures"), CM("BlockedPanicCleanups"),
 	)
 	return nil
 }

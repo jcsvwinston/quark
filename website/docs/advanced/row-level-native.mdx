@@ -229,6 +229,18 @@ the resolver for the current context.
 
   `router.Tx` has none of this: it commits synchronously inside the callback.
   Prefer it for any write whose durability must be settled before you answer.
+- **A driver panic hands cleanup to a detached goroutine.** If the driver
+  panics mid implicit transaction, Quark rolls the transaction back and
+  returns its pooled connection on a detached goroutine — after a panic,
+  `database/sql` may still hold internal locks that would deadlock a
+  same-goroutine rollback. When those locks are never released, that cleanup
+  blocks and the connection stays out of the pool. A watchdog makes this
+  observable: a cleanup that overruns the client's `QueryTimeout` is logged
+  once at `ERROR` and counted in
+  [`Client.BlockedPanicCleanups`](../reference/api/client#blockedpaniccleanups)
+  — alert on that counter alongside `DeferredCommitFailures`; each unit is a
+  held connection you may need to recycle by restarting the process. The
+  cleanup keeps retrying either way.
 - **Single-row reads distinguish "no rows" from an isolation failure.** When a
   single-row operation (`Count`, aggregates, `Create` reading back
   `INSERT … RETURNING`) cannot even set the tenant variable — acquiring the
