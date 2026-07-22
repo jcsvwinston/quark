@@ -47,7 +47,12 @@ zeroing the rest — in particular it can no longer leave `QueryTimeout` at 0,
 which used to make every query context expire immediately. The boolean
 fields are not filled in: a partial literal keeps `AllowRawQueries` and
 `SafeMigrations` at `false`, so start from `DefaultLimits()` whenever you
-want to keep `SafeMigrations` enabled.
+want to keep `SafeMigrations` enabled. Because that combination is easy to
+miss, `quark.New` logs one structured warning
+(`event=quark.limits.partial_literal_safe_migrations_off`) when a partial
+literal — one whose numeric zeros were actually filled in — leaves
+`SafeMigrations` at `false`; a full literal that disables `SafeMigrations`
+on purpose stays silent, and behaviour is identical either way.
 
 ## Options
 
@@ -138,7 +143,11 @@ passed through untouched; `MaxQueryLength: -1` disables the generated-SQL
 length check. The boolean fields are never rewritten, because an explicit
 `false` is indistinguishable from an omitted field: a partial literal
 therefore carries `SafeMigrations: false` (destructive `Sync` allowed) even
-though the default is `true`.
+though the default is `true`. When that happens — the literal was partial
+(numeric zeros were filled) and `SafeMigrations` ended up `false` —
+`quark.New` logs one warning with
+`event=quark.limits.partial_literal_safe_migrations_off` so the drop does
+not go unnoticed; it does not change the installed limits.
 
 Recommended pattern:
 

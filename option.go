@@ -64,6 +64,8 @@ func WithMiddleware(m Middleware) Option {
 // literal carries AllowRawQueries=false and SafeMigrations=false regardless
 // of the defaults. To change one field while keeping every default —
 // including SafeMigrations=true — start from [DefaultLimits] and modify it.
+// When a partial literal leaves SafeMigrations=false, [New] logs one
+// structured WARN pointing here — see [WithLimits].
 type Limits struct {
 	MaxQueryLength     int
 	MaxResults         int
@@ -102,34 +104,58 @@ func DefaultLimits() Limits {
 // latter differs from the DefaultLimits value (true), which means Sync may
 // drop columns. When you want the defaults for the booleans, start from
 // [DefaultLimits] and modify only what you need.
+//
+// Because that asymmetry is easy to miss, [New] logs one structured WARN
+// (event quark.limits.partial_literal_safe_migrations_off) when the literal
+// shows the partial-literal signal — the numeric normalization actually
+// filled at least one zero field — AND SafeMigrations ended up false. A
+// full literal (every numeric field set, e.g. DefaultLimits() with
+// SafeMigrations flipped off on purpose) carries no signal and stays
+// silent. The warning changes no behaviour.
 func WithLimits(l Limits) Option {
 	return func(c *Client) {
-		c.limits = l.normalized()
+		n, filled := l.normalized()
+		c.limits = n
+		// Partial-literal signal: the numeric normalization DID something,
+		// so at least one field carried the "not set" zero — the same
+		// literal shape that silently drops SafeMigrations to false. An
+		// untouched literal (filled == false) is a deliberate full value
+		// and must stay silent. Last WithLimits wins, like the limits
+		// themselves; New() emits the WARN once the logger is final.
+		c.warnPartialLimitsSafeMigrationsOff = filled && !n.SafeMigrations
 	}
 }
 
 // normalized returns a copy of l with every zero-valued numeric field
-// replaced by its [DefaultLimits] counterpart (#262). Negative values and
-// the boolean fields pass through unchanged — see the godoc on [Limits]
-// and [WithLimits] for the rationale.
-func (l Limits) normalized() Limits {
+// replaced by its [DefaultLimits] counterpart (#262), plus whether it
+// filled at least one field — the partial-literal signal WithLimits uses
+// for the SafeMigrations WARN. Negative values and the boolean fields pass
+// through unchanged — see the godoc on [Limits] and [WithLimits] for the
+// rationale.
+func (l Limits) normalized() (Limits, bool) {
 	d := DefaultLimits()
+	filled := false
 	if l.MaxQueryLength == 0 {
 		l.MaxQueryLength = d.MaxQueryLength
+		filled = true
 	}
 	if l.MaxResults == 0 {
 		l.MaxResults = d.MaxResults
+		filled = true
 	}
 	if l.MaxJoins == 0 {
 		l.MaxJoins = d.MaxJoins
+		filled = true
 	}
 	if l.MaxWhereConditions == 0 {
 		l.MaxWhereConditions = d.MaxWhereConditions
+		filled = true
 	}
 	if l.QueryTimeout == 0 {
 		l.QueryTimeout = d.QueryTimeout
+		filled = true
 	}
-	return l
+	return l, filled
 }
 
 // WithCacheStore sets the caching backend for the client.
