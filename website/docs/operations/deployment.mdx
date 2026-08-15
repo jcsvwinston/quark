@@ -124,7 +124,8 @@ migration files register themselves via `init()`, so a `go install`ed `quark`
 binary cannot see them; `quark migrate up` exits non-zero with an explanation
 rather than falsely reporting "nothing pending". Build the small runner
 described in [Operational Workflows](../guides/cli#embedding-the-same-operations-in-your-own-binary)
-— your `main` imports your migrations package and calls `commands.Execute()` —
+— your `main` imports your migrations package and calls `commands.Main()`
+(prints errors to stderr, exits non-zero on failure) —
 and ship that binary (or `go run` it) in your deploy pipeline. For the
 model-diff flow, the [`quarkmigrate`](../guides/migrations#a-ci-drift-gate-with-quarkmigrate)
 package gives you `plan` / `verify` / `apply` as a tiny command you own;

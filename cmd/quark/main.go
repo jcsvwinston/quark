@@ -14,15 +14,11 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/jcsvwinston/quark/cmd/quark/commands"
 )
 
+// commands.Main prints any error to stderr and exits 1 — the same contract
+// embedded runners get from the documented recipe (QCD-CLI-2).
 func main() {
-	if err := commands.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	commands.Main()
 }
