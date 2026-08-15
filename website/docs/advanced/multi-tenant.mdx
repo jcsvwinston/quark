@@ -108,9 +108,13 @@ users, _ := quark.For[User](WithTenant(ctx, "tenant_acme"), router).List()
 // table references become "tenant_acme"."users"
 ```
 
-The resolver's return value is used directly as the schema name. Creating each
-tenant's schema and running migrations into it is your job — `client.Migrate`
-runs on the base client; the router doesn't orchestrate per-schema provisioning.
+The resolver's return value is used directly as the schema name. `quark tenant
+provision <id>` creates the schema and registers the tenant in `quark_tenants`
+(and refuses to re-provision an already-registered id, so a retry never
+half-executes); running migrations into each schema is your job — the CLI
+skips that step explicitly under `schema_per_tenant` because it needs a
+`TenantRouter` wired to your models. `client.Migrate` runs on the base client;
+the router doesn't orchestrate per-schema provisioning.
 
 ## Database-per-tenant
 
