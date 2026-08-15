@@ -81,7 +81,8 @@ compiled into the executing binary — and a `go install`ed CLI never imports
 your project's `migrations/` package. Rather than reporting a bogus "No
 pending migrations", the command exits non-zero and prints the fix: a two-line
 runner in your own repo that imports your migrations package and calls
-`commands.Execute()`. The recipe is in
+`commands.Main()` (which prints the error and exits non-zero — a bare
+`commands.Execute()` would swallow failures into exit 0). The recipe is in
 [Operational Workflows](guides/cli#embedding-the-same-operations-in-your-own-binary).
 
 ## How do I stop two deploys from running migrations at once?

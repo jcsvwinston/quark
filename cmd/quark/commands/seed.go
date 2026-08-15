@@ -26,7 +26,7 @@ type SeederFunc func(ctx context.Context, client *quark.Client) error
 var seederRegistry = map[string]SeederFunc{}
 
 // RegisterSeeder registers a named seeder function.
-// Call this from your main package before invoking commands.Execute().
+// Call this from your main package before invoking commands.Main.
 func RegisterSeeder(name string, fn SeederFunc) {
 	seederRegistry[name] = fn
 }
@@ -130,10 +130,13 @@ func runSeedRun() error {
 	if len(seederRegistry) == 0 {
 		return fmt.Errorf(`no seeders are registered in this binary — cannot run.
 
-Seeders register via commands.RegisterSeeder from YOUR main before Execute():
+Seeders register via commands.RegisterSeeder from YOUR main before running
+the CLI:
 
     commands.RegisterSeeder("users", seeders.SeedUsers)
-    commands.Execute()
+    commands.Main()
+
+commands.Main prints errors to stderr and exits non-zero on failure.
 
 See the CLI guide ("Embedding the same operations in your own binary")`)
 	}
