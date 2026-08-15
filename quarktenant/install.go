@@ -164,11 +164,11 @@ var ErrInvalidCast = errors.New("quarktenant: invalid SQL cast")
 // [ErrInvalidCast]).
 //
 // Idempotence: the policy name is deterministic
-// (<table>_tenant_isolation). Re-running InstallRLSPolicies on a
-// table that already has the policy installed will fail at apply
-// time with a PostgreSQL duplicate-object error (SQLSTATE 42710).
-// Callers who want idempotent install should DROP the policy first
-// or guard the call with their own existence check.
+// (<table>_tenant_isolation) and the rendered DDL drops it (IF
+// EXISTS) before recreating it, all inside the install transaction.
+// Re-running InstallRLSPolicies — after adding a model, or to repair
+// a half-applied install — is therefore safe and converges to
+// exactly one policy per table.
 func InstallRLSPolicies(ctx context.Context, client *quark.Client, opts InstallOptions) ([]string, error) {
 	if client == nil {
 		return nil, errors.New("quarktenant: client must not be nil")
@@ -301,6 +301,13 @@ func renderPolicyDDL(model any, opts InstallOptions) ([]string, error) {
 	// re-quote any inner single quotes (defensive: NativeRLSVar
 	// should be a stable config constant, but better safe).
 	settingLit := "'" + strings.ReplaceAll(opts.NativeRLSVar, "'", "''") + "'"
+
+	// Idempotence (v1.4.1): the policy name is deterministic, so dropping it
+	// before recreating makes re-running the install safe — previously a
+	// second run died on SQLSTATE 42710 (duplicate_object). Runs inside the
+	// same transaction as the CREATE, so there is no window without a policy.
+	stmts = append(stmts, fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s",
+		quoteIdent(policyName), quoteIdent(table)))
 
 	stmts = append(stmts, fmt.Sprintf(
 		`CREATE POLICY %s ON %s USING (%s = current_setting(%s, true)%s) WITH CHECK (%s = current_setting(%s, true)%s)`,

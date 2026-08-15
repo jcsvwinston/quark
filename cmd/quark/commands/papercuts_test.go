@@ -105,9 +105,9 @@ func TestMigrateStatusFreshDatabaseListsPending(t *testing.T) {
 func TestSeedRunHonorsRegistrationOrder(t *testing.T) {
 	withSQLiteConfig(t)
 
-	oldRegistry := seederRegistry
-	seederRegistry = map[string]SeederFunc{}
-	t.Cleanup(func() { seederRegistry = oldRegistry })
+	oldRegistry, oldOrder := seederRegistry, seederOrder
+	seederRegistry, seederOrder = map[string]SeederFunc{}, nil
+	t.Cleanup(func() { seederRegistry, seederOrder = oldRegistry, oldOrder })
 
 	var got []string
 	names := []string{"zeta", "alpha", "mike", "juliet", "bravo", "yankee", "echo", "quebec"}

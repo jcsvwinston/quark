@@ -78,9 +78,10 @@ func TestInstallRLSPolicies_Postgres(t *testing.T) {
 		if err != nil {
 			t.Fatalf("dry-run: %v", err)
 		}
-		// 3 statements per model (ENABLE, FORCE, CREATE POLICY) × 2 models.
-		if len(stmts) != 6 {
-			t.Fatalf("dry-run produced %d stmts, want 6 (3 per model × 2 models)", len(stmts))
+		// 4 statements per model (ENABLE, FORCE, DROP POLICY IF EXISTS,
+		// CREATE POLICY) × 2 models.
+		if len(stmts) != 8 {
+			t.Fatalf("dry-run produced %d stmts, want 8 (4 per model × 2 models)", len(stmts))
 		}
 		// Each table should appear in ENABLE and CREATE POLICY.
 		for _, tbl := range tables {
