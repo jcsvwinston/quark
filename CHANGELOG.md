@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1](https://github.com/jcsvwinston/quark/compare/v1.4.0...v1.4.1) (2026-08-15)
+
+
+### Fixed
+
+* **cli:** commands.Main() y receta de embebido que propaga errores (QCD-CLI-2) ([#271](https://github.com/jcsvwinston/quark/issues/271)) ([fdedd2f](https://github.com/jcsvwinston/quark/commit/fdedd2f4a49d905f019620aa5f25fb2324c3f687))
+* **cli:** model generate --fields compila y declara PK (QCD-CLI-1) ([#270](https://github.com/jcsvwinston/quark/issues/270)) ([37d0179](https://github.com/jcsvwinston/quark/commit/37d017955017eb8c2e9deec39640fa523473934e))
+* **cli:** papercuts v1.4.1 — status con pendientes, seeders en orden, init lee go.mod, RLS re-ejecutable ([#274](https://github.com/jcsvwinston/quark/issues/274)) ([9856348](https://github.com/jcsvwinston/quark/commit/9856348fcfba9005985644b72bb65819f32ef2c2))
+* **cli:** tenant provision completa bajo schema_per_tenant e idempotente (QCD-CLI-3) ([#272](https://github.com/jcsvwinston/quark/issues/272)) ([adde5e3](https://github.com/jcsvwinston/quark/commit/adde5e3a8d076c07d06ba45fd0556a7819541d3b))
+
 ## [1.4.0](https://github.com/jcsvwinston/quark/compare/v1.3.3...v1.4.0) (2026-07-22)
 
 
