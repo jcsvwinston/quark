@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.4.0** on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.4.1** on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade:
@@ -17,6 +17,47 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.4.1
+
+A patch release: the CLI keeps its promises. Three defects surfaced by an
+external coverage exercise over the public module surface, plus a round of
+CLI papercuts. Two deliberate behaviour changes, no API breaks.
+
+### Fixed
+
+- **`model generate --fields` output compiles and declares its primary key.**
+  A `time.Time` or `json.RawMessage` field now emits its import block, `id`
+  gets `pk:"true"` (the tag the ORM parses), and the template renders the
+  computed `quark:"..."` tag — only with vocabulary the ORM understands
+  (`not_null` on the from-table path).
+- **The embed recipe no longer swallows errors.** New entry point
+  `commands.Main()` (execute, print to stderr, exit non-zero) is what every
+  recipe now prescribes; a runner built from the old printed recipe
+  (`func main() { commands.Execute() }`) exited 0 in silence on any failure.
+  `commands.Execute()` keeps its signature and behaviour.
+- **`tenant provision` completes under `schema_per_tenant`.** It creates the
+  schema and the `quark_tenants` row and explicitly skips the migration step
+  (which needs a `TenantRouter` in your own binary); an id already registered
+  is rejected with a clear "already provisioned" error before any DDL runs,
+  so retries never crash on duplicate `CREATE SCHEMA`.
+- **Papercuts.** `migrate status`/`version` work on a fresh database (zero
+  applied, no missing-table error) and `status` lists pending migrations;
+  `seed run`/`seed list` honour registration order; `quark init` fills
+  `project.module`/`project.name` from the directory's `go.mod`; the `With`
+  docs example uses the real `Join(table).On(...)` signature.
+
+### Changed
+
+- **`quarktenant.InstallRLSPolicies` is now re-runnable:** the rendered DDL
+  drops the deterministic policy (`DROP POLICY IF EXISTS`) before recreating
+  it, in the same transaction — re-running converges instead of failing with
+  SQLSTATE 42710. Gate the call yourself if you relied on that failure.
+- Go toolchain to **go1.26.6** (closes GO-2026-6090, GO-2026-6088,
+  GO-2026-5972 in the standard library).
+
+Narrative notes:
+[`docs/RELEASE_NOTES_v1.4.1.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.4.1.md).
 
 ## v1.4.0
 
