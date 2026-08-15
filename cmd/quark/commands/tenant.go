@@ -105,6 +105,22 @@ func runTenantProvision(id string) error {
 	ctx := context.Background()
 	dialect := adminClient.Dialect()
 
+	// Idempotency gate (QCD-CLI-3): consult the registry BEFORE any DDL so a
+	// retry of an already-provisioned id fails with a clear error and zero
+	// effects, instead of blowing up on a duplicate CREATE SCHEMA/DATABASE
+	// after partially touching the server.
+	if err := ensureTenantRegistry(ctx, adminClient); err != nil {
+		return fmt.Errorf("initializing tenant registry: %w", err)
+	}
+	var already int
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM quark_tenants WHERE id = %s", dialect.Placeholder(1))
+	if err := adminClient.Raw().QueryRowContext(ctx, countQuery, id).Scan(&already); err != nil {
+		return fmt.Errorf("checking tenant registry: %w", err)
+	}
+	if already > 0 {
+		return fmt.Errorf("tenant %q is already provisioned (registered in quark_tenants) — nothing was changed. Use 'tenant migrate %s' to run its migrations", id, id)
+	}
+
 	switch strategy {
 	case "db_per_tenant":
 		// Create Database — DDL takes no bind params; the regexp above plus
@@ -123,21 +139,29 @@ func runTenantProvision(id string) error {
 		fmt.Printf("  Created schema: %s\n", id)
 	}
 
-	// Register tenant in quark_tenants registry
-	if err := ensureTenantRegistry(ctx, adminClient); err != nil {
-		return fmt.Errorf("initializing tenant registry: %w", err)
-	}
+	// Register tenant in quark_tenants registry. The registry row is now the
+	// idempotency source of truth (the pre-DDL gate above reads it), so a
+	// failed insert is a hard error — the old warn-and-continue left a tenant
+	// whose retry would crash on duplicate DDL.
 	regQuery := fmt.Sprintf("INSERT INTO quark_tenants (id, strategy) VALUES (%s, %s)",
 		dialect.Placeholder(1), dialect.Placeholder(2))
 	if err := adminClient.Exec(ctx, regQuery, id, strategy); err != nil {
-		color.Yellow("Warning: could not register tenant in quark_tenants: %v", err)
-	} else {
-		fmt.Printf("  Registered tenant in quark_tenants registry.\n")
+		return fmt.Errorf("registering tenant in quark_tenants: %w", err)
 	}
+	fmt.Printf("  Registered tenant in quark_tenants registry.\n")
 
-	// Run migrations
-	if err := runTenantMigrate(id); err != nil {
-		return err
+	// Run migrations — except for schema_per_tenant, whose migrations cannot
+	// run from static CLI config by design (they need a TenantRouter wired to
+	// your models; GetTenantQuarkClient rejects the strategy). Chaining them
+	// made provision impossible to complete and left partial state
+	// (QCD-CLI-3, option A): skip EXPLICITLY so schema + registry row is a
+	// complete, honest result.
+	if strategy == "schema_per_tenant" {
+		color.Yellow("  Skipping migrations: schema_per_tenant migrations need a TenantRouter wired to your models — run them from your own runner binary (see the multi-tenant guide).")
+	} else {
+		if err := runTenantMigrate(id); err != nil {
+			return err
+		}
 	}
 
 	color.Green("Tenant %s provisioned successfully!", id)

@@ -170,7 +170,11 @@ tenant:
 Without a template the command fails instead of guessing (it used to migrate
 the *default* database, whatever tenant you named). `schema_per_tenant`
 migrations are not resolvable from static config and exit with an explicit
-error — run those from your own binary. In code, the same loop stays explicit —
+error — run those from your own binary. `tenant provision` therefore stops at
+schema + registry row under `schema_per_tenant` (it says so, and exits 0 —
+that's the complete effect); it also refuses to provision an id that's
+already registered in `quark_tenants`, so retries never crash on duplicate
+`CREATE SCHEMA`. In code, the same loop stays explicit —
 resolve each tenant's DSN, build a client, run the same migrator:
 
 ```go

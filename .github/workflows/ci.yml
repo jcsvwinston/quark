@@ -236,7 +236,7 @@ jobs:
           # per-engine legs stop being dead code without fragmenting the
           # matrix into more jobs.
           - engine: postgres
-            run: 'TestSuitePostgres|TestPostgresReplicaRouting|TestDeadlockRetryPostgres|TestPgListener_RoundTrip|TestRowLevelSecurityNativePostgresIsolation|TestInstallRLSPolicies_Postgres|TestInstallRLSPolicies_Postgres_NoTenantColumn'
+            run: 'TestSuitePostgres|TestPostgresReplicaRouting|TestDeadlockRetryPostgres|TestPgListener_RoundTrip|TestRowLevelSecurityNativePostgresIsolation|TestInstallRLSPolicies_Postgres|TestInstallRLSPolicies_Postgres_NoTenantColumn|TestTenantProvisionSchemaPerTenantPostgres'
             leg: Postgres
           - engine: mysql
             run: 'TestSuiteMySQL|TestDeadlockRetryMySQL'
