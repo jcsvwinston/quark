@@ -168,16 +168,16 @@ func generateFromDefinition(name string) error {
 		fieldName := parts[0]
 		fieldType := parts[1]
 
-		quarkTag := ""
-		if fieldName == "id" {
-			quarkTag = "pk,auto"
-		}
-
+		// `id` is the conventional primary key; the template renders IsPK as
+		// pk:"true", the tag the ORM parses. (The old QuarkTag="pk,auto" was
+		// vocabulary the ORM never understood, and the template dropped it
+		// anyway — QCD-CLI-1.) No quark:"not_null" here: unlike from-table,
+		// a definition carries no nullability information.
 		data.Fields = append(data.Fields, gen.FieldData{
-			Name:     gen.SnakeToCamel(fieldName, true),
-			Type:     fieldType,
-			QuarkTag: quarkTag,
-			JSONTag:  fieldName,
+			Name:    gen.SnakeToCamel(fieldName, true),
+			Type:    fieldType,
+			JSONTag: fieldName,
+			IsPK:    fieldName == "id",
 		})
 	}
 

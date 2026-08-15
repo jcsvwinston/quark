@@ -12,7 +12,7 @@ import (
 {{end}}
 type {{.StructName}} struct {
 	{{- range .Fields}}
-	{{.Name}} {{.Type}} `db:"{{.JSONTag}}"{{if .IsPK}} pk:"true"{{end}}{{if .JSONTag}} json:"{{.JSONTag}}"{{end}}`
+	{{.Name}} {{.Type}} `db:"{{.JSONTag}}"{{if .IsPK}} pk:"true"{{end}}{{if .QuarkTag}} quark:"{{.QuarkTag}}"{{end}}{{if .JSONTag}} json:"{{.JSONTag}}"{{end}}`
 	{{- end}}
 }
 
