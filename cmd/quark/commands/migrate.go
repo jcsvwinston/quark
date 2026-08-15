@@ -41,7 +41,11 @@ Build a small runner that does, and drive it from there:
         _ "github.com/you/yourapp/migrations" // side-effect: registers migrations
         "github.com/jcsvwinston/quark/cmd/quark/commands"
     )
-    func main() { commands.Execute() }
+    func main() { commands.Main() }
+
+commands.Main prints errors to stderr and exits non-zero on failure. (A bare
+commands.Execute() discards the returned error: every failure would exit 0
+in silence.)
 
 See the CLI guide ("Embedding the same operations in your own binary")`, verb)
 }

@@ -46,7 +46,9 @@ is empty, instead of reporting a bogus "No pending migrations". To run them
 for real, build the two-line runner shown in
 [Embedding the same operations in your own binary](#embedding-the-same-operations-in-your-own-binary):
 your `main` imports the migrations package for its side effects and calls
-`commands.Execute()`.
+`commands.Main()`, which prints errors to stderr and exits non-zero on
+failure. (Don't call a bare `commands.Execute()` from `main` — it *returns*
+the error instead of printing it, so every failure becomes a silent exit 0.)
 :::
 
 ## Generating models from an existing database
@@ -99,6 +101,28 @@ err := client.Sync(ctx, quark.SyncOptions{DryRun: true}, &User{}, &Order{})
 
 ## Embedding the same operations in your own binary
 
+To reuse the CLI's own command tree (`migrate`, `seed`, `tenant`, …) with your
+project's migrations compiled in, the whole runner is:
+
+```go
+// cmd/quark/main.go (in YOUR project)
+package main
+
+import (
+    _ "github.com/you/yourapp/migrations" // side-effect: registers migrations
+
+    "github.com/jcsvwinston/quark/cmd/quark/commands"
+)
+
+func main() { commands.Main() }
+```
+
+`commands.Main` executes the root command, prints any error to stderr and
+exits 1 — the same contract as the standalone binary, which is what CI gates
+need. `commands.Execute` remains available for mains that deliberately take
+over error handling; it returns the error and prints nothing, so never call
+it bare.
+
 When you'd rather run these from your own service or CI binary, call the public
 APIs directly. A migration runner imports your migration package for its side
 effects and drives the versioned migrator:
@@ -146,7 +170,11 @@ tenant:
 Without a template the command fails instead of guessing (it used to migrate
 the *default* database, whatever tenant you named). `schema_per_tenant`
 migrations are not resolvable from static config and exit with an explicit
-error — run those from your own binary. In code, the same loop stays explicit —
+error — run those from your own binary. `tenant provision` therefore stops at
+schema + registry row under `schema_per_tenant` (it says so, and exits 0 —
+that's the complete effect); it also refuses to provision an id that's
+already registered in `quark_tenants`, so retries never crash on duplicate
+`CREATE SCHEMA`. In code, the same loop stays explicit —
 resolve each tenant's DSN, build a client, run the same migrator:
 
 ```go

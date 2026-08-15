@@ -58,6 +58,19 @@ func NewModelGenerator(pkgName, outDir string, tmplStr string) (*ModelGenerator,
 }
 
 func (g *ModelGenerator) GenerateFromData(data ModelData) error {
+	// Both entry points (from-table and --fields) render through here, so the
+	// import flags are derived from the fields rather than trusted from the
+	// caller: the --fields path never set them, emitting Go that referenced
+	// time.Time/json.RawMessage without the import block (QCD-CLI-1).
+	for _, f := range data.Fields {
+		if strings.Contains(f.Type, "time.Time") {
+			data.HasTimeField = true
+		}
+		if strings.Contains(f.Type, "json.RawMessage") {
+			data.HasJSONRawMessage = true
+		}
+	}
+
 	var buf bytes.Buffer
 	if err := g.Template.Execute(&buf, data); err != nil {
 		return err
@@ -86,41 +99,26 @@ func (g *ModelGenerator) GenerateFromTable(table TableInfo) error {
 		goType, quarkTags := mapSQLToGo(col)
 		field.Type = goType
 		field.QuarkTag = strings.Join(quarkTags, ",")
-
-		if goType == "json.RawMessage" {
-			data.HasJSONRawMessage = true
-		}
-		if strings.Contains(goType, "time.Time") {
-			data.HasTimeField = true
-		}
 		field.IsPK = col.IsPK
 
 		data.Fields = append(data.Fields, field)
 	}
 
-	var buf bytes.Buffer
-	if err := g.Template.Execute(&buf, data); err != nil {
-		return err
-	}
-
-	fileName := strings.ToLower(data.StructName) + ".go"
-	path := filepath.Join(g.OutDir, fileName)
-	return os.WriteFile(path, buf.Bytes(), 0644)
+	return g.GenerateFromData(data)
 }
 
+// mapSQLToGo returns the Go type plus the tokens for the `quark:"..."` struct
+// tag. The tokens must be vocabulary the ORM actually parses
+// (internal/schema.BuildMeta): `not_null`, `unique`, `version`, `rename:`,
+// `tz=`. Earlier versions emitted pk/auto/notnull here, none of which the ORM
+// understands — pk is declared via the separate pk:"true" tag (FieldData.IsPK)
+// and PKs are implicitly NOT NULL, so only non-PK NOT NULL columns need a tag.
 func mapSQLToGo(col ColumnInfo) (string, []string) {
 	var goType string
 	var tags []string
 
-	if col.IsPK {
-		tags = append(tags, "pk")
-		if col.IsAuto {
-			tags = append(tags, "auto")
-		}
-	}
-
-	if !col.IsNullable {
-		tags = append(tags, "notnull")
+	if !col.IsNullable && !col.IsPK {
+		tags = append(tags, "not_null")
 	}
 
 	sqlType := strings.ToLower(col.Type)
