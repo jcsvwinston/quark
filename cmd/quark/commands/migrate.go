@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"text/template"
 	"time"
 
@@ -209,14 +210,46 @@ func runMigrateStatus() error {
 	defer client.Close()
 
 	migrator := migrate.NewMigrator(client)
-	applied, err := migrator.GetApplied(context.Background())
+	ctx := context.Background()
+
+	// Init is idempotent (dialect-aware IF NOT EXISTS); without it, status on
+	// a fresh database surfaced a raw missing-table error instead of the
+	// obvious truth: zero applied migrations.
+	if err := migrator.Init(ctx); err != nil {
+		return fmt.Errorf("initializing migration table: %w", err)
+	}
+	applied, err := migrator.GetApplied(ctx)
 	if err != nil {
 		return fmt.Errorf("getting migration status: %w", err)
 	}
 
-	fmt.Println("Applied migrations:")
+	appliedIDs := make([]string, 0, len(applied))
 	for id := range applied {
+		appliedIDs = append(appliedIDs, id)
+	}
+	sort.Strings(appliedIDs)
+
+	fmt.Printf("Applied migrations (%d):\n", len(appliedIDs))
+	for _, id := range appliedIDs {
 		fmt.Printf("  [x] %s\n", id)
+	}
+
+	// Pending = registered in this binary but not applied. An empty registry
+	// means this binary cannot know the pending set (standalone install) —
+	// say so instead of implying "none pending".
+	if migrate.RegisteredCount() == 0 {
+		fmt.Println("Pending migrations: unknown — no migrations are registered in this binary (see 'quark migrate up' for the embed recipe).")
+		return nil
+	}
+	var pending []string
+	for _, id := range migrate.RegisteredIDs() {
+		if !applied[id] {
+			pending = append(pending, id)
+		}
+	}
+	fmt.Printf("Pending migrations (%d):\n", len(pending))
+	for _, id := range pending {
+		fmt.Printf("  [ ] %s\n", id)
 	}
 	return nil
 }
@@ -229,7 +262,13 @@ func runMigrateVersion() error {
 	defer client.Close()
 
 	migrator := migrate.NewMigrator(client)
-	applied, err := migrator.GetApplied(context.Background())
+	ctx := context.Background()
+	// Same fresh-database contract as `migrate status`: report "none applied"
+	// rather than a missing-table error.
+	if err := migrator.Init(ctx); err != nil {
+		return fmt.Errorf("initializing migration table: %w", err)
+	}
+	applied, err := migrator.GetApplied(ctx)
 	if err != nil {
 		return fmt.Errorf("getting version: %w", err)
 	}

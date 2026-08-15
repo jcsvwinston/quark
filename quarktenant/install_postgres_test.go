@@ -5,7 +5,6 @@ package quarktenant_test
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -79,9 +78,10 @@ func TestInstallRLSPolicies_Postgres(t *testing.T) {
 		if err != nil {
 			t.Fatalf("dry-run: %v", err)
 		}
-		// 3 statements per model (ENABLE, FORCE, CREATE POLICY) × 2 models.
-		if len(stmts) != 6 {
-			t.Fatalf("dry-run produced %d stmts, want 6 (3 per model × 2 models)", len(stmts))
+		// 4 statements per model (ENABLE, FORCE, DROP POLICY IF EXISTS,
+		// CREATE POLICY) × 2 models.
+		if len(stmts) != 8 {
+			t.Fatalf("dry-run produced %d stmts, want 8 (4 per model × 2 models)", len(stmts))
 		}
 		// Each table should appear in ENABLE and CREATE POLICY.
 		for _, tbl := range tables {
@@ -124,27 +124,25 @@ func TestInstallRLSPolicies_Postgres(t *testing.T) {
 		}
 	})
 
-	// --- re-apply on top of an existing policy fails loudly ---
-	t.Run("apply_twice_fails_with_duplicate_object_sqlstate", func(t *testing.T) {
+	// --- re-apply is idempotent (v1.4.1 papercut): the rendered DDL drops
+	// the deterministic policy before recreating it, so an operator can
+	// re-run the install after adding a model without hand-dropping
+	// policies. Previously this failed with SQLSTATE 42710
+	// (duplicate_object) and left the run non-repeatable.
+	t.Run("apply_twice_is_idempotent", func(t *testing.T) {
 		opts := quarktenant.DefaultInstallOptions()
-		_, err := quarktenant.InstallRLSPolicies(ctx, client, opts)
-		if err == nil {
-			t.Fatal("expected duplicate-policy error on re-apply, got nil")
+		stmts, err := quarktenant.InstallRLSPolicies(ctx, client, opts)
+		if err != nil {
+			t.Fatalf("re-apply must be idempotent, got: %v\nstmts: %v", err, stmts)
 		}
-		// PostgreSQL surfaces 42710 (duplicate_object). Asserting on
-		// SQLSTATE rather than the message text is robust against
-		// driver wording changes — same pattern as isPGLockTimeout in
-		// dialect_migration_lock.go.
-		type sqlStater interface{ SQLState() string }
-		var se sqlStater
-		if !errors.As(err, &se) || se.SQLState() != "42710" {
-			t.Errorf("expected SQLSTATE 42710 (duplicate_object), got %v", err)
-		}
-		// Sanity check: the wrapped error still mentions the policy
-		// name so an operator reading the log knows which object
-		// collided.
-		if !strings.Contains(err.Error(), "tenant_isolation") {
-			t.Errorf("error should mention policy name, got %v", err)
+		// Still exactly one policy per table, with the documented name.
+		for _, tbl := range tables {
+			if got := countPolicies(t, client, tbl); got != 1 {
+				t.Errorf("re-apply: table %s has %d policies, want 1", tbl, got)
+			}
+			if name := policyName(t, client, tbl); name != tbl+"_tenant_isolation" {
+				t.Errorf("re-apply: table %s policy = %q", tbl, name)
+			}
 		}
 	})
 }

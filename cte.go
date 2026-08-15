@@ -30,7 +30,7 @@ type cteEntry struct {
 //
 //	users, err := quark.For[User](ctx, client).
 //	    With("top_orders", topOrders).
-//	    Join("top_orders", "users.id = top_orders.user_id").
+//	    Join("top_orders").On("users.id", "=", "top_orders.user_id").
 //	    Limit(50).
 //	    List()
 //

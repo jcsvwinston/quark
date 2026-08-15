@@ -31,6 +31,18 @@ func RegisteredCount() int {
 	return len(registry)
 }
 
+// RegisteredIDs returns the IDs of every migration registered in this binary,
+// sorted ascending (the order Up applies them). The CLI's `migrate status`
+// uses it to compute the pending set.
+func RegisteredIDs() []string {
+	ids := make([]string, 0, len(registry))
+	for id := range registry {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // Reset clears all registered migrations. Intended for use in tests only.
 func Reset() {
 	registry = make(map[string]*Migration)

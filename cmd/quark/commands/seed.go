@@ -22,12 +22,20 @@ var (
 // SeederFunc is the signature for a registered seeder function.
 type SeederFunc func(ctx context.Context, client *quark.Client) error
 
-// seederRegistry holds seeders registered via RegisterSeeder.
-var seederRegistry = map[string]SeederFunc{}
+// seederRegistry holds seeders registered via RegisterSeeder; seederOrder
+// remembers registration order, which is the order `seed run` promises. A map
+// alone iterates randomly — every all-seeders run used a different order.
+var (
+	seederRegistry = map[string]SeederFunc{}
+	seederOrder    []string
+)
 
 // RegisterSeeder registers a named seeder function.
 // Call this from your main package before invoking commands.Main.
 func RegisterSeeder(name string, fn SeederFunc) {
+	if _, exists := seederRegistry[name]; !exists {
+		seederOrder = append(seederOrder, name)
+	}
 	seederRegistry[name] = fn
 }
 
@@ -165,7 +173,11 @@ See the CLI guide ("Embedding the same operations in your own binary")`)
 	// Run all seeders in registration order
 	color.Cyan("Running all seeders...")
 	success, failed := 0, 0
-	for name, fn := range seederRegistry {
+	for _, name := range seederOrder {
+		fn, ok := seederRegistry[name]
+		if !ok {
+			continue
+		}
 		fmt.Printf("  Running %s...", name)
 		if err := fn(ctx, client); err != nil {
 			color.Red(" FAILED: %v", err)
@@ -188,7 +200,7 @@ func runSeedList() {
 		return
 	}
 	color.Cyan("Registered seeders:")
-	for name := range seederRegistry {
+	for _, name := range seederOrder {
 		fmt.Printf("  - %s\n", name)
 	}
 }

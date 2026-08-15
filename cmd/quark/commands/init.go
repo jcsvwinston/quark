@@ -1,14 +1,51 @@
 package commands
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
+
+// detectGoModule reads <dir>/go.mod and derives project.module and
+// project.name for the generated config. Falling back to the old
+// github.com/user/myapp placeholder only when there is no readable module
+// line — an initialized Go project should never see its own config point at
+// somebody else's module path.
+func detectGoModule(dir string) (module, name string) {
+	module, name = "github.com/user/myapp", "myapp"
+
+	f, err := os.Open(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return module, name
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "module ") {
+			continue
+		}
+		mod := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "module")), `"`)
+		if mod == "" {
+			return module, name
+		}
+		module = mod
+		if i := strings.LastIndex(mod, "/"); i >= 0 {
+			name = mod[i+1:]
+		} else {
+			name = mod
+		}
+		return module, name
+	}
+	return module, name
+}
 
 var (
 	initDir     string
@@ -64,10 +101,11 @@ func runInit() error {
 	if _, err := os.Stat(configPath); err == nil {
 		color.Yellow("Warning: .quark.yml already exists. Skipping.")
 	} else {
+		moduleName, projectName := detectGoModule(initDir)
 		config := map[string]interface{}{
 			"project": map[string]string{
-				"name":   "myapp",
-				"module": "github.com/user/myapp",
+				"name":   projectName,
+				"module": moduleName,
 			},
 			"database": map[string]interface{}{
 				"default": map[string]string{

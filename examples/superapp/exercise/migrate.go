@@ -420,6 +420,12 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 		return fmt.Errorf("RegisteredCount: %d, esperaba 2", n)
 	}
 	rec.Note(MIG("RegisteredCount"))
+	// RegisteredIDs alimenta el listado de pendientes de 'migrate status'
+	// (papercut v1.4.1): ordenado ascendente, el orden en que Up aplica.
+	if ids := migrate.RegisteredIDs(); len(ids) != 2 || ids[0] != migVNotesID || ids[1] != migVSeedID {
+		return fmt.Errorf("RegisteredIDs: %v, esperaba [%s %s]", ids, migVNotesID, migVSeedID)
+	}
+	rec.Note(MIG("RegisteredIDs"))
 	m := migrate.NewMigrator(admin)
 	if err := m.Init(rec.Mark(ctx, MIG("(*Migrator).Init"))); err != nil {
 		return fmt.Errorf("migrator init: %w", err)
