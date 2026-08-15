@@ -7,7 +7,7 @@ module github.com/jcsvwinston/quark/benchmarks
 
 go 1.25.7
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	entgo.io/ent v0.14.6
