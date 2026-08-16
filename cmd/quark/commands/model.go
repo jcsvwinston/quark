@@ -42,7 +42,9 @@ var modelCmd = &cobra.Command{
 }
 
 var genCmd = &cobra.Command{
-	Use:     "generate [Name]",
+	Use: "generate [Name]",
+	Example: `  quark model generate --from-table users,orders --out ./models
+  quark model generate Product --fields "id:int64,name:string,price:float64" --out ./models`,
 	Aliases: []string{"gen"},
 	Short:   "Generate models from tables or definition",
 	// A generation failure must surface as a non-zero exit (main.go prints the

@@ -76,6 +76,7 @@ var migrateCmd = &cobra.Command{
 // single line is the only output.
 var migrateCreateCmd = &cobra.Command{
 	Use:           "create <name>",
+	Example:       `  quark migrate create add_users_table --message "users base table"`,
 	Short:         "Create a new migration file",
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
@@ -86,7 +87,9 @@ var migrateCreateCmd = &cobra.Command{
 }
 
 var migrateUpCmd = &cobra.Command{
-	Use:           "up",
+	Use: "up",
+	Example: `  quark migrate up --dry-run
+  quark migrate up --steps 1`,
 	Short:         "Apply pending migrations",
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -97,6 +100,7 @@ var migrateUpCmd = &cobra.Command{
 
 var migrateDownCmd = &cobra.Command{
 	Use:           "down",
+	Example:       `  quark migrate down --steps 1`,
 	Short:         "Revert the last migration",
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -107,6 +111,7 @@ var migrateDownCmd = &cobra.Command{
 
 var migrateStatusCmd = &cobra.Command{
 	Use:           "status",
+	Example:       `  quark migrate status`,
 	Short:         "Show migration status",
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -117,6 +122,7 @@ var migrateStatusCmd = &cobra.Command{
 
 var migrateVersionCmd = &cobra.Command{
 	Use:           "version",
+	Example:       `  quark migrate version`,
 	Short:         "Show current migration version",
 	SilenceUsage:  true,
 	SilenceErrors: true,

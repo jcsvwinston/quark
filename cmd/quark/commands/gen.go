@@ -14,8 +14,9 @@ import (
 var codegenDryRun bool
 
 var codegenCmd = &cobra.Command{
-	Use:   "gen [packages]",
-	Short: "Generate typed scanners/binders for models (opt-in codegen)",
+	Use:     "gen [packages]",
+	Example: `  quark gen ./...`,
+	Short:   "Generate typed scanners/binders for models (opt-in codegen)",
 	Long: `Generate parses the given package(s) and, for every struct with db: tags,
 emits a quark_gen.go that registers a typed implementation with Quark's
 runtime. Codegen is opt-in: without it the reflection path is used,

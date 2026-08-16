@@ -20,8 +20,9 @@ func init() {
 // --safe / --no-transaction / --models while ignoring all of them; those
 // flags are gone (H-Q3) — the real knobs live on quark.SyncOptions.
 var syncCmd = &cobra.Command{
-	Use:   "sync",
-	Short: "Check the DB connection and explain how to run schema sync",
+	Use:     "sync",
+	Example: `  quark sync`,
+	Short:   "Check the DB connection and explain how to run schema sync",
 	Long: `Schema sync (auto-migration) compares Go model structs against the live
 database schema and applies CREATE TABLE / ADD COLUMN / RENAME COLUMN /
 DROP COLUMN as needed. Because it needs your compiled model types, sync runs

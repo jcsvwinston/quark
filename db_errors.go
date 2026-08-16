@@ -13,7 +13,6 @@ import (
 
 	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
-	mattnsqlite "github.com/mattn/go-sqlite3"
 	mssql "github.com/microsoft/go-mssqldb"
 	goora "github.com/sijms/go-ora/v2/network"
 	moderncsqlite "modernc.org/sqlite"
@@ -61,14 +60,14 @@ func isUniqueViolation(err error) bool {
 		return oraErr.ErrCode == 1
 	}
 
-	// SQLite mattn/go-sqlite3. ExtendedCode 2067 = SQLITE_CONSTRAINT_UNIQUE,
-	// 1555 = SQLITE_CONSTRAINT_PRIMARYKEY.
-	var mattnErr mattnsqlite.Error
-	if errors.As(err, &mattnErr) {
-		switch mattnErr.ExtendedCode {
-		case mattnsqlite.ErrConstraintUnique, mattnsqlite.ErrConstraintPrimaryKey:
-			return true
-		}
+	// SQLite mattn/go-sqlite3 — cgo-only driver, so its error types only
+	// exist in cgo builds. The check lives behind a build tag
+	// (db_errors_cgo.go / db_errors_nocgo.go): a CGO_ENABLED=0 build — the
+	// default of scratch/distroless Dockerfiles and of every cross-compile —
+	// must keep compiling (DX-1). The pure-Go modernc driver below covers
+	// SQLite classification for those builds with the same numeric codes.
+	if isMattnUniqueViolation(err) {
+		return true
 	}
 
 	// SQLite modernc.org/sqlite. Same numeric extended codes.

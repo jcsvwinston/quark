@@ -33,8 +33,9 @@ func init() {
 }
 
 var validateCmd = &cobra.Command{
-	Use:   "validate",
-	Short: "Validate a Go model against the live table schema",
+	Use:     "validate",
+	Example: `  quark validate users --models ./models --model User`,
+	Short:   "Validate a Go model against the live table schema",
 	Long: `Loads your model structs with go/packages, introspects the table in the
 configured database, and reports the column mapping in both directions:
 DB columns with no db-tagged field, and fields whose column is missing in

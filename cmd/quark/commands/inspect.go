@@ -39,6 +39,7 @@ var inspectCmd = &cobra.Command{
 // failures must exit non-zero (RunE → main.go prints and exits 1).
 var inspectSchemaCmd = &cobra.Command{
 	Use:           "schema",
+	Example:       `  quark inspect schema --format table`,
 	Short:         "Show full database schema",
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -49,6 +50,7 @@ var inspectSchemaCmd = &cobra.Command{
 
 var inspectTableCmd = &cobra.Command{
 	Use:           "table <name>",
+	Example:       `  quark inspect table users --format json`,
 	Short:         "Show structure of a specific table",
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
@@ -59,8 +61,9 @@ var inspectTableCmd = &cobra.Command{
 }
 
 var inspectSQLCmd = &cobra.Command{
-	Use:   "sql",
-	Short: "Reconstruct CREATE TABLE DDL from a live table",
+	Use:     "sql",
+	Example: `  quark inspect sql`,
+	Short:   "Reconstruct CREATE TABLE DDL from a live table",
 	Long: `Introspects a table in the connected database and prints an equivalent
 CREATE TABLE statement reconstructed from its live columns. It does not
 generate SQL from Go model structs — for that, see client.Sync or 'quark gen'.`,

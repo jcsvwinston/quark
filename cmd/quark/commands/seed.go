@@ -59,6 +59,7 @@ var seedCmd = &cobra.Command{
 // non-zero (RunE → main.go prints and exits 1).
 var seedCreateCmd = &cobra.Command{
 	Use:           "create <name>",
+	Example:       `  quark seed create demo_users`,
 	Short:         "Create a new seeder file",
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
@@ -69,7 +70,9 @@ var seedCreateCmd = &cobra.Command{
 }
 
 var seedRunCmd = &cobra.Command{
-	Use:           "run",
+	Use: "run",
+	Example: `  quark seed run
+  quark seed run --name demo_users`,
 	Short:         "Run seeders",
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -79,8 +82,9 @@ var seedRunCmd = &cobra.Command{
 }
 
 var seedListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List registered seeders",
+	Use:     "list",
+	Example: `  quark seed list`,
+	Short:   "List registered seeders",
 	Run: func(cmd *cobra.Command, args []string) {
 		runSeedList()
 	},

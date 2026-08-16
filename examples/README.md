@@ -4,12 +4,16 @@ This directory contains real-world examples of Quark ORM usage with different da
 
 ## Prerequisites
 
-To run the PostgreSQL and MySQL examples, you need to have the test databases running via Docker:
+To run the PostgreSQL and MySQL examples, you need a database reachable at
+the DSN each example reads from its environment. A throwaway container per
+engine is enough:
 
 ```bash
-# From the project root
-docker compose -f docker-compose.test.yml up -d
+docker run -d --name quark-pg -p 5432:5432 -e POSTGRES_USER=quark -e POSTGRES_PASSWORD=quark -e POSTGRES_DB=quark_test postgres:16-alpine
+docker run -d --name quark-mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=quark -e MYSQL_DATABASE=quark_test mysql:8
 ```
+
+The SQLite and sharding examples need no infrastructure at all.
 
 ## Running Examples
 
@@ -41,8 +45,9 @@ Demonstrates pagination using the OFFSET/FETCH syntax required by SQL Server.
 go run ./examples/mssql/main.go
 ```
 
-### 5. Oracle (Godror Support)
-Demonstrates Godror setup. Note that the Godror driver requires CGO enabled for Oracle compilation.
+### 5. Oracle
+Demonstrates Oracle setup with the `sijms/go-ora/v2` driver — pure Go, no
+CGO or Oracle client libraries required.
 
 ```bash
 go run ./examples/oracle/main.go
@@ -51,7 +56,7 @@ go run ./examples/oracle/main.go
 ### 6. Sharding (ShardRouter)
 Self-contained (no Docker): partitions data across two SQLite shards by shard
 key via `ShardRouter`, proving per-shard disjoint storage and the keyless-query
-rejection. See the [Sharding guide](https://jcsvwinston.github.io/quark-docs/docs/advanced/sharding).
+rejection. See the [Sharding guide](https://jcsvwinston.github.io/quark/docs/advanced/sharding).
 
 ```bash
 go run ./examples/sharding/main.go
@@ -60,5 +65,5 @@ go run ./examples/sharding/main.go
 ## Cleaning Up
 
 ```bash
-docker compose -f docker-compose.test.yml down
+docker rm -f quark-pg quark-mysql
 ```

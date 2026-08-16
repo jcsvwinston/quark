@@ -77,6 +77,27 @@ jobs:
             exit 1
           fi
 
+  # DX-1 (auditoría DX 2026-08-16): CGO_ENABLED=0 es el modo por defecto de
+  # los Dockerfile scratch/distroless y de todo cross-compile, y estuvo roto
+  # (db_errors.go enlazaba mattn/go-sqlite3 sin build tag). Este job impide
+  # la regresión compilando el módulo entero sin cgo y en cross-compile.
+  static-build:
+    name: Static build (CGO_ENABLED=0 + cross)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: CGO_ENABLED=0 go build
+        run: CGO_ENABLED=0 go build ./...
+
+      - name: Cross-compile linux/arm64
+        run: GOOS=linux GOARCH=arm64 go build ./...
+
   govulncheck:
     name: govulncheck
     # H-Q5. SECURITY.md points at the Go vulnerability database as the

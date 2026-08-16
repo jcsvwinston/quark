@@ -60,6 +60,7 @@ func init() {
 
 var initCmd = &cobra.Command{
 	Use:           "init",
+	Example:       `  quark init --dialect postgresql`,
 	Short:         "Initialize a new Quark project",
 	SilenceUsage:  true,
 	SilenceErrors: true,
