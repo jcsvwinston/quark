@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.4.1** on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.5.0** on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade:
@@ -17,6 +17,45 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.5.0
+
+The DX minor: everything the 2026-08-16 DX audit demanded from quark. No API
+breaks; every change is additive or turns a silent failure into a loud one.
+
+### Added
+
+- **`quark migrate create <name> --from-models <dir> --dialect <d>`** renders
+  domain DDL from your model structs through the SAME type mapping the runtime
+  migrator uses: dialect-correct column types, topological table order,
+  foreign keys, indexes, and a Down that drops in reverse dependency order.
+- **Rich field vocabulary in `model generate`**: `nullable<T>`, `array<T>`,
+  `json<T>`, and `belongs_to<Model>` (emits the FK column plus the
+  `rel:`/`join:` pair).
+- **Automatic timestamps**: `Create` fills zero `created_at`/`updated_at` and
+  `Update` refreshes `updated_at` — the 18 hand-written timestamp hooks the
+  audit counted are no longer needed.
+- **`quark init` writes the embedded runner** (`cmd/<app>/main.go` with the
+  blank imports and `commands.Main()`) instead of only prescribing it.
+- **`Example:` blocks on 19 subcommands.**
+
+### Fixed
+
+- **Struct-tag typos fail fast.** `quark:"notnull"`, `db:"price,lenght=10"`,
+  `column:"..."` and friends die in `RegisterModel`/`Migrate` with a hint
+  (`ErrInvalidTag`) instead of silently dropping constraints; `pk:"True"` is
+  accepted case-insensitively.
+- **Models without a primary key get an actionable error** naming the model
+  and the fix, instead of `sql: no rows in result set` downstream.
+- **`quark.New` rejects invalid options** (a string, a number, an uncalled
+  constructor) naming each one, and an **unknown driver without
+  `WithDialect` is now an error** instead of a WARN plus a silent PostgreSQL
+  fallback.
+- **Static builds**: the mattn/go-sqlite3 error classifier sits behind a
+  `cgo` build tag, so `CGO_ENABLED=0` and cross-compiles build again (new
+  static-build CI lane).
+- The CLI builds its `Limits` from `DefaultLimits()`, killing the
+  partial-literal `SafeMigrations` WARN on every invocation.
 
 ## v1.4.1
 
