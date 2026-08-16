@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0](https://github.com/jcsvwinston/quark/compare/v1.4.1...v1.5.0) (2026-08-16)
+
+
+### Added
+
+* **dx:** arco DX de quark P0+P1 — build estático, tags fail-fast, PK accionable, runner en init (DX-1/5/6/7/8/9/10) ([#276](https://github.com/jcsvwinston/quark/issues/276)) ([044820d](https://github.com/jcsvwinston/quark/commit/044820d3a8f2f5d6248d25400260f5d59286cd8a))
+
 ## [1.4.1](https://github.com/jcsvwinston/quark/compare/v1.4.0...v1.4.1) (2026-08-15)
 
 
