@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"text/template"
 	"time"
 
@@ -17,9 +18,11 @@ import (
 )
 
 var (
-	migrateSteps   int
-	migrateDryRun  bool
-	migrateMessage string
+	migrateSteps      int
+	migrateDryRun     bool
+	migrateMessage    string
+	migrateFromModels string
+	migrateDialect    string
 )
 
 // errNoMigrationsRegistered is returned by up/down when this binary's
@@ -58,6 +61,8 @@ func init() {
 	migrateCmd.AddCommand(migrateVersionCmd)
 
 	migrateCreateCmd.Flags().StringVar(&migrateMessage, "message", "", "Migration message")
+	migrateCreateCmd.Flags().StringVar(&migrateFromModels, "from-models", "", "Render domain DDL from the model structs in this package (e.g. ./models)")
+	migrateCreateCmd.Flags().StringVar(&migrateDialect, "dialect", "", "SQL dialect for --from-models (postgresql|postgres|mysql|mariadb|sqlite|mssql|oracle); defaults to the configured driver")
 	migrateUpCmd.Flags().IntVar(&migrateSteps, "steps", 0, "Number of migrations to apply")
 	migrateUpCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Preview SQL without executing")
 	migrateDownCmd.Flags().IntVar(&migrateSteps, "steps", 1, "Number of migrations to revert")
@@ -145,14 +150,42 @@ func runMigrateCreate(name string) error {
 
 	path := filepath.Join(dir, filename)
 
+	// DX-18: with --from-models the Up/Down bodies carry rendered domain
+	// DDL instead of the empty skeleton.
+	upBody, downBody := "", ""
+	if migrateFromModels != "" {
+		dialect := normalizeDDLDialect(migrateDialect)
+		if dialect == "" {
+			dialect = normalizeDDLDialect(viper.GetString("database.default.driver"))
+		}
+		if dialect == "" {
+			return fmt.Errorf("--from-models needs a dialect: pass --dialect or configure database.default.driver")
+		}
+		models, err := loadModelsForDDL(migrateFromModels)
+		if err != nil {
+			return err
+		}
+		up, down, err := buildDDLStatements(models, dialect)
+		if err != nil {
+			return err
+		}
+		upBody = renderExecBody(up)
+		downBody = renderExecBody(down)
+		fmt.Printf("Rendered DDL for %d model(s) from %s (dialect %s)\n", len(models), migrateFromModels, dialect)
+	}
+
 	data := struct {
-		ID      string
-		Name    string
-		Message string
+		ID       string
+		Name     string
+		Message  string
+		UpBody   string
+		DownBody string
 	}{
-		ID:      timestamp,
-		Name:    name,
-		Message: migrateMessage,
+		ID:       timestamp,
+		Name:     name,
+		Message:  migrateMessage,
+		UpBody:   upBody,
+		DownBody: downBody,
 	}
 
 	tmpl, _ := template.New("migration").Parse(migrationTemplate)
@@ -292,4 +325,37 @@ func runMigrateVersion() error {
 		fmt.Printf("Current version: %s\n", latest)
 	}
 	return nil
+}
+
+// normalizeDDLDialect maps CLI/config dialect spellings onto the names
+// internal/migrate.SQLTypeWithOpts understands.
+func normalizeDDLDialect(d string) string {
+	switch strings.ToLower(strings.TrimSpace(d)) {
+	case "postgresql", "postgres":
+		return "postgres"
+	case "mysql":
+		return "mysql"
+	case "mariadb":
+		return "mariadb"
+	case "sqlite":
+		return "sqlite"
+	case "mssql", "sqlserver":
+		return "mssql"
+	case "oracle":
+		return "oracle"
+	default:
+		return ""
+	}
+}
+
+// renderExecBody turns DDL statements into the client.Exec sequence the
+// migration template embeds.
+func renderExecBody(stmts []string) string {
+	var b strings.Builder
+	for _, stmt := range stmts {
+		b.WriteString("\t\t\tif err := client.Exec(ctx, `" + stmt + "`); err != nil {\n")
+		b.WriteString("\t\t\t\treturn err\n")
+		b.WriteString("\t\t\t}\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
