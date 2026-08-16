@@ -228,6 +228,22 @@ func (c *Client) GetClient(ctx context.Context) (*Client, error) {
 //
 // The dialect is auto-detected from the driver name. You can override it with WithDialect().
 func New(driverName, dataSource string, opts ...any) (*Client, error) {
+	// The variadic is ...any so PoolOption and Option both fit, which used
+	// to mean anything else was silently discarded (DX audit A4). Reject
+	// unknown values up front, naming each one.
+	var badOpts []string
+	for i, opt := range opts {
+		switch opt.(type) {
+		case PoolOption, Option:
+		default:
+			badOpts = append(badOpts, fmt.Sprintf("position %d: %T", i+1, opt))
+		}
+	}
+	if len(badOpts) > 0 {
+		return nil, fmt.Errorf("quark.New: invalid option(s) — want quark PoolOption or Option values, e.g. quark.WithMaxOpenConns(25), not the constructor itself or arbitrary values: %s",
+			strings.Join(badOpts, "; "))
+	}
+
 	// Open database connection
 	db, err := sql.Open(driverName, dataSource)
 	if err != nil {
@@ -265,31 +281,28 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 		stampedeXFetchBeta: 1.0,
 	}
 
-	// Auto-detect dialect from driverName if not specified
+	// Auto-detect dialect from driverName if not specified. On detection
+	// failure c.dialect stays nil here: an explicit WithDialect applied
+	// below still wins, and if none arrives, construction fails after the
+	// options loop (DX audit A5 — it used to WARN and silently assume
+	// PostgreSQL, emitting SQL for the wrong engine from then on).
 	if c.dialect == nil {
-		dialect, err := DetectDialect(driverName)
-		if err != nil {
-			c.logger.Warn("could not auto-detect dialect, defaulting to generic",
-				"driver", driverName,
-				"error", err)
-			// Default to PostgreSQL as most common
-			c.dialect = PostgreSQL()
-		} else {
+		if dialect, err := DetectDialect(driverName); err == nil {
 			c.dialect = dialect
-		}
-		// MariaDB ships no dedicated database/sql driver — it speaks the MySQL
-		// wire protocol through go-sql-driver/mysql ("mysql"), so DetectDialect
-		// cannot tell them apart by name. Probe the server version and upgrade
-		// to the MariaDB dialect when actually connected to MariaDB, so the
-		// dialect divergences (e.g. LOCK IN SHARE MODE vs the MySQL-8-only
-		// FOR SHARE — BB-3) are emitted correctly. An explicit WithDialect
-		// applied below still wins. (BB-3)
-		if c.dialect.Name() == "mysql" && isMariaDBServer(ctx, db) {
-			c.dialect = MariaDB()
-			// Debug, not Info: WithOptions re-runs New (and thus this probe) on
-			// every clone, so an Info line here would spam logs in apps that
-			// derive clients per-request or in test suites.
-			c.logger.Debug("detected a MariaDB server via SELECT VERSION(); using the MariaDB dialect instead of MySQL")
+			// MariaDB ships no dedicated database/sql driver — it speaks the MySQL
+			// wire protocol through go-sql-driver/mysql ("mysql"), so DetectDialect
+			// cannot tell them apart by name. Probe the server version and upgrade
+			// to the MariaDB dialect when actually connected to MariaDB, so the
+			// dialect divergences (e.g. LOCK IN SHARE MODE vs the MySQL-8-only
+			// FOR SHARE — BB-3) are emitted correctly. An explicit WithDialect
+			// applied below still wins. (BB-3)
+			if c.dialect.Name() == "mysql" && isMariaDBServer(ctx, db) {
+				c.dialect = MariaDB()
+				// Debug, not Info: WithOptions re-runs New (and thus this probe) on
+				// every clone, so an Info line here would spam logs in apps that
+				// derive clients per-request or in test suites.
+				c.logger.Debug("detected a MariaDB server via SELECT VERSION(); using the MariaDB dialect instead of MySQL")
+			}
 		}
 	}
 
@@ -298,6 +311,13 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 		if clientOpt, ok := opt.(Option); ok {
 			clientOpt(c)
 		}
+	}
+
+	// A5: no auto-detected dialect and no WithDialect from the options —
+	// fail construction instead of guessing an engine.
+	if c.dialect == nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("%w: cannot auto-detect a dialect for driver %q — pass quark.WithDialect(...) (or RegisterDialect) to use this driver", ErrDialectNotSupported, driverName)
 	}
 
 	// One WARN per client when a partial Limits literal left
