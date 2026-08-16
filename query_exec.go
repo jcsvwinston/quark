@@ -528,6 +528,12 @@ func (q *Query[T]) Find(id any) (T, error) {
 	if q.client == nil {
 		return zero, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
+	// DX-9: without this guard a PK-less model died deeper down with
+	// "invalid identifier: identifier is empty" — a message that named
+	// neither the model nor the actual problem.
+	if q.pk.Column == "" {
+		return zero, fmt.Errorf("%w: model %T has no primary key — tag a field with pk:\"true\" or name a column db:\"id\"", ErrInvalidQuery, zero)
+	}
 
 	q.where = []condition{{
 		column:   q.pk.Column,

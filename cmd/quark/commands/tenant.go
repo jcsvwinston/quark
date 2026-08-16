@@ -39,6 +39,7 @@ var tenantCmd = &cobra.Command{
 // fails must exit non-zero (RunE → main.go prints and exits 1).
 var tenantProvisionCmd = &cobra.Command{
 	Use:           "provision <tenant-id>",
+	Example:       `  QUARK_TENANT_STRATEGY=db_per_tenant quark tenant provision acme`,
 	Short:         "Provision a new tenant",
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
@@ -50,6 +51,7 @@ var tenantProvisionCmd = &cobra.Command{
 
 var tenantMigrateCmd = &cobra.Command{
 	Use:           "migrate <tenant-id>",
+	Example:       `  quark tenant migrate acme`,
 	Short:         "Run migrations for a specific tenant",
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
@@ -61,6 +63,7 @@ var tenantMigrateCmd = &cobra.Command{
 
 var tenantListCmd = &cobra.Command{
 	Use:           "list",
+	Example:       `  quark tenant list`,
 	Short:         "List active tenants",
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -71,6 +74,7 @@ var tenantListCmd = &cobra.Command{
 
 var tenantMigrateAllCmd = &cobra.Command{
 	Use:           "migrate-all",
+	Example:       `  quark tenant migrate-all --dry-run`,
 	Short:         "Run migrations for all tenants",
 	SilenceUsage:  true,
 	SilenceErrors: true,

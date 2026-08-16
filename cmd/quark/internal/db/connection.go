@@ -16,7 +16,7 @@ func GetQuarkClient() (*quark.Client, error) {
 		return nil, fmt.Errorf("database configuration missing")
 	}
 
-	return quark.New(DriverName(driver), dsn, quark.WithLimits(quark.Limits{AllowRawQueries: true}))
+	return quark.New(DriverName(driver), dsn, quark.WithLimits(cliLimits()))
 }
 
 func GetAdminQuarkClient() (*quark.Client, error) {
@@ -27,7 +27,7 @@ func GetAdminQuarkClient() (*quark.Client, error) {
 		return nil, fmt.Errorf("admin database configuration missing")
 	}
 
-	return quark.New(DriverName(driver), dsn, quark.WithLimits(quark.Limits{AllowRawQueries: true}))
+	return quark.New(DriverName(driver), dsn, quark.WithLimits(cliLimits()))
 }
 
 // GetTenantQuarkClient opens a client connected to ONE tenant's database.
@@ -59,10 +59,22 @@ func GetTenantQuarkClient(tenantID string) (*quark.Client, error) {
 			return nil, fmt.Errorf("database configuration missing")
 		}
 		dsn := strings.ReplaceAll(tmpl, "{tenant}", tenantID)
-		return quark.New(DriverName(driver), dsn, quark.WithLimits(quark.Limits{AllowRawQueries: true}))
+		return quark.New(DriverName(driver), dsn, quark.WithLimits(cliLimits()))
 	case "schema_per_tenant":
 		return nil, fmt.Errorf("schema_per_tenant migrations are not supported by the standalone CLI: the migrator would run against the connection's default schema, not the tenant's. Run migrations from your own binary with a TenantRouter (see the multi-tenant guide)")
 	default:
 		return nil, fmt.Errorf("unsupported strategy: %s", strategy)
 	}
+}
+
+// cliLimits starts from DefaultLimits and enables only raw queries — the
+// CLI's migrate/seed/tenant paths need them. Starting from the defaults
+// (instead of a partial literal) keeps SafeMigrations=true and silences the
+// partial-literal WARN that used to fire on EVERY CLI command, telling the
+// user their brand-new project risked dropped tables because of the CLI's
+// own wiring (DX-6).
+func cliLimits() quark.Limits {
+	limits := quark.DefaultLimits()
+	limits.AllowRawQueries = true
+	return limits
 }

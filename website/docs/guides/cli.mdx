@@ -69,6 +69,14 @@ locking. Or define a model inline, no database needed:
 quark model generate Product --fields "id:int64,name:string,price:float64" --out ./models
 ```
 
+The definition grammar also covers the rich half of the ORM: a third
+segment adds a tag token (`sku:string:unique`, `version:int64:version`,
+`title:string:not_null`), and generic specs produce quark's container
+types and relations — `bio:nullable<string>`, `tags:array<string>`,
+`attrs:json<Attrs>`, `author:belongs_to<User>` (which emits the
+`author_id` column plus the relation field pair). The referenced types
+(`Attrs`, `User`) stay yours to define.
+
 Flags: `--from-table`, `--fields`, `--out` (default `./models`), `--package`
 (default `models`), `--dialect`, `--tags` (default `json`). The `--out` directory
 is created if missing, and a malformed spec or unwritable output exits non-zero.

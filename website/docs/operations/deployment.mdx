@@ -12,6 +12,17 @@ connection pool, how long may a query run, is the wire encrypted, who runs
 migrations and when, and how do you see what the ORM is doing. This page walks
 through each one.
 
+## Static binaries and cross-compilation
+
+`CGO_ENABLED=0 go build` works — the default of `scratch`/`distroless`
+Dockerfiles and of every cross-compile (`GOOS=linux GOARCH=arm64 …`). The
+only cgo-dependent piece, the `mattn/go-sqlite3` error classifier, sits
+behind a build tag; pure-Go builds classify SQLite errors through
+`modernc.org/sqlite` (the driver the [installation guide](../guides/installation)
+recommends) with the same numeric codes. If you use SQLite in a static
+binary, use the `modernc.org/sqlite` driver; every other engine's driver is
+already pure Go except `mattn/go-sqlite3` itself.
+
 ## Size the connection pool
 
 Quark builds on `database/sql`, and pool options are applied to the underlying

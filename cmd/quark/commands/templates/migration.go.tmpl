@@ -12,14 +12,24 @@ func init() {
 		Name:    "{{.Name}}",
 		Message: "{{.Message}}",
 		Up: func(ctx context.Context, client *quark.Client) error {
+{{- if .UpBody}}
+{{.UpBody}}
+			return nil
+{{- else}}
 			// Write your Up migration logic here
 			// Example: return client.Exec(ctx, "CREATE TABLE users (...)")
 			return nil
+{{- end}}
 		},
 		Down: func(ctx context.Context, client *quark.Client) error {
+{{- if .DownBody}}
+{{.DownBody}}
+			return nil
+{{- else}}
 			// Write your Down migration logic here
 			// Example: return client.Exec(ctx, "DROP TABLE users")
 			return nil
+{{- end}}
 		},
 	})
 }

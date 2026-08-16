@@ -64,8 +64,16 @@ func (c *Client) RegisterModel(models ...any) error {
 		// at registration, rather than on the first query that binds or
 		// scans the column. computeModelMeta records the parse failure
 		// on the cached meta; we wrap it in the public sentinel here.
-		if meta := GetModelMetaByType(t); meta != nil && meta.TZError != nil {
-			return fmt.Errorf("%w: %v", ErrInvalidTimezone, meta.TZError)
+		if meta := GetModelMetaByType(t); meta != nil {
+			if meta.TZError != nil {
+				return fmt.Errorf("%w: %v", ErrInvalidTimezone, meta.TZError)
+			}
+			// Same fail-fast contract for the rest of the tag vocabulary
+			// (DX-8): a typo must break here naming every offending field,
+			// not emit DDL missing NOT NULL/UNIQUE/columns.
+			if meta.TagError != nil {
+				return fmt.Errorf("%w: %v", ErrInvalidTag, meta.TagError)
+			}
 		}
 	}
 	c.registeredModelsMu.Lock()

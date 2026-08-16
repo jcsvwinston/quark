@@ -36,8 +36,9 @@ func init() {
 }
 
 var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Show the quark CLI version",
+	Use:     "version",
+	Example: `  quark version`,
+	Short:   "Show the quark CLI version",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("quark %s %s/%s (%s)\n", cliVersion(), runtime.GOOS, runtime.GOARCH, runtime.Version())
 	},

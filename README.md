@@ -455,7 +455,7 @@ client, err := quark.New("postgres", "postgres://user:pass@localhost/db",
 More knobs — deadlock retry, slow-query logging, default timezone, cache
 jitter/XFetch/cross-instance stampede control, read replicas and their
 selection strategy/cooldown, pool idle-time — are covered in the
-[Configuration Reference](https://jcsvwinston.github.io/quantum/quark/reference/configuration/).
+[Configuration Reference](https://jcsvwinston.github.io/quark/docs/reference/configuration).
 
 ---
 
