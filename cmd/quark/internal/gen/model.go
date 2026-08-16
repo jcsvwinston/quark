@@ -35,6 +35,10 @@ type ModelData struct {
 	Fields            []FieldData
 	HasJSONRawMessage bool
 	HasTimeField      bool
+	// HasQuark is true when any field uses a quark generic container
+	// (Nullable/Array/JSON) and the file must import the quark module
+	// (DX-19).
+	HasQuark bool
 }
 
 type FieldData struct {
@@ -43,6 +47,11 @@ type FieldData struct {
 	QuarkTag string
 	JSONTag  string
 	IsPK     bool
+	// RelTag/JoinTag render the relation tag pair (rel:"belongs_to"
+	// join:"author_id") for fields produced by the belongs_to<Model>
+	// vocabulary (DX-19).
+	RelTag  string
+	JoinTag string
 }
 
 func NewModelGenerator(pkgName, outDir string, tmplStr string) (*ModelGenerator, error) {
@@ -68,6 +77,9 @@ func (g *ModelGenerator) GenerateFromData(data ModelData) error {
 		}
 		if strings.Contains(f.Type, "json.RawMessage") {
 			data.HasJSONRawMessage = true
+		}
+		if strings.Contains(f.Type, "quark.") {
+			data.HasQuark = true
 		}
 	}
 
