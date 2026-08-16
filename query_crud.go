@@ -493,6 +493,11 @@ func (q *Query[T]) Create(entity *T) error {
 		}
 	}
 
+	// created_at/updated_at column convention (DX-20).
+	if q.meta != nil {
+		stampTimestamps(entity, q.meta, true)
+	}
+
 	// Operation-scoped ctx, the same pattern every other op in this file
 	// uses. It is load-bearing under RowLevelSecurityNative: the implicit
 	// transaction around INSERT … RETURNING commits when THIS ctx ends, so
@@ -668,6 +673,11 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 		}
 	}
 
+	// created_at/updated_at column convention (DX-20).
+	if q.meta != nil {
+		stampTimestamps(entity, q.meta, false)
+	}
+
 	// Operation-scoped ctx — see the twin comment in Create. Update's
 	// fallback branch for a zero PK is an INSERT … RETURNING, which under
 	// RowLevelSecurityNative runs in an implicit transaction that commits
@@ -731,6 +741,11 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		if err := hook.BeforeUpdate(q.ctx); err != nil {
 			return 0, err
 		}
+	}
+
+	// created_at/updated_at column convention (DX-20).
+	if q.meta != nil {
+		stampTimestamps(entity, q.meta, false)
 	}
 
 	v := reflect.ValueOf(entity).Elem()
@@ -1559,6 +1574,11 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 		}
 	}
 
+	// created_at/updated_at column convention (DX-20).
+	if q.meta != nil {
+		stampTimestamps(entity, q.meta, true)
+	}
+
 	v := reflect.ValueOf(entity)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
@@ -1805,6 +1825,11 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 			if err := hook.BeforeCreate(q.ctx); err != nil {
 				return err
 			}
+		}
+
+		// created_at/updated_at column convention (DX-20).
+		if q.meta != nil {
+			stampTimestamps(e, q.meta, true)
 		}
 	}
 
@@ -2168,6 +2193,11 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 				return err
 			}
 		}
+
+		// created_at/updated_at column convention (DX-20).
+		if q.meta != nil {
+			stampTimestamps(e, q.meta, true)
+		}
 	}
 
 	first := reflect.ValueOf(entities[0])
@@ -2449,6 +2479,11 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 					return err
 				}
 			}
+
+			// created_at/updated_at column convention (DX-20).
+			if q.meta != nil {
+				stampTimestamps(entity, q.meta, false)
+			}
 			v := reflect.ValueOf(entity)
 			if v.Kind() == reflect.Ptr {
 				v = v.Elem()
@@ -2519,3 +2554,42 @@ func (q *BaseQuery) linkM2M(rel RelationMeta, parentPK, childPK any) error {
 	}
 	return fmt.Errorf("linkM2M: %w", wrapDBError(err))
 }
+
+// stampTimestamps applies the created_at/updated_at column convention
+// (DX-20): on Create, both are set to now (UTC) when the entity carries the
+// zero value — an explicit value always wins; on Update, updated_at is
+// refreshed unconditionally (the row just changed). Models without those
+// columns pay one map lookup each. This replaces the 18 hand-written hook
+// methods the reference app needed just to stamp timestamps.
+func stampTimestamps(entity any, meta *ModelMeta, creating bool) {
+	v := reflect.ValueOf(entity)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	now := time.Now().UTC()
+
+	setIf := func(col string, always bool) {
+		fm, ok := meta.FieldByCol[col]
+		if !ok {
+			return
+		}
+		f := v.Field(fm.Index)
+		if !f.CanSet() || f.Type() != timeTimeType {
+			return
+		}
+		if always || f.Interface().(time.Time).IsZero() {
+			f.Set(reflect.ValueOf(now))
+		}
+	}
+	if creating {
+		setIf("created_at", false)
+		setIf("updated_at", false)
+	} else {
+		setIf("updated_at", true)
+	}
+}
+
+var timeTimeType = reflect.TypeOf(time.Time{})
