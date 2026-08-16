@@ -1047,7 +1047,7 @@ func testP1Features(ctx context.Context, t *testing.T, client *quark.Client) {
 		// a documented limitation.
 		type P1SuiteUpsertUser struct {
 			ID    int64  `db:"id" pk:"true"`
-			Email string `db:"email" quark:"unique,size=190"`
+			Email string `db:"email,size=190" quark:"unique"`
 			Name  string `db:"name"`
 		}
 		dropTable(client, "p1_suite_upsert_users")

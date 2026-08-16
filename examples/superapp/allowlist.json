@@ -245,6 +245,7 @@
     "github.com/jcsvwinston/quark.ErrInvalidJoin": "package var: no invocable (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.ErrInvalidModel": "package var: no invocable (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.ErrInvalidQuery": "package var: no invocable (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark.ErrInvalidTag": "package var: no invocable (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.ErrInvalidTimezone": "package var: no invocable (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.ErrListenerClosed": "package var: no invocable (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.ErrLockTimeout": "package var: no invocable (denominador S7-coverage)",
