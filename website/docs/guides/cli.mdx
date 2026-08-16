@@ -37,6 +37,22 @@ quark migrate status                    # show applied vs pending
 quark migrate down                      # roll back the last migration
 ```
 
+`migrate create` can also write the migration **body** for you. Point it at
+the package that holds your model structs and name the dialect, and it
+renders domain DDL through the same type mapping the runtime migrator uses:
+
+```bash
+quark migrate create domain_schema --from-models ./models --dialect postgresql
+```
+
+Tables come out in dependency order (parents before children), with the
+`NOT NULL`/`UNIQUE`/size constraints your tags declare, `FOREIGN KEY`
+clauses and indexes for every `rel:"belongs_to"`/`join:` pair, and a `Down`
+that drops in reverse order. `--dialect` accepts
+`postgresql|mysql|mariadb|sqlite|mssql|oracle` and defaults to the
+configured `database.default.driver`. The result is a regular migration
+file — review it and edit like any other.
+
 :::caution The standalone binary cannot see your migrations
 Migration files register themselves via `init()`, which only runs when their
 package is compiled into the executing binary — a `go install`ed `quark`
@@ -110,7 +126,10 @@ err := client.Sync(ctx, quark.SyncOptions{DryRun: true}, &User{}, &Order{})
 ## Embedding the same operations in your own binary
 
 To reuse the CLI's own command tree (`migrate`, `seed`, `tenant`, …) with your
-project's migrations compiled in, the whole runner is:
+project's migrations compiled in, you need a small runner in your project —
+and `quark init` already writes it for you (`cmd/<app>/main.go`, plus the
+`migrations`/`seeders` doc stubs it imports). Written out, the whole runner
+is:
 
 ```go
 // cmd/quark/main.go (in YOUR project)
