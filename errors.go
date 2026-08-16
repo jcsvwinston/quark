@@ -73,6 +73,15 @@ var (
 	// and the offending timezone string.
 	ErrInvalidTimezone = errors.New("invalid column timezone")
 
+	// ErrInvalidTag indicates a model struct carries tag tokens quark does
+	// not read — a misspelled quark:"..." token, a db option other than
+	// size/precision/scale, a pk value other than "true", or a foreign tag
+	// key like column:/notnull:. Surfaced by Client.RegisterModel and
+	// Client.Migrate so a typo breaks at startup naming every offending
+	// field, instead of producing DDL that silently omits NOT NULL, UNIQUE
+	// or whole columns (DX-8).
+	ErrInvalidTag = errors.New("invalid struct tag")
+
 	// ErrDialectNotSupported indicates that the database dialect is not supported.
 	ErrDialectNotSupported = errors.New("dialect not supported")
 

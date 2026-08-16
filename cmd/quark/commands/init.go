@@ -147,6 +147,17 @@ func runInit() error {
 		fmt.Println("  Created .quark.yml")
 	}
 
+	// DX-10: close the CLI cycle. The standalone quark binary cannot see
+	// project migrations/seeders (they register via init()), so every
+	// project needs a small runner — the CLI used to dictate it in an error
+	// message without ever writing it. init knows the module path, so it
+	// scaffolds the runner plus the package stubs that make it compile on
+	// day one (the migrations/ and seeders/ dirs start empty).
+	moduleName, projectName := detectGoModule(initDir)
+	if err := writeRunnerScaffold(initDir, moduleName, projectName); err != nil {
+		return err
+	}
+
 	color.Green("\nQuark project initialized successfully!")
 	return nil
 }
@@ -168,4 +179,63 @@ func getDSNPlaceholder(dialect string) string {
 	default:
 		return ""
 	}
+}
+
+// writeRunnerScaffold writes cmd/<name>/main.go — the project's embedded
+// migration/seed runner — and the doc.go stubs for migrations/ and seeders/
+// so the runner's blank imports compile before the first migrate create.
+// Existing files are never overwritten.
+func writeRunnerScaffold(dir, moduleName, projectName string) error {
+	stub := func(pkg, purpose string) string {
+		return fmt.Sprintf(`// Package %s registers this project's %s via init() side
+// effects. Files scaffolded by 'quark migrate create' / 'quark seed create'
+// land here; the runner in cmd/ imports this package so they compile into
+// the binary that runs them.
+package %s
+`, pkg, purpose, pkg)
+	}
+	for pkg, purpose := range map[string]string{"migrations": "versioned migrations", "seeders": "seeders"} {
+		path := filepath.Join(dir, pkg, "doc.go")
+		if _, err := os.Stat(path); err == nil {
+			continue
+		}
+		if err := os.WriteFile(path, []byte(stub(pkg, purpose)), 0o644); err != nil {
+			return fmt.Errorf("creating %s: %w", path, err)
+		}
+		fmt.Printf("  Created %s/doc.go\n", pkg)
+	}
+
+	runnerDir := filepath.Join(dir, "cmd", projectName)
+	runnerPath := filepath.Join(runnerDir, "main.go")
+	if _, err := os.Stat(runnerPath); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(runnerDir, 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", runnerDir, err)
+	}
+	runner := fmt.Sprintf(`// Command %s is this project's migration and seed runner, scaffolded by
+// 'quark init'. The standalone quark binary cannot see the migrations and
+// seeders registered below (they register through init() side effects), so
+// migrate/seed/tenant commands run through THIS binary:
+//
+//	go run ./cmd/%s migrate up
+//	go run ./cmd/%s seed run
+//
+// commands.Main prints errors to stderr and exits non-zero on failure.
+package main
+
+import (
+	_ "%s/migrations" // side-effect: registers migrations
+	_ "%s/seeders"    // side-effect: registers seeders
+
+	"github.com/jcsvwinston/quark/cmd/quark/commands"
+)
+
+func main() { commands.Main() }
+`, projectName, projectName, projectName, moduleName, moduleName)
+	if err := os.WriteFile(runnerPath, []byte(runner), 0o644); err != nil {
+		return fmt.Errorf("creating %s: %w", runnerPath, err)
+	}
+	fmt.Printf("  Created cmd/%s/main.go (migration/seed runner — run it with: go run ./cmd/%s migrate up)\n", projectName, projectName)
+	return nil
 }

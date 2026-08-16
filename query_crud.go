@@ -476,6 +476,12 @@ func (q *Query[T]) Create(entity *T) error {
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
+	// DX-9: the insert path needs the PK for RETURNING / LastInsertId; a
+	// PK-less model used to die with "sql: no rows in result set", naming
+	// neither the model nor the words "primary key".
+	if q.pk.Column == "" {
+		return fmt.Errorf("%w: model %T has no primary key — tag a field with pk:\"true\" or name a column db:\"id\"", ErrInvalidQuery, entity)
+	}
 
 	if err := q.client.Validate(q.ctx, entity); err != nil {
 		return fmt.Errorf("validation failed: %w", err)

@@ -59,7 +59,7 @@ func FindPKs(v reflect.Value) []PKMeta {
 	var pks []PKMeta
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		if field.Tag.Get("pk") == "true" {
+		if strings.EqualFold(field.Tag.Get("pk"), "true") && field.Tag.Get("pk") != "" {
 			dbTag := ColumnFromDBTag(field.Tag.Get("db"))
 			if dbTag == "" || dbTag == "-" {
 				dbTag = ToSnakeCase(field.Name)
@@ -113,6 +113,15 @@ type ModelMeta struct {
 	// fail-fast by Client.RegisterModel / Client.Migrate, which wrap it
 	// in quark.ErrInvalidTimezone.
 	TZError error
+
+	// TagError aggregates every unknown/malformed struct-tag token found on
+	// this model (DX-8): quark tokens outside the vocabulary, db options
+	// other than size/precision/scale or with non-numeric values, pk values
+	// other than "true", and foreign tag keys quark never reads (column:,
+	// notnull:). Same surfacing contract as TZError — RegisterModel and
+	// Migrate fail fast wrapping quark.ErrInvalidTag. A typo used to mean
+	// DDL silently missing NOT NULL/UNIQUE/columns.
+	TagError error
 }
 
 // FieldMeta holds metadata about a single struct field.
@@ -210,17 +219,25 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 		tableName = tn.TableName()
 	}
 
+	// Tag lint (DX-8): recorded here, surfaced fail-fast by
+	// RegisterModel/Migrate — same contract as TZError.
+	tagError := lintFieldTags(t)
+
 	meta := &ModelMeta{
 		Table:             tableName,
 		FieldByCol:        make(map[string]*FieldMeta),
 		Relations:         make(map[string]*RelationMeta),
 		VersionFieldIndex: -1,
+		TagError:          tagError,
 	}
 
-	// Find PKs: collect all pk:"true" tags; fall back to db:"id"
+	// Find PKs: collect all pk:"true" tags; fall back to db:"id".
+	// EqualFold: codegen_registry always accepted pk:"True"; the schema half
+	// demanding the exact lowercase literal made the two halves of the
+	// product disagree about the same tag (DX-8).
 	var pkIndices []int
 	for i := 0; i < t.NumField(); i++ {
-		if t.Field(i).Tag.Get("pk") == "true" {
+		if strings.EqualFold(t.Field(i).Tag.Get("pk"), "true") && t.Field(i).Tag.Get("pk") != "" {
 			pkIndices = append(pkIndices, i)
 		}
 	}
@@ -496,4 +513,97 @@ func parseDBTag(tag string) (col string, size, precision, scale int) {
 		}
 	}
 	return col, size, precision, scale
+}
+
+// lintFieldTags checks every exported field's struct tags against the
+// vocabulary quark actually reads and returns one error naming EVERY
+// problem found, or nil (DX-8). Before this, a typo — quark:"notnull",
+// db:"price,lenght=10", column:"extra" — silently produced DDL without the
+// intended NOT NULL/UNIQUE/column, and the first symptom was an unrelated
+// runtime error that named neither the model nor the tag.
+func lintFieldTags(t reflect.Type) error {
+	var problems []string
+
+	quarkTokens := "rename:<old>, tz=<iana>, not_null, unique, version"
+	dbOptions := "size, precision, scale"
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if field.PkgPath != "" { // unexported
+			continue
+		}
+		name := t.Name() + "." + field.Name
+
+		// pk: only "true" (any case) means anything.
+		if v, ok := field.Tag.Lookup("pk"); ok && !strings.EqualFold(v, "true") {
+			problems = append(problems, fmt.Sprintf(
+				"%s: pk:%q — the only accepted value is \"true\"", name, v))
+		}
+
+		// quark: closed token vocabulary.
+		if quarkTag := field.Tag.Get("quark"); quarkTag != "" {
+			for _, part := range strings.Split(quarkTag, ",") {
+				part = strings.TrimSpace(part)
+				switch {
+				case part == "", part == "not_null", part == "unique", part == "version":
+				case strings.HasPrefix(part, "rename:"), strings.HasPrefix(part, "tz="):
+				case part == "notnull":
+					problems = append(problems, fmt.Sprintf(
+						"%s: quark:\"notnull\" is not a token — did you mean not_null? (valid: %s)", name, quarkTokens))
+				default:
+					problems = append(problems, fmt.Sprintf(
+						"%s: unknown quark tag token %q (valid: %s)", name, part, quarkTokens))
+				}
+			}
+		}
+
+		// db: options after the column name must be known keys with
+		// positive integer values.
+		if dbTag := field.Tag.Get("db"); dbTag != "" && dbTag != "-" {
+			parts := strings.Split(dbTag, ",")
+			for _, opt := range parts[1:] {
+				opt = strings.TrimSpace(opt)
+				if opt == "" {
+					continue
+				}
+				eq := strings.IndexByte(opt, '=')
+				if eq <= 0 {
+					problems = append(problems, fmt.Sprintf(
+						"%s: malformed db tag option %q — use key=value (valid keys: %s)", name, opt, dbOptions))
+					continue
+				}
+				key := strings.ToLower(strings.TrimSpace(opt[:eq]))
+				val := strings.TrimSpace(opt[eq+1:])
+				switch key {
+				case "size", "precision", "scale":
+					if n, err := strconv.Atoi(val); err != nil || n <= 0 {
+						problems = append(problems, fmt.Sprintf(
+							"%s: db tag option %s=%q must be a positive integer", name, key, val))
+					}
+				default:
+					problems = append(problems, fmt.Sprintf(
+						"%s: unknown db tag option %q (valid keys: %s)", name, key, dbOptions))
+				}
+			}
+		}
+
+		// Foreign tag keys quark never reads but humans plausibly write.
+		for foreign, hint := range map[string]string{
+			"column":      "use db:\"<column>\"",
+			"notnull":     "use quark:\"not_null\"",
+			"primarykey":  "use pk:\"true\"",
+			"primary_key": "use pk:\"true\"",
+		} {
+			if v, ok := field.Tag.Lookup(foreign); ok {
+				problems = append(problems, fmt.Sprintf(
+					"%s: %s:%q is not a quark tag — %s", name, foreign, v, hint))
+			}
+		}
+	}
+
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("model %s has invalid struct tags:\n  - %s",
+		t.Name(), strings.Join(problems, "\n  - "))
 }

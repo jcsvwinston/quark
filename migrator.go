@@ -46,6 +46,11 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 	if meta.TZError != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidTimezone, meta.TZError)
 	}
+	// And on any other invalid tag token (DX-8) — the DDL this function is
+	// about to emit would silently drop whatever the typo meant to declare.
+	if meta.TagError != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidTag, meta.TagError)
+	}
 
 	var columns []string
 	for _, field := range meta.Fields {
