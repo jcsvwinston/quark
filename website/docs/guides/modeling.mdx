@@ -260,19 +260,23 @@ func (m *Member) Validate(ctx context.Context) error {
 }
 ```
 
+## Automatic timestamps
+
+`created_at` and `updated_at` maintain themselves: `Create` fills both when
+they are zero, and `Update` refreshes `updated_at` on every write (UTC).
+Fields must be `time.Time` mapped to those column names — the scaffolded
+models already qualify. A value you set yourself before `Create` is kept, so
+imports and backdating keep working; timestamp hooks written for older
+versions remain correct (they run first and the stamping only touches
+zero values on create).
+
 ## Lifecycle hooks
 
 Add methods to run code around writes:
 
 ```go
 func (u *User) BeforeCreate(ctx context.Context) error {
-    u.CreatedAt = time.Now()
-    u.UpdatedAt = u.CreatedAt
-    return nil
-}
-
-func (u *User) BeforeUpdate(ctx context.Context) error {
-    u.UpdatedAt = time.Now()
+    u.Slug = slugify(u.Name) // derived fields, validation, defaults…
     return nil
 }
 ```
