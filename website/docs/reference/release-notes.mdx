@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.5.0** on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.5.1** on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade:
@@ -17,6 +17,28 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.5.1
+
+A durability patch under native row-level security.
+
+### Fixed
+
+- **A write under `RowLevelSecurityNative` is durable when the call
+  returns.** `Create` (and every single-row operation) runs
+  `INSERT … RETURNING` inside an implicit transaction whose commit used to
+  run in a background goroutine when the operation's context ended — with
+  no ordering guarantee against the call returning. A handler could answer
+  2xx while the row was not yet committed, and an immediate reader on
+  another connection missed it (surfaced as a rare flake by an external
+  end-to-end suite; v1.3.1 fixed a first variant of the same class). The
+  executor now materializes the returned row, commits synchronously, and
+  only then returns: writes are durable on return, commit failures surface
+  as the call's own error, and single-row reads release their pooled
+  connection immediately. The deferred commit remains only on the multi-row
+  read path, where it affects connection release, never durability — the
+  `DeferredCommitFailures` counter now covers exactly that path. The
+  native-RLS guide's write-semantics section is rewritten accordingly.
 
 ## v1.5.0
 
