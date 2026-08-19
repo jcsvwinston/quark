@@ -9,6 +9,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -34,11 +35,19 @@ import (
 //     be referenced again by the caller; pg keeps the snapshot
 //     consistent until the tx finalizes.
 //
-//   - QueryRowContext has the same shape as QueryContext: tx left
-//     open, AfterFunc commits on ctx end. *sql.Row is also opaque so
-//     no wrapping is possible. Failures before the statement runs
-//     (conn acquisition, BeginTx, set_config) surface through the
-//     returned Row's Scan as the real error — never as sql.ErrNoRows.
+//   - QueryRowContext begins a tx, sets the variable, MATERIALIZES the
+//     single row, COMMITS, and only then returns (QCD-FW §1). *sql.Row
+//     is opaque, so the row is read generically and re-served through
+//     the internal row-value driver — by the time the method returns,
+//     the transaction is committed: an INSERT … RETURNING is durable
+//     when the call returns, and an immediate reader on another
+//     connection sees it. (The previous shape — tx left open, AfterFunc
+//     commit on ctx end — ran the commit in a separate goroutine with
+//     no happens-before against the return: a 2xx could precede
+//     durability, the same class v1.3.1 fixed once.) Failures at any
+//     stage (conn acquisition, BeginTx, set_config, query, commit)
+//     surface through the returned Row's Scan as the real error — never
+//     as sql.ErrNoRows; an empty result surfaces sql.ErrNoRows exactly.
 //
 // CONTRACT — the ctx these methods receive must be OPERATION-scoped,
 // not request- or process-scoped: the implicit tx (its pooled
@@ -111,8 +120,10 @@ func (e *nativeRLSExecutor) noteDeferredCommitFailure(cerr error) {
 
 // DeferredCommitFailures reports how many deferred implicit-transaction
 // commits have failed on this Client since it was created. Deferred
-// commits only exist under the RowLevelSecurityNative strategy: the
-// For[T] query/QueryRow paths commit their implicit transaction when the
+// commits only exist under the RowLevelSecurityNative strategy, and since
+// QCD-FW §1 only on the multi-row QueryContext path (QueryRowContext —
+// every write with RETURNING included — commits synchronously before
+// returning): the *sql.Rows implicit transaction commits when the
 // operation's ctx ends — an instant after the operation completes (see
 // nativeRLSExecutor) — so a commit failure
 // happens AFTER the operation already returned success to the caller —
@@ -256,6 +267,106 @@ var errorRowDB = sync.OnceValue(func() *sql.DB {
 	}
 	return db
 })
+
+// --- value-carrying *sql.Row (QCD-FW §1) -------------------------------
+
+// materializeSingleRow reads the first row of rows generically. Returns
+// sql.ErrNoRows when the result set is empty (preserving Row.Scan's
+// contract) and the row iteration error otherwise. Scanning into *any
+// makes database/sql copy []byte values, so the returned values stay
+// valid after rows is closed.
+func materializeSingleRow(rows *sql.Rows) ([]string, []driver.Value, error) {
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, sql.ErrNoRows
+	}
+	holders := make([]any, len(cols))
+	for i := range holders {
+		holders[i] = new(any)
+	}
+	if err := rows.Scan(holders...); err != nil {
+		return nil, nil, err
+	}
+	vals := make([]driver.Value, len(cols))
+	for i, h := range holders {
+		vals[i] = driver.Value(*(h.(*any)))
+	}
+	return cols, vals, nil
+}
+
+// mintedRow is the one-row payload the row-value driver serves. It travels
+// as the query's only bind argument, exactly like errorRow's error does.
+type mintedRow struct {
+	cols []string
+	vals []driver.Value
+}
+
+type mintedRows struct {
+	row  *mintedRow
+	done bool
+}
+
+func (m *mintedRows) Columns() []string { return m.row.cols }
+func (m *mintedRows) Close() error      { return nil }
+func (m *mintedRows) Next(dest []driver.Value) error {
+	if m.done {
+		return io.EOF
+	}
+	copy(dest, m.row.vals)
+	m.done = true
+	return nil
+}
+
+// rowValueDriver mints *sql.Row values that serve one pre-materialized
+// row. The sibling of rowErrDriver, and it exists for the same reason:
+// database/sql has no constructor for a Row and the Executor interface
+// fixes QueryRowContext's return type — but the native-RLS executor must
+// COMMIT its implicit transaction before returning (QCD-FW §1), which
+// requires reading the row first and re-serving it.
+type rowValueDriver struct{}
+
+func (rowValueDriver) Open(string) (driver.Conn, error) { return rowValueConn{}, nil }
+
+type rowValueConn struct{}
+
+func (rowValueConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("quark: internal row-value driver does not prepare statements")
+}
+func (rowValueConn) Close() error { return nil }
+func (rowValueConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("quark: internal row-value driver does not begin transactions")
+}
+func (rowValueConn) CheckNamedValue(*driver.NamedValue) error { return nil }
+
+func (rowValueConn) QueryContext(_ context.Context, _ string, args []driver.NamedValue) (driver.Rows, error) {
+	if len(args) == 1 {
+		if row, ok := args[0].Value.(*mintedRow); ok {
+			return &mintedRows{row: row}, nil
+		}
+	}
+	return nil, errors.New("quark: internal row-value driver queried without a row argument")
+}
+
+var valueRowDB = sync.OnceValue(func() *sql.DB {
+	sql.Register("quark-internal-row-value", rowValueDriver{})
+	db, err := sql.Open("quark-internal-row-value", "")
+	if err != nil {
+		panic("quark: open internal row-value driver: " + err.Error())
+	}
+	return db
+})
+
+// valueRow mints a *sql.Row serving the given pre-materialized row.
+// context.Background() for the same reason errorRow uses it.
+func valueRow(cols []string, vals []driver.Value) *sql.Row {
+	return valueRowDB().QueryRowContext(context.Background(), "quark internal row value", &mintedRow{cols: cols, vals: vals})
+}
 
 // errorRow mints a *sql.Row whose Scan returns exactly err. The context
 // is deliberately context.Background(): with the caller's (possibly
@@ -457,16 +568,35 @@ func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, a
 	if _, err := tx.ExecContext(ctx, e.setConfigSQL(), e.varName, e.tenantID); err != nil {
 		return errorRow(fmt.Errorf("native rls: set_config: %w", err))
 	}
-	row := tx.QueryRowContext(ctx, query, args...)
-	owned = true // the AfterFunc owns the tx+conn pair from here
-	context.AfterFunc(ctx, func() {
-		if cerr := tx.Commit(); cerr != nil {
-			e.noteDeferredCommitFailure(cerr)
-		}
-		// Manual pool hand-back — see QueryContext.
-		_ = conn.Close()
-	})
-	return row
+	// QCD-FW §1: materialize the single row and COMMIT BEFORE RETURNING.
+	// The deferred-commit pattern (context.AfterFunc on the received ctx)
+	// ran its commit in a separate goroutine with no happens-before against
+	// this method's return — so INSERT … RETURNING could answer the caller
+	// while the write was not yet durable, and an immediate reader on
+	// another connection missed the row (the demo's webhook flake; same
+	// class v1.3.1 fixed once). *sql.Row is opaque, so instead of wrapping
+	// it, the row is read generically here and re-served through the same
+	// internal-driver minting mechanism errorRow already uses: by the time
+	// this returns, the transaction is committed and the write is durable.
+	// Reads gain the same property for free (and release their pooled
+	// connection immediately instead of at ctx end).
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return errorRow(fmt.Errorf("native rls: query: %w", err))
+	}
+	cols, vals, scanErr := materializeSingleRow(rows)
+	_ = rows.Close()
+	commitErr := tx.Commit()
+	owned = true // finalized synchronously: the defer guard must not touch it
+	_ = conn.Close()
+	if commitErr != nil {
+		return errorRow(fmt.Errorf("native rls: commit implicit tx: %w", commitErr))
+	}
+	if scanErr != nil {
+		// sql.ErrNoRows travels verbatim so Row.Scan keeps its contract.
+		return errorRow(scanErr)
+	}
+	return valueRow(cols, vals)
 }
 
 // Tx opens a single transaction on the router's BaseClient, calls
