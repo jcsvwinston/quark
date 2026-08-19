@@ -341,12 +341,21 @@ func TestNativeRLSDeferredCommitFailureLeavesTrace(t *testing.T) {
 		t.Fatalf("commit failure not logged through the client logger; log output:\n%s", out)
 	}
 
-	// Second failure accumulates — the counter is an aggregate, not a flag.
+	// QueryRowContext commits SYNCHRONOUSLY since QCD-FW §1: its commit
+	// failure surfaces through Scan as the real error — before the caller
+	// can act on a success that never became durable — and must NOT move
+	// the deferred-failure counter (that aggregate now covers only the
+	// multi-row QueryContext path).
 	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
 	var v int64
-	_ = e.QueryRowContext(ctx2, "SELECT 1").Scan(&v)
-	cancel2()
-	waitForCounter(t, 2, c.DeferredCommitFailures)
+	scanErr := e.QueryRowContext(ctx2, "SELECT 1").Scan(&v)
+	if scanErr == nil || !strings.Contains(scanErr.Error(), "commit implicit tx") {
+		t.Fatalf("QueryRow commit failure must surface synchronously through Scan, got: %v", scanErr)
+	}
+	if got := c.DeferredCommitFailures(); got != 1 {
+		t.Fatalf("synchronous QueryRow commit failure must not move the deferred counter: got %d, want 1", got)
+	}
 }
 
 // TestNativeRLSDeferredCommitFailureFallbackLogger pins the "never

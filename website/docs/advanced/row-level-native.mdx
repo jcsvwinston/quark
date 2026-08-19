@@ -123,10 +123,11 @@ filters server-side.
 
 :::note Use `router.Tx` for anything non-trivial
 `For[T](ctx, router)` wraps each call in an implicit transaction (needed because
-`set_config(..., is_local=true)` only applies inside one). That transaction is
-scoped to the operation: it commits an instant after the call completes — the
-commit is deferred, not part of the statement itself (see the write-semantics
-limitation below). `Iter`/`Cursor` are the exception: their transaction stays
+`set_config(..., is_local=true)` only applies inside one). Single-row operations
+— every write with `RETURNING` included — commit that transaction **before the
+call returns**, so a write is durable the moment you get control back (see the
+write-semantics note below). Multi-row reads commit an instant after the
+operation completes. `Iter`/`Cursor` are the exception: their transaction stays
 open until you close the cursor, holding a pooled connection and shared locks
 on the table for as long as the stream lives. For multi-step work, batch jobs
 and streaming, run inside `router.Tx` — one transaction, opened and committed
@@ -208,27 +209,29 @@ the resolver for the current context.
   locks included — until the cursor closes; `QueryTimeout` bounds an abandoned
   one. Every other operation releases its transaction as the call completes.
   For long streams, prefer `router.Tx`.
-- **Write semantics under the implicit `For[T]` transaction.** A write that
-  goes through the query paths — `Create`, which runs `INSERT … RETURNING`,
-  and the multi-row `CreateBatch` — executes inside an implicit transaction
-  whose commit is **deferred**: it lands an instant after the operation
-  returns, not inside the call itself. Once the statement has executed,
-  cancelling the request does **not** roll the write back. This diverges from
-  the exec path (`Update` / `Delete`), which commits synchronously before
-  returning and is rolled back like any interrupted statement. Two
-  consequences to plan for:
-  - There is a brief window after the operation returns in which the write is
-    not yet visible to any other transaction — including your own next query.
-    It closes in milliseconds, but "read your own write on the very next
-    line" is only guaranteed inside `router.Tx`.
-  - If the deferred commit fails, the operation has already reported success.
-    Quark logs the failure at `ERROR` through the client logger and increments
-    [`Client.DeferredCommitFailures`](../reference/api/client#deferredcommitfailures)
-    — alert on that counter; each unit is a write the engine rolled back after
-    the caller saw it succeed.
+- **Write semantics under the implicit `For[T]` transaction.** Every write
+  commits **synchronously, before the call returns** — `Update`/`Delete`
+  through the exec path, and `Create`/`Upsert` (which run
+  `INSERT … RETURNING`) through the single-row query path, which since the
+  QCD-FW §1 fix materializes the returned row and commits inside the call.
+  A `2xx` answered after `Create` returns therefore never precedes
+  durability, and the row is immediately visible from any other connection.
+  A commit failure surfaces as the call's own error — never as a success
+  followed by a silent rollback. (Before this fix the `RETURNING` commit was
+  deferred to a background goroutine: a reader could miss a row an instant
+  after `Create` returned — the class the demo's webhook flake exposed, and
+  the one v1.3.1 fixed a first variant of.)
 
-  `router.Tx` has none of this: it commits synchronously inside the callback.
-  Prefer it for any write whose durability must be settled before you answer.
+  The **deferred** commit now exists only on the multi-row read path
+  (`Find`-style operations returning `*sql.Rows`): its transaction commits an
+  instant after the operation's ctx ends, which only affects when the pooled
+  connection is released — never durability. If one of those deferred commits
+  fails, Quark logs it at `ERROR` and increments
+  [`Client.DeferredCommitFailures`](../reference/api/client#deferredcommitfailures)
+  — alert on that counter.
+
+  `router.Tx` remains the right tool for multi-step units of work: one
+  transaction, opened and committed exactly where you can see it.
 - **A driver panic hands cleanup to a detached goroutine.** If the driver
   panics mid implicit transaction, Quark rolls the transaction back and
   returns its pooled connection on a detached goroutine — after a panic,
