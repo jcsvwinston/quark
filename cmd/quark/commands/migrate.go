@@ -17,8 +17,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+// up and down need SEPARATE --steps variables: pflag writes each default into
+// the bound variable at registration time, so sharing one variable let down's
+// default (1) overwrite up's (0) and a bare `migrate up` applied only the
+// first pending migration.
 var (
-	migrateSteps      int
+	migrateUpSteps    int
+	migrateDownSteps  int
 	migrateDryRun     bool
 	migrateMessage    string
 	migrateFromModels string
@@ -63,9 +68,9 @@ func init() {
 	migrateCreateCmd.Flags().StringVar(&migrateMessage, "message", "", "Migration message")
 	migrateCreateCmd.Flags().StringVar(&migrateFromModels, "from-models", "", "Render domain DDL from the model structs in this package (e.g. ./models)")
 	migrateCreateCmd.Flags().StringVar(&migrateDialect, "dialect", "", "SQL dialect for --from-models (postgresql|postgres|mysql|mariadb|sqlite|mssql|oracle); defaults to the configured driver")
-	migrateUpCmd.Flags().IntVar(&migrateSteps, "steps", 0, "Number of migrations to apply")
+	migrateUpCmd.Flags().IntVar(&migrateUpSteps, "steps", 0, "Number of migrations to apply (0 = all pending)")
 	migrateUpCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Preview SQL without executing")
-	migrateDownCmd.Flags().IntVar(&migrateSteps, "steps", 1, "Number of migrations to revert")
+	migrateDownCmd.Flags().IntVar(&migrateDownSteps, "steps", 1, "Number of migrations to revert")
 
 	rootCmd.AddCommand(migrateCmd)
 }
@@ -218,10 +223,10 @@ func runMigrateUp() error {
 
 	if migrateDryRun {
 		color.Yellow("Dry-run mode: no migrations will be applied.")
-		return migrator.UpDryRun(ctx, migrateSteps)
+		return migrator.UpDryRun(ctx, migrateUpSteps)
 	}
 
-	return migrator.Up(ctx, migrateSteps)
+	return migrator.Up(ctx, migrateUpSteps)
 }
 
 func runMigrateDown() error {
@@ -235,7 +240,7 @@ func runMigrateDown() error {
 	defer client.Close()
 
 	migrator := migrate.NewMigrator(client)
-	if err := migrator.Down(context.Background(), migrateSteps); err != nil {
+	if err := migrator.Down(context.Background(), migrateDownSteps); err != nil {
 		return fmt.Errorf("reverting migrations: %w", err)
 	}
 	return nil
