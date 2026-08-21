@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.5.1** on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.5.2** on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade:
@@ -17,6 +17,24 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.5.2
+
+A CLI correctness patch.
+
+### Fixed
+
+- **A bare `quark migrate up` applies every pending migration again.** The
+  `--steps` flags of `migrate up` (default 0 = all pending) and
+  `migrate down` (default 1) were registered on the same package variable,
+  and pflag writes each default into the bound variable at registration
+  time — so after startup the shared variable held `1`, and `migrate up`
+  without `--steps` applied only the FIRST pending migration and exited 0.
+  With three pending migrations in a CI pipeline, one was applied and the
+  job went green. The flags now use separate variables, and a regression
+  test drives the real command line with two pending migrations (every
+  earlier test used exactly one, where the truncation is invisible).
+  `--dry-run` was affected the same way and is covered by the same fix.
 
 ## v1.5.1
 
