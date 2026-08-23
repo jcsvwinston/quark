@@ -8,17 +8,56 @@
   "draft": false,
   "prerelease": false,
   "changelog-sections": [
-    {"type": "feat", "section": "Added"},
-    {"type": "fix", "section": "Fixed"},
-    {"type": "perf", "section": "Performance"},
-    {"type": "refactor", "section": "Changed"},
-    {"type": "revert", "section": "Reverted"},
-    {"type": "docs", "section": "Documentation", "hidden": true},
-    {"type": "test", "section": "Tests", "hidden": true},
-    {"type": "chore", "section": "Chore", "hidden": true},
-    {"type": "ci", "section": "CI", "hidden": true},
-    {"type": "build", "section": "Build", "hidden": true},
-    {"type": "style", "section": "Style", "hidden": true}
+    {
+      "type": "feat",
+      "section": "Added"
+    },
+    {
+      "type": "fix",
+      "section": "Fixed"
+    },
+    {
+      "type": "perf",
+      "section": "Performance"
+    },
+    {
+      "type": "refactor",
+      "section": "Changed"
+    },
+    {
+      "type": "revert",
+      "section": "Reverted"
+    },
+    {
+      "type": "docs",
+      "section": "Documentation",
+      "hidden": true
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": true
+    },
+    {
+      "type": "chore",
+      "section": "Chore",
+      "hidden": true
+    },
+    {
+      "type": "ci",
+      "section": "CI",
+      "hidden": true
+    },
+    {
+      "type": "build",
+      "section": "Build",
+      "hidden": true
+    },
+    {
+      "type": "style",
+      "section": "Style",
+      "hidden": true
+    }
   ],
   "packages": {
     ".": {
@@ -29,6 +68,24 @@
         "bugbash",
         "benchmarks",
         "TASKS.md"
+      ],
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "README.md"
+        },
+        {
+          "type": "generic",
+          "path": "SECURITY.md"
+        },
+        {
+          "type": "generic",
+          "path": "CLAUDE.md"
+        },
+        {
+          "type": "generic",
+          "path": "website/docs/reference/release-notes.mdx"
+        }
       ]
     }
   }
