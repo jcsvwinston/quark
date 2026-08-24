@@ -44,9 +44,9 @@ can persist it recursively.
 | Many to many | `Roles []Role` | join table | `rel:"many_to_many" m2m:"user_roles:user_id:role_id"` |
 | Polymorphic | `Comments []Comment` | related table | `rel:"polymorphic" polymorphic:"poly_type:post" join:"polyable_id"` |
 
-If you omit `join`, Quark infers it (`belongs_to` from `Order` → `User` infers
-`user_id`; `has_one`/`has_many` from `User` → `Post` infers `user_id`). Being
-explicit is clearer for legacy or non-conventional schemas.
+Omit `join` and Quark infers it: `belongs_to` from `Order` to `User` infers
+`user_id`, and `has_one`/`has_many` from `User` to `Post` infers `user_id` as
+well. Being explicit is clearer on legacy or unconventional schemas.
 
 ## Eager loading with Preload
 
@@ -79,10 +79,10 @@ Paths sharing a prefix are merged, so `Preload("Posts", "Posts.Comments")`
 fetches `Posts` only once. Each segment is a **Go field name**, not a `db` tag;
 an unknown segment surfaces as `relation X not found` at runtime.
 
-Eager loading splits parent keys into chunks of 1000 before each `SELECT` — a
-cap sized for Oracle's 1000-element `IN` ceiling and SQL Server's ~2100
-bind-parameter limit. Tenant predicates and polymorphic discriminators are
-re-applied per chunk.
+Eager loading splits parent keys into chunks of 1000 before each `SELECT`. That
+cap is sized for Oracle's 1000-element `IN` ceiling and SQL Server's roughly
+2100 bind parameters. Tenant predicates and polymorphic discriminators are
+re-applied on every chunk.
 
 ## Belongs to
 
@@ -156,11 +156,13 @@ fmt.Println(len(withRoles[0].Roles), "roles")
 // => 2 roles
 ```
 
-Linking is **idempotent**: re-saving the same `(user, role)` pair is a no-op —
+Linking is **idempotent**: re-saving the same `(user, role)` pair does nothing.
 Quark recognizes the join table's unique-key violation and returns `nil`, so you
-don't have to dedupe input. Any *other* driver error (a foreign-key violation, a
-missing table, a broken connection) is wrapped with a `linkM2M:` prefix and
-propagated, with the underlying error still reachable via `errors.Unwrap`.
+don't have to deduplicate input yourself.
+
+Any *other* driver error — a foreign-key violation, a missing table, a broken
+connection — is wrapped with a `linkM2M:` prefix and propagated, with the
+underlying error still reachable through `errors.Unwrap`.
 
 :::note Use the long form `rel:"many_to_many"`
 `rel:"m2m"` is accepted by the eager-loading path, but `Migrate` and recursive
@@ -211,7 +213,8 @@ type Post struct {
 }
 ```
 
-Add the configured tenant column to every related model you preload under RLS.
+Add the configured tenant column to every related model you preload under
+row-level isolation.
 
 ## Common pitfalls
 
@@ -221,7 +224,7 @@ Add the configured tenant column to every related model you preload under RLS.
 | Empty relation slice | Parent or foreign key is zero. | Ensure parent rows have persisted primary keys. |
 | Join table missing | Used `rel:"m2m"`, or forgot to `Migrate` the parent. | Use `rel:"many_to_many"` and run `Migrate`. |
 | Belongs-to FK not set | Related value is zero or the field was omitted. | Provide the related struct, or set the FK manually. |
-| Cross-tenant preload leak | Related model lacks the tenant column. | Add the tenant column to related models under RLS. |
+| Cross-tenant preload leak | Related model lacks the tenant column. | Add the tenant column to related models under row-level isolation. |
 
 For write-heavy workflows with complex invariants, wrap association saves in
 `client.Tx` so the parent, children, and join rows commit or roll back together.

@@ -6,14 +6,15 @@ description: "Build a working users service with Quark in ten minutes: model, mi
 
 # Getting Started
 
-In the next ten minutes you'll build a tiny but complete users service: define a
-model, create its table, and run every basic operation against it — inserting a
-row, reading it back, querying a list, updating, and deleting. You'll run it on
-SQLite so there's nothing to install, but the exact same code works on
-PostgreSQL, MySQL, MariaDB, SQL Server, and Oracle by changing one string.
+By the end of this page you'll have a small but complete users service: a model,
+its table, and every basic operation against it — insert, read, list, update,
+delete. It takes about ten minutes.
 
-Throughout this guide, the `// =>` comments show what each snippet **prints**, so
-you can follow along as if you were typing into a shell.
+The examples run on SQLite, so there is nothing to install. The same code runs
+on PostgreSQL, MySQL, MariaDB, SQL Server, and Oracle by changing one string.
+
+The `// =>` comments show what each snippet **prints**, so you can follow along
+as if you were typing into a shell.
 
 ## Start with a model
 
@@ -83,11 +84,11 @@ Quark detects the dialect from the driver name — pass `"postgres"`, `"mysql"`,
 changes between engines.
 
 :::note Quark logs through `log/slog`
-With the default logger you'll see an informational line when the client starts
-(`INFO quark client initialized dialect=sqlite ...`), and the occasional `WARN`
+The default logger prints one informational line when the client starts
+(`INFO quark client initialized dialect=sqlite ...`), plus the occasional `WARN`
 when Quark wants your attention — for example when an update skips a zero value
-(more on that below). Pass [`quark.WithLogger`](/docs/reference/configuration) to route these
-through your own logger or to silence them.
+(more on that below). Pass [`quark.WithLogger`](/docs/reference/configuration)
+to route these through your own logger, or to silence them.
 :::
 
 ## Create the table
@@ -101,9 +102,9 @@ if err := client.Migrate(ctx, &User{}); err != nil {
 }
 ```
 
-That's enough to start building. When you later need to evolve a live schema
-without losing data, you'll graduate to `Sync` or versioned migrations — see
-[Migrations](migrations) — but you don't need them yet.
+That's enough to start building. Evolving a live schema without losing data is
+a different job, handled by `Sync` or versioned migrations — see
+[Migrations](migrations) — but you don't need either yet.
 
 ## Insert a row — and watch the ID come back
 
@@ -120,9 +121,10 @@ fmt.Println("new id:", u.ID)
 // => new id: 1
 ```
 
-`Create` validates the struct (that `validate:"required,email"` tag is enforced
-here), runs your `BeforeCreate` hook, inserts the row, and writes the generated
-primary key **back into `u`** — which is why `u.ID` is `1` afterward.
+`Create` does four things in order: it validates the struct (that
+`validate:"required,email"` tag is enforced here), runs your `BeforeCreate`
+hook, inserts the row, and writes the generated primary key **back into `u`**.
+That last step is why `u.ID` reads `1` afterwards.
 
 ## Read it back
 
@@ -197,10 +199,12 @@ fmt.Println(rows, "row updated")
 ```
 
 `Update` is **partial**: it skips zero values, so a half-filled struct can't
-accidentally blank out columns with `false`, `0`, or `""`. If you skip a scalar
-zero this way, Quark logs a `WARN` so it's never silent (a nil pointer like an
-unset `deleted_at` is the expected "absent" case and stays quiet). When you
-genuinely *want* to write a zero value, say so explicitly with `UpdateMap`:
+accidentally blank out a column with `false`, `0`, or `""`. Whenever a scalar
+zero is skipped this way Quark logs a `WARN`, so it is never silent. (A nil
+pointer — an unset `deleted_at`, say — is the expected "absent" case, and stays
+quiet.)
+
+To write a zero value on purpose, name the column with `UpdateMap`:
 
 ```go
 rows, _ = quark.For[User](ctx, client).
@@ -244,8 +248,8 @@ quark.For[User](ctx, client).Where("active", "=", false).DeleteBy()
 
 ## Insert-or-update in one call
 
-When an import or an idempotent command should create a row if it's new or update
-it if it already exists, use `Upsert`:
+`Upsert` creates a row when it's new and updates it when it already exists —
+what an import or an idempotent command usually wants:
 
 ```go
 incoming := User{Email: "alice@example.com", Name: "Alice W.", Active: true}
@@ -280,10 +284,11 @@ default:
 }
 ```
 
-One nice safety net: a malformed column or table name is caught **before** the
-query ever reaches the database, and comes back as `quark.ErrInvalidIdentifier`.
-(It's a fast structural check, not a spell-checker — a perfectly-formed name for a
-column that doesn't exist is still rejected by the database, as usual.)
+One safety net worth knowing: a malformed column or table name is caught
+**before** the query reaches the database, and comes back as
+`quark.ErrInvalidIdentifier`. It's a fast structural check, not a spell-checker
+— a well-formed name for a column that doesn't exist still fails at the
+database, as usual.
 
 ## The complete program
 

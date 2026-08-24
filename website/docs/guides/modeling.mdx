@@ -168,9 +168,9 @@ fmt.Println(live, all)
 // => 0 1
 ```
 
-`Restore` clears `deleted_at` for a row you've loaded. Restoring a row that's
-already live is a harmless 0-row no-op rather than a stray write, so a misuse
-can't corrupt live data:
+`Restore` clears `deleted_at` for a row you've loaded. Restoring a row that is
+already live affects zero rows instead of writing anything, so a misuse can't
+corrupt live data:
 
 ```go
 trashed, _ := quark.For[User](ctx, client).OnlyTrashed().Find(42)
@@ -182,9 +182,9 @@ For a permanent delete, use `HardDelete` (one entity) or `DeleteBy` /
 
 ## Partial updates and optimistic locking
 
-`Update` performs a **partial** update: it skips zero-value fields, so a
-half-filled struct can't blank out a column with `false`, `0`, or `""`. To write
-a zero value on purpose, name it with `UpdateMap`:
+`Update` is a **partial** update: it skips zero-value fields, so a half-filled
+struct can't blank out a column with `false`, `0`, or `""`. To write a zero value
+on purpose, name the column with `UpdateMap`:
 
 ```go
 quark.For[User](ctx, client).
@@ -227,8 +227,8 @@ if errors.Is(err, quark.ErrStaleEntity) {
 // => stale conflict: true   (when a concurrent writer won the race)
 ```
 
-On success Quark bumps the in-memory version so the next `Update` sees the new
-value without a re-read. The version column is automatically `NOT NULL`, and a
+On success, Quark bumps the in-memory version so the next `Update` sees the new
+value without a re-read. The version column is automatically `NOT NULL`, and one
 model may carry the tag on only one field.
 
 ## Validation
@@ -262,13 +262,14 @@ func (m *Member) Validate(ctx context.Context) error {
 
 ## Automatic timestamps
 
-`created_at` and `updated_at` maintain themselves: `Create` fills both when
-they are zero, and `Update` refreshes `updated_at` on every write (UTC).
-Fields must be `time.Time` mapped to those column names — the scaffolded
-models already qualify. A value you set yourself before `Create` is kept, so
-imports and backdating keep working; timestamp hooks written for older
-versions remain correct (they run first and the stamping only touches
-zero values on create).
+`created_at` and `updated_at` maintain themselves. `Create` fills both when they
+are zero, and `Update` refreshes `updated_at` on every write, in UTC. The fields
+must be `time.Time` mapped to exactly those column names; the scaffolded models
+already qualify.
+
+A value you set yourself before `Create` is kept, so imports and backdating keep
+working. Timestamp hooks written for older versions also stay correct: they run
+first, and the automatic stamping only touches values still at zero.
 
 ## Lifecycle hooks
 
@@ -289,8 +290,8 @@ semantics under transactions.
 
 ## Rich column types
 
-Beyond Go's primitives, Quark ships generic wrappers for the common cases —
-each implements `sql.Scanner` and `driver.Valuer`, so reads and writes use the
+Beyond Go's primitives, Quark ships generic wrappers for the common cases. Each
+implements `sql.Scanner` and `driver.Valuer`, so reads and writes use the
 standard library's fast paths with no extra reflection.
 
 ### Nullable columns — `Nullable[T]`
@@ -311,10 +312,10 @@ p := Profile{
 }
 ```
 
-`Migrate` emits `T`'s column type for you. The older `*time.Time` /
+`Migrate` emits `T`'s column type for you. The older `*time.Time` and
 `sql.NullString` idioms still work, but `Nullable[T]` avoids the pointer's heap
-allocation and reads more clearly at the call site (`p.Bio.Valid` vs a nil
-check).
+allocation and reads more clearly at the call site — `p.Bio.Valid` rather than a
+nil check.
 
 ### Typed JSON — `JSON[T]`
 
@@ -354,11 +355,12 @@ fmt.Println(p.Tags.Len(), p.Tags.Slice())
 // => 2 [go orm]
 ```
 
-It's deliberately **not** a PostgreSQL-native `TEXT[]` wrapper — operators like
-`@>` and `array_agg` won't fire on the JSON column it backs. For native arrays
-with operators, drop to `pgx`/`pgtype` or `RawQuery`. A nil `V` serializes to
-`[]`, not `null`; wrap in `Nullable[Array[T]]` to distinguish SQL NULL from
-"valid but empty".
+It is deliberately **not** a PostgreSQL-native `TEXT[]` wrapper: operators like
+`@>` and `array_agg` won't fire on the JSON column behind it. For native arrays
+with operators, drop to `pgx`/`pgtype` or `RawQuery`.
+
+A nil `V` serializes to `[]`, not `null`. Wrap it in `Nullable[Array[T]]` when
+you need to tell SQL NULL apart from "valid but empty".
 
 ### Binary columns
 
@@ -392,10 +394,11 @@ func init() {
 ```
 
 Pointer types are stripped before lookup, so this also covers `*uuid.UUID`.
-The mapper only handles the DDL type; the round-trip still goes through
-`database/sql`, so the type must implement `sql.Scanner` + `driver.Valuer` (or
-be natively supported by the driver). The `time.Duration` mapper ships built in
-(it emits `BIGINT`, `NUMBER(19)` on Oracle).
+
+The mapper only decides the DDL type. The round-trip still goes through
+`database/sql`, so the type must implement `sql.Scanner` and `driver.Valuer`, or
+be natively supported by the driver. A `time.Duration` mapper ships built in; it
+emits `BIGINT`, or `NUMBER(19)` on Oracle.
 
 :::warning On SQL Server, store UUIDs as text, not `UNIQUEIDENTIFIER`
 SQL Server stores the first three groups of a GUID little-endian while
@@ -422,12 +425,13 @@ type Event struct {
 }
 ```
 
-Precedence is **column tag → client default → pass-through**. The wire contract
-is always UTC: a zoned column is converted to UTC on the way to the database and
-back to the configured location when scanned, so the tag changes only how the
-field reads in Go, never what's stored. Invalid IANA names fail fast at
-`RegisterModel` / `Migrate` with `ErrInvalidTimezone`, so a typo breaks startup
-rather than a later query.
+Precedence is **column tag → client default → pass-through**.
+
+The wire contract is always UTC. A zoned column is converted to UTC on the way to
+the database and back to the configured location when scanned, so the tag
+changes only how the field reads in Go — never what is stored. An invalid IANA
+name fails fast at `RegisterModel` or `Migrate` with `ErrInvalidTimezone`, so a
+typo breaks startup instead of some later query.
 
 ## Relation fields
 

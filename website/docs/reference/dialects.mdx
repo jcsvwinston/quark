@@ -53,7 +53,7 @@ err := quark.For[User](ctx, client).Upsert(
 
 ## Oracle-specific behavior
 
-Oracle differs from the other engines in two ways worth knowing:
+Oracle differs from the other five engines in two ways worth knowing:
 
 - **Empty strings are NULL.** Oracle stores `''` as `NULL`, so an empty
   string written to a `VARCHAR2`/`CLOB` column comes back as `NULL`. When

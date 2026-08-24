@@ -45,13 +45,14 @@ renders domain DDL through the same type mapping the runtime migrator uses:
 quark migrate create domain_schema --from-models ./models --dialect postgresql
 ```
 
-Tables come out in dependency order (parents before children), with the
-`NOT NULL`/`UNIQUE`/size constraints your tags declare, `FOREIGN KEY`
-clauses and indexes for every `rel:"belongs_to"`/`join:` pair, and a `Down`
-that drops in reverse order. `--dialect` accepts
-`postgresql|mysql|mariadb|sqlite|mssql|oracle` and defaults to the
-configured `database.default.driver`. The result is a regular migration
-file — review it and edit like any other.
+Tables come out in dependency order, parents before children. Each carries the
+`NOT NULL`, `UNIQUE`, and size constraints your tags declare, plus `FOREIGN KEY`
+clauses and indexes for every `rel:"belongs_to"` / `join:` pair, and the `Down`
+drops them in reverse order.
+
+`--dialect` accepts `postgresql|mysql|mariadb|sqlite|mssql|oracle` and defaults
+to the configured `database.default.driver`. The result is a regular migration
+file — review and edit it like any other.
 
 :::caution The standalone binary cannot see your migrations
 **What happens.** `migrate up` / `migrate down` and `seed run` exit non-zero with
@@ -172,7 +173,7 @@ standalone binary cannot know about (they need your registered models):
   row-level-security DDL for every registered model, and
   `verify-rls-policies` is the boot/CI gate that fails (exit `1`) when any
   table is left unenforced — see
-  [Native row-level security](../advanced/row-level-native.mdx).
+  [Native row-level security](../advanced/row-level-native).
 
 When you'd rather run these from your own service or CI binary, call the public
 APIs directly. A migration runner imports your migration package for its side

@@ -6,17 +6,22 @@ description: Create tables from models, evolve schemas safely, add indexes and f
 
 # Migrations and Sync
 
-Quark gives you two schema paths — a quick reflective one for development, and
-reviewable versioned migrations for production:
+Quark offers two ways to get a schema into a database, and most projects use
+both:
 
 | Path | Best for |
 | --- | --- |
 | `client.Migrate` / `client.Sync` | Development, tests, prototypes, additive evolution. |
 | `github.com/jcsvwinston/quark/migrate` | Ordered, reviewable, reversible production migrations. |
 
-The [`quark` CLI](cli) wraps the production path (`quark migrate
-create/up/down/status`); everything below also works from your own Go command,
-app startup, or CI.
+The first reads your models and creates or adjusts tables on the spot. The
+second runs ordered `Up`/`Down` functions that you wrote and reviewed. Start on
+the first while the schema is young, and move to the second once a table holds
+real data.
+
+The [`quark` CLI](cli) wraps the versioned path (`quark migrate create` / `up` /
+`down` / `status`). Everything on this page also works from your own Go command,
+from app startup, or from CI.
 
 ## Create tables with Migrate
 
@@ -39,9 +44,7 @@ It reads your tags and field types:
 | `default:"value"` | `DEFAULT value` (bool defaults normalized per dialect). |
 | `rel:"many_to_many" m2m:"..."` | A join table. |
 
-`Migrate` is idempotent where the engine supports `CREATE TABLE IF NOT EXISTS`,
-so re-running it is safe. It's deliberately additive — it creates what's missing
-but doesn't alter or drop. For evolution, use `Sync` or versioned migrations.
+Field types map to each dialect's own column types:
 
 | Go type | SQL type |
 | --- | --- |
@@ -53,7 +56,12 @@ but doesn't alter or drop. For evolution, use `Sync` or versioned migrations.
 | `time.Time` | timestamp / datetime |
 | pointer fields | unwrapped, nullable unless constrained |
 
-For richer column types, see the [rich types in Modeling](modeling#rich-column-types)
+`Migrate` is idempotent wherever the engine supports `CREATE TABLE IF NOT
+EXISTS`, so re-running it is safe. It is also deliberately additive: it creates
+what is missing, and never alters or drops. To change an existing table, use
+`Sync` or a versioned migration.
+
+For richer column types, see the [rich types in Modeling](modeling#rich-column-types),
 or create the column in a versioned migration and map it with a `db` tag.
 
 ## Evolve a schema with Sync
@@ -71,18 +79,21 @@ err := client.Sync(ctx, quark.SyncOptions{}, &User{})
 | `quark:"rename:old_col"` | Renames `old_col` to the current `db` name. |
 | Removed field | Drops the column **only when `SafeMigrations` is false**. |
 
-`Sync` doesn't do type changes or constraint rewrites on an existing column — use
-a versioned migration for those. Preview before applying with `DryRun`, and add a
-logger to see the planned SQL:
+`Sync` does not change column types or rewrite constraints on an existing
+column. Use a versioned migration for those.
+
+Preview a sync before applying it with `DryRun`, and attach a logger to see the
+planned SQL:
 
 ```go
 err := client.Sync(ctx, quark.SyncOptions{DryRun: true}, &User{})
 ```
 
-`DryRun` logs the add/rename/drop SQL without executing it; `NoTransaction`
-disables transactional DDL wrapping. (DDL is transactional on PostgreSQL, SQL
-Server, SQLite, and Oracle; MySQL/MariaDB implicitly commit each DDL statement,
-so Quark runs their sync steps without a transaction.)
+`DryRun` logs the add, rename, and drop statements without executing them.
+`NoTransaction` disables the transactional DDL wrapping. That wrapping applies
+on PostgreSQL, SQL Server, SQLite, and Oracle; MySQL and MariaDB commit each DDL
+statement implicitly, so Quark runs their sync steps without a transaction
+anyway.
 
 ### Renaming a column
 
@@ -125,10 +136,10 @@ err := client.AddForeignKey(ctx, "orders", "fk_orders_user",
 // columns/refColumns match by position; onDelete/onUpdate appended verbatim
 ```
 
-`AddForeignKey` needs an engine that supports `ALTER TABLE ADD CONSTRAINT`
-(SQLite doesn't — declare the FK at table-create time there instead). For partial
-or expression indexes, included columns, or engine-specific options, use a
-versioned migration with explicit SQL.
+`AddForeignKey` needs an engine that supports `ALTER TABLE ADD CONSTRAINT`.
+SQLite does not, so declare the foreign key at table-create time there instead.
+For partial or expression indexes, included columns, or engine-specific options,
+write a versioned migration with explicit SQL.
 
 ## Versioned Go migrations
 
@@ -152,10 +163,12 @@ func init() {
 }
 ```
 
-`ID`s sort lexicographically — use timestamp-like prefixes so order is stable.
-Drive them from a command that imports your migration package for its side
-effects (the migrator runs raw SQL internally, so the client needs
-`AllowRawQueries: true`):
+IDs sort lexicographically, so use timestamp-like prefixes to keep the order
+stable.
+
+Drive the migrations from a command that imports your migration package for its
+side effects. The migrator runs raw SQL internally, so that command's client
+needs `AllowRawQueries: true`:
 
 ```go
 limits := quark.DefaultLimits()
@@ -181,9 +194,9 @@ tracked in a `quark_migrations` table.
 
 ## Coordinating concurrent deploys
 
-When several processes can run migrations against the same database, wrap them in
-a cluster-wide advisory lock so they don't race — the first caller wins, the rest
-wait up to `timeout` or get `ErrLockTimeout`:
+When several processes can migrate the same database, take a cluster-wide
+advisory lock first so they don't race. The first caller wins; the rest wait up
+to `timeout` and then get `ErrLockTimeout`:
 
 ```go
 lock, err := client.AcquireMigrationLock(ctx, "schema-migrations", 30*time.Second)
@@ -197,17 +210,18 @@ if err := client.Migrate(ctx, &User{}, &Order{}); err != nil {
 }
 ```
 
-It's opt-in — `Migrate` doesn't lock on its own. Each engine uses its native
-primitive (`pg_advisory_lock`, `GET_LOCK`, `sp_getapplock`, Oracle `DBMS_LOCK` —
-which needs `GRANT EXECUTE ON DBMS_LOCK`). SQLite is single-writer and returns
-`ErrUnsupportedFeature`; use `BEGIN IMMEDIATE` in-process there.
+The lock is opt-in: `Migrate` never takes one on its own. Each engine uses its
+native primitive — `pg_advisory_lock`, `GET_LOCK`, `sp_getapplock`, and Oracle's
+`DBMS_LOCK`, which needs `GRANT EXECUTE ON DBMS_LOCK`. SQLite is single-writer
+and returns `ErrUnsupportedFeature`; use `BEGIN IMMEDIATE` in-process there.
 
 ## Diffing models against the database
 
-For a CI gate or a controlled apply, `PlanMigration` builds the desired schema
-from your models, introspects the live database, diffs them, and returns an
-**inert** `Plan`. Introspection and diffing work on all six engines, and a plan
-on an in-sync schema is empty:
+`PlanMigration` builds the schema your models describe, introspects the live
+database, diffs the two, and returns an **inert** `Plan` — nothing runs until you
+apply it. That makes it the right tool for a CI drift gate or a controlled
+apply. Introspection and diffing work on all six engines, and a plan against an
+in-sync schema comes back empty:
 
 ```go
 plan, err := client.PlanMigration(ctx, &User{}, &Order{})
@@ -225,16 +239,22 @@ if !plan.IsEmpty() {
 }
 ```
 
-`PlanMigration` carries the m2m join tables your models declare into the desired
-schema, and brings the live indexes/FKs/checks over too, so it won't propose
-dropping objects your tags don't describe. A table created by `ApplyPlan` is
-interchangeable with one from `Migrate` (same PK / auto-increment shape).
+The desired schema includes the many-to-many join tables your models declare,
+and the live indexes, foreign keys, and check constraints are carried over as
+well — so a plan never proposes dropping an object your tags simply don't
+describe. A table created by `ApplyPlan` is interchangeable with one from
+`Migrate`: same primary key, same auto-increment shape.
 
-`ApplyPlan` is transactional on PostgreSQL, SQL Server, and SQLite (a mid-plan
-failure rolls back the whole plan). On MySQL, MariaDB, and Oracle — where DDL
-auto-commits — it's **resumable** instead: re-running the same plan after a
-mid-plan failure picks up from the first un-applied operation. A few changes are
-intentionally refused so drift stays visible rather than silently mis-applied:
+How `ApplyPlan` recovers from a mid-plan failure depends on the engine:
+
+- **PostgreSQL, SQL Server, SQLite** — the apply is transactional, so a failure
+  rolls the whole plan back.
+- **MySQL, MariaDB, Oracle** — DDL auto-commits, so the apply is **resumable**
+  instead: re-running the same plan picks up from the first operation that
+  hasn't been applied.
+
+A few changes are refused on purpose, so that drift stays visible instead of
+being silently mis-applied:
 
 - A **primary-key change** returns `ErrUnsupportedFeature` (it needs a table
   rebuild). The diff still reports it.
@@ -245,8 +265,8 @@ intentionally refused so drift stays visible rather than silently mis-applied:
 
 ### A CI drift gate with `quarkmigrate`
 
-The `quarkmigrate` package wraps plan/verify/apply into a tiny command you own
-(Go has no runtime model registry, so the binary imports your models):
+Go has no runtime model registry, so a schema-diff command has to import your
+models directly. The `quarkmigrate` package keeps that command down to one call:
 
 ```go
 os.Exit(quarkmigrate.Run(context.Background(), action, client,
@@ -269,8 +289,9 @@ A runnable example lives at `examples/migrations/` (SQLite by default).
 
 ## Backfilling data
 
-After a migration adds a column you need to populate, `Backfill` handles the PK
-pagination, batching, and resume token — you write only the per-batch work:
+When a migration adds a column you then have to populate, `Backfill` handles the
+primary-key pagination, the batching, and the resume token. You write only the
+per-batch work:
 
 ```go
 err := client.Backfill(ctx, quark.BackfillSpec{
@@ -285,9 +306,10 @@ err := client.Backfill(ctx, quark.BackfillSpec{
 })
 ```
 
-It records the highest PK of each successful batch in `quark_backfill_state`, so a
-crash or retry resumes from where it stopped — no earlier batch is reprocessed,
-and a re-run after completion is a no-op. (Integer PKs only.)
+Each successful batch records its highest primary key in
+`quark_backfill_state`, so a crash or a retry resumes exactly where it stopped:
+no earlier batch is reprocessed, and re-running a finished backfill does
+nothing. Integer primary keys only.
 
 ## Register models once
 
@@ -299,8 +321,8 @@ client.MigrateRegistered(ctx)
 plan, _ := client.PlanMigrationRegistered(ctx)
 ```
 
-`RegisterModel` validates each model up front and is safe for concurrent use; the
-registry is per-client, so it doesn't leak across tenant clients.
+`RegisterModel` validates each model up front and is safe for concurrent use.
+The registry belongs to one client, so it never leaks across tenant clients.
 
 ## Recommended production flow
 

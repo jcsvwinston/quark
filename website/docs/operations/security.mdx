@@ -7,9 +7,10 @@ description: Quark's practical security model — injection defenses, tenancy as
 # Security
 
 This page is the operator's view of Quark security: what the ORM defends by
-itself, where the boundaries are, and what remains your job. The honest
-summary — Quark binds every value, validates every identifier, and disables
-raw SQL by default; you own secrets, database privileges, and log retention.
+itself, where the boundaries are, and what remains your job.
+
+In short: Quark binds every value, validates every identifier, and disables raw
+SQL by default. You own secrets, database privileges, and log retention.
 
 ## SQL injection
 
@@ -73,8 +74,9 @@ When tenant isolation is a security requirement, pick by engine:
 
 The [Multi-Tenant](../advanced/multi-tenant) guide covers setup for all of them.
 
-Quark helps you notice drift: a raw query executed under a native-RLS router
-logs a WARN (`quark.tenant.raw_under_native_rls`) — isolation still holds,
+Quark helps you notice drift: a raw query executed under a native row-level
+security router logs a WARN (`quark.tenant.raw_under_native_rls`) — isolation
+still holds,
 because PostgreSQL enforces the policy, but the call sidestepped the
 tenant-scoped builder and deserves a look.
 

@@ -6,8 +6,8 @@ description: Answers to the questions that actually come up — row caps, dialec
 
 # FAQ & Troubleshooting
 
-Real questions, in the form they usually appear: a log line you didn't expect
-or an error you don't recognize.
+Real questions, in the form they usually reach you — a log line you didn't
+expect, or an error you don't recognize.
 
 ## Why does `List()` warn about a missing `Limit()`?
 
@@ -29,12 +29,14 @@ options:
 
 ## Why does a large `List()` top out at 10,000 rows?
 
-`Limits.MaxResults` (default 10,000) is a ceiling on any single `List()`. A
-`Limit(50_000)` runs with the cap instead — Quark clamps the limit rather than
-failing the query. If you genuinely need more rows in one call, raise the
-ceiling via `WithLimits`; if you are processing a big dataset, `Iter()` (not
-subject to `MaxResults`) is usually the better tool. See the
-[Configuration Reference](reference/configuration) for all limits.
+`Limits.MaxResults` (default 10,000) is a ceiling on any single `List()`. Ask
+for `Limit(50_000)` and the query runs at the cap instead: Quark clamps the
+limit rather than failing the call.
+
+If you genuinely need more rows in one call, raise the ceiling with
+`WithLimits`. If you are processing a big dataset, `Iter()` is usually the better
+tool — it is not subject to `MaxResults`. The
+[Configuration Reference](reference/configuration) lists every limit.
 
 ## Why do I get "feature not supported by dialect" from set operations?
 
@@ -106,13 +108,16 @@ is opt-in — `Migrate` does not lock on its own. Details in
 
 ## I connected with the "mysql" driver but Quark says MariaDB — why?
 
-MariaDB has no dedicated `database/sql` driver: it speaks the MySQL wire
-protocol through `go-sql-driver/mysql`, so the driver name alone cannot tell
-the two apart. At `New()`, Quark probes the server version once and switches
-to the MariaDB dialect when it is actually talking to MariaDB — that is what
-makes MariaDB-specific SQL (locking clauses, set operations) come out right.
-`quark.New("mysql", dsn)` is therefore correct for both engines, and an
-explicit `WithDialect(...)` always wins over the probe.
+MariaDB has no dedicated `database/sql` driver. It speaks the MySQL wire
+protocol through `go-sql-driver/mysql`, so the driver name alone cannot tell the
+two apart.
+
+At `New()`, Quark probes the server version once and switches to the MariaDB
+dialect when it really is talking to MariaDB. That probe is what makes
+MariaDB-specific SQL — locking clauses, set operations — come out right.
+
+So `quark.New("mysql", dsn)` is correct for both engines, and an explicit
+`WithDialect(...)` always wins over the probe.
 
 ## Why does Oracle reject my row-locking query?
 
@@ -133,28 +138,34 @@ candidate keys first and lock them by ID inside a transaction.
 
 Only if you opt in. With `quark.WithDeadlockRetry(3)`, a `Client.Tx` closure
 that fails with the engine's deadlock error (PostgreSQL `40P01`, MySQL 1213,
-SQL Server 1205, Oracle `ORA-00060`) is re-executed against a fresh
-transaction with exponential backoff and jitter, up to the configured number
-of attempts. The retry wraps the entire closure — a deadlock aborts the whole
-transaction, so retrying a single statement would be wrong. Non-deadlock
-errors never retry. Keep the closure free of non-idempotent side effects (or
-hang them on `OnCommit`); see
-[Transactions](guides/transactions#retrying-deadlocks).
+SQL Server 1205, Oracle `ORA-00060`) is re-executed against a fresh transaction,
+with exponential backoff and jitter, up to the configured number of attempts.
+
+The retry wraps the entire closure, because a deadlock aborts the whole
+transaction — retrying a single statement would be wrong. Non-deadlock errors
+never retry.
+
+Keep the closure free of non-idempotent side effects, or hang them on
+`OnCommit`. See [Transactions](guides/transactions#retrying-deadlocks).
 
 ## What stops a cache stampede when a hot key expires?
 
 With `WithCacheStore` installed, three protections are on by default:
-in-process **singleflight** (concurrent misses for one key collapse into one
-database trip), **TTL jitter** (±10%, so keys written together don't expire
-together), and **probabilistic early refresh** (a hot key is recomputed
-slightly before expiry). That covers a single process.
 
-Running several instances against a shared cache (e.g. Redis), each instance
-still recomputes independently. `quark.WithCacheCrossInstance()` closes that
-gap: a per-key lock in the store serializes the recompute across processes —
-one instance computes, the rest briefly wait and re-read the result. It
-requires a store that supports locking (the bundled Redis store does) and
-falls back to in-process protection when the store doesn't. See
+- **Singleflight** — concurrent misses for one key collapse into one database
+  trip.
+- **TTL jitter** — ±10%, so keys written together don't expire together.
+- **Probabilistic early refresh** — a hot key is recomputed slightly before
+  expiry.
+
+All three are per-process. Run several instances against a shared cache such as
+Redis and each one still recomputes independently.
+
+`quark.WithCacheCrossInstance()` closes that gap: a per-key lock in the store
+serializes the recompute across processes, so one instance computes while the
+rest briefly wait and re-read the result. It needs a store that supports
+locking — the bundled Redis store does — and falls back to the in-process
+protections when the store doesn't. See
 [Caching and Observability](advanced/caching-observability#stampede-protection).
 
 ## How do I run one query across all shards?
@@ -175,9 +186,10 @@ rather than a silently incomplete result. See
 
 ## Does Quark log my query parameters?
 
-Not on its own. The slow-query log and the default OpenTelemetry spans carry
-the parameterized SQL only — placeholders, never bind values. The two places
-values do appear are explicit opt-ins you control: span redaction set to
-include arguments, and your own `QueryObserver`, whose events include `Args`
-by design. The full redaction map is in
+Not on its own. The slow-query log and the default OpenTelemetry spans carry the
+parameterized SQL only — placeholders, never bind values.
+
+Values appear in exactly two places, and both are opt-ins you control: span
+redaction set to include arguments, and your own `QueryObserver`, whose events
+include `Args` by design. The full redaction map is in
 [Security](operations/security#what-quark-writes-to-your-logs).

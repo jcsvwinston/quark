@@ -98,10 +98,10 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 | `OnRollback` callbacks | discarded | fire (FIFO) |
 
 - Callbacks run in **registration order**.
-- A callback that returns an error is **logged** (`quark.hook.on_commit_error` /
-  `quark.hook.on_rollback_error`) but doesn't stop the others and doesn't change
-  what `Client.Tx` returns — once the database has committed, no application
-  handler can undo it.
+- A callback that returns an error is **logged** (`quark.hook.on_commit_error`
+  or `quark.hook.on_rollback_error`). It does not stop the other callbacks and
+  does not change what `Client.Tx` returns: once the database has committed, no
+  application handler can undo it.
 - Each callback gets the transaction's context. If you set a tight deadline on it,
   derive a fresh context from `context.Background()` inside the callback when the
   work must outlive the transaction.
@@ -195,11 +195,11 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 
 ## Retrying deadlocks
 
-Callback transactions roll back on any non-nil error. For deadlocks specifically,
-turn on `WithDeadlockRetry` — it re-runs the closure when the engine reports a
-deadlock (PostgreSQL `40P01`, MySQL `1213`, SQL Server `1205`, Oracle `ORA-00060`)
-with exponential backoff and jitter. It's opt-in, context-aware, and off by
-default:
+Callback transactions roll back on any non-nil error. For deadlocks
+specifically, turn on `WithDeadlockRetry`: it re-runs the closure, with
+exponential backoff and jitter, when the engine reports a deadlock (PostgreSQL
+`40P01`, MySQL `1213`, SQL Server `1205`, Oracle `ORA-00060`). It is opt-in,
+context-aware, and off by default:
 
 ```go
 client, _ := quark.New("pgx", dsn, quark.WithDeadlockRetry(3))

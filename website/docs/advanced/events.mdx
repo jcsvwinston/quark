@@ -6,9 +6,10 @@ description: Publish created/updated/deleted events after each write to a logger
 
 # Event Bus
 
-Want to react when data changes — push to a search index, notify another service,
-warm a cache? Wire an `EventBus` with `Client.UseEventBus`, and every committed
-`Create`, `Update`, and `Delete` publishes a typed event you can route anywhere:
+Want to react when data changes — push to a search index, notify another
+service, warm a cache? Wire an `EventBus` with `Client.UseEventBus`. Every
+committed `Create`, `Update`, and `Delete` then publishes a typed event you can
+route anywhere:
 
 ```go
 client.UseEventBus(quark.NewLoggerEventBus(slog.Default()))
@@ -67,19 +68,20 @@ table, poller and delivery guarantees, and those belong to your infrastructure,
 not to the ORM.
 :::
 
-Inside `client.Tx` (with `ForTx[T]`), the publish is registered via
-[`Tx.OnCommit`](../guides/transactions#side-effects-on-commit-or-rollback): it
-fires after a durable commit and is **discarded on rollback** — a rolled-back
+Inside `client.Tx` (with `ForTx[T]`), the publish is registered through
+[`Tx.OnCommit`](../guides/transactions#side-effects-on-commit-or-rollback). It
+fires after a durable commit and is **discarded on rollback**, so a rolled-back
 write emits nothing. Outside a transaction (`For[T]`), it publishes inline right
 after the statement.
 
-**What emits:** the per-row methods — `Create` (`created`),
-`Update`/`UpdateFields` (`updated`), `Delete` (`deleted`). Bulk and WHERE-based
-methods (`CreateBatch`, `UpdateBatch`, `DeleteBatch`, `DeleteBy`, `UpdateMap`) do
-**not** emit — there's no single `*T` to attach. Emission isn't gated on rows
-affected: treat an event as "the operation committed", not "a row definitely
-changed" (whether a no-op update counts varies by engine, so gating would be
-engine-dependent).
+**What emits:** the per-row methods only — `Create` (`created`),
+`Update`/`UpdateFields` (`updated`), and `Delete` (`deleted`). The bulk and
+WHERE-based methods (`CreateBatch`, `UpdateBatch`, `DeleteBatch`, `DeleteBy`,
+`UpdateMap`) do **not** emit, because there is no single `*T` to attach.
+
+Emission is not gated on rows affected. Read an event as "the operation
+committed", not "a row definitely changed" — whether a no-op update counts
+varies by engine, so gating would be engine-dependent.
 
 **When `Publish` fails**, the write is already saved — an emit failure never rolls
 anything back:
@@ -159,14 +161,18 @@ PG), `ErrNoSubscription` (`Receive` before any `Listen`), `ErrListenerClosed`
 (any call after `Close`).
 
 :::warning Single-goroutine, fire-and-forget
-`Listen`/`Receive`/`Close` are serialized over the one pinned connection, and
-`Receive` blocks holding it — register every channel first, then loop `Receive` in
-one goroutine; to stop, cancel the `Receive` context, then `Close`. PostgreSQL
-`LISTEN/NOTIFY` has **no durable buffer**: notifications emitted while the
-connection is down are lost, so reconnect on error and reconcile state yourself.
-The listener holds one connection from the pool for its lifetime — size the pool
-accordingly or give it its own `Client`. A dedicated connection is required:
-`LISTEN` registers on a specific session, so a listener sharing the general pool
-would silently stop receiving notifications the moment its connection was
-recycled.
+`Listen`, `Receive`, and `Close` are serialized over the one pinned connection,
+and `Receive` blocks while holding it. Register every channel first, then loop
+`Receive` in one goroutine; to stop, cancel the `Receive` context and then call
+`Close`.
+
+PostgreSQL `LISTEN/NOTIFY` has **no durable buffer**. Notifications emitted while
+the connection is down are lost, so reconnect on error and reconcile state
+yourself.
+
+The listener holds one connection from the pool for its whole lifetime, so size
+the pool accordingly or give the listener its own `Client`. The dedicated
+connection is not optional: `LISTEN` registers on a specific session, so a
+listener sharing the general pool would silently stop receiving notifications the
+moment its connection was recycled.
 :::

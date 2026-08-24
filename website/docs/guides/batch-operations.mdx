@@ -111,6 +111,8 @@ batch rolls back.
 
 ```go
 users, _ := quark.For[User](ctx, client).Where("active", "=", true).List()
+
+ptrs := make([]*User, len(users))
 for i := range users {
     users[i].Score += 100
     ptrs[i] = &users[i]

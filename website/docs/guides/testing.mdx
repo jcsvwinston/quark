@@ -6,9 +6,9 @@ description: Test applications built on Quark — the quarktest kit, per-test is
 
 # Testing your application
 
-`quarktest` is the test kit: a ready SQLite client with cleanup, one-line
-schema setup, and the transaction-per-test isolation pattern. Three calls,
-zero external services:
+`quarktest` is the test kit: a ready SQLite client with cleanup, one-line schema
+setup, and the transaction-per-test isolation pattern. Three calls, and no
+external services:
 
 ```go
 import (
@@ -74,7 +74,7 @@ func TestRLSAgainstPostgres(t *testing.T) {
 ```
 
 For multi-tenant apps on
-[native row-level security](../advanced/row-level-native.mdx), gate the
+[native row-level security](../advanced/row-level-native), gate the
 suite (and the boot) on `quarktenant.VerifyRLSPolicies` — an unenforced
 table is a silent cross-tenant leak, and it is exactly the kind of thing a
 test database reproduces faithfully.

@@ -7,11 +7,13 @@ description: Opt-in code generation (quark gen) for typed scanners, an insert bi
 # Code Generation
 
 Quark maps structs to SQL with reflection by default, and that stays the
-permanent default — every struct works with zero build steps. Code generation is
-an **opt-in** layer on top: `quark gen` reads your model package and writes a
-`quark_gen.go` that registers a typed implementation per model. Your code doesn't
-change — `quark.For[T]` is identical with or without it. What changes is internal:
-the runtime can use the generated path instead of reflection.
+permanent default: every struct works with zero build steps.
+
+Code generation is an **opt-in** layer on top. `quark gen` reads your model
+package and writes a `quark_gen.go` that registers a typed implementation per
+model. Your own code doesn't change — `quark.For[T]` is identical with or without
+it. What changes is internal: the runtime can take the generated path instead of
+reflecting.
 
 :::note It's for type safety, not speed
 The read path (`List`/`First`/`Find`) uses a generated row scanner, and `Create`
@@ -114,11 +116,13 @@ and grouping aren't on the typed API; use the string `Or` helper.)
 
 ## How it works
 
-`quark gen` reads your package's **source** with `go/packages` and `go/types` —
-not reflection — so it can be `go install`ed and driven from `//go:generate`
-without compiling your types into it. It reuses Quark's own column parser, so
-generated names can't drift from the runtime, and a conformance test in the repo
-asserts the generator and runtime agree on every model's shape.
+`quark gen` reads your package's **source** with `go/packages` and `go/types`,
+not reflection. That is what lets it be `go install`ed and driven from
+`//go:generate` without compiling your types into it.
+
+It also reuses Quark's own column parser, so generated names can't drift from the
+runtime, and a conformance test in the repository asserts that generator and
+runtime agree on every model's shape.
 
 ## Limitations
 
@@ -130,7 +134,7 @@ asserts the generator and runtime agree on every model's shape.
   reflection path also matches untagged fields by snake-cased name). Give every
   persisted field a `db` tag so both paths agree.
 
-Reflection stays the default, and generated code is an accelerator layered on top
-of it rather than a replacement: the two coexist model by model. That is why every
-limitation above is a silent fallback to reflection instead of an error — deleting
-the generated file changes performance, never behaviour.
+Reflection stays the default, and generated code is a layer on top of it rather
+than a replacement: the two coexist model by model. That is why every limitation
+above is a silent fallback to reflection instead of an error — deleting the
+generated file changes performance, never behaviour.

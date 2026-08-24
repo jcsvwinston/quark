@@ -6,15 +6,20 @@ description: Engine-enforced row-level security on PostgreSQL via set_config + C
 
 # PostgreSQL Native Row-Level Security
 
-`RowLevelSecurityNative` pushes tenant isolation **into PostgreSQL**. Each query
-runs in a transaction that first calls `set_config('app.tenant_id', <tenant>, true)`,
-and a `CREATE POLICY` on each tenant table filters rows against that setting. The
-payoff over the client-side strategy: Quark **cannot bypass the policy even from
-`client.Raw()`** — the engine itself enforces isolation.
+`RowLevelSecurityNative` moves tenant isolation into PostgreSQL itself. The
+database decides which rows a tenant may see, so **no Go code can step around
+the policy — not even `client.Raw()`**.
 
-It's PostgreSQL-only. On the other five engines, use
-[`RowLevelSecurityClient`](multi-tenant#row-level-isolation) (client-side WHERE
-injection); attempting Native elsewhere fails at construction:
+It works in two parts:
+
+- Quark runs every query inside a transaction that first calls
+  `set_config('app.tenant_id', <tenant>, true)`.
+- A `CREATE POLICY` on each tenant table filters rows against that setting.
+
+This strategy is PostgreSQL-only. On the other five engines use
+[`RowLevelSecurityClient`](multi-tenant#row-level-isolation), which injects the
+`WHERE` clause from Go. A Native router over a non-PostgreSQL client fails
+loudly rather than falling back to something weaker:
 
 ```go
 _, err := quark.For[Order](tenantCtx, nativeRouter).List() // non-PG base client
@@ -139,9 +144,9 @@ one transaction, opened and committed exactly where you can see it.
 
 ## Verify enforcement at startup
 
-A Native router against a database where the DDL was never applied emits no
-predicate — every tenant reads every row, and nothing errors. Make the boot
-fail instead:
+Point a Native router at a database where the DDL was never applied, and there
+is no predicate at all: every tenant reads every row, and nothing errors. Make
+startup fail instead:
 
 ```go
 if _, err := quarktenant.VerifyRLSPolicies(ctx, client, quarktenant.DefaultInstallOptions()); err != nil {
@@ -149,11 +154,11 @@ if _, err := quarktenant.VerifyRLSPolicies(ctx, client, quarktenant.DefaultInsta
 }
 ```
 
-It checks, per registered model: `relrowsecurity` (RLS enabled),
-`relforcerowsecurity` (unless you opted out of FORCE), and the deterministic
-`<table>_tenant_isolation` policy in `pg_policies`. The tenant runner
-exposes the same check for CI/deploy gates — exit `1` means not enforced,
-distinct from operational errors (`2`):
+For each registered model it checks three things: `relrowsecurity` (row-level
+security is enabled), `relforcerowsecurity` (unless you opted out of `FORCE`),
+and the `<table>_tenant_isolation` policy in `pg_policies`. The tenant runner
+exposes the same check as a CI or deploy gate, with exit `1` for "not enforced"
+and exit `2` for an operational error:
 
 ```bash
 go run ./tenant verify-rls-policies
@@ -161,13 +166,14 @@ go run ./tenant verify-rls-policies
 
 ## Raw SQL under Native
 
-`client.RawQuery` / `client.Exec` go straight to the pool, so they skip the
-implicit transaction that sets `app.tenant_id`. Unlike the client-side strategy,
-this is **not a hole** under Native: with no tenant set, the policy's `USING`
-returns zero rows and an `INSERT` fails `WITH CHECK` — the engine stays in
-control. It's still rarely what you want (you lose the tenant scope and the
-builder), so a Native router's base client logs a warning when raw SQL runs with a
-resolvable tenant:
+`client.RawQuery` and `client.Exec` go straight to the pool, so they skip the
+implicit transaction that sets `app.tenant_id`. Under Native that is **not a
+hole**: with no tenant set, the policy's `USING` clause returns zero rows and an
+`INSERT` fails its `WITH CHECK` — the engine stays in control either way.
+
+It is still rarely what you want, because you lose both the tenant scope and the
+builder. So a Native router's base client logs a warning when raw SQL runs while
+a tenant is resolvable:
 
 ```
 event=quark.tenant.raw_under_native_rls op=RawQuery tenant=acme
@@ -194,8 +200,11 @@ forces PostgreSQL to use it.
 **Query returns zero rows when it shouldn't** — the usual sign the variable
 never reaches the query:
 
-1. `set_config` never ran for this query — raw SQL outside `router.Tx` / `For[T]`; the setting reads `NULL` and filters everything out.
-2. The policy cast and the tenant column type disagree — compare the policy's `USING` clause with the column type.
+1. `set_config` never ran for this query — typically raw SQL outside
+   `router.Tx` or `For[T]`. The setting reads `NULL`, which filters everything
+   out.
+2. The policy's cast and the tenant column's type disagree. Compare the
+   policy's `USING` clause with the column type.
 
 **A migration or DDL statement hangs** (`ALTER TABLE`, `DROP TABLE`, an index
 build) — something is holding a lock on the table, and under Native the usual
