@@ -71,7 +71,7 @@ jobs:
           go run ./examples/superapp/cmd/gen-allowlist
           if ! git diff --quiet examples/superapp/apisurface.json examples/superapp/allowlist.json; then
             echo "apisurface.json / allowlist.json are stale. Run:"
-            echo "  go generate ./examples/superapp/..."
+            echo "  make regen"
             echo "and commit the result. Drift:"
             git --no-pager diff --stat examples/superapp/apisurface.json examples/superapp/allowlist.json
             exit 1
@@ -291,39 +291,10 @@ jobs:
       # schema users by default.
       - name: Start Oracle
         if: matrix.engine == 'oracle'
-        run: |
-          docker run -d --name quark-oracle -p 1521:1521 \
-            -e ORACLE_PASSWORD=quark \
-            -e APP_USER=quark \
-            -e APP_USER_PASSWORD=quark \
-            gvenzl/oracle-free:23-slim
-
-          echo "Waiting for Oracle to report ready..."
-          # 6 min is ample (observed ~30-90s on hosted runners) and keeps the
-          # worst case (setup + boot + 25m suite) inside the 35m job cap.
-          deadline=$((SECONDS + 360))
-          until docker logs quark-oracle 2>&1 | grep -q "DATABASE IS READY TO USE!"; do
-            if [ $SECONDS -ge $deadline ]; then
-              echo "Oracle did not become ready within 6 minutes; logs:"
-              docker logs quark-oracle
-              exit 1
-            fi
-            sleep 5
-          done
-
-          echo "Granting EXECUTE ON DBMS_LOCK to quark..."
-          # -i is required: without it `docker exec` does not forward the
-          # heredoc to sqlplus's stdin, so the grant silently no-ops (exit
-          # 0, no SQL run) and the MigrationLock subtest later fails with
-          # PLS-00201 on DBMS_LOCK. With -i the WHENEVER SQLERROR guard
-          # below also actually fires on a failed/missing grant.
-          docker exec -i quark-oracle sqlplus -S -L sys/quark@localhost:1521/FREEPDB1 as sysdba <<'SQL'
-          WHENEVER SQLERROR EXIT SQL.SQLCODE
-          GRANT EXECUTE ON DBMS_LOCK TO quark;
-          EXIT
-          SQL
-
-          echo "QUARK_TEST_ORACLE_DSN=oracle://quark:quark@localhost:1521/FREEPDB1" >> "$GITHUB_ENV"
+        # Bootstrap compartido con local (make oracle-up): readiness + GRANT
+        # DBMS_LOCK (ADR-0018). Antes vivía duplicado aquí y en el job del
+        # superapp.
+        run: bash scripts/ci/oracle-up.sh QUARK_TEST_ORACLE_DSN
 
       - name: Run ${{ matrix.engine }} suite
         timeout-minutes: ${{ matrix.timeout || 20 }}
@@ -369,35 +340,9 @@ jobs:
           cache: true
 
       - name: Start Oracle
-        run: |
-          docker run -d --name quark-oracle -p 1521:1521 \
-            -e ORACLE_PASSWORD=quark \
-            -e APP_USER=quark \
-            -e APP_USER_PASSWORD=quark \
-            gvenzl/oracle-free:23-slim
-
-          echo "Waiting for Oracle to report ready..."
-          deadline=$((SECONDS + 360))
-          until docker logs quark-oracle 2>&1 | grep -q "DATABASE IS READY TO USE!"; do
-            if [ $SECONDS -ge $deadline ]; then
-              echo "Oracle did not become ready within 6 minutes; logs:"
-              docker logs quark-oracle
-              exit 1
-            fi
-            sleep 5
-          done
-
-          echo "Granting EXECUTE ON DBMS_LOCK to quark..."
-          # AcquireMigrationLock on Oracle needs EXECUTE ON DBMS_LOCK
-          # (ADR-0018); not granted to schema users by default. -i forwards
-          # the heredoc to sqlplus stdin (see the integration job note).
-          docker exec -i quark-oracle sqlplus -S -L sys/quark@localhost:1521/FREEPDB1 as sysdba <<'SQL'
-          WHENEVER SQLERROR EXIT SQL.SQLCODE
-          GRANT EXECUTE ON DBMS_LOCK TO quark;
-          EXIT
-          SQL
-
-          echo "SUPERAPP_DSN_ORACLE=oracle://quark:quark@localhost:1521/FREEPDB1" >> "$GITHUB_ENV"
+        # Mismo bootstrap compartido; la var del DSN es la que consume el
+        # superapp.
+        run: bash scripts/ci/oracle-up.sh SUPERAPP_DSN_ORACLE
 
       - name: Run superapp acceptance (all engines, strict gate)
         timeout-minutes: 25
