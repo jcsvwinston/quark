@@ -80,10 +80,6 @@
         },
         {
           "type": "generic",
-          "path": "CLAUDE.md"
-        },
-        {
-          "type": "generic",
           "path": "website/docs/reference/release-notes.mdx"
         }
       ]

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0](https://github.com/jcsvwinston/quark/compare/v1.5.2...v1.6.0) (2026-08-24)
+
+
+### Added
+
+* **ci:** guard de deriva para la documentación interna ([#291](https://github.com/jcsvwinston/quark/issues/291)) ([8912123](https://github.com/jcsvwinston/quark/commit/89121236b5e0525892e52d5dec2b7e65462359ab))
+* **dev:** make check espejo de las lanes baratas de CI + oracle-up.sh compartido + CONTRIBUTING sin fantasmas (DX-2, fase C) ([#290](https://github.com/jcsvwinston/quark/issues/290)) ([b67ec48](https://github.com/jcsvwinston/quark/commit/b67ec482a9c2a13989355ce324c41a1cc10716ae))
+* **quarktenant:** verify-rls-policies — el preflight que hace ruidosa la fuga silenciosa del RLS nativo ([#287](https://github.com/jcsvwinston/quark/issues/287)) ([444273e](https://github.com/jcsvwinston/quark/commit/444273eeefbe95b0642a7ccea6196f1ab899cbe0))
+* **quarktest:** el kit de testing que cada usuario montaba a mano — SQLite con cleanup, Migrate en una línea y Tx con rollback garantizado ([#288](https://github.com/jcsvwinston/quark/issues/288)) ([7ce50d7](https://github.com/jcsvwinston/quark/commit/7ce50d7a5bcbb11be9ed40238ddfac59d5255010))
+* **release:** menciones de versión auto-bumpadas y esqueletos de release notes por script (capa 1 de automatización de docs) ([#284](https://github.com/jcsvwinston/quark/issues/284)) ([de1a404](https://github.com/jcsvwinston/quark/commit/de1a4043827df643c26aa15adb008d2892bfd9b2))
+
+
+### Fixed
+
+* **release:** el marker de versión de release-notes.mdx que la capa 1 dejó fuera ([#286](https://github.com/jcsvwinston/quark/issues/286)) ([4ccfc7c](https://github.com/jcsvwinston/quark/commit/4ccfc7c2a2f2ad9ccc0212dec2515b498dd4e9b2))
+* **website:** el marcador de versión rompía el build del sitio en MDX ([#293](https://github.com/jcsvwinston/quark/issues/293)) ([b9880e7](https://github.com/jcsvwinston/quark/commit/b9880e76587e2e788fa07bd6d4e9f96e93ec6be3))
+
 ## [1.5.2](https://github.com/jcsvwinston/quark/compare/v1.5.1...v1.5.2) (2026-08-21)
 
 
