@@ -1,0 +1,252 @@
+---
+sidebar_position: 10
+title: Operational Workflows
+description: The quark CLI — migrations, schema inspection, model generation, seeders, and tenant jobs — plus how to embed the same operations in your own binary.
+---
+
+# Operational Workflows
+
+Quark ships a `quark` binary for the operational tasks around your app:
+migrations, schema inspection, model generation, seeding, and multi-tenant jobs.
+
+```bash
+go install github.com/jcsvwinston/quark/cmd/quark@latest
+```
+
+| Subcommand | What it does |
+|------------|--------------|
+| `init` | Scaffold a project (config + layout) for a chosen dialect. |
+| `migrate` | `create` / `up` / `down` / `status` / `version` for the versioned migrator. |
+| `model generate` | Generate a model struct from a table (`--from-table`) or an inline spec (`--fields`). |
+| `inspect` | `schema` / `table <name>` / `sql` introspection. |
+| `sync` | Check the connection and print how to wire `client.Sync(...)` — the diff/apply itself needs your compiled model types, so it runs in your app, not the CLI. |
+| `seed` | `create` / `run` / `list` seed scripts. |
+| `tenant` | `provision` / `migrate` / `list` / `migrate-all` for multi-tenant databases. |
+| `validate` | Validate a model's tags against the live schema. |
+| `gen` | Generate typed accessors / binders (see [Code Generation](codegen)). |
+
+The CLI reads its connection from a `.quark.yml` config (created by `quark init`)
+or from `QUARK_DATABASE_DEFAULT_DRIVER` / `QUARK_DATABASE_DEFAULT_DSN`.
+
+## Migrations from the CLI
+
+```bash
+quark migrate create add_users_table   # scaffold a new migration file
+quark migrate up                        # apply pending migrations
+quark migrate status                    # show applied vs pending
+quark migrate down                      # roll back the last migration
+```
+
+`migrate create` can also write the migration **body** for you. Point it at
+the package that holds your model structs and name the dialect, and it
+renders domain DDL through the same type mapping the runtime migrator uses:
+
+```bash
+quark migrate create domain_schema --from-models ./models --dialect postgresql
+```
+
+Tables come out in dependency order, parents before children. Each carries the
+`NOT NULL`, `UNIQUE`, and size constraints your tags declare, plus `FOREIGN KEY`
+clauses and indexes for every `rel:"belongs_to"` / `join:` pair, and the `Down`
+drops them in reverse order.
+
+`--dialect` accepts `postgresql|mysql|mariadb|sqlite|mssql|oracle` and defaults
+to the configured `database.default.driver`. The result is a regular migration
+file — review and edit it like any other.
+
+:::caution The standalone binary cannot see your migrations
+**What happens.** `migrate up` / `migrate down` and `seed run` exit non-zero with
+an explanation when the registry is empty, instead of reporting a misleading "No
+pending migrations".
+
+**Why.** Migration files register themselves in an `init()`, which only runs when
+their package is compiled into the running binary. A `go install`ed `quark`
+never imports your project's `migrations/` package, so it genuinely has nothing
+to apply.
+
+**What to do.** Build the two-line runner shown in
+[Embedding the same operations in your own binary](#embedding-the-same-operations-in-your-own-binary).
+Your `main` imports the migrations package for its side effects and calls
+`commands.Main()`, which prints errors to stderr and exits non-zero on failure.
+Don't call a bare `commands.Execute()` from `main`: it *returns* the error
+instead of printing it, so every failure becomes a silent exit 0.
+:::
+
+## Generating models from an existing database
+
+`model generate` is database-first or spec-first. From existing tables, it
+introspects the database and writes one struct per table:
+
+```bash
+quark model generate --from-table users,orders --out ./models --package models
+```
+
+Nullable columns become pointers, `JSON`/`JSONB` becomes `json.RawMessage`, and
+timestamp columns become `time.Time`. Treat the output as a starting point —
+review it before adding rich types, relations, soft-delete, or optimistic
+locking. Or define a model inline, no database needed:
+
+```bash
+quark model generate Product --fields "id:int64,name:string,price:float64" --out ./models
+```
+
+The `--fields` grammar reaches the rich half of the ORM, not just scalars:
+
+- **A third segment adds a tag token** — `sku:string:unique`,
+  `version:int64:version`, `title:string:not_null`.
+- **Generic specs produce container types and relations** —
+  `bio:nullable<string>`, `tags:array<string>`, `attrs:json<Attrs>`,
+  `author:belongs_to<User>`. A `belongs_to` emits both the `author_id` column and
+  the relation field pair.
+
+The referenced types (`Attrs`, `User` above) stay yours to define.
+
+Flags: `--from-table`, `--fields`, `--out` (default `./models`), `--package`
+(default `models`), `--dialect`, `--tags` (default `json`). The `--out` directory
+is created if missing, and a malformed spec or unwritable output exits non-zero.
+
+## Inspecting and validating
+
+```bash
+quark inspect schema                      # list tables and columns
+quark inspect table users                 # describe one table
+quark validate users --models ./models    # compare the User struct against the users table
+```
+
+`validate` compares one Go struct against the live table and reports the mapping
+in both directions:
+
+- **A Go field whose column is missing in the database** always exits non-zero.
+  That is drift you have to fix.
+- **A database column with no Go field** exits non-zero only under `--strict`.
+
+It loads your structs with `go/packages`. `--models` defaults to `paths.models`
+from `.quark.yml`, falling back to `./...`, and the table is matched to a model
+by pluralized snake_case name unless you name it with `--model User`.
+
+`inspect table` and `model generate --from-table` also exit non-zero when the
+table doesn't exist, rather than printing an empty report.
+
+`inspect schema` and `inspect table` take `--format table|json|yaml` for
+machine-readable output. Schema sync (auto-migration) is a programmatic API —
+it needs your compiled model types, so it can't run from a standalone CLI.
+`quark sync` just checks the connection and prints the call to embed:
+
+```go
+// DryRun previews the SQL without applying it.
+err := client.Sync(ctx, quark.SyncOptions{DryRun: true}, &User{}, &Order{})
+```
+
+## Embedding the same operations in your own binary
+
+To reuse the CLI's own command tree (`migrate`, `seed`, `tenant`, …) with your
+project's migrations compiled in, you need a small runner in your project —
+and `quark init` already writes it for you (`cmd/<app>/main.go`, plus the
+`migrations`/`seeders` doc stubs it imports). Written out, the whole runner
+is:
+
+```go
+// cmd/quark/main.go (in YOUR project)
+package main
+
+import (
+    _ "github.com/you/yourapp/migrations" // side-effect: registers migrations
+
+    "github.com/jcsvwinston/quark/cmd/quark/commands"
+)
+
+func main() { commands.Main() }
+```
+
+`commands.Main` executes the root command, prints any error to stderr and
+exits 1 — the same contract as the standalone binary, which is what CI gates
+need. `commands.Execute` remains available for mains that deliberately take
+over error handling; it returns the error and prints nothing, so never call
+it bare.
+
+Two sibling runner libraries follow the same embed pattern for flows the
+standalone binary cannot know about (they need your registered models):
+
+- **`quarkmigrate`** — plan/verify/apply schema against the live database
+  (exit `1` = drift, `2` = operational error).
+- **`quarktenant`** — `install-rls-policies` renders and applies the native
+  row-level-security DDL for every registered model, and
+  `verify-rls-policies` is the boot/CI gate that fails (exit `1`) when any
+  table is left unenforced — see
+  [Native row-level security](../advanced/row-level-native).
+
+When you'd rather run these from your own service or CI binary, call the public
+APIs directly. A migration runner imports your migration package for its side
+effects and drives the versioned migrator:
+
+```go
+// cmd/migrate/main.go
+limits := quark.DefaultLimits()
+limits.AllowRawQueries = true
+
+client, err := quark.New("pgx", dsn, quark.WithLimits(limits))
+if err != nil {
+    log.Fatal(err)
+}
+defer client.Close()
+
+migrator := migrate.NewMigrator(client)
+switch {
+case dryRun:
+    err = migrator.UpDryRun(ctx, 0)
+case down > 0:
+    err = migrator.Down(ctx, down)
+default:
+    err = migrator.Up(ctx, 0)
+}
+```
+
+For a dev/test schema bootstrap, call `Migrate` directly (it reflects the current
+model shape and creates missing tables — different from versioned migrations,
+which record exactly which DDL ran):
+
+```go
+err := client.Migrate(ctx, &User{}, &Order{}, &Product{})
+```
+
+For database-per-tenant, `quark tenant migrate <id>` / `migrate-all` resolve
+each tenant's DSN from `tenant.dsn_template` in `.quark.yml` — the tenant id
+replaces the `{tenant}` placeholder:
+
+```yaml
+tenant:
+  strategy: db_per_tenant
+  dsn_template: postgres://user:pass@localhost/{tenant}?sslmode=disable
+```
+
+Three behaviours are worth knowing before you wire this into a deploy job:
+
+- **No `dsn_template` means the command fails**, rather than guessing and
+  migrating the default database under a tenant's name.
+- **`schema_per_tenant` migrations can't be resolved from static config**, so
+  they exit with an explicit error. Run those from your own binary.
+- **`tenant provision` under `schema_per_tenant` stops at the schema plus the
+  registry row.** It says so and exits 0 — that is the complete effect. It also
+  refuses an id already registered in `quark_tenants`, so a retry never crashes
+  on a duplicate `CREATE SCHEMA`.
+
+In code the same loop stays explicit — resolve each tenant's DSN, build a client,
+run the same migrator:
+
+```go
+for _, tenant := range tenants {
+    client, err := clientForTenant(tenant)
+    if err != nil {
+        return err
+    }
+    if err := migrate.NewMigrator(client).Up(ctx, 0); err != nil {
+        _ = client.Close()
+        return fmt.Errorf("tenant %s: %w", tenant.ID, err)
+    }
+    _ = client.Close()
+}
+```
+
+(`TenantRouter` uses tenant IDs as schema names at query time but doesn't
+orchestrate schema provisioning — see [Multi-Tenant](../advanced/multi-tenant).)
+Commit these commands with your app and run them from CI or deployment jobs.

@@ -1,0 +1,74 @@
+# Multi-Tenancy API Reference
+
+A `TenantRouter` is a drop-in stand-in for a `*Client`. It reads the tenant ID
+out of the request context, applies the isolation strategy you configured, and
+hands the query the right connection — so `quark.For[T](ctx, router)` is the
+only thing that changes in your data layer.
+
+This page is the symbol-level reference. For the concepts and worked examples,
+start with [Multi-Tenant](../../advanced/multi-tenant).
+
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `NewTenantRouter` | `NewTenantRouter(config TenantConfig, resolver func(context.Context) string, factory func(string) (*Client, error)) *TenantRouter` | Builds a tenant-aware router. |
+| `TenantRouter.ResolveTenant` | `ResolveTenant(ctx) (string, error)` | Extracts the tenant ID from context. |
+| `TenantRouter.GetClient` | `GetClient(ctx) (*Client, error)` | Returns the client for the resolved tenant. |
+| `TenantRouter.ActiveTenants` | `ActiveTenants() []string` | Lists cached tenant connections. |
+| `DatabasePerTenant` | `TenantStrategy` const | Separate DB pool per tenant. |
+| `SchemaPerTenant` | `TenantStrategy` const | Shared pool, schema prefix per tenant. |
+| `RowLevelSecurityClient` | `TenantStrategy` const | Client-side `WHERE tenant_id = ?` injection. |
+| `RowLevelSecurityNative` | `TenantStrategy` const | Engine-enforced policies (PostgreSQL only). |
+
+## Tenant Strategies
+
+| Strategy | Description | Use Case |
+|----------|-------------|----------|
+| `DatabasePerTenant` | Separate DB per tenant | Strong isolation, regulatory |
+| `SchemaPerTenant` | Schema per tenant | Medium isolation, shared pool |
+| `RowLevelSecurityClient` | Client-side `WHERE tenant_id = ?` injection on every Quark-built query (raw SQL bypasses it). | Shared table, simple scaling. On PG, [`RowLevelSecurityNative`](../../advanced/row-level-native) offers engine-enforced policies as the alternative. |
+| `RowLevelSecurityNative` | PostgreSQL-only. Engine-enforced via `set_config('app.tenant_id', ...)` per implicit transaction + `CREATE POLICY` clauses on each tenant-scoped table. `client.Raw()` is also filtered server-side. | PG deployments where bypass risk matters; mutually exclusive with `RowLevelSecurityClient` per router. |
+
+:::caution `RowLevelSecurity` is deprecated
+`RowLevelSecurity` is a deprecated alias for `RowLevelSecurityClient`.
+Use `RowLevelSecurityClient` in new code; the alias is scheduled for
+removal in v2.0.
+:::
+
+## TenantRouter
+
+### `NewTenantRouter(config, resolver, factory) *TenantRouter`
+
+```go
+router := quark.NewTenantRouter(
+    quark.TenantConfig{
+        Strategy:       quark.SchemaPerTenant,
+        BaseClient:     baseClient,
+        MaxCachedPools: 100, // For DatabasePerTenant
+    },
+    func(ctx context.Context) string {
+        return ctx.Value("tenant_id").(string) // Extract from context
+    },
+    func(tenantID string) (*quark.Client, error) {
+        // Create tenant-specific client
+        return quark.New("postgres", fmt.Sprintf(".../tenant_%s", tenantID))
+    },
+)
+```
+
+The router exposes three methods. `ResolveTenant(ctx)` returns the tenant ID the
+resolver extracted, `GetClient(ctx)` returns the `*Client` that ID maps to, and
+`ActiveTenants()` lists the tenant connections currently cached. Normal query
+code needs none of them — pass the router itself.
+
+## Usage with Queries
+
+Pass the router wherever you would pass a client. The strategy decides what the
+generated SQL looks like:
+
+```go
+// RowLevelSecurityClient: WHERE tenant_id = 'acme' is auto-injected
+users, _ := quark.For[User](ctx, router).List()
+
+// SchemaPerTenant: queries "acme.users"
+orders, _ := quark.For[Order](ctx, router).List()
+```

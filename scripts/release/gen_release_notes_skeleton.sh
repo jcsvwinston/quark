@@ -92,4 +92,22 @@ else
   echo "ok: ${notes} ya existe"
 fi
 
+# CLAUDE.md queda FUERA de los extra-files de release-please a propósito: su
+# updater genérico reemplaza todas las apariciones de la versión anterior en
+# el fichero, y este cita versiones pasadas en su línea de historial — la
+# reescribía, falseando el registro. Aquí se bumpa solo la línea marcada.
+if grep -q 'x-release-please-version' CLAUDE.md 2>/dev/null; then
+  python3 - "$version" <<'PY_BUMP'
+import re, sys
+version = sys.argv[1]
+lines = open("CLAUDE.md").read().split("\n")
+for i, line in enumerate(lines):
+    if "x-release-please-version" in line:
+        lines[i] = re.sub(r"v\d+\.\d+\.\d+", f"v{version}", line, count=1)
+        break
+open("CLAUDE.md", "w").write("\n".join(lines))
+print(f"bumpeada la línea marcada de CLAUDE.md a v{version}")
+PY_BUMP
+fi
+
 echo "Recuerda: la prosa final es tuya. El guard de coherencia valida menciones y sección."
