@@ -40,19 +40,10 @@ client, err := quark.New("postgres", dsn,
 )
 ```
 
-Start from `DefaultLimits()` and override fields selectively. `WithLimits`
-fills any numeric field left at zero from `DefaultLimits()`, so a partial
-literal such as `quark.Limits{MaxResults: 500}` raises one limit without
-zeroing the rest — in particular it can no longer leave `QueryTimeout` at 0,
-which used to make every query context expire immediately. The boolean
-fields are not filled in: a partial literal keeps `AllowRawQueries` and
-`SafeMigrations` at `false`, so start from `DefaultLimits()` whenever you
-want to keep `SafeMigrations` enabled. Because that combination is easy to
-miss, `quark.New` logs one structured warning
-(`event=quark.limits.partial_literal_safe_migrations_off`) when a partial
-literal — one whose numeric zeros were actually filled in — leaves
-`SafeMigrations` at `false`; a full literal that disables `SafeMigrations`
-on purpose stays silent, and behaviour is identical either way.
+**Always start from `DefaultLimits()` and override fields selectively**, as
+above. A bare literal like `quark.Limits{MaxResults: 500}` silently leaves
+`SafeMigrations` at `false`, which allows a destructive `Sync`. The full
+zero-value rules are under [Limits](#limits) below.
 
 ## Options
 
@@ -136,18 +127,26 @@ Defaults:
 | `AllowRawQueries` | `false` | Required for `RawQuery`, `Exec`, and `WhereSubquery`. |
 | `SafeMigrations` | `true` | Prevents `Sync` from dropping columns. |
 
-Zero-value semantics: for the numeric fields, zero means "not set" —
-`WithLimits` replaces each zero-valued numeric field with its
-`DefaultLimits()` value before installing the struct. A negative value is
-passed through untouched; `MaxQueryLength: -1` disables the generated-SQL
-length check. The boolean fields are never rewritten, because an explicit
-`false` is indistinguishable from an omitted field: a partial literal
-therefore carries `SafeMigrations: false` (destructive `Sync` allowed) even
-though the default is `true`. When that happens — the literal was partial
-(numeric zeros were filled) and `SafeMigrations` ended up `false` —
-`quark.New` logs one warning with
-`event=quark.limits.partial_literal_safe_migrations_off` so the drop does
-not go unnoticed; it does not change the installed limits.
+### Zero-value semantics
+
+`WithLimits` treats numeric and boolean fields differently, and the difference
+matters:
+
+- **Numeric fields: zero means "not set".** `WithLimits` replaces each
+  zero-valued numeric field with its `DefaultLimits()` value before installing
+  the struct, so `quark.Limits{MaxResults: 500}` raises one limit without
+  zeroing the rest.
+- **Negative values pass through untouched.** `MaxQueryLength: -1` disables the
+  generated-SQL length check.
+- **Boolean fields are never rewritten**, because an explicit `false` is
+  indistinguishable from an omitted one. A partial literal therefore carries
+  `SafeMigrations: false` — destructive `Sync` allowed — even though the default
+  is `true`.
+
+Because that last case is easy to miss, `quark.New` logs one warning
+(`event=quark.limits.partial_literal_safe_migrations_off`) when a partial literal
+ends up with `SafeMigrations` disabled. The warning does not change the installed
+limits; a full literal that disables `SafeMigrations` on purpose stays silent.
 
 Recommended pattern:
 

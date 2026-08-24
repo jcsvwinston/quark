@@ -38,15 +38,19 @@ Install exactly the driver you need:
 | SQL Server | `github.com/microsoft/go-mssqldb` | `quark.MSSQL()` |
 | Oracle | `github.com/sijms/go-ora/v2` | `quark.Oracle()` |
 
-SQLite is the easiest place to start — no external service. For PostgreSQL,
-`lib/pq` covers everything except the inbound `LISTEN/NOTIFY` listener
-([Events](../advanced/events)) — that one feature requires
-`github.com/jackc/pgx/v5/stdlib` (`quark.New("pgx", dsn)`); if you plan to use
-it, start with pgx directly. For MySQL/MariaDB,
-add `parseTime=true` to the DSN when you scan `time.Time` fields. MariaDB speaks
-the MySQL wire protocol through the same `"mysql"` driver; Quark detects it
-automatically (it checks the server version once at `New()` and switches to the
-MariaDB dialect), so `quark.New("mysql", dsn)` is correct for both.
+SQLite is the easiest place to start — there's no external service to run. Three
+engines have a wrinkle worth knowing before you pick a driver:
+
+- **PostgreSQL.** `lib/pq` covers everything except the inbound `LISTEN/NOTIFY`
+  listener ([Events](../advanced/events)). That one feature needs
+  `github.com/jackc/pgx/v5/stdlib` and `quark.New("pgx", dsn)`. If you expect to
+  use it, start with pgx and skip the migration later.
+- **MySQL.** Add `parseTime=true` to the DSN when you scan `time.Time` fields,
+  or the driver hands back raw bytes.
+- **MariaDB.** It speaks the MySQL wire protocol through the same `"mysql"`
+  driver, so `quark.New("mysql", dsn)` is correct for both. Quark checks the
+  server version once at `New()` and switches to the MariaDB dialect when it
+  finds one.
 
 ## A minimal program
 
@@ -160,8 +164,9 @@ func Smoke(ctx context.Context, client *quark.Client) error {
 
 ## Running the test suite
 
-The upstream tests use environment variables for the external engines (SQLite
-runs offline):
+If you're building Quark itself — contributing a patch, or reproducing a bug
+against a real engine — the test suite reads its connections from environment
+variables. SQLite tests run offline with no setup:
 
 ```bash
 export QUARK_TEST_POSTGRES_DSN="postgres://user:pass@localhost:5432/testdb?sslmode=disable"
@@ -170,6 +175,7 @@ export QUARK_TEST_MSSQL_DSN="sqlserver://sa:Pass@localhost:1433?database=testdb"
 export QUARK_TEST_ORACLE_DSN="oracle://user:pass@localhost:1521/XE"
 ```
 
-A local tool that runs raw DDL through `client.Exec` needs the client configured
-with `AllowRawQueries: true`; the high-level `Migrate`, `Sync`, `CreateIndex`,
-and `AddForeignKey` helpers don't.
+The same applies to any local tool you write that sets up a schema. If it runs
+raw DDL through `client.Exec`, build its client with `AllowRawQueries: true` —
+raw statements are disabled by default. The high-level `Migrate`, `Sync`,
+`CreateIndex`, and `AddForeignKey` helpers need no such opt-in.

@@ -60,15 +60,18 @@ where it is enforced — because that determines what can bypass it:
 | `RowLevelSecurityClient` | Quark's query builder (injected `WHERE`) | **Yes** — `Raw()` / `Exec()` skip the predicate |
 | `RowLevelSecurityNative` (PostgreSQL) | The database engine (`CREATE POLICY`) | No — the policy filters server-side |
 
-The practical rule: `RowLevelSecurityClient` is a correctness convenience, not
-a hard boundary — one raw query in the codebase steps around it. When tenant
-isolation is a security requirement and you are on PostgreSQL, use
-[`RowLevelSecurityNative`](../advanced/row-level-native), where the engine
-enforces the policy even against raw SQL. On the other engines, prefer
-database- or schema-per-tenant if the boundary matters. The
-[Multi-Tenant](../advanced/multi-tenant) guide covers setup for all of them;
-the native page also documents its write semantics (each query runs in an
-implicit transaction that scopes the tenant setting).
+The practical rule: **`RowLevelSecurityClient` is a correctness convenience, not
+a hard boundary.** One raw query anywhere in the codebase steps around it.
+
+When tenant isolation is a security requirement, pick by engine:
+
+- **On PostgreSQL**, use [`RowLevelSecurityNative`](../advanced/row-level-native).
+  The engine enforces the policy even against raw SQL. That page also documents
+  its write semantics — each query runs in an implicit transaction that scopes
+  the tenant setting.
+- **On the other five engines**, prefer database- or schema-per-tenant.
+
+The [Multi-Tenant](../advanced/multi-tenant) guide covers setup for all of them.
 
 Quark helps you notice drift: a raw query executed under a native-RLS router
 logs a WARN (`quark.tenant.raw_under_native_rls`) — isolation still holds,

@@ -1,6 +1,12 @@
 # Dialects API Reference
 
-Dialects isolate database-specific SQL generation.
+A dialect is the one place a database's quirks live: placeholder syntax,
+identifier quoting, upsert form, pagination, and DDL. Quark picks one for you
+from the driver name, so most applications never touch this API.
+
+You need it in two cases — overriding a mis-detected dialect, and registering a
+dialect of your own. See [Dialects](../dialects) for the engine-by-engine
+support table.
 
 ## Built-In Constructors
 

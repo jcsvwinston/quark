@@ -154,10 +154,11 @@ contradictorio. La promesa pública supera a la cobertura real.
    "Oracle real" de la fila top de `comparison.mdx` y reescribirla como
    "Oracle: validación manual del mantenedor; no en CI bloqueante hasta
    v1.x". Coste competitivo real pero honesto.
-3. **Salida C — job programado.** Workflow `.github/workflows/oracle-nightly.yml`
-   que corre la suite Oracle una vez al día (no bloqueante de PR pero
-   visible). Punto medio entre A y B. **Done:** el job existe, ha corrido
-   verde 7 días seguidos, y el badge se muestra en README.
+3. **Salida C — job programado.** Un workflow aparte que corriera la suite
+   Oracle una vez al día (no bloqueante de PR pero visible). Punto medio
+   entre A y B. **No se tomó:** el gate se cerró por la Salida A — Oracle es
+   una entrada bloqueante de la matriz de `ci.yml`, que es más estricta y
+   evita mantener un segundo workflow.
 
 **Comando de verificación:**
 

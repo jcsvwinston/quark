@@ -1,7 +1,12 @@
 # Stored Routines API Reference
 
-Quark can call database functions and stored procedures through `Routine[T]`
-and `Call`.
+Quark reaches stored procedures and database functions through two entry points.
+`Routine[T]` runs a function that returns rows and maps them into your struct,
+the same way `List` would. `Call` runs a procedure and binds its output
+parameters.
+
+Neither goes through the model query builder, so `Where`, `OrderBy`, and the
+rest do not apply.
 
 ## NewRoutine
 

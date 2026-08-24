@@ -54,17 +54,21 @@ configured `database.default.driver`. The result is a regular migration
 file — review it and edit like any other.
 
 :::caution The standalone binary cannot see your migrations
-Migration files register themselves via `init()`, which only runs when their
-package is compiled into the executing binary — a `go install`ed `quark`
-never imports your project's `migrations/` package. `migrate up`/`down` (and
-`seed run`) therefore **exit non-zero with an explanation** when the registry
-is empty, instead of reporting a bogus "No pending migrations". To run them
-for real, build the two-line runner shown in
-[Embedding the same operations in your own binary](#embedding-the-same-operations-in-your-own-binary):
-your `main` imports the migrations package for its side effects and calls
-`commands.Main()`, which prints errors to stderr and exits non-zero on
-failure. (Don't call a bare `commands.Execute()` from `main` — it *returns*
-the error instead of printing it, so every failure becomes a silent exit 0.)
+**What happens.** `migrate up` / `migrate down` and `seed run` exit non-zero with
+an explanation when the registry is empty, instead of reporting a misleading "No
+pending migrations".
+
+**Why.** Migration files register themselves in an `init()`, which only runs when
+their package is compiled into the running binary. A `go install`ed `quark`
+never imports your project's `migrations/` package, so it genuinely has nothing
+to apply.
+
+**What to do.** Build the two-line runner shown in
+[Embedding the same operations in your own binary](#embedding-the-same-operations-in-your-own-binary).
+Your `main` imports the migrations package for its side effects and calls
+`commands.Main()`, which prints errors to stderr and exits non-zero on failure.
+Don't call a bare `commands.Execute()` from `main`: it *returns* the error
+instead of printing it, so every failure becomes a silent exit 0.
 :::
 
 ## Generating models from an existing database
@@ -85,13 +89,16 @@ locking. Or define a model inline, no database needed:
 quark model generate Product --fields "id:int64,name:string,price:float64" --out ./models
 ```
 
-The definition grammar also covers the rich half of the ORM: a third
-segment adds a tag token (`sku:string:unique`, `version:int64:version`,
-`title:string:not_null`), and generic specs produce quark's container
-types and relations — `bio:nullable<string>`, `tags:array<string>`,
-`attrs:json<Attrs>`, `author:belongs_to<User>` (which emits the
-`author_id` column plus the relation field pair). The referenced types
-(`Attrs`, `User`) stay yours to define.
+The `--fields` grammar reaches the rich half of the ORM, not just scalars:
+
+- **A third segment adds a tag token** — `sku:string:unique`,
+  `version:int64:version`, `title:string:not_null`.
+- **Generic specs produce container types and relations** —
+  `bio:nullable<string>`, `tags:array<string>`, `attrs:json<Attrs>`,
+  `author:belongs_to<User>`. A `belongs_to` emits both the `author_id` column and
+  the relation field pair.
+
+The referenced types (`Attrs`, `User` above) stay yours to define.
 
 Flags: `--from-table`, `--fields`, `--out` (default `./models`), `--package`
 (default `models`), `--dialect`, `--tags` (default `json`). The `--out` directory
@@ -105,13 +112,19 @@ quark inspect table users                 # describe one table
 quark validate users --models ./models    # compare the User struct against the users table
 ```
 
-`validate` loads your structs with `go/packages` (`--models` defaults to
-`paths.models` from `.quark.yml`, else `./...`), matches the table to a model
-by pluralized snake_case name (or take `--model User` explicitly), and reports
-the mapping in both directions: a field whose column is missing in the
-database always exits non-zero; DB columns unmapped in Go exit non-zero under
-`--strict`. `inspect table` and `model generate --from-table` also exit
-non-zero when the table doesn't exist, instead of printing an empty report.
+`validate` compares one Go struct against the live table and reports the mapping
+in both directions:
+
+- **A Go field whose column is missing in the database** always exits non-zero.
+  That is drift you have to fix.
+- **A database column with no Go field** exits non-zero only under `--strict`.
+
+It loads your structs with `go/packages`. `--models` defaults to `paths.models`
+from `.quark.yml`, falling back to `./...`, and the table is matched to a model
+by pluralized snake_case name unless you name it with `--model User`.
+
+`inspect table` and `model generate --from-table` also exit non-zero when the
+table doesn't exist, rather than printing an empty report.
 
 `inspect schema` and `inspect table` take `--format table|json|yaml` for
 machine-readable output. Schema sync (auto-migration) is a programmatic API —
@@ -205,15 +218,19 @@ tenant:
   dsn_template: postgres://user:pass@localhost/{tenant}?sslmode=disable
 ```
 
-Without a template the command fails instead of guessing (it used to migrate
-the *default* database, whatever tenant you named). `schema_per_tenant`
-migrations are not resolvable from static config and exit with an explicit
-error — run those from your own binary. `tenant provision` therefore stops at
-schema + registry row under `schema_per_tenant` (it says so, and exits 0 —
-that's the complete effect); it also refuses to provision an id that's
-already registered in `quark_tenants`, so retries never crash on duplicate
-`CREATE SCHEMA`. In code, the same loop stays explicit —
-resolve each tenant's DSN, build a client, run the same migrator:
+Three behaviours are worth knowing before you wire this into a deploy job:
+
+- **No `dsn_template` means the command fails**, rather than guessing and
+  migrating the default database under a tenant's name.
+- **`schema_per_tenant` migrations can't be resolved from static config**, so
+  they exit with an explicit error. Run those from your own binary.
+- **`tenant provision` under `schema_per_tenant` stops at the schema plus the
+  registry row.** It says so and exits 0 — that is the complete effect. It also
+  refuses an id already registered in `quark_tenants`, so a retry never crashes
+  on a duplicate `CREATE SCHEMA`.
+
+In code the same loop stays explicit — resolve each tenant's DSN, build a client,
+run the same migrator:
 
 ```go
 for _, tenant := range tenants {

@@ -463,14 +463,16 @@ privileged, err := adminEmails.UnionAll(ownerEmails).List()
 Each operand can't carry `ORDER BY`, `LIMIT`, locks, its own CTEs, or nested
 set-ops; `ORDER BY`/`LIMIT` on the **outer** query apply to the combined result.
 
-A statement chains **one operator kind only**. `Union` and `UnionAll` mix
-freely (same operator, same precedence — evaluation is left to right on every
-engine), but mixing kinds, as in `a.Union(b).Intersect(c)`, returns
-`ErrUnsupportedFeature`: the combined statement renders flat, and engines
-disagree on how a flat mix parses — PostgreSQL, MySQL, MariaDB, and SQL Server
-give `INTERSECT` higher precedence, while SQLite and Oracle evaluate left to
-right — so the same chain would silently return different rows depending on
-the engine. Materialize each step into its own query instead.
+A statement chains **one operator kind only**. `Union` and `UnionAll` mix freely,
+since they are the same operator at the same precedence and evaluate left to
+right everywhere. Mixing kinds — `a.Union(b).Intersect(c)` — returns
+`ErrUnsupportedFeature` instead.
+
+The reason is that the combined statement renders flat, and engines parse a flat
+mix differently: PostgreSQL, MySQL, MariaDB, and SQL Server give `INTERSECT`
+higher precedence, while SQLite and Oracle evaluate left to right. The same chain
+would quietly return different rows on different engines. Materialize each step
+into its own query instead.
 
 Per-engine support (an unsupported combination returns
 `ErrUnsupportedFeature` instead of emitting SQL the engine rejects):

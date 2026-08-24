@@ -41,6 +41,13 @@ jobs:
         # reader's language.
         run: bash scripts/ci/check_docs_product_voice.sh
 
+      - name: check internal docs drift
+        # La doc interna (docs/**) no tenía guard: aquí se comprueba que no
+        # cite ficheros que ya no existen — enlaces relativos y rutas del
+        # repo entre comillas. Los registros históricos (adr/, notas de
+        # versión, guías de migración) quedan fuera: son actas fechadas.
+        run: bash scripts/ci/check_internal_docs_drift.sh
+
       - name: lint docs
         # F0-10. Catches doc drift before it lands on main:
         # marketing language ("production-ready" / "enterprise-grade"

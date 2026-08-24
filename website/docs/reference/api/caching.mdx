@@ -1,6 +1,10 @@
 # Caching API Reference
 
-Quark cache support is opt-in per client and per query.
+Caching is opt-in twice over: a client needs a store (`WithCacheStore`), and a
+query needs `.Cache(ttl, tags...)`. Nothing is cached until both are present.
+
+This page lists the symbols. For how the stampede protections interact, see
+[Caching & Observability](../../advanced/caching-observability).
 
 | Symbol | Signature | Purpose |
 | --- | --- | --- |

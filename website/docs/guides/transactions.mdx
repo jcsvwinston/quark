@@ -6,8 +6,13 @@ description: Callback and manual transactions, savepoints, commit/rollback side-
 
 # Transactions
 
-Use the callback style for the common case, and manual transactions when a larger
-workflow owns the transaction's lifetime.
+Quark gives you two ways to run a transaction. `client.Tx` takes a callback and
+handles commit and rollback for you — reach for that first. `client.BeginTx`
+hands you the transaction object when a larger workflow, or a framework you're
+integrating with, owns its lifetime.
+
+Both give you the same extras: savepoints on all six engines, callbacks that fire
+only after a real commit or rollback, and opt-in deadlock retry.
 
 ## Callback transactions
 
@@ -49,21 +54,25 @@ Savepoints work on all six engines through a uniform `Savepoint` / `RollbackTo` 
 `SAVEPOINT` statements; SQL Server (`SAVE TRANSACTION`) and Oracle (no
 `RELEASE SAVEPOINT`) use their own forms transparently.
 
-Rolling back to a savepoint unwinds more than the SQL: any model `After*` hooks
-and `OnCommit`/`OnRollback` callbacks queued *after* that savepoint are discarded
-with it, so work that was rolled back never fires the side-effects that would
-have followed it. A savepoint rollback is a *partial* rollback, so it does **not**
-fire the scope's `OnRollback` callbacks — react to it through the error your
-nested code returns. `ReleaseSavepoint` keeps the queued work, merging it into the
-surrounding transaction.
+Rolling back to a savepoint unwinds more than the SQL:
+
+- **Queued side-effects go with it.** Any model `After*` hooks and
+  `OnCommit`/`OnRollback` callbacks registered *after* that savepoint are
+  discarded, so rolled-back work never fires the side-effects that would have
+  followed it.
+- **It does not fire `OnRollback`.** A savepoint rollback is a *partial*
+  rollback, not a terminal state for the transaction. React to it through the
+  error your nested code returns instead.
+- **`ReleaseSavepoint` keeps the queued work**, merging it into the surrounding
+  transaction.
 
 ## Side-effects on commit or rollback
 
 `Tx.OnCommit` and `Tx.OnRollback` register callbacks that fire only once the
-transaction reaches its terminal state — the honest place for work that must wait
-for a durable commit (publish an event, invalidate a cache) or that should happen
-*because* the transaction aborted (release a reservation, emit a "cancelled"
-signal):
+transaction reaches its terminal state. That is the honest place for two kinds of
+work: anything that must wait for a durable commit (publish an event, invalidate
+a cache), and anything that should happen *because* the transaction aborted
+(release a reservation, emit a "cancelled" signal).
 
 ```go
 err := client.Tx(ctx, func(tx *quark.Tx) error {
@@ -135,8 +144,11 @@ if err := quark.ForTx[User](ctx, tx).Create(&user); err != nil {
 return tx.Commit()
 ```
 
-Useful when the transaction's lifetime belongs to a larger workflow or framework
-integration.
+You own commit and rollback here, so `defer tx.Rollback()` is the safety net that
+covers every early return. After a successful `Commit` it has nothing left to do
+— the transaction is already closed and its `OnRollback` callbacks were discarded
+at commit time. Use this form when the transaction's lifetime belongs to a larger
+workflow or a framework integration rather than to a single function.
 
 ## Isolation levels
 

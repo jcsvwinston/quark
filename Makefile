@@ -25,6 +25,7 @@ lint: ## go vet + gofmt (lo que corre la lane Lint de CI)
 
 docs-guards: ## Los tres guards de docs de CI (voz de producto, lint, roadmap)
 	bash scripts/ci/check_docs_product_voice.sh
+	bash scripts/ci/check_internal_docs_drift.sh
 	bash scripts/lint-docs.sh
 
 test: ## Tests del módulo raíz (los de Redis se saltan sin QUARK_TEST_REDIS_ADDR)

@@ -44,17 +44,20 @@ go list -m github.com/jcsvwinston/quark
 
 ## Step by step
 
-```bash
-# 1. Pin the new version (use an explicit tag, not "latest", in anything scripted)
-go get github.com/jcsvwinston/quark@v1.3.1
-go mod tidy
+1. **Pin the new version.** Use an explicit tag, not `latest`, in anything
+   scripted:
 
-# 2. Compile and run your test suite
-go build ./...
-go test ./...
-```
+   ```bash
+   go get github.com/jcsvwinston/quark@v1.3.1
+   go mod tidy
+   ```
 
-Then:
+2. **Compile and run your test suite:**
+
+   ```bash
+   go build ./...
+   go test ./...
+   ```
 
 3. **Run your integration tests against a real database.** Quark is tested
    against all six engines, but your models and queries are yours — the

@@ -1,6 +1,11 @@
 # Transactions API Reference
 
-Complete reference for ACID transactions, savepoints, and nested transactions.
+The transaction surface: the two ways to open one, savepoints, nested
+transactions, and the callbacks that fire when a transaction reaches its
+terminal state.
+
+For when to pick each style and how side-effects behave around a rollback, see
+the [Transactions guide](../../guides/transactions).
 
 | Symbol | Signature | Purpose |
 | --- | --- | --- |

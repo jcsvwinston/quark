@@ -6,7 +6,12 @@ description: Request lifecycle, immutable builders, SQLGuard, middleware, routin
 
 # Architecture
 
-Quark is organized around a small set of primitives:
+This page describes how a Quark call travels from `quark.For[T]` to a row in
+your struct. Read it when you want to know where an extension point sits — where
+middleware runs, when identifiers are validated, what the dialect owns — rather
+than how to call a specific method.
+
+Everything is built from five primitives:
 
 - `Client` owns the database handle, dialect, middleware, observers, cache, and
   migration helpers.
@@ -42,6 +47,8 @@ flowchart TD
     K --> L["Observers & OpenTelemetry events"]
 ```
 
+The same path in words:
+
 1. `quark.For[T]` parses model metadata and initializes a typed builder.
 2. Builder methods add query state by returning cloned builders.
 3. An endpoint such as `List`, `Create`, `Update`, or `Delete` executes.
@@ -55,7 +62,10 @@ flowchart TD
 
 ## Native routines and events
 
-Quark separates routine execution from normal model queries.
+Calls to database functions and stored procedures take a separate path from
+model queries — they don't go through the model builder at all. A function that
+returns rows is read through `NewRoutine[T]`, which maps the result set into your
+struct the same way a `List` would:
 
 ```go
 users, err := quark.NewRoutine[User](
@@ -84,6 +94,7 @@ Database-native events are exposed through notification helpers such as
 
 ## Schema evolution
 
-Schema operations are routed through dialect methods for add, drop, alter,
-rename column, and rename table behavior. Dialects also report whether
-transactional DDL is supported.
+DDL follows the same rule as the rest of the SQL: the dialect owns it. Add,
+drop, alter, rename column, and rename table are all dialect methods. Each
+dialect also reports whether the engine supports transactional DDL, since that
+differs by engine and changes what a failed migration leaves behind.

@@ -14,16 +14,17 @@ hand-written `database/sql` baseline and against four peer libraries — GORM
 same model, schema, data, and operations.
 
 :::note Microbenchmarks, not production timings
-The harness runs against **in-memory SQLite** so it isolates ORM and driver
-CPU/allocation overhead, not disk or network I/O. Against a networked
-database, that overhead is a small fraction of round-trip latency — do not
-read these microseconds as production request times. Numbers are also
-machine- and run-specific: treat the **relative ratios** as the signal and
-reproduce locally before drawing conclusions. SQLite is the *benchmark*
-engine only; functional correctness is validated separately across all six
-dialects — PostgreSQL, MySQL, MariaDB, SQLite, MSSQL, and **Oracle (booted
-via `docker run gvenzl/oracle-free`, not testcontainers)** — in the blocking
-`integration` CI matrix on every PR.
+The harness runs against **in-memory SQLite**, which isolates ORM and driver
+CPU and allocation overhead from disk and network I/O. Against a networked
+database that overhead is a small fraction of round-trip latency, so do not read
+these microseconds as production request times. The numbers are machine- and
+run-specific too: treat the **relative ratios** as the signal, and reproduce
+locally before drawing conclusions.
+
+SQLite is the *benchmark* engine only. Functional correctness is validated
+separately across all six dialects — PostgreSQL, MySQL, MariaDB, SQLite, MSSQL,
+and **Oracle (booted via `docker run gvenzl/oracle-free`, not testcontainers)** —
+in the blocking `integration` CI matrix on every pull request.
 :::
 
 ## What is measured
@@ -101,25 +102,23 @@ Allocations per operation (allocs/op, lower is better):
 
 - **Code generation alone does not put you at the floor — the absence of a
   runtime does.** sqlc sits right on the raw `database/sql` floor (~1.0–1.1×)
-  because its generated code is thin wrappers with no runtime. ent is also
-  code-generated, but it carries a rich runtime (builders, mutations); it
-  lands in the reflect class on writes — its `Update` is the slowest here
-  (it does the most work per call) and its `InsertBatch` allocates the most.
-  So the speed difference across these libraries tracks **runtime and
-  allocation design, not reflect-vs-codegen.**
+  because its generated code is thin wrappers with no runtime of its own. ent is
+  also code-generated, but it carries a rich runtime of builders and mutations,
+  and it lands in the reflect class on writes: its `Update` is the slowest figure
+  here, and its `InsertBatch` allocates the most. The speed difference across
+  these libraries therefore tracks **runtime and allocation design, not
+  reflect-vs-codegen.**
 - **Quark, GORM, and ent are in the same performance class.** None dominates:
   Quark is faster than GORM on inserts and updates, GORM and ent are faster on
   the single-row read and the filtered list. Only sqlc is consistently faster,
   and it trades ergonomics for that (no batch helper on SQLite, hand-written
   SQL, no model lifecycle).
-- This is exactly why Quark's own code generation (shipped v0.11.0) was
-  reframed. Profiled against this baseline, the generated scanners and binders
-  recover only ~2–5% on scan and ~1% on insert: they remove reflection, but the
-  cost that remains is architectural allocation plus the driver round-trip — the
-  same reason ent (codegen + a runtime) stays in the reflect class. So codegen in
-  Quark is a **type-safety** feature, not a speedup, and we no longer claim a
-  multiple-times speedup for it.
-
+- **This is why Quark's own code generation is framed as type safety, not
+  speed.** Profiled against this baseline, the generated scanners and binders
+  (shipped in v0.11.0) recover roughly 2–5% on scan and 1% on insert. They do
+  remove reflection — but what remains is architectural allocation plus the
+  driver round-trip, the same reason ent stays in the reflect class despite being
+  code-generated.
 
 These results are not a claim of fastest-in-class. The per-operation figures
 have run-to-run noise (a few vary ±10–25% between runs); treat the **relative

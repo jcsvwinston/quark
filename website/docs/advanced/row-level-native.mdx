@@ -32,12 +32,12 @@ _, err := quark.For[Order](tenantCtx, nativeRouter).List() // non-PG base client
 | Per-query cost | Implicit transaction + `set_config` | None |
 | Use when | Production; bypass risk matters | Cross-dialect dev / staging |
 
-They're mutually exclusive per router — Native isn't a drop-in upgrade of Client.
-The two enforce isolation in different places: Native leans on real PostgreSQL
-policies and a transaction-scoped session variable, so the database itself
-rejects rows the tenant may not see, even through raw SQL. Client mode only adds
-a predicate to queries Quark builds. Switching means installing policies, not
-flipping a stricter flag.
+A router uses one strategy or the other, never both, and Native is not a
+drop-in upgrade of Client. They enforce isolation in different places. Native
+leans on real PostgreSQL policies plus a transaction-scoped session variable, so
+the database itself rejects rows the tenant may not see — raw SQL included.
+Client mode only adds a predicate to the queries Quark builds. Switching means
+installing policies, not flipping a stricter flag.
 
 ## Setup
 
@@ -122,16 +122,19 @@ Both reach PostgreSQL with `app.tenant_id` set to the resolved tenant; the polic
 filters server-side.
 
 :::note Use `router.Tx` for anything non-trivial
-`For[T](ctx, router)` wraps each call in an implicit transaction (needed because
-`set_config(..., is_local=true)` only applies inside one). Single-row operations
-— every write with `RETURNING` included — commit that transaction **before the
-call returns**, so a write is durable the moment you get control back (see the
-write-semantics note below). Multi-row reads commit an instant after the
-operation completes. `Iter`/`Cursor` are the exception: their transaction stays
-open until you close the cursor, holding a pooled connection and shared locks
-on the table for as long as the stream lives. For multi-step work, batch jobs
-and streaming, run inside `router.Tx` — one transaction, opened and committed
-exactly where you can see it.
+`For[T](ctx, router)` wraps each call in its own implicit transaction, because
+`set_config(..., is_local=true)` only takes effect inside one. When that
+transaction closes depends on the operation:
+
+- **Writes and single-row reads** commit before the call returns, so a write is
+  durable the moment you get control back.
+- **Multi-row reads** commit an instant after the operation completes.
+- **`Iter` / `Cursor`** keep their transaction open until you close the cursor,
+  holding a pooled connection and a shared lock on the table for the life of
+  the stream.
+
+For multi-step work, batch jobs, and streaming, run inside `router.Tx` instead —
+one transaction, opened and committed exactly where you can see it.
 :::
 
 ## Verify enforcement at startup
@@ -181,8 +184,9 @@ silent: the router sets the session variable on every query, but nothing
 forces PostgreSQL to use it.
 
 1. The policies were never installed — with no `CREATE POLICY`, RLS applies
-   no predicate at all. `quarktenant.VerifyRLSPolicies` (below) catches this
-   at boot; manually: `SELECT * FROM pg_policies WHERE tablename = '<table>'`.
+   no predicate at all. [`quarktenant.VerifyRLSPolicies`](#verify-enforcement-at-startup)
+   catches this at boot; to check by hand, run
+   `SELECT * FROM pg_policies WHERE tablename = '<table>'`.
 2. `FORCE ROW LEVEL SECURITY` is missing and the application role OWNS the
    table — the owner is exempt from policies by default, so the policy is
    decorative. Re-emit the DDL with `FORCE` (the installer's default).
@@ -201,13 +205,13 @@ suspects are implicit transactions that have not finalized yet:
    `ACCESS SHARE` lock included — lives until the cursor closes (an abandoned
    cursor is reclaimed when `QueryTimeout` expires). Close cursors promptly,
    or run the stream inside `router.Tx`.
-2. On releases up to 1.3.2, `Create` (and an `Update` falling back to an
-   insert) kept its implicit transaction open until the **caller's** context
-   ended. With a long-lived context — a CLI tool or a batch job on
-   `context.Background()` — every insert parked one `idle in transaction`
-   session, and any later DDL on the table blocked behind their locks
-   indefinitely. Current releases scope that transaction to the operation, so
-   it drains on its own; on affected versions, give each operation a
+2. You are on a release up to 1.3.2. On those versions, `Create` (and an
+   `Update` that falls back to an insert) held its implicit transaction open
+   until the **caller's** context ended. Under a long-lived context — a CLI
+   tool or a batch job on `context.Background()` — every insert parked an
+   `idle in transaction` session, and later DDL blocked behind those locks
+   indefinitely. Current releases scope the transaction to the operation, so
+   it drains on its own. On affected versions, give each operation a
    short-lived context or write through `router.Tx`.
 
 To see the culprits:
@@ -241,47 +245,43 @@ the resolver for the current context.
   locks included — until the cursor closes; `QueryTimeout` bounds an abandoned
   one. Every other operation releases its transaction as the call completes.
   For long streams, prefer `router.Tx`.
-- **Write semantics under the implicit `For[T]` transaction.** Every write
-  commits **synchronously, before the call returns** — `Update`/`Delete`
-  through the exec path, and `Create`/`Upsert` (which run
-  `INSERT … RETURNING`) through the single-row query path, which since the
-  QCD-FW §1 fix materializes the returned row and commits inside the call.
-  A `2xx` answered after `Create` returns therefore never precedes
-  durability, and the row is immediately visible from any other connection.
-  A commit failure surfaces as the call's own error — never as a success
-  followed by a silent rollback. (Before this fix the `RETURNING` commit was
-  deferred to a background goroutine: a reader could miss a row an instant
-  after `Create` returned — the class the demo's webhook flake exposed, and
-  the one v1.3.1 fixed a first variant of.)
+- **Writes are durable before the call returns.** Under the implicit `For[T]`
+  transaction, `Update`, `Delete`, `Create`, and `Upsert` all commit inside
+  the call. By the time you get control back, the row is visible from any
+  other connection — so a `2xx` sent right after `Create` never runs ahead of
+  durability. A commit failure comes back as that call's own error, never as
+  a success followed by a silent rollback. (Older releases deferred the commit
+  of `INSERT … RETURNING` to a background goroutine, so a reader could briefly
+  miss a row that `Create` had already returned. Current releases don't.)
 
-  The **deferred** commit now exists only on the multi-row read path
-  (`Find`-style operations returning `*sql.Rows`): its transaction commits an
-  instant after the operation's ctx ends, which only affects when the pooled
-  connection is released — never durability. If one of those deferred commits
-  fails, Quark logs it at `ERROR` and increments
-  [`Client.DeferredCommitFailures`](../reference/api/client#deferredcommitfailures)
-  — alert on that counter.
+  Deferred commits now happen only on the multi-row read path — operations
+  that return `*sql.Rows`. That transaction commits an instant after the
+  operation's context ends, which changes *when the pooled connection is
+  released*, not whether the data is durable. If one of those commits fails,
+  Quark logs it at `ERROR` and increments
+  [`Client.DeferredCommitFailures`](../reference/api/client#deferredcommitfailures).
+  Alert on that counter.
 
-  `router.Tx` remains the right tool for multi-step units of work: one
-  transaction, opened and committed exactly where you can see it.
-- **A driver panic hands cleanup to a detached goroutine.** If the driver
-  panics mid implicit transaction, Quark rolls the transaction back and
-  returns its pooled connection on a detached goroutine — after a panic,
-  `database/sql` may still hold internal locks that would deadlock a
-  same-goroutine rollback. When those locks are never released, that cleanup
-  blocks and the connection stays out of the pool. A watchdog makes this
-  observable: a cleanup that overruns the client's `QueryTimeout` is logged
-  once at `ERROR` and counted in
-  [`Client.BlockedPanicCleanups`](../reference/api/client#blockedpaniccleanups)
-  — alert on that counter alongside `DeferredCommitFailures`; each unit is a
-  held connection you may need to recycle by restarting the process. The
-  cleanup keeps retrying either way.
-- **Single-row reads distinguish "no rows" from an isolation failure.** When a
-  single-row operation (`Count`, aggregates, `Create` reading back
-  `INSERT … RETURNING`) cannot even set the tenant variable — acquiring the
-  connection, opening the implicit transaction, or the `set_config` call
-  itself fails — the operation returns that error, prefixed with the failing
-  stage (`native rls: begin tx: …`, `native rls: set_config: …`) and with the
-  original cause intact for `errors.Is`. It is never reported as
-  `sql.ErrNoRows`, so an empty result always means exactly that: the policy
-  filtered every row.
+  For multi-step units of work, `router.Tx` is still the right tool: one
+  transaction, opened and committed where you can see it.
+- **A driver panic can strand a connection.** If the driver panics inside an
+  implicit transaction, Quark rolls the transaction back and returns the
+  pooled connection on a *detached* goroutine — after a panic `database/sql`
+  may still hold internal locks, and a same-goroutine rollback would deadlock
+  on them. If those locks are never released, the cleanup blocks and the
+  connection stays out of the pool.
+
+  A watchdog makes that visible. A cleanup that overruns the client's
+  `QueryTimeout` is logged once at `ERROR` and counted in
+  [`Client.BlockedPanicCleanups`](../reference/api/client#blockedpaniccleanups).
+  Alert on that counter alongside `DeferredCommitFailures`: each unit is one
+  held connection, and recovering it may take a process restart. The cleanup
+  keeps retrying either way.
+- **An empty single-row read always means "the policy filtered every row".**
+  Single-row operations — `Count`, aggregates, `Create` reading back
+  `INSERT … RETURNING` — never disguise an isolation failure as `sql.ErrNoRows`.
+  If Quark cannot even set the tenant variable (acquiring the connection,
+  opening the implicit transaction, or the `set_config` call itself fails), it
+  returns that error instead. The message names the stage that failed
+  (`native rls: begin tx: …`, `native rls: set_config: …`) and keeps the
+  original cause intact for `errors.Is`.
