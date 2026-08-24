@@ -30,6 +30,7 @@
 //
 //	go run ./tenant install-rls-policies --dry-run    # print DDL
 //	go run ./tenant install-rls-policies              # actually install
+//	go run ./tenant verify-rls-policies               # gate: exit 1 if any table is unenforced
 //
 // Only PostgreSQL is supported. Other dialects return
 // [quark.ErrUnsupportedFeature] from [InstallRLSPolicies].

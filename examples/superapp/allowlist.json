@@ -386,14 +386,18 @@
     "github.com/jcsvwinston/quark/quarkmigrate.RunWithOutput": "entrypoint CLI/instalador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant; ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.Action": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.ActionInstallRLSPolicies": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/quarktenant.ActionVerifyRLSPolicies": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.ErrInvalidCast": "package var: no invocable (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.ErrNoRegisteredModels": "package var: no invocable (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.ErrNoTenantColumn": "package var: no invocable (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/quarktenant.ErrRLSNotEnforced": "package var: no invocable (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.ExitError": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/quarktenant.ExitNotEnforced": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.ExitSuccess": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.InstallOptions": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.InstallRLSPolicies": "entrypoint CLI/instalador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant; ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktenant.Run": "entrypoint CLI/instalador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant; ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)",
-    "github.com/jcsvwinston/quark/quarktenant.RunWithIO": "entrypoint CLI/instalador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant; ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)"
+    "github.com/jcsvwinston/quark/quarktenant.RunWithIO": "entrypoint CLI/instalador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant; ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/quarktenant.VerifyFinding": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)"
   }
 }

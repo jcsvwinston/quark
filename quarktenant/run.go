@@ -5,6 +5,7 @@ package quarktenant
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,16 +27,28 @@ const (
 	// Without --dry-run, the DDL is applied under a distributed
 	// migration lock so concurrent installers are serialised.
 	ActionInstallRLSPolicies Action = "install-rls-policies"
+
+	// ActionVerifyRLSPolicies checks that every registered model's
+	// table actually enforces the installed row security (RLS
+	// enabled, FORCE unless --no-force-rls, deterministic policy
+	// present). The boot/CI guardrail against the silent
+	// cross-tenant leak of a Native router with no DDL applied.
+	ActionVerifyRLSPolicies Action = "verify-rls-policies"
 )
 
 // Exit codes returned by [Run]:
 //
-//	0 — success: DDL printed (dry-run) or applied successfully.
+//	0 — success: DDL printed (dry-run), applied successfully, or
+//	    (verify) every table enforced.
+//	1 — verify only: at least one table is NOT enforced. Distinct
+//	    from 2 so CI can gate on enforcement without conflating it
+//	    with operational failures (same convention as quarkmigrate).
 //	2 — operational error (unsupported dialect, generation failure,
 //	    apply failure, unknown action).
 const (
-	ExitSuccess = 0
-	ExitError   = 2
+	ExitSuccess     = 0
+	ExitNotEnforced = 1
+	ExitError       = 2
 )
 
 // ParseAction returns the [Action] for the given CLI argument. The
@@ -45,9 +58,11 @@ func ParseAction(arg string) (Action, error) {
 	switch Action(arg) {
 	case ActionInstallRLSPolicies:
 		return ActionInstallRLSPolicies, nil
+	case ActionVerifyRLSPolicies:
+		return ActionVerifyRLSPolicies, nil
 	default:
-		return "", fmt.Errorf("quarktenant: unknown action %q (expected: %s)",
-			arg, ActionInstallRLSPolicies)
+		return "", fmt.Errorf("quarktenant: unknown action %q (expected: %s | %s)",
+			arg, ActionInstallRLSPolicies, ActionVerifyRLSPolicies)
 	}
 }
 
@@ -76,7 +91,7 @@ func Run(ctx context.Context, args []string, client *quark.Client) int {
 // the test suite to capture stdout/stderr without touching globals.
 func RunWithIO(ctx context.Context, args []string, client *quark.Client, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintf(stderr, "quarktenant: missing action; expected one of: %s\n", ActionInstallRLSPolicies)
+		fmt.Fprintf(stderr, "quarktenant: missing action; expected one of: %s | %s\n", ActionInstallRLSPolicies, ActionVerifyRLSPolicies)
 		return ExitError
 	}
 	action, err := ParseAction(args[0])
@@ -106,6 +121,8 @@ func RunWithIO(ctx context.Context, args []string, client *quark.Client, stdout,
 	switch action {
 	case ActionInstallRLSPolicies:
 		return runInstall(ctx, client, opts, stdout, stderr)
+	case ActionVerifyRLSPolicies:
+		return runVerify(ctx, client, opts, stdout, stderr)
 	default:
 		// ParseAction already guards this; defensive only.
 		fmt.Fprintf(stderr, "quarktenant: unhandled action %q\n", action)
@@ -142,5 +159,24 @@ func runInstall(ctx context.Context, client *quark.Client, opts InstallOptions, 
 	} else {
 		fmt.Fprintf(stderr, "quarktenant: applied %d statements\n", len(stmts))
 	}
+	return ExitSuccess
+}
+
+func runVerify(ctx context.Context, client *quark.Client, opts InstallOptions, stdout, stderr io.Writer) int {
+	findings, err := VerifyRLSPolicies(ctx, client, opts)
+	if errors.Is(err, ErrRLSNotEnforced) {
+		// The error text already names every table, its gap and the
+		// remedy; stdout carries the machine-friendly per-table lines.
+		for _, f := range findings {
+			fmt.Fprintf(stdout, "NOT ENFORCED\t%s\n", f.Table)
+		}
+		fmt.Fprintf(stderr, "quarktenant: %v\n", err)
+		return ExitNotEnforced
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "quarktenant: %v\n", err)
+		return ExitError
+	}
+	fmt.Fprintf(stderr, "quarktenant: verify-rls-policies OK — every registered model's table is enforced\n")
 	return ExitSuccess
 }

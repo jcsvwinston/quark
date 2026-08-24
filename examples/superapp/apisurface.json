@@ -3347,6 +3347,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
+      "name": "ActionVerifyRLSPolicies",
+      "kind": "const"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "DefaultInstallOptions",
       "kind": "func"
     },
@@ -3367,7 +3372,17 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
+      "name": "ErrRLSNotEnforced",
+      "kind": "var"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ExitError",
+      "kind": "const"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarktenant",
+      "name": "ExitNotEnforced",
       "kind": "const"
     },
     {
@@ -3398,6 +3413,16 @@
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "RunWithIO",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarktenant",
+      "name": "VerifyFinding",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarktenant",
+      "name": "VerifyRLSPolicies",
       "kind": "func"
     }
   ]
