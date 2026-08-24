@@ -40,6 +40,7 @@ var inScope = []string{
 	"github.com/jcsvwinston/quark/migrate",
 	"github.com/jcsvwinston/quark/quarkmigrate",
 	"github.com/jcsvwinston/quark/quarktenant",
+	"github.com/jcsvwinston/quark/quarktest",
 }
 
 const loadMode = packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps

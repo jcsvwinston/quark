@@ -3399,6 +3399,21 @@
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "RunWithIO",
       "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarktest",
+      "name": "Migrate",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarktest",
+      "name": "SQLite",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarktest",
+      "name": "Tx",
+      "kind": "func"
     }
   ]
 }
