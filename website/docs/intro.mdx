@@ -37,9 +37,9 @@ fmt.Printf("%d active user(s); first: %s\n", len(active), active[0].Name)
 // => 1 active user(s); first: Ada Lovelace
 ```
 
-Ready to build something? **[Getting Started](guides/getting-started)** takes you
-from an empty file to full CRUD — connect, model, migrate, query — in about ten
-minutes, with the runnable version of the code above.
+Ready to build something? **[Getting Started](guides/getting-started)** takes
+you from an empty file to full CRUD — connect, model, migrate, query — in about
+ten minutes, with a runnable version of the code above.
 
 ## Why Quark
 
@@ -58,9 +58,9 @@ minutes, with the runnable version of the code above.
   eager loading, batch operations, transactions with savepoints, validation, an
   L2 cache, OpenTelemetry traces and metrics, and multi-tenancy — all on the same
   client.
-- **Honest about trade-offs.** Quark is a reflection-based ORM in the same
-  performance class as GORM and Ent (see [Benchmarks](reference/benchmarks)); the
-  optional code generator buys compile-time column safety, not a speed claim.
+- **Honest about trade-offs.** Quark is a reflection-based ORM, in the same
+  performance class as GORM and Ent — see [Benchmarks](reference/benchmarks).
+  The optional code generator buys compile-time column safety, not speed.
 
 ## Why I built this
 
@@ -136,9 +136,12 @@ Symbol-level reference for the public API, grouped as in the sidebar:
 
 ## Project status
 
-Quark is on the stable **v1.x** line and follows [SemVer](https://semver.org):
-the public API stays compatible within v1.x, and breaking changes are reserved
-for a future v2 with a migration guide. All six engines — Oracle included — run
-on every pull request in CI. For the current version and what changed in each
-release, see the [Releases](https://github.com/jcsvwinston/quark/releases) page
-and the [Release Notes](reference/release-notes).
+Quark is on the stable **v1.x** line and follows [SemVer](https://semver.org).
+The public API stays compatible within v1.x, and breaking changes are reserved
+for a future v2, which would ship with a migration guide.
+
+All six engines — Oracle included — run on every pull request in CI.
+
+For the current version and what changed in each release, see the
+[Releases](https://github.com/jcsvwinston/quark/releases) page and the
+[Release Notes](reference/release-notes).

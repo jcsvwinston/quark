@@ -30,10 +30,10 @@ A query does nothing until you finish it with one of these:
 | `Paginate(size, page)` | You want rows plus total/page metadata. |
 | `Iter(fn)` / `Cursor()` | You want to stream rows instead of buffering them. |
 
-The rest of this page is in two halves: the **everyday** building blocks first
-(filter, sort, paginate, aggregate, join, stream), then **advanced composition**
-(the expression AST, set operators, window functions, CTEs, subqueries) and
-locking when you need them.
+The rest of this page comes in two halves. First the **everyday** building
+blocks: filter, sort, paginate, aggregate, join, stream. Then **advanced
+composition** — the expression AST, subqueries, set operators, window functions,
+CTEs — and locking, for when you need them.
 
 ---
 
@@ -49,8 +49,8 @@ users, err := quark.For[User](ctx, client).
     List()
 ```
 
-Column names and operators are validated before any SQL is built; values are
-always sent as bound parameters. The operators you can pass to `Where`:
+Column names and operators are validated before any SQL is built, and values
+always travel as bound parameters. The operators `Where` accepts:
 
 | Family | Operators |
 | --- | --- |
@@ -75,8 +75,8 @@ users, err := quark.For[User](ctx, client).
     List()
 ```
 
-Don't call `WhereIn` with an empty slice — most engines reject `IN ()`, and an
-empty input is better handled in code:
+Don't call `WhereIn` with an empty slice: most engines reject `IN ()`. Handle
+the empty case in Go instead:
 
 ```go
 if len(ids) == 0 {
@@ -137,11 +137,12 @@ users, err := quark.For[User](ctx, client).
     List()
 ```
 
-`Select` takes column identifiers from the model's table, so it validates each
-one — it's deliberately **not** a raw projection API. Expressions like
-`COUNT(*) AS count` or `orders.total` belong to the aggregate helpers below, a
-view-backed read model, or [raw SQL](#raw-sql). `Distinct` pairs with simple
-column selection:
+`Select` takes column identifiers from the model's table and validates each one.
+It is deliberately **not** a raw projection API: expressions like
+`COUNT(*) AS count` or `orders.total` belong to the aggregate helpers below, to a
+view-backed read model, or to [raw SQL](#raw-sql).
+
+`Distinct` pairs with simple column selection:
 
 ```go
 roles, err := quark.For[User](ctx, client).Select("role").Distinct().List()
@@ -198,14 +199,15 @@ users, err := quark.For[User](ctx, client).
 ```
 
 Paths are dotted identifiers, validated against
-`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$` (max 256 chars); anything
-else returns [`ErrInvalidJSONPath`](/docs/reference/api/errors). Array indexes
-and engine-specific JSONPath operators are out of scope — use [raw SQL](#raw-sql)
+`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$` and capped at 256
+characters; anything else returns
+[`ErrInvalidJSONPath`](/docs/reference/api/errors). Array indexes and
+engine-specific JSONPath operators are out of scope — use [raw SQL](#raw-sql)
 for those.
 
-Each engine gets its native shape (and the path is bound as a parameter
-everywhere except Oracle, whose `JSON_VALUE` requires a literal path, so there the
-**validated** path is inlined and only the value stays bound):
+Each engine gets its native shape. The path is bound as a parameter everywhere
+except Oracle, whose `JSON_VALUE` requires a literal path; there the
+**validated** path is inlined and only the value stays bound:
 
 | Dialect | Shape for `column="metadata"`, `path="plan"` |
 | --- | --- |
@@ -242,13 +244,16 @@ quark.For[Order](ctx, client).
 
 :::note Projection under a join
 Without an explicit `Select`, a query over a join projects **only the base
-model's columns** — Quark emits `SELECT "orders".*`, not a bare `SELECT *`, so
-shared names like `id` don't collide and the result stays aligned with `T`. The
-joined table is available for filtering and `ON`, but not in the output; read
-joined columns through a view, a read model, or [raw SQL](#raw-sql). For the same
-reason the soft-delete filter is qualified to the base table
-(`"orders"."deleted_at" IS NULL`). Note that `Where` and `Select` still take
-simple identifiers, so they don't accept dotted names like `users.active`.
+model's columns**: Quark emits `SELECT "orders".*`, not a bare `SELECT *`. Shared
+names like `id` therefore never collide, and the result stays aligned with `T`.
+
+The joined table is available for filtering and for `ON`, but not in the output.
+To read joined columns, go through a view, a read model, or
+[raw SQL](#raw-sql). For the same reason, the soft-delete filter is qualified to
+the base table (`"orders"."deleted_at" IS NULL`).
+
+One more constraint: `Where` and `Select` still take simple identifiers, so they
+do not accept dotted names like `users.active`.
 :::
 
 ## Reusable scopes
@@ -274,9 +279,10 @@ users, err := quark.For[User](ctx, client).
 
 ## Streaming large result sets
 
-`List` buffers everything into a slice (and caps at 100 rows when you forget
-`Limit`). For exports, backfills, or queues, stream instead. `Iter` calls your
-callback per row:
+`List` buffers everything into a slice, and caps at 100 rows when you forget
+`Limit`. For exports, backfills, or queues, stream instead.
+
+`Iter` calls your callback once per row:
 
 ```go
 err := quark.For[User](ctx, client).
@@ -436,10 +442,12 @@ users, err := quark.For[User](ctx, client).
 | `Exists(sub)` / `NotExists(sub)` | `[NOT] EXISTS (<subquery>)` |
 | `InSub(lhs, sub)` / `NotInSub(lhs, sub)` | `lhs [NOT] IN (<subquery>)` |
 
-`AsSubquery()` renders the inner SELECT eagerly, so a bad inner column surfaces at
-capture time, not at the outer query's exec time; `MustAsSubquery()` is the
-panic-on-error variant for inline use. Locks on the inner query are rejected
-(acquire them on the outer query). Inner args are threaded into the outer arg
+`AsSubquery()` renders the inner SELECT eagerly, so a bad inner column surfaces
+at capture time rather than at the outer query's execution. `MustAsSubquery()`
+is the panic-on-error variant, for inline use.
+
+Two details worth knowing: locks on the inner query are rejected (acquire them
+on the outer query), and inner arguments are threaded into the outer argument
 list automatically, so a subquery composes correctly on every engine.
 
 ## Set operators
@@ -523,11 +531,12 @@ sales, err := quark.For[Sale](ctx, client).
 | `RowNumber()` / `Rank()` / `DenseRank()` | `ROW_NUMBER()` / `RANK()` / `DENSE_RANK()` |
 | `Lag(col, n)` / `Lead(col, n)` | `LAG(<col>, ?)` / `LEAD(<col>, ?)` (offset bound) |
 
-Wrap any whitelisted aggregate for running totals:
-`Over(Func("SUM", Col("amount")), NewWindow().OrderBy(Col("id"), false))`. `Window`
-is immutable, so one definition is reusable across `Over` calls. The shapes are
-standard SQL and run on PostgreSQL, MySQL 8+, MariaDB 10.2+, MSSQL, Oracle, and
-SQLite 3.25+.
+For a running total, wrap any whitelisted aggregate:
+`Over(Func("SUM", Col("amount")), NewWindow().OrderBy(Col("id"), false))`.
+`Window` is immutable, so one definition is reusable across `Over` calls.
+
+The emitted shapes are standard SQL, and run on PostgreSQL, MySQL 8+,
+MariaDB 10.2+, SQL Server, Oracle, and SQLite 3.25+.
 
 ## Common table expressions
 
@@ -546,10 +555,12 @@ users, err := quark.For[User](ctx, client).
 ```
 
 `WithRecursive(name, sub)` marks the CTE recursive. The `RECURSIVE` keyword is
-dialect-specific — PostgreSQL, MySQL, MariaDB, and SQLite require it; Oracle and
-SQL Server infer recursion and reject it — and Quark emits the right spelling per
-engine, so you call `WithRecursive` the same way everywhere. (On Oracle a
-genuinely recursive CTE also needs a column-alias list in the subquery's own SQL.)
+dialect-specific: PostgreSQL, MySQL, MariaDB, and SQLite require it, while Oracle
+and SQL Server infer recursion and reject the keyword. Quark emits the right
+spelling per engine, so you call `WithRecursive` the same way everywhere.
+
+On Oracle, a genuinely recursive CTE also needs a column-alias list in the
+subquery's own SQL.
 
 ## Pessimistic locking
 
@@ -611,8 +622,9 @@ users, err := quark.For[User](ctx, client).
 ```
 
 Bound parameters protect values, but a raw subquery can still encode unsafe
-identifiers or structure — use it only for static or carefully built SQL. For a
-full raw read, use `client.RawQuery`:
+identifiers or structure. Use it only for static or carefully built SQL.
+
+For a full raw read, use `client.RawQuery`:
 
 ```go
 rows, err := client.RawQuery(ctx, "SELECT id, email FROM users WHERE active = $1", true)

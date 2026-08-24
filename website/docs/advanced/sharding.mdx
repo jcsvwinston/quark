@@ -9,8 +9,8 @@ description: Partition data across multiple databases with a pluggable ShardRout
 For datasets too large for one database, `ShardRouter` partitions data across
 several **shard** databases by a *shard key* (e.g. `user_id`, `region`). Each
 row lives on exactly one shard; a query routes to the shard that owns its key.
-Unlike [read replicas](./read-replicas), shards hold **disjoint** data and
-scale **writes** as well as reads.
+Unlike [read replicas](read-replicas), shards hold **disjoint** data and scale
+**writes** as well as reads.
 
 `ShardRouter` is a `ClientProvider`, so it drops into `quark.For[T]` like any
 client — the rest of the ORM is unaware of sharding.
@@ -60,10 +60,11 @@ _ = quark.For[User](ctx, router).Create(&user) // → the shard owning user.Tena
 ```
 
 `WithShardKeyOf(ctx, entity)` is exactly `WithShardKey(ctx, entity.ShardKey())`.
-It applies to **writes**, where you hold the entity; reads carry no entity, so
-they keep passing the key to `WithShardKey` directly. An entity whose
-`ShardKey()` returns the empty string fails to route — like a missing key, never
-a silent fan-out.
+It applies to **writes**, where you hold the entity. Reads carry no entity, so
+they keep passing the key to `WithShardKey` directly.
+
+An entity whose `ShardKey()` returns an empty string fails to route — the same
+as a missing key, and never a silent fan-out.
 
 ## How routing works
 
@@ -106,11 +107,13 @@ n, err := quark.ScatterCount[Account](ctx, router, nil) // total across all shar
 ```
 
 If any shard errors, the call returns that error rather than a silently partial
-result. Aggregates beyond count (`AVG`/`MIN`/`MAX`) and cross-shard `GROUP BY`
-are **not** merged — run those per shard. Merging them correctly needs more than
-the per-shard result rows (an average needs each shard's count as well as its
-mean, for instance), so Quark returns nothing rather than a plausible-looking
-wrong number.
+result.
+
+Aggregates beyond count (`AVG`, `MIN`, `MAX`) and cross-shard `GROUP BY` are
+**not** merged; run those per shard. Merging them correctly needs more than the
+per-shard result rows — an average, for instance, needs each shard's count as
+well as its mean — so Quark returns nothing rather than a plausible-looking wrong
+number.
 
 ## Limits
 
@@ -125,7 +128,7 @@ wrong number.
 - **Resharding** (changing the `ShardFunc` + migrating data) is an operator
   task; the shard set is fixed at construction.
 
-Multi-tenancy composes orthogonally: a shard's `*Client` can itself sit behind
-a `TenantRouter`. Sharding is a router in front of ordinary clients rather than
-a mode inside the client, which is what lets the two stack without either
-knowing about the other.
+Multi-tenancy composes orthogonally: a shard's `*Client` can itself sit behind a
+`TenantRouter`. Sharding is a router in front of ordinary clients, not a mode
+inside the client, which is what lets the two stack without either knowing about
+the other.

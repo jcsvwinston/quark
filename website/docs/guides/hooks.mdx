@@ -7,7 +7,8 @@ description: Before/After hooks for Create, Update, Delete, and Find — and how
 # Lifecycle Hooks
 
 Quark runs lifecycle hooks around every write and read. Implement the matching
-interface on your `*Model` and Quark picks it up automatically — no registration:
+method on your `*Model` and Quark picks it up automatically — there is nothing to
+register:
 
 ```go
 type Order struct {
@@ -59,11 +60,13 @@ timestamp / default / derived-field hooks apply to batched rows too. Their
 Outside a transaction, hooks run inline: `Before*` before the statement,
 `After*` right after it.
 
-Inside `Client.Tx`, the timing changes for `After*`: a `Before*` hook still runs
-inline (returning an error rolls the transaction back), but an `After*` hook is
-**queued and fired only after the transaction commits** — so a side-effect can't
-fire for work that later rolls back. Multiple operations queue their `After*`
-hooks in FIFO order and fire them in that order at commit:
+Inside `Client.Tx`, the timing of `After*` changes. A `Before*` hook still runs
+inline, and returning an error from it rolls the transaction back. An `After*`
+hook is instead **queued, and fires only after the transaction commits** — so a
+side-effect can never fire for work that later rolls back.
+
+Several operations queue their `After*` hooks in FIFO order and fire them in that
+order at commit:
 
 ```go
 err := client.Tx(ctx, func(tx *quark.Tx) error {
@@ -88,13 +91,15 @@ An `After*` hook that returns an error post-commit is logged
 (`quark.hook.after_post_commit_error`) and the rest still run — once the database
 has committed, nothing application-side can undo it.
 
-The non-transactional path is intentionally left inline: wrapping every
-single-statement CRUD in an implicit transaction would add two round-trips and a
-connection pin to buy safety that doesn't exist (there's no transaction to roll
-back). To run one cross-cutting side-effect after *all* the inserts commit —
-rather than one `AfterCreate` per row — register a
-[`Tx.OnCommit`](transactions#side-effects-on-commit-or-rollback) callback, which
-fires once per transaction after the model hooks:
+The non-transactional path stays inline on purpose. Wrapping every
+single-statement write in an implicit transaction would cost two round-trips and
+a pinned connection, and would buy safety that doesn't exist — there is no
+transaction to roll back.
+
+To run one cross-cutting side-effect after *all* the inserts commit, rather than
+one `AfterCreate` per row, register a
+[`Tx.OnCommit`](transactions#side-effects-on-commit-or-rollback) callback. It
+fires once per transaction, after the model hooks:
 
 ```go
 err := client.Tx(ctx, func(tx *quark.Tx) error {
@@ -129,7 +134,7 @@ func (d *Document) AfterFind(ctx context.Context) error {
 
 `AfterFind` fires for `Iter` only when the loop completes without error, and for
 `Cursor` from `Cursor.Close()` when `rows.Err()` is nil. To enrich scanned rows,
-use a [`Scope`](querying#reusable-scopes) helper rather than a hook.
+reach for a [`Scope`](querying#reusable-scopes) helper instead of a hook.
 
 ## Limitations
 

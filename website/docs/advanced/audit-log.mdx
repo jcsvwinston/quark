@@ -7,9 +7,10 @@ description: Record an immutable per-row change trail in quark_audit, written at
 # Audit Log
 
 Quark can record an audit trail of every `Create`, `Update`, and `Delete` into a
-`quark_audit` table. Turn it on with `Client.EnableAuditLog`; from then on each
-write inserts an audit row **on the same connection/transaction as the write
-itself**, so the trail is atomic with the data.
+`quark_audit` table. Turn it on with `Client.EnableAuditLog`.
+
+From then on, each write inserts an audit row **on the same connection and
+transaction as the write itself**, so the trail is atomic with the data.
 
 ```go
 err := client.EnableAuditLog(ctx, quark.AuditConfig{
@@ -37,9 +38,9 @@ quark.For[Order](ctx, client).Update(&order)  // → one "updated" audit row
 | `pk` | The affected row's primary key (composite PKs joined with `:`). |
 | `diff` | JSON change payload (below). |
 
-The table is created from a model, so its DDL is portable across all six engines —
-`diff` lands in the engine's JSON column (or text where it has none); you never
-hand-write `JSONB`/`BIGSERIAL` DDL.
+The table is created from a model, so its DDL is portable across all six
+engines. `diff` lands in the engine's JSON column, or in text where the engine
+has none — you never hand-write `JSONB` or `BIGSERIAL` DDL yourself.
 
 ### The diff payload
 
@@ -100,9 +101,9 @@ The audit row is inserted **inline on the CRUD connection**:
   write, with a small crash window between them — wrap writes in `client.Tx` when
   you need the guarantee.
 
-This is a deliberately **stronger** guarantee than the [Event Bus](events), whose
-post-commit emit can be lost on a crash. Losing an event is tolerable; losing an
-audit record isn't.
+That is a deliberately **stronger** guarantee than the [Event Bus](events),
+whose post-commit emit can be lost on a crash. Losing an event is tolerable;
+losing an audit record is not.
 
 ## Choosing which tables to audit
 

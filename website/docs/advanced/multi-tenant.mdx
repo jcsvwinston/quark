@@ -7,9 +7,12 @@ description: Isolate each tenant's data with one of three strategies — databas
 # Multi-Tenant
 
 You're running one application for many customers (tenants), and each must see
-only its own data. Quark handles that with a `TenantRouter`: it resolves a tenant
-ID from the request `context.Context`, picks an isolation strategy, and you query
-it **exactly like a normal client** — the same `quark.For[T]` entry point:
+only its own data.
+
+A `TenantRouter` handles that. It resolves a tenant ID from the request's
+`context.Context` and applies the isolation strategy you chose. You then query
+the router **exactly like a normal client**, through the same `quark.For[T]`
+entry point:
 
 ```go
 users, _ := quark.For[User](ctx, client).List()       // single-tenant
@@ -76,9 +79,9 @@ docs, _ := quark.For[Document](acme, router).List()
 // docs contains only acme's rows — even though the query never names tenant_id
 ```
 
-`Or()` groups inherit the predicate too. Since SQL parses `A AND B OR C` as
-`(A AND B) OR C`, an OR branch needs its own `tenant_id = ?` to stay isolated, and
-Quark adds it automatically:
+`Or()` groups inherit the predicate too. SQL parses `A AND B OR C` as
+`(A AND B) OR C`, so an OR branch needs its own `tenant_id = ?` to stay isolated.
+Quark adds it for you:
 
 ```go
 quark.For[Document](acme, router).
@@ -108,13 +111,16 @@ users, _ := quark.For[User](WithTenant(ctx, "tenant_acme"), router).List()
 // table references become "tenant_acme"."users"
 ```
 
-The resolver's return value is used directly as the schema name. `quark tenant
-provision <id>` creates the schema and registers the tenant in `quark_tenants`
-(and refuses to re-provision an already-registered id, so a retry never
-half-executes); running migrations into each schema is your job — the CLI
-skips that step explicitly under `schema_per_tenant` because it needs a
-`TenantRouter` wired to your models. `client.Migrate` runs on the base client;
-the router doesn't orchestrate per-schema provisioning.
+The resolver's return value is used directly as the schema name.
+
+`quark tenant provision <id>` creates the schema and registers the tenant in
+`quark_tenants`. It refuses to re-provision an already-registered id, so a retry
+never half-executes.
+
+Running migrations into each schema stays your job. The CLI skips that step
+explicitly under `schema_per_tenant`, because it would need a `TenantRouter`
+wired to your models. `client.Migrate` runs on the base client, and the router
+does not orchestrate per-schema provisioning.
 
 ## Database-per-tenant
 
@@ -136,9 +142,12 @@ users, _ := quark.For[User](WithTenant(ctx, "acme"), router).List()
 active := router.ActiveTenants()
 ```
 
-When the cache exceeds `MaxCachedPools`, the least-recently-used client is evicted
-and its connections closed. Budget your pool: 100 active tenants × 10 max conns is
-up to 1000 connections, so size `MaxCachedPools` and per-client limits together.
+When the cache exceeds `MaxCachedPools`, the least-recently-used client is
+evicted and its connections closed.
+
+Budget the total: 100 active tenants at 10 connections each is up to 1000
+connections against the server. Size `MaxCachedPools` and the per-client limits
+together.
 
 ## Configuration
 
@@ -156,10 +165,12 @@ name still works as a deprecated alias and is removed in v2.)
 
 ## Relations, cache, and the bigger picture
 
-Tenant context flows into `Preload`: if a related model has the tenant column,
+Tenant context flows into `Preload`. When a related model has the tenant column,
 Quark filters the relation query too, so a parent can't preload another tenant's
-children. Cache keys include the tenant ID and schema, so two tenants never share
-a cached result for the same SQL.
+children.
+
+Cache keys include the tenant ID and the schema, so two tenants never share a
+cached result for the same SQL.
 
 | Concern | Guidance |
 | --- | --- |
