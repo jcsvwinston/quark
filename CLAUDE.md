@@ -91,7 +91,7 @@ Si encuentras una sesión abriendo PRs que tocan API pero no `website/docs/`, re
 # Tests
 go test -count=1 -short ./...                         # SQLite + unit tests
 QUARK_TEST_POSTGRES_DSN=... go test -count=1 ./...    # añade postgres
-make test-all                                         # los 6 motores (testcontainers; Oracle vía docker run)
+make test-all                                         # matriz de motores por DSN (testcontainers con -tags integration; Oracle: make oracle-up)
 
 # Docs site (durante desarrollo)
 cd website && npm install && npm run start            # localhost:3000

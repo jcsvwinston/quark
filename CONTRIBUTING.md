@@ -144,12 +144,16 @@ export QUARK_TEST_ORACLE_DSN="oracle://quark:quark@localhost:1521/ORCLPDB1"
 go test ./... -tags integration
 ```
 
-### All engines via Docker Compose
+### All engines
+
+Postgres, MySQL, MariaDB and MSSQL boot in-process via testcontainers when
+you run with `-tags integration`; Oracle needs the shared bootstrap script
+(the same one CI uses — readiness wait + `GRANT EXECUTE ON DBMS_LOCK`):
 
 ```bash
-docker compose -f docker-compose.test.yml up -d
-go test ./... -tags integration
-docker compose -f docker-compose.test.yml down
+make oracle-up
+export QUARK_TEST_ORACLE_DSN=oracle://quark:quark@localhost:1521/FREEPDB1
+make test-all
 ```
 
 ### Benchmarks
@@ -167,9 +171,34 @@ go test -run TestBenchmarkEngines -v -timeout 10m
 ## Coding Style
 
 - **`gofmt`** — all code must be formatted with `gofmt`.
-- **`golangci-lint`** — run `golangci-lint run ./...` before submitting. The config is at `.golangci.yml` (if missing, defaults apply).
+- **`go vet` + `gofmt`** — what CI's Lint lane actually runs; `make lint` reproduces it. (There is no golangci-lint config in this repo.)
 - **No `interface{}` in public APIs** — Quark's core value proposition is type safety. Generics or concrete types only.
 - **Error handling** — always wrap errors with `fmt.Errorf("...: %w", err)` for caller unwrapping.
 - **No silent failures** — functions that can fail must return `error`.
 - **Tests alongside code** — add `_test.go` in the same package. Integration tests (requiring external databases) must be guarded by env-var checks or build tags.
 - **Comments on exported symbols** — every exported type and function must have a Go doc comment.
+
+---
+
+## Before opening a PR: `make check`
+
+`make check` reproduces CI's cheap lanes locally so the PR does not go red
+on things you could have caught in seconds: vet+gofmt, the three docs
+guards (product voice, docs lint, roadmap), version coherence, apisurface/
+allowlist freshness, the static builds (`CGO_ENABLED=0` and cross-compile),
+and the unit tests. The expensive lanes have their own targets — `make
+test-race`, `make test-all` (engine matrix), `make superapp` — and
+`make help` lists everything.
+
+Two guards you WILL meet on your first API change:
+
+- **apisurface/allowlist freshness**: any new exported symbol requires
+  regenerating both files in the same change — `make regen` (order
+  matters: the allowlist reads the surface). If the symbol cannot be
+  exercised by the superapp (needs a live engine, or takes `testing.TB`),
+  add a REASONED entry to `examples/superapp/cmd/gen-allowlist/main.go`
+  and regenerate — an unclassified symbol fails the strict gate.
+- **version coherence** (release PRs only): `scripts/check-version-coherence.sh`
+  demands the docs bump in the same PR; release-please handles the version
+  mentions and `scripts/release/gen_release_notes_skeleton.sh` writes the
+  release-notes skeletons.
