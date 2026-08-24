@@ -150,6 +150,17 @@ need. `commands.Execute` remains available for mains that deliberately take
 over error handling; it returns the error and prints nothing, so never call
 it bare.
 
+Two sibling runner libraries follow the same embed pattern for flows the
+standalone binary cannot know about (they need your registered models):
+
+- **`quarkmigrate`** — plan/verify/apply schema against the live database
+  (exit `1` = drift, `2` = operational error).
+- **`quarktenant`** — `install-rls-policies` renders and applies the native
+  row-level-security DDL for every registered model, and
+  `verify-rls-policies` is the boot/CI gate that fails (exit `1`) when any
+  table is left unenforced — see
+  [Native row-level security](../advanced/row-level-native.mdx).
+
 When you'd rather run these from your own service or CI binary, call the public
 APIs directly. A migration runner imports your migration package for its side
 effects and drives the versioned migrator:
