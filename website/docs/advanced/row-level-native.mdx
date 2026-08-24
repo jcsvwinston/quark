@@ -134,6 +134,28 @@ and streaming, run inside `router.Tx` — one transaction, opened and committed
 exactly where you can see it.
 :::
 
+## Verify enforcement at startup
+
+A Native router against a database where the DDL was never applied emits no
+predicate — every tenant reads every row, and nothing errors. Make the boot
+fail instead:
+
+```go
+if _, err := quarktenant.VerifyRLSPolicies(ctx, client, quarktenant.DefaultInstallOptions()); err != nil {
+    log.Fatal(err) // names each table, its exact gap, and the remedy
+}
+```
+
+It checks, per registered model: `relrowsecurity` (RLS enabled),
+`relforcerowsecurity` (unless you opted out of FORCE), and the deterministic
+`<table>_tenant_isolation` policy in `pg_policies`. The tenant runner
+exposes the same check for CI/deploy gates — exit `1` means not enforced,
+distinct from operational errors (`2`):
+
+```bash
+go run ./tenant verify-rls-policies
+```
+
 ## Raw SQL under Native
 
 `client.RawQuery` / `client.Exec` go straight to the pool, so they skip the
@@ -154,12 +176,22 @@ through `set_config` — reserve it for schema/maintenance, not tenant data.
 
 ## Troubleshooting
 
-**Query returns zero rows when it shouldn't** — the usual sign Native isn't fully
-wired:
+**Queries return rows from OTHER tenants** — the dangerous failure, and it is
+silent: the router sets the session variable on every query, but nothing
+forces PostgreSQL to use it.
 
-1. The policy isn't installed — check `SELECT * FROM pg_policies WHERE tablename = '<table>'`.
-2. `set_config` never ran for this query — raw SQL outside `router.Tx` / `For[T]`; the setting reads `NULL` and filters everything out.
-3. `FORCE ROW LEVEL SECURITY` is missing and the caller owns the table — re-emit the DDL with `FORCE`.
+1. The policies were never installed — with no `CREATE POLICY`, RLS applies
+   no predicate at all. `quarktenant.VerifyRLSPolicies` (below) catches this
+   at boot; manually: `SELECT * FROM pg_policies WHERE tablename = '<table>'`.
+2. `FORCE ROW LEVEL SECURITY` is missing and the application role OWNS the
+   table — the owner is exempt from policies by default, so the policy is
+   decorative. Re-emit the DDL with `FORCE` (the installer's default).
+
+**Query returns zero rows when it shouldn't** — the usual sign the variable
+never reaches the query:
+
+1. `set_config` never ran for this query — raw SQL outside `router.Tx` / `For[T]`; the setting reads `NULL` and filters everything out.
+2. The policy cast and the tenant column type disagree — compare the policy's `USING` clause with the column type.
 
 **A migration or DDL statement hangs** (`ALTER TABLE`, `DROP TABLE`, an index
 build) — something is holding a lock on the table, and under Native the usual
