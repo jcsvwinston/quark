@@ -7,21 +7,30 @@ description: Pool sizing, query timeouts, TLS in DSNs, migrations at deploy time
 # Production Deployment
 
 Quark in development is one call: `quark.New(driver, dsn)`. Quark in production
-is the same call plus deliberate answers to five questions — how big is the
-connection pool, how long may a query run, is the wire encrypted, who runs
-migrations and when, and how do you see what the ORM is doing. This page walks
-through each one.
+is the same call plus deliberate answers to five questions:
+
+- How big should the connection pool be?
+- How long may a query run?
+- Is the wire encrypted?
+- Who runs migrations, and when?
+- How do you see what the ORM is doing?
+
+This page works through them in that order, after one build-time note that
+catches people out when they containerize.
 
 ## Static binaries and cross-compilation
 
-`CGO_ENABLED=0 go build` works — the default of `scratch`/`distroless`
-Dockerfiles and of every cross-compile (`GOOS=linux GOARCH=arm64 …`). The
-only cgo-dependent piece, the `mattn/go-sqlite3` error classifier, sits
-behind a build tag; pure-Go builds classify SQLite errors through
-`modernc.org/sqlite` (the driver the [installation guide](../guides/installation)
-recommends) with the same numeric codes. If you use SQLite in a static
-binary, use the `modernc.org/sqlite` driver; every other engine's driver is
-already pure Go except `mattn/go-sqlite3` itself.
+`CGO_ENABLED=0 go build` works. That is the default for `scratch` and
+`distroless` Dockerfiles and for every cross-compile
+(`GOOS=linux GOARCH=arm64 …`), so nothing here needs special handling.
+
+The one cgo-dependent piece is the `mattn/go-sqlite3` error classifier, and it
+sits behind a build tag. Pure-Go builds classify SQLite errors through
+`modernc.org/sqlite` instead, using the same numeric codes — that is the driver
+the [installation guide](../guides/installation) recommends anyway.
+
+So the only rule is: if you use SQLite in a static binary, use
+`modernc.org/sqlite`. Every other engine's driver is already pure Go.
 
 ## Size the connection pool
 
@@ -74,8 +83,10 @@ client, err := quark.New("pgx", dsn, quark.WithLimits(limits))
 Two things to know:
 
 - `WithLimits` replaces the **entire** `Limits` struct. Always start from
-  `quark.DefaultLimits()` and override fields — a zero `QueryTimeout` produces
-  immediately-expired query contexts, not "no timeout".
+  `quark.DefaultLimits()` and override fields. A partial literal has its numeric
+  zeros filled in from the defaults, but its **booleans do not** — so
+  `SafeMigrations` silently lands on `false`, which permits a destructive `Sync`.
+  See [Zero-value semantics](../reference/configuration#zero-value-semantics).
 - The timeout cancels the Go-side wait. Whether the statement also stops on
   the server depends on the driver and engine; for defense in depth, set a
   server-side statement timeout too (for example PostgreSQL's
@@ -131,16 +142,18 @@ starts serving traffic — not from your request path.
 Two mechanics matter:
 
 **Migrations live in your binary, not in the standalone CLI.** Versioned
-migration files register themselves via `init()`, so a `go install`ed `quark`
-binary cannot see them; `quark migrate up` exits non-zero with an explanation
-rather than falsely reporting "nothing pending". Build the small runner
-described in [Operational Workflows](../guides/cli#embedding-the-same-operations-in-your-own-binary)
-— your `main` imports your migrations package and calls `commands.Main()`
-(prints errors to stderr, exits non-zero on failure) —
-and ship that binary (or `go run` it) in your deploy pipeline. For the
-model-diff flow, the [`quarkmigrate`](../guides/migrations#a-ci-drift-gate-with-quarkmigrate)
-package gives you `plan` / `verify` / `apply` as a tiny command you own;
-`verify` exits non-zero on schema drift, which makes it a natural CI gate.
+migration files register themselves in an `init()`, so a `go install`ed `quark`
+binary cannot see them. `quark migrate up` exits non-zero with an explanation
+rather than falsely reporting "nothing pending".
+
+Build the small runner described in
+[Operational Workflows](../guides/cli#embedding-the-same-operations-in-your-own-binary)
+— your `main` imports your migrations package and calls `commands.Main()`, which
+prints errors to stderr and exits non-zero on failure — then ship that binary, or
+`go run` it, in your deploy pipeline. For the model-diff flow, the
+[`quarkmigrate`](../guides/migrations#a-ci-drift-gate-with-quarkmigrate) package
+gives you `plan` / `verify` / `apply` as a small command you own. `verify` exits
+non-zero on schema drift, which makes it a natural CI gate.
 
 **Concurrent deploys must not race.** If several instances can run migrations
 at once (rolling deploys, multiple replicas of a job), take the cluster-wide

@@ -1,7 +1,11 @@
 # Migrations API Reference
 
-Reference for schema creation, schema sync, indexes, foreign keys, and versioned
-migrations.
+Everything that changes a schema: the reflective helpers (`Migrate`, `Sync`,
+`CreateIndex`, `AddForeignKey`) and the versioned migrator in the `migrate`
+package.
+
+For which path to use when — quick reflective setup versus reviewable versioned
+migrations — see the [Migrations guide](../../guides/migrations).
 
 | Symbol | Signature | Purpose |
 | --- | --- | --- |

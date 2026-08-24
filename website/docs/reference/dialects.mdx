@@ -6,9 +6,14 @@ description: Supported engines and dialect-specific behavior.
 
 # Dialects
 
-Quark routes SQL generation through a dialect abstraction. Dialects are
-responsible for placeholders, identifier quoting, insert ID behavior, upsert
-syntax, and DDL operations.
+Every SQL difference between the six supported engines is handled in one place:
+the dialect. It owns placeholders, identifier quoting, insert-ID behaviour,
+upsert syntax, and DDL — which is why the same model and query code runs
+everywhere.
+
+You normally never choose one. Quark detects the dialect from the driver name at
+`quark.New`. This page is the engine-by-engine reference for what that detection
+gets you, and where an engine still behaves differently enough to matter.
 
 | Dialect | Constructor | Notes |
 | --- | --- | --- |
@@ -19,10 +24,11 @@ syntax, and DDL operations.
 | MSSQL | `quark.MSSQL()` | `IDENTITY`, `OFFSET/FETCH`, `MERGE` upserts. |
 | Oracle | `quark.Oracle()` | `GENERATED AS IDENTITY`, `MERGE` upserts. |
 
-Since v1.1.0, **MariaDB is detected automatically**: on a `quark.New("mysql", dsn)`
-connection Quark probes `SELECT VERSION()` once at construction and switches to
-the MariaDB dialect when the server reports MariaDB, so you get the MariaDB DDL
-edge cases without picking the constructor explicitly.
+**MariaDB is detected automatically** since v1.1.0. MariaDB and MySQL share the
+`"mysql"` driver, so the driver name alone can't tell them apart. On a
+`quark.New("mysql", dsn)` connection Quark probes `SELECT VERSION()` once at
+construction and switches to the MariaDB dialect when the server reports MariaDB.
+You get the MariaDB DDL edge cases without naming the constructor yourself.
 
 ## Upsert mapping
 

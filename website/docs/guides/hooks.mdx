@@ -151,9 +151,10 @@ use a [`Scope`](querying#reusable-scopes) helper rather than a hook.
   the rows and loop through `Delete` if you need them.
 - **A savepoint rollback un-queues the `After*` hooks queued since that
   savepoint.** `RollbackTo` truncates the `After*`, `OnCommit`, and `OnRollback`
-  queues back to where they were when the savepoint was created — mirroring the
-  `ROLLBACK TO SAVEPOINT` that just undid the SQL those hooks were reacting to,
-  so they do **not** fire on the outer `Commit`. One caveat: the truncation is
-  keyed to savepoints created through the quark API (`Savepoint`/nested `Tx.Tx`);
-  rolling back to a savepoint issued via raw `Exec` is invisible to the hook
-  queues and leaves them untouched.
+  queues back to where they stood when the savepoint was created, so they do
+  **not** fire on the outer `Commit`. That mirrors the `ROLLBACK TO SAVEPOINT`
+  which just undid the SQL those hooks were reacting to.
+
+  The truncation only tracks savepoints created through the Quark API —
+  `Savepoint` and nested `Tx.Tx`. A savepoint issued through a raw `Exec` is
+  invisible to the hook queues, and rolling back to it leaves them untouched.

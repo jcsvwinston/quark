@@ -25,17 +25,17 @@ db.Where("name = ?", userInput)
 db.Order(userInput)  // userInput = "name; DROP TABLE users--"
 ```
 
-Quark validates every identifier at the API layer before it reaches the SQL builder.
-A malformed identifier, an operator outside the allowed set, or a suspicious raw
-pattern is rejected and the statement is never executed. These are **lexical** checks
-— identifier shape, reserved words, length — not a lookup against your model or schema.
+Quark validates every identifier at the API layer, before it reaches the SQL
+builder. A malformed identifier, an operator outside the allowed set, or a
+suspicious raw pattern is rejected, and the statement never executes.
 
 ## What gets validated
 
-SQLGuard's checks are **lexical**, not semantic. It verifies that each identifier is
-well-formed and not a reserved word; it does **not** check that a column or table
-actually exists on your model or schema. A well-formed but unknown column passes the
-guard and is rejected by the database engine at execution time, not by Quark.
+SQLGuard's checks are **lexical, not semantic**. It asks whether an identifier is
+*well-formed* — the right shape, not a reserved word, within the length limit. It
+does not ask whether that column or table exists. A well-formed but unknown
+column passes the guard and is rejected by the database at execution time, as
+usual. Blocking injection-shaped input is the job; mirroring your schema is not.
 
 | Category | Examples | Validation |
 |----------|----------|-----------|
@@ -60,13 +60,6 @@ _, err = quark.For[User](ctx, client).
 // → invalid identifier: identifier "name; DROP TABLE users--" contains invalid characters
 //   errors.Is(err, quark.ErrInvalidIdentifier) == true
 ```
-
-:::note
-SQLGuard validates identifiers **lexically**, so a *well-formed but unknown* column
-(e.g. `Where("nonexistent_column", "=", "x")`) passes the guard and is rejected by the
-database engine at execution time, not by Quark. The guard's job is to block
-injection-shaped input, not to mirror your schema.
-:::
 
 ## Raw subqueries require explicit opt-in
 
@@ -93,17 +86,22 @@ client, _ := quark.New("postgres", dsn,
 )
 ```
 
-When raw queries are enabled, Quark still applies a **best-effort** check
-(`ValidateRawQuery`): since v1.1.0 it rejects the SQL line-comment tail `--`
-(a classic injection-truncation vector). The structural checks (`--`, stacked
-`;DROP`/`;DELETE`/`;UPDATE`, `UNION SELECT`) skip the *contents* of
-single-quoted string literals, so a legitimate literal like `'range--max'` is
-accepted while the same marker outside a literal is still rejected. Block
-comments (`/* … */`) stay allowed — they are legitimate optimizer hints
-(`/*+ … */`). This check is a heuristic backstop, **not a complete filter**:
-the real safety boundary for raw SQL is keeping `AllowRawQueries` off by
-default and binding *values* through placeholders, never string-concatenating
-user input.
+Even with raw queries enabled, Quark applies a best-effort check
+(`ValidateRawQuery`) to what you pass:
+
+- **The line-comment tail `--` is rejected** since v1.1.0 — a classic
+  injection-truncation vector.
+- **Stacked statements** (`;DROP`, `;DELETE`, `;UPDATE`) and `UNION SELECT` are
+  rejected too.
+- **String literals are skipped.** Those structural checks ignore the contents of
+  single-quoted literals, so `'range--max'` is accepted while the same marker
+  outside a literal is not.
+- **Block comments (`/* … */`) stay allowed**, because they carry legitimate
+  optimizer hints (`/*+ … */`).
+
+Treat this as a heuristic backstop, **not a complete filter**. The real safety
+boundary for raw SQL is keeping `AllowRawQueries` off by default and binding
+*values* through placeholders — never string-concatenating user input.
 
 ## Comparison with other ORMs
 
@@ -142,11 +140,14 @@ if errors.Is(err, quark.ErrInvalidIdentifier) {
 }
 ```
 
-`quark.ErrInvalidQuery` is separate: it signals a malformed *query structure* or a
-disallowed element — an operator outside the whitelist, a raw query missing
-placeholders or matching a suspicious pattern, a raw subquery used without opting in,
-limits exceeded, or an uninitialised client — not an identifier/path/join validation
-failure.
+`quark.ErrInvalidQuery` is separate. It signals a malformed query *structure* or a
+disallowed element rather than a bad identifier, path, or join:
+
+- an operator outside the whitelist;
+- a raw query missing placeholders, or matching a suspicious pattern;
+- a raw subquery used without opting in;
+- a configured limit exceeded;
+- an uninitialised client.
 
 ## Design intent
 
