@@ -200,6 +200,24 @@ fi
 rm -f /tmp/lint-docs-broken-links.$$
 
 # ----------------------------------------------------------------------------
+# Comentarios HTML en ficheros .mdx
+#
+# MDX v3 no admite `<!-- … -->`: aborta la compilación de la página entera con
+# «Unexpected character `!`». No es teórico — el marcador de versión de
+# release-please se añadió con esa sintaxis y dejó el sitio sin construir,
+# invisible hasta que alguien lo compiló (el paraguas monta la doc del TAG
+# pinado, así que el CI del propio repo era el único sitio donde podía verse).
+# En MDX el comentario es `{/* … */}`.
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  if grep -n '<!--' "$f" >/dev/null 2>&1; then
+    while IFS= read -r hit; do
+      report "$f: comentario HTML en un .mdx — MDX no compila con \`<!-- … -->\`; usa {/* … */} ($hit)"
+    done < <(grep -n '<!--' "$f" | cut -d: -f1 | sed 's/^/línea /')
+  fi
+done < <(find website/docs -name '*.mdx' 2>/dev/null)
+
+# ----------------------------------------------------------------------------
 
 echo
 if [[ "$FAIL" -ne 0 ]]; then
