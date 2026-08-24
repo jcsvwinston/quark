@@ -1,0 +1,80 @@
+---
+sidebar_position: 11
+title: Testing
+description: Test applications built on Quark — the quarktest kit, per-test isolation, and when you need a real engine.
+---
+
+# Testing your application
+
+`quarktest` is the test kit: a ready SQLite client with cleanup, one-line schema
+setup, and the transaction-per-test isolation pattern. Three calls, and no
+external services:
+
+```go
+import (
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/quarktest"
+)
+
+func TestOrders(t *testing.T) {
+    client := quarktest.SQLite(t)              // temp DB file, closed via t.Cleanup
+    quarktest.Migrate(t, client, &Order{})     // register + create tables, fail-fast
+
+    quarktest.Tx(t, client, func(tx *quark.Tx) {
+        err := quark.ForTx[Order](t.Context(), tx).Create(&Order{Status: "new"})
+        // assertions here see the row…
+    })
+    // …and after Tx returns the rollback erased it: every test starts from
+    // the same schema-only state, no per-table cleanup.
+}
+```
+
+## What each piece does
+
+- **`quarktest.SQLite(t)`** opens a client over a fresh SQLite **file** in a
+  per-test temp dir. A file, deliberately not `:memory:`: Quark pools
+  connections, and every pooled connection to `:memory:` opens its *own*
+  empty database — the classic trap where the schema exists on one
+  connection and your query runs on another. Extra options
+  (`quark.WithLimits`, `quark.WithLogger`, …) pass through.
+- **`quarktest.Migrate(t, client, models…)`** is `RegisterModel` +
+  `MigrateRegistered` with test-fatal error handling. The fail-fast tag
+  linter fires here, so a typoed `db:` tag dies naming the token — not as a
+  missing column three asserts later.
+- **`quarktest.Tx(t, client, fn)`** runs `fn` in a transaction that is
+  **always rolled back**. Writes through the `*quark.Tx` (use
+  `quark.ForTx[T]` for the typed surface) are visible inside `fn` and gone
+  after. The enforced rollback means `fn` cannot observe commit-time
+  behaviour — test that through `client.Tx` directly.
+
+## Seeding data
+
+There is no fixtures DSL: seed with the same CRUD your application uses.
+Inside `Tx` when the data belongs to one test; outside (after `Migrate`)
+when several subtests share it.
+
+## When SQLite is not enough
+
+The kit covers the fast unit lane. Engine-specific behaviour needs the real
+engine — native row-level security, dialect DDL, `LISTEN/NOTIFY`, deadlock
+retry semantics. For those, open a client against a real database the same
+way Quark's own integration matrix does: read the DSN from an environment
+variable and skip when it is absent, so the fast lane stays
+dependency-free:
+
+```go
+func TestRLSAgainstPostgres(t *testing.T) {
+    dsn := os.Getenv("QUARK_TEST_POSTGRES_DSN")
+    if dsn == "" {
+        t.Skip("set QUARK_TEST_POSTGRES_DSN to run engine tests")
+    }
+    client, err := quark.New("pgx", dsn)
+    // …
+}
+```
+
+For multi-tenant apps on
+[native row-level security](../advanced/row-level-native), gate the
+suite (and the boot) on `quarktenant.VerifyRLSPolicies` — an unenforced
+table is a silent cross-tenant leak, and it is exactly the kind of thing a
+test database reproduces faithfully.

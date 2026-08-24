@@ -41,6 +41,13 @@ jobs:
         # reader's language.
         run: bash scripts/ci/check_docs_product_voice.sh
 
+      - name: check docs archive freshness
+        # El sitio sirve la doc actual y un snapshot por minor publicada. Ese
+        # archivo se congeló en 1.2.2 mientras se publicaban 1.3, 1.4 y 1.5:
+        # el desplegable ofrecía versiones viejas y saltaba a la actual sin
+        # decir que faltaba nada. Una minor sin snapshot ya no pasa.
+        run: bash scripts/ci/check_docs_archive_freshness.sh
+
       - name: check internal docs drift
         # La doc interna (docs/**) no tenía guard: aquí se comprueba que no
         # cite ficheros que ya no existen — enlaces relativos y rutas del
