@@ -98,14 +98,24 @@ var manualReasons = map[string]string{
 	"github.com/jcsvwinston/quark/quarktenant.Run":                reasonCLIRun,
 	"github.com/jcsvwinston/quark/quarktenant.RunWithIO":          reasonCLIRun,
 	"github.com/jcsvwinston/quark/quarktenant.InstallRLSPolicies": reasonCLIRun,
-	"github.com/jcsvwinston/quark/quarkmigrate.Run":               reasonCLIRun,
-	"github.com/jcsvwinston/quark/quarkmigrate.RunWithOutput":     reasonCLIRun,
+	"github.com/jcsvwinston/quark/quarktenant.VerifyRLSPolicies":  reasonCLIRun,
+
+	// El kit de testing recibe testing.TB: es INVOCABLE solo desde un test,
+	// nunca desde el superapp (que es un binario). Su cobertura por
+	// ejecución vive en quarktest/quarktest_test.go (SQLite+Migrate+Tx con
+	// rollback verificado); listarlo aquí evita fingir una llamada.
+	"github.com/jcsvwinston/quark/quarktest.SQLite":           reasonTestKit,
+	"github.com/jcsvwinston/quark/quarktest.Migrate":          reasonTestKit,
+	"github.com/jcsvwinston/quark/quarktest.Tx":               reasonTestKit,
+	"github.com/jcsvwinston/quark/quarkmigrate.Run":           reasonCLIRun,
+	"github.com/jcsvwinston/quark/quarkmigrate.RunWithOutput": reasonCLIRun,
 }
 
 const (
 	reasonRoutine = "stored routine/proc: ejecutar necesita un fixture DB-side por motor; no portable in-process (el SQL se cubre a nivel dialecto) (denominador S7-coverage)"
 	reasonRedis   = "necesita un Redis vivo; ejercido contra redis real en recorder/infra_test.go (tag superapp_infra), fuera del run por-motor del gate (denominador S7-coverage)"
-	reasonCLIRun  = "entrypoint CLI/instalador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant; ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)"
+	reasonCLIRun  = "entrypoint CLI/instalador/verificador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant (install y verify con PG real); ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)"
+	reasonTestKit = "helper de kit de testing (recibe testing.TB): solo invocable desde un test; cubierto por ejecución en quarktest/quarktest_test.go (denominador S7-coverage)"
 )
 
 const (
