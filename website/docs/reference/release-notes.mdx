@@ -26,7 +26,7 @@ about your database than it had actually checked.
 ### Fixed
 
 - **The row-level security preflight now reads the policy, not just its
-  name** (QCD-QK-2). `VerifyRLSPolicies` asked PostgreSQL whether a policy
+  name**. `VerifyRLSPolicies` asked PostgreSQL whether a policy
   called `<table>_tenant_isolation` existed and stopped there. A policy
   carrying that name with `USING (true)` — right name, no predicate —
   earned a green light while every tenant read every row. That is worse
@@ -45,13 +45,13 @@ about your database than it had actually checked.
   policies is reported as a deviation rather than guessed at.
 
 - **The preflight runs with the client the documentation prescribes**
-  (QCD-QK-1). It used `RawQuery`, which is off by default, so
+ . It used `RawQuery`, which is off by default, so
   `quark.New("pgx", dsn)` — the exact client `quarktenant`'s own docs show
   — could not run it, and a boot guardrail failed indistinguishably from a
   real outage. It now reads the catalog directly, the way the install path
   already did. The doubled `quarktenant: quarktenant:` prefix is gone too.
 
-- **`verify-rls-policies` stops accepting flags it ignores** (QCD-QK-3).
+- **`verify-rls-policies` stops accepting flags it ignores**.
   `--tenant-col` and `--native-rls-var` now genuinely change the verdict,
   because the predicate check needs them: verifying with the default column
   against an installation made with another one used to return OK without
