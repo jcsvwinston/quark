@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/jcsvwinston/quark"
 )
@@ -118,6 +120,35 @@ func RunWithIO(ctx context.Context, args []string, client *quark.Client, stdout,
 		opts.ForceRLS = false
 	}
 
+	// verify-rls-policies shares this FlagSet with the install action, and
+	// used to read only ForceRLS from it — every other flag was accepted
+	// and dropped (QCD-QK-3). The verdict now depends on --tenant-col and
+	// --native-rls-var (the predicate check needs to know what a correct
+	// policy looks like), so those stay; the ones that cannot change a
+	// read-only verdict are refused instead of silently ignored. An
+	// ignored flag is worse than a rejected one: it returns an OK that did
+	// not check what the caller believes it checked.
+	if action == ActionVerifyRLSPolicies {
+		installOnly := map[string]string{
+			"dry-run":      "verify-rls-policies never writes, so there is nothing to skip",
+			"lock-name":    "the migration lock is only taken to APPLY DDL",
+			"lock-timeout": "the migration lock is only taken to APPLY DDL",
+			"cast":         "the cast shapes the DDL install writes; verification checks the predicate's structure, not its casts",
+		}
+		var refused []string
+		fs.Visit(func(f *flag.Flag) {
+			if why, ok := installOnly[f.Name]; ok {
+				refused = append(refused, fmt.Sprintf("--%s (%s)", f.Name, why))
+			}
+		})
+		if len(refused) > 0 {
+			sort.Strings(refused)
+			fmt.Fprintf(stderr, "quarktenant: %s: flag(s) not applicable to this action: %s\n",
+				ActionVerifyRLSPolicies, strings.Join(refused, "; "))
+			return ExitError
+		}
+	}
+
 	switch action {
 	case ActionInstallRLSPolicies:
 		return runInstall(ctx, client, opts, stdout, stderr)
@@ -170,13 +201,24 @@ func runVerify(ctx context.Context, client *quark.Client, opts InstallOptions, s
 		for _, f := range findings {
 			fmt.Fprintf(stdout, "NOT ENFORCED\t%s\n", f.Table)
 		}
-		fmt.Fprintf(stderr, "quarktenant: %v\n", err)
+		fmt.Fprintln(stderr, prefixed(err))
 		return ExitNotEnforced
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "quarktenant: %v\n", err)
+		fmt.Fprintln(stderr, prefixed(err))
 		return ExitError
 	}
 	fmt.Fprintf(stderr, "quarktenant: verify-rls-policies OK — every registered model's table is enforced\n")
 	return ExitSuccess
+}
+
+// prefixed renders an error with the package prefix exactly once. Errors
+// raised inside the package already carry it, and re-prefixing produced
+// "quarktenant: quarktenant: …" in the operator's terminal (QCD-QK-1).
+func prefixed(err error) string {
+	msg := err.Error()
+	if strings.HasPrefix(msg, "quarktenant: ") {
+		return msg
+	}
+	return "quarktenant: " + msg
 }

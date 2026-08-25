@@ -172,7 +172,8 @@ standalone binary cannot know about (they need your registered models):
 - **`quarktenant`** — `install-rls-policies` renders and applies the native
   row-level-security DDL for every registered model, and
   `verify-rls-policies` is the boot/CI gate that fails (exit `1`) when any
-  table is left unenforced — see
+  table is left unenforced — including a policy that carries the right name
+  while its predicate isolates nothing — see
   [Native row-level security](../advanced/row-level-native).
 
 When you'd rather run these from your own service or CI binary, call the public
