@@ -18,6 +18,47 @@ Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
 
+## v1.6.1
+
+A patch release about the preflight that shipped in v1.6.0 believing more
+about your database than it had actually checked.
+
+### Fixed
+
+- **The row-level security preflight now reads the policy, not just its
+  name** (QCD-QK-2). `VerifyRLSPolicies` asked PostgreSQL whether a policy
+  called `<table>_tenant_isolation` existed and stopped there. A policy
+  carrying that name with `USING (true)` — right name, no predicate —
+  earned a green light while every tenant read every row. That is worse
+  than no check at all: a green check is what stops an operator from
+  looking.
+
+  It now reads the policy's `USING` and `WITH CHECK` expressions and
+  demands the two things that make them isolate: a reference to your tenant
+  column, and a read of the session variable the router sets. It also
+  catches a policy narrowed to one command by a later `ALTER POLICY`, and
+  one that leaves the write path open. The error says which of those is
+  wrong, not merely that something is.
+
+  Scope, so the guarantee is not overread: it verifies the policy this
+  package installs. A deployment that isolates through several hand-written
+  policies is reported as a deviation rather than guessed at.
+
+- **The preflight runs with the client the documentation prescribes**
+  (QCD-QK-1). It used `RawQuery`, which is off by default, so
+  `quark.New("pgx", dsn)` — the exact client `quarktenant`'s own docs show
+  — could not run it, and a boot guardrail failed indistinguishably from a
+  real outage. It now reads the catalog directly, the way the install path
+  already did. The doubled `quarktenant: quarktenant:` prefix is gone too.
+
+- **`verify-rls-policies` stops accepting flags it ignores** (QCD-QK-3).
+  `--tenant-col` and `--native-rls-var` now genuinely change the verdict,
+  because the predicate check needs them: verifying with the default column
+  against an installation made with another one used to return OK without
+  having checked what you believed. Flags that cannot change a read-only
+  verdict (`--dry-run`, `--cast`, `--lock-name`, `--lock-timeout`) are
+  refused for this action instead of being silently dropped.
+
 ## v1.6.0
 
 A minor release about the sharpest edge in multi-tenancy, plus the test kit
