@@ -154,15 +154,41 @@ if _, err := quarktenant.VerifyRLSPolicies(ctx, client, quarktenant.DefaultInsta
 }
 ```
 
-For each registered model it checks three things: `relrowsecurity` (row-level
+For each registered model it checks four things: `relrowsecurity` (row-level
 security is enabled), `relforcerowsecurity` (unless you opted out of `FORCE`),
-and the `<table>_tenant_isolation` policy in `pg_policies`. The tenant runner
-exposes the same check as a CI or deploy gate, with exit `1` for "not enforced"
-and exit `2` for an operational error:
+that the `<table>_tenant_isolation` policy exists — and **what that policy
+actually says**.
+
+That last one matters more than it sounds. A policy carrying the right name
+can still isolate nothing:
+
+```sql
+CREATE POLICY orders_tenant_isolation ON orders USING (true) WITH CHECK (true);
+```
+
+Right name, no predicate — every tenant reads every row. So the check reads the
+policy's `USING` and `WITH CHECK` expressions and demands the two things that
+make them isolate at all: a reference to your tenant column, and a read of the
+session variable the router sets. A policy that filters the wrong column, reads
+the wrong variable, leaves the write path open, or was narrowed to a single
+command by a later `ALTER POLICY` fails the check and the error says which.
+
+What it does not judge: a setup that isolates through several hand-written
+policies, or one that restricts by role. It verifies the policy this package
+installs, and reports anything else as a deviation rather than guessing.
+
+The tenant runner exposes the same check as a CI or deploy gate, with exit `1`
+for "not enforced" and exit `2` for an operational error:
 
 ```bash
 go run ./tenant verify-rls-policies
 ```
+
+`--tenant-col` and `--native-rls-var` are honoured here — the check needs them
+to know what a correct policy looks like, so verifying with a column your
+install never used now fails instead of returning a green light. Flags that
+only shape the install (`--dry-run`, `--cast`, `--lock-name`, `--lock-timeout`)
+are refused for this action rather than silently ignored.
 
 ## Raw SQL under Native
 
