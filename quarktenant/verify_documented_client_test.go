@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jcsvwinston/quark"
 	"github.com/jcsvwinston/quark/quarktenant"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // The client the package's own docs prescribe: quark.New with models
