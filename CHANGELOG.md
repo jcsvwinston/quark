@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1](https://github.com/jcsvwinston/quark/compare/v1.6.0...v1.6.1) (2026-08-25)
+
+
+### Fixed
+
+* **quarktenant:** el preflight de RLS comprueba el PREDICADO, no el nombre ([#295](https://github.com/jcsvwinston/quark/issues/295)) ([4df7927](https://github.com/jcsvwinston/quark/commit/4df7927b3c43deef4e56cf9d55dfe984a337eabe))
+
 ## [1.6.0](https://github.com/jcsvwinston/quark/compare/v1.5.2...v1.6.0) (2026-08-24)
 
 
