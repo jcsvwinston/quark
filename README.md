@@ -21,7 +21,23 @@
 ## 📌 Status
 
 Quark is **v1.6.1** <!-- x-release-please-version --> on the stable `v1.x` line
-(v1.2.0 closed the scaling deferrals; v1.1.0 was the hardening minor; v1.0.0 the first stable release under SemVer). Phases 0–6 are complete: the core query builder, CRUD, schema-as-code migrations across all six dialects (Oracle now in blocking CI), multi-tenancy, caché, hooks/events/audit log, observability, opt-in code generation, read replicas with failover, and pluggable sharding. `v1.x` keeps API compatibility; breaking changes go to `v2.x` with a `docs/MIGRATION_v2.0.0.md`. v1.0 was gated on the qualitative checklist in [`docs/V1_GATE.md`](docs/V1_GATE.md) (cross-engine coverage, structural gaps closed or consciously waived), not on a performance target — [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so code generation is a type-safety feature, not a speedup. Known limitations consciously deferred at each minor are listed in the release notes ([`docs/RELEASE_NOTES_v1.5.1.md`](docs/RELEASE_NOTES_v1.5.1.md) for the current line).
+(v1.2.0 closed the scaling deferrals; v1.1.0 was the hardening minor; v1.0.0 the first stable release under SemVer). Phases 0–6 are complete: the core query builder, CRUD, schema-as-code migrations across all six dialects (Oracle now in blocking CI), multi-tenancy, caché, hooks/events/audit log, observability, opt-in code generation, read replicas with failover, and pluggable sharding. `v1.x` keeps API compatibility; breaking changes go to `v2.x` with a `docs/MIGRATION_v2.0.0.md`. v1.0 was gated on the qualitative checklist in [`docs/V1_GATE.md`](docs/V1_GATE.md) (cross-engine coverage, structural gaps closed or consciously waived), not on a performance target — [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so code generation is a type-safety feature, not a speedup. Known limitations consciously deferred at each minor are listed in the release notes ([`docs/RELEASE_NOTES_v1.6.1.md`](docs/RELEASE_NOTES_v1.6.1.md) for the current line).
+
+The **v1.6.1** patch fixes the guardrail that shipped in v1.6.0 believing
+more about your database than it had checked. `verify-rls-policies` asked
+PostgreSQL whether a policy with the expected NAME existed and stopped
+there, so a policy called `<table>_tenant_isolation` with `USING (true)` —
+right name, no predicate — earned a green light while every tenant read
+every row. That is worse than no check at all: a green check is what stops
+an operator from looking. It now reads the policy's `USING` and `WITH
+CHECK` expressions and demands the two things that make them isolate — a
+reference to your tenant column and a read of the session variable the
+router sets — and it runs with the plain client the package's own docs
+prescribe, which it previously could not.
+
+The **v1.6.0** minor adds `quarktest` (a per-test SQLite database backed by
+a file, schema from your models, and a transaction that always rolls back)
+and `quarktenant.VerifyRLSPolicies`, the preflight above.
 
 The **v1.3.3** patch closes the native row-level-security correctness backlog: `Create` and `Update` now scope their implicit transaction to the operation like every other entry point — a write from a long-lived context (batch job, CLI, worker) no longer keeps a pooled connection idle in transaction until that context ends, later DDL on the touched table no longer blocks behind its locks, and a row you just wrote is visible to reads on the same context; the executor returns its pooled connection on every path even when the driver panics; and driver or transaction errors on the `QueryRow` path reach `Scan` intact instead of being masked as `ErrNoRows`. The test matrix gains a `-race` lane.
 
@@ -191,6 +207,8 @@ For a cell-by-cell justification with code examples, see **[docs/comparison.md](
 - **Batch Operations** — Chunked `DeleteBatch`, dialect-optimal `UpsertBatch`, atomic `UpdateBatch`
 - **Eager Loading** — Single-query `Preload()` eliminates N+1 queries
 - **Auto-Migrations & Sync** — `Migrate()` creates tables; `Sync()` evolves them, including column renames
+- **Test kit** — `quarktest` gives each test its own database, migrates it from your models, and rolls back what the test wrote
+- **RLS preflight** — `verify-rls-policies` reads your isolation policies' predicates, not just their names, so a policy that isolates nothing fails the check instead of passing it
 - **Hooks & Middleware** — Full lifecycle hooks (`BeforeCreate`, `AfterDelete`…) and stackable middleware
 - **Versioned Migrations** — Code-first migration files with Up/Down and dry-run support
 - **Composite PKs** — First-class support for multi-column primary keys across all dialects
