@@ -422,12 +422,36 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 					rowsAffected, _ = res.RowsAffected()
 				} else {
 					sqlBatch := sqlStr + "; " + q.dialect.LastInsertIDQuery(meta.Table, meta.PK.Column)
-					var lastID int64
-					err = dq.executeQueryRow(ctx, sqlBatch, args).Scan(&lastID)
+					// NullInt64, not int64, and the difference is not
+					// cosmetic: the INSERT and SCOPE_IDENTITY() travel as ONE
+					// batch, so when the INSERT is rejected the server still
+					// returns a row for the SELECT — with NULL. Scanning that
+					// into a plain int64 fails with "converting NULL to int64
+					// is unsupported", and database/sql reports THAT conversion
+					// error instead of the driver's, which is only delivered
+					// once the scan itself succeeds. The engine's real message
+					// —the unique violation, the foreign key, the check— was
+					// being thrown away and replaced by a scan error that named
+					// no constraint and no table. Scanning a nullable makes the
+					// conversion succeed, so the driver's error surfaces and
+					// stays classifiable.
+					var lastID sql.NullInt64
+					// wrapDBError for the same reason scanReturning wraps the
+					// RETURNING path: without it the same duplicate insert
+					// yields ErrConstraintViolation on PostgreSQL and a bare
+					// driver error on SQL Server — one fact with two answers
+					// depending on the engine underneath.
+					err = wrapDBError(dq.executeQueryRow(ctx, sqlBatch, args).Scan(&lastID))
 					if err != nil {
 						return 0, err
 					}
-					setPKValue(elem, meta.PK, lastID)
+					if !lastID.Valid {
+						// No error and no identity: the batch reported success
+						// but the row is not there. Failing loudly beats
+						// returning a zero PK the caller would use as real.
+						return 0, fmt.Errorf("insert into %s reported success but SCOPE_IDENTITY() returned NULL", meta.Table)
+					}
+					setPKValue(elem, meta.PK, lastID.Int64)
 					rowsAffected = 1
 				}
 			} else {

@@ -256,6 +256,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("AuditLog", func(t *testing.T) {
 		testAuditLog(ctx, t, client)
 	})
+
+	t.Run("UniqueViolationClassifiable", func(t *testing.T) {
+		testUniqueViolationClassifiable(ctx, t, client)
+	})
 }
 
 func testCaching(ctx context.Context, t *testing.T, client *quark.Client) {
