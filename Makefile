@@ -23,10 +23,11 @@ lint: ## go vet + gofmt (lo que corre la lane Lint de CI)
 	go vet ./...
 	@fmt=$$(gofmt -l .); if [ -n "$$fmt" ]; then echo "gofmt:"; echo "$$fmt"; exit 1; fi
 
-docs-guards: ## Los tres guards de docs de CI (voz de producto, lint, roadmap)
+docs-guards: ## Los guards de docs de CI (voz de producto, deriva, archivo, marcadores, lint)
 	bash scripts/ci/check_docs_product_voice.sh
 	bash scripts/ci/check_internal_docs_drift.sh
 	bash scripts/ci/check_docs_archive_freshness.sh
+	bash scripts/ci/check_versioned_docs_markers.sh
 	bash scripts/lint-docs.sh
 
 test: ## Tests del módulo raíz (los de Redis se saltan sin QUARK_TEST_REDIS_ADDR)
