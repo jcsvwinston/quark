@@ -121,6 +121,45 @@ if errors.Is(err, quark.ErrConstraintViolation) {
 }
 ```
 
+## Classifying a failure
+
+`ErrConstraintViolation` tells you the database rejected the write, but not
+which rule it broke — unique, foreign key, not-null and check violations all
+arrive as the same sentinel. When the answer changes what you do, two
+predicates give you the specific one:
+
+```go
+if err := quark.For[User](ctx, client).Create(u); err != nil {
+    if quark.IsUniqueViolation(err) {
+        http.Error(w, "email already registered", http.StatusConflict)
+        return
+    }
+    return err
+}
+```
+
+| Predicate | True when | Typical response |
+| --- | --- | --- |
+| `quark.IsUniqueViolation(err)` | A unique or primary-key constraint rejected the row | `409 Conflict`, naming the field |
+| `quark.IsDeadlock(err)` | The engine picked this transaction as a deadlock victim | Re-run the transaction |
+
+Both work on every supported engine and on both PostgreSQL drivers, and both
+match on the **error code the driver reports** rather than on the text of the
+message. That distinction matters more than it looks: a database server
+configured for a non-English locale translates its messages, so any check
+written against English wording stops recognising the very errors it was
+meant to catch. Code matching is unaffected by the server's locale and by
+wording changes between driver releases.
+
+Both also walk the wrapping chain, so an error you have wrapped yourself
+still classifies.
+
+`IsDeadlock` is for callers driving their own retry loop. If you build the
+client with [`WithDeadlockRetry`](/docs/reference/api/client), quark already
+re-runs the victim transaction for you and you will not see the error at all.
+SQLite never reports a deadlock — it serialises writes — so the predicate is
+always false there.
+
 ## Error Wrapping
 
 Quark wraps database errors with context:
@@ -130,9 +169,11 @@ Quark wraps database errors with context:
 if errors.Is(err, context.DeadlineExceeded) {
     // Detected as ErrTimeout
 }
-
-// Constraint violations detected across dialects
-// PostgreSQL: "unique constraint", "foreign key constraint"
-// MySQL: "duplicate entry", "foreign key constraint fails"
-// SQLite: "unique constraint failed"
 ```
+
+Unique violations reach `ErrConstraintViolation` through the driver's error
+code, the same route `IsUniqueViolation` uses. The remaining constraint kinds
+— foreign key, not-null, check — are still recognised by matching the message
+text each engine produces, which means they can go unclassified on a server
+running in another language. Prefer `IsUniqueViolation` where the distinction
+matters; the sentinel remains the broad "the database rejected this" signal.

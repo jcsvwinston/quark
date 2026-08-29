@@ -41,10 +41,11 @@ Install exactly the driver you need:
 SQLite is the easiest place to start — there's no external service to run. Three
 engines have a wrinkle worth knowing before you pick a driver:
 
-- **PostgreSQL.** `lib/pq` covers everything except the inbound `LISTEN/NOTIFY`
-  listener ([Events](../advanced/events)). That one feature needs
-  `github.com/jackc/pgx/v5/stdlib` and `quark.New("pgx", dsn)`. If you expect to
-  use it, start with pgx and skip the migration later.
+- **PostgreSQL.** Either `lib/pq` or `github.com/jackc/pgx/v5/stdlib` works, and
+  both report errors the same way to Quark. The one feature `lib/pq` cannot
+  serve is the inbound `LISTEN/NOTIFY` listener
+  ([Events](../advanced/events)), which needs pgx and `quark.New("pgx", dsn)`.
+  If you expect to use it, start with pgx and skip the migration later.
 - **MySQL.** Add `parseTime=true` to the DSN when you scan `time.Time` fields,
   or the driver hands back raw bytes.
 - **MariaDB.** It speaks the MySQL wire protocol through the same `"mysql"`

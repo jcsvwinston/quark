@@ -2292,6 +2292,16 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "IsDeadlock",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "IsUniqueViolation",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "JSON",
       "kind": "type"
     },
