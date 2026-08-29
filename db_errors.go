@@ -12,16 +12,42 @@ import (
 	"strings"
 
 	gomysql "github.com/go-sql-driver/mysql"
-	"github.com/jackc/pgx/v5/pgconn"
 	mssql "github.com/microsoft/go-mssqldb"
 	goora "github.com/sijms/go-ora/v2/network"
 	moderncsqlite "modernc.org/sqlite"
 )
 
+// pgSQLState extracts the five-character SQLSTATE from a PostgreSQL driver
+// error, reporting whether err came from PostgreSQL at all.
+//
+// It matches on the `SQLState() string` METHOD rather than on a concrete
+// driver type, because quark supports more than one PostgreSQL driver:
+// `dialect.go` accepts the driver names "postgres", "pgx", "pgx/v5" and "pq",
+// and the installation guide prescribes `lib/pq` while the events listener
+// requires `pgx/v5`. Both expose the code through this method, as do any
+// future drivers that follow the same convention, so one assertion covers
+// them all — and it costs no import, which is why the pgconn dependency this
+// file used to carry is gone.
+//
+// Matching a concrete type instead is the bug this helper exists to prevent:
+// classifying only `*pgconn.PgError` silently skipped every lib/pq error, so
+// unique violations, deadlocks and dropped connections went unrecognised
+// under the driver the docs recommend. errors.As walks the Unwrap chain, so
+// wrapped driver errors classify identically.
+func pgSQLState(err error) (string, bool) {
+	type sqlStater interface{ SQLState() string }
+	var sse sqlStater
+	if errors.As(err, &sse) {
+		return sse.SQLState(), true
+	}
+	return "", false
+}
+
 // isUniqueViolation reports whether err is a unique-key (or primary-key)
 // constraint violation from any of the supported drivers. It uses errors.As
-// against driver-specific error types and code constants — no string matching
-// — so it stays correct across driver versions and locales.
+// against driver error codes — through pgSQLState for PostgreSQL, and against
+// the driver-specific error type for the rest — and never against message
+// text, so it stays correct across driver versions and locales.
 //
 // Used by linkM2M to keep duplicate-link inserts idempotent while still
 // propagating any other error (FK violation, missing table, broken
@@ -31,10 +57,9 @@ func isUniqueViolation(err error) bool {
 		return false
 	}
 
-	// PostgreSQL (pgx). SQLSTATE 23505 = unique_violation.
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23505"
+	// PostgreSQL. SQLSTATE 23505 = unique_violation.
+	if state, ok := pgSQLState(err); ok {
+		return state == "23505"
 	}
 
 	// MySQL / MariaDB. 1062 = ER_DUP_ENTRY.
@@ -103,10 +128,9 @@ func isDeadlock(err error) bool {
 		return false
 	}
 
-	// PostgreSQL (pgx).
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "40P01"
+	// PostgreSQL.
+	if state, ok := pgSQLState(err); ok {
+		return state == "40P01"
 	}
 
 	// MySQL / MariaDB.
@@ -164,14 +188,13 @@ func isTransientConnErr(err error) bool {
 		return true
 	}
 
-	// PostgreSQL (pgx): SQLSTATE class 08 (connection exception) plus the
+	// PostgreSQL: SQLSTATE class 08 (connection exception) plus the
 	// shutdown / cannot-connect-now codes.
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		if strings.HasPrefix(pgErr.Code, "08") {
+	if state, ok := pgSQLState(err); ok {
+		if strings.HasPrefix(state, "08") {
 			return true
 		}
-		switch pgErr.Code {
+		switch state {
 		case "57P01", "57P02", "57P03": // admin_shutdown, crash_shutdown, cannot_connect_now
 			return true
 		}

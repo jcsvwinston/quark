@@ -6,7 +6,6 @@ package quark
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -92,17 +91,13 @@ func (l *pgMigrationLock) Release(ctx context.Context) error {
 // isPGLockTimeout maps the SQLSTATE `55P03` (lock_not_available) error
 // emitted by Postgres when `lock_timeout` fires before the advisory
 // lock can be taken. Both `lib/pq` and `pgx/v5/stdlib` expose the code
-// via a SQLState() method on their error types.
+// via a SQLState() method on their error types, which is what
+// pgSQLState asserts on — this function was the only PostgreSQL
+// classifier in the package that got that right, and the ones in
+// db_errors.go now share its helper rather than re-deriving it.
 func isPGLockTimeout(err error) bool {
-	if err == nil {
-		return false
-	}
-	type sqlStater interface{ SQLState() string }
-	var sse sqlStater
-	if errors.As(err, &sse) {
-		return sse.SQLState() == "55P03"
-	}
-	return false
+	state, ok := pgSQLState(err)
+	return ok && state == "55P03"
 }
 
 // --- MySQL / MariaDB ---------------------------------------------------------

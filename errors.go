@@ -131,6 +131,19 @@ func wrapDBError(err error) error {
 		return errors.Join(ErrTimeout, err)
 	}
 
+	// Driver-reported unique/PK violations are classified by error CODE
+	// before any message inspection below. The string matching that follows
+	// is locale-dependent — PostgreSQL, MySQL and Oracle all translate their
+	// messages when the server is configured for a non-English locale, and a
+	// translated message matches none of these substrings — so a code match
+	// is both more precise and the only one that holds outside an
+	// English-language server. The message patterns stay as the fallback for
+	// the constraint kinds not yet covered by code (foreign key, not null,
+	// check): removing them would narrow what ErrConstraintViolation catches.
+	if isUniqueViolation(err) {
+		return errors.Join(ErrConstraintViolation, err)
+	}
+
 	msg := strings.ToLower(err.Error())
 
 	// Timeout messages from various drivers
