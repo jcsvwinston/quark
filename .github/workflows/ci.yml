@@ -48,6 +48,13 @@ jobs:
         # decir que faltaba nada. Una minor sin snapshot ya no pasa.
         run: bash scripts/ci/check_docs_archive_freshness.sh
 
+      - name: check versioned docs markers
+        # Un snapshot cortado antes de que release-please suba el marcador
+        # congela la versión ANTERIOR y la publica como si fuera la suya: el
+        # archivo de 1.6.0 decía «Quark is v1.5.2». Sólo se ve desde fuera, y
+        # ningún otro guard lo mira porque la copia es coherente consigo misma.
+        run: bash scripts/ci/check_versioned_docs_markers.sh
+
       - name: check internal docs drift
         # La doc interna (docs/**) no tenía guard: aquí se comprueba que no
         # cite ficheros que ya no existen — enlaces relativos y rutas del
