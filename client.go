@@ -473,6 +473,17 @@ func For[T any](ctx context.Context, provider ClientProvider) *Query[T] {
 					ErrUnsupportedFeature, client.dialect.Name())
 				return q
 			}
+			// tenantID participates ONLY in the cache key here.
+			// tenantCol stays empty on purpose, so every SQL-shaping
+			// consumer (WHERE injection, soft-delete scoping, create
+			// auto-fill) stays inert — the policy remains the sole
+			// filter. Without this, generateCacheKey hashed the same
+			// bytes for every tenant over the ONE shared cacheStore of
+			// the base client, and a .Cache() fill by tenant A was
+			// served verbatim to tenant B: the engine's RLS protected
+			// the database, nothing protected the cache
+			// (TestRowLevelSecurityNativeCacheIsTenantScoped).
+			q.tenantID = tenantID
 			q.exec = newNativeRLSExecutor(client, tenantID, router.config.defaultNativeRLSVar())
 		}
 	}
