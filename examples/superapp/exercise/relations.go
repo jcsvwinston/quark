@@ -96,5 +96,24 @@ var RELATIONS = Exerciser{Name: "relations", Fn: func(ctx context.Context, clien
 		return fmt.Errorf("m2m Tags=%d, esperaba 2", len(mp.Tags))
 	}
 
+	// --- WithoutAssociations (AQ-03): update del padre precargado SIN
+	// re-grabar los hijos — la salida del trap de lost-updates. mp lleva
+	// las Tags cargadas por el Preload de arriba; el update sólo puede
+	// tocar la fila de projects. ---
+	mp.Name = "m2m-proj-renamed"
+	if _, err := quark.For[domain.Project](rec.Mark(ctx, QM("WithoutAssociations")), client).WithoutAssociations().Update(&mp); err != nil {
+		return fmt.Errorf("WithoutAssociations update: %w", err)
+	}
+	renamed, err := quark.For[domain.Project](ctx, client).Preload("Tags").Where("id", "=", mProj.ID).First()
+	if err != nil {
+		return fmt.Errorf("re-read tras WithoutAssociations: %w", err)
+	}
+	if renamed.Name != "m2m-proj-renamed" {
+		return fmt.Errorf("WithoutAssociations no escribió la fila del padre: %+v", renamed)
+	}
+	if len(renamed.Tags) != 2 {
+		return fmt.Errorf("WithoutAssociations alteró las asociaciones: Tags=%d", len(renamed.Tags))
+	}
+
 	return nil
 }}

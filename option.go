@@ -158,6 +158,33 @@ func (l Limits) normalized() (Limits, bool) {
 	return l, filled
 }
 
+// WithStrictColumns enables the opt-in column-membership check (AQ-02):
+// a plain column reference in Where / WhereIn / WhereBetween / OrderBy /
+// GroupBy / Select / Having and the aggregates (Sum / Avg / Min / Max)
+// must be a column the model's metadata knows, or the query fails with
+// ErrInvalidQuery naming the unknown column and listing the valid ones.
+//
+// Why opt in: SQLGuard's charset validation stops injection, but a typo'd
+// column name passes it — and on SQLite the double-quoted unknown column
+// degrades to a string literal, so `Where("agee", ">", 1)` silently
+// matches every row with err == nil; on other engines it fails only at
+// runtime with the engine's own error. Strict columns turns both into a
+// deterministic, actionable failure at query build time.
+//
+// Escape hatches, by design: queries with JOINs are exempt (they
+// legitimately reference other tables' columns), raw fragments
+// (WhereExpr / WhereJSON / HavingAggregate / RawQuery) are never checked,
+// and ORDER BY / GROUP BY may reference a SelectExpr alias. Off by
+// default for backward compatibility; candidate to become the default in
+// v2.
+//
+//	client, _ := quark.New("pgx", dsn, quark.WithStrictColumns())
+func WithStrictColumns() Option {
+	return func(c *Client) {
+		c.strictColumns = true
+	}
+}
+
 // WithCacheStore sets the caching backend for the client.
 func WithCacheStore(s CacheStore) Option {
 	return func(c *Client) {
@@ -398,7 +425,7 @@ type QueryEvent struct {
 	Rows      int64
 	Error     error
 	Table     string
-	Operation string // "SELECT", "INSERT", "UPDATE", "DELETE"
+	Operation string // "SELECT", "INSERT", "UPDATE", "DELETE", "PRELOAD" (eager-loading batch), "QUERY_ROW", "SELECT (stream)", "RAW_QUERY", "RAW_EXEC"
 }
 
 // ExecFunc is the signature for SQL execution functions used by middleware.

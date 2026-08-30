@@ -73,6 +73,13 @@ var BUILDER = Exerciser{Name: "builder", Fn: func(ctx context.Context, client *q
 		return fmt.Errorf("WhereIn count=%d err=%v, esperaba 3", c, err)
 	}
 
+	// --- WhereInOf (AQ-07): la forma tipada — mismo resultado sin el bucle
+	// de conversión a []any. ---
+	rec.Note(QF("WhereInOf"))
+	if c, err := quark.WhereInOf(quark.For[domain.Task](ctx, client).Where("project_id", "=", proj.ID), "priority", []int{1, 2, 3}).Count(); err != nil || c != 3 {
+		return fmt.Errorf("WhereInOf count=%d err=%v, esperaba 3", c, err)
+	}
+
 	// --- Or: priority=1 OR priority=5 dentro del scope (assert laxo por la
 	// precedencia SQL de OR; basta con que corra y devuelva >=1) ---
 	if c, err := scope().Where("priority", "=", 5).Or(func(q *quark.Query[domain.Task]) *quark.Query[domain.Task] {

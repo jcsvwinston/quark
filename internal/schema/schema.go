@@ -14,7 +14,7 @@ import (
 
 // RelationMeta holds metadata about a model relation.
 type RelationMeta struct {
-	Type           string       // "has_one", "has_many", "belongs_to", "m2m", "polymorphic"
+	Type           string       // "has_one", "has_many", "belongs_to", "many_to_many", "polymorphic" (the tag alias rel:"m2m" is normalized to "many_to_many" at parse time)
 	Field          string       // struct field name
 	JoinCol        string       // foreign key column (for belongs_to, has_one, has_many)
 	JoinTable      string       // join table name (for m2m)
@@ -254,6 +254,15 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 
 		// Parse relations
 		relTag := field.Tag.Get("rel")
+		// Normalize the short alias ONCE, here, so every subsystem sees the
+		// same relation type. Before this, rel:"m2m" was accepted by the
+		// eager-loading path (which matched both spellings) but ignored by
+		// Migrate and the recursive save (which matched only the long form):
+		// the join table was never created and links were never written —
+		// a silent divergence between subsystems over the same tag (AQ-14).
+		if relTag == "m2m" {
+			relTag = "many_to_many"
+		}
 		if relTag != "" {
 			joinCol := field.Tag.Get("join")
 			isSlice := field.Type.Kind() == reflect.Slice

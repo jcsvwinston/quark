@@ -301,8 +301,14 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		}
 	}
 
-	// 1. Save BelongsTo associations FIRST (so we have their PKs)
-	for _, rel := range meta.Relations {
+	// 1. Save BelongsTo associations FIRST (so we have their PKs).
+	// Skipped entirely under WithoutAssociations (AQ-03): the caller asked
+	// for a row-only write, so related records are never touched.
+	belongsToRels := meta.Relations
+	if q.skipAssociations {
+		belongsToRels = nil
+	}
+	for _, rel := range belongsToRels {
 		if rel.Type == "belongs_to" {
 			field := elem.FieldByName(rel.Field)
 			if !field.IsZero() {
@@ -480,9 +486,12 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		dq.invalidateInsert(ctx, getPKValue(elem, meta.PK))
 	}
 
-	// 4. Save HasOne/HasMany associations AFTER
-	if err := dq.saveAssociations(elem, actualUpdate); err != nil {
-		return rowsAffected, err
+	// 4. Save HasOne/HasMany associations AFTER — unless the caller opted
+	// out with WithoutAssociations (AQ-03).
+	if !q.skipAssociations {
+		if err := dq.saveAssociations(elem, actualUpdate); err != nil {
+			return rowsAffected, err
+		}
 	}
 
 	return rowsAffected, nil
@@ -685,10 +694,41 @@ func (q *BaseQuery) scanReturning(row *sql.Row, v reflect.Value) error {
 // "absent" case and do not warn.
 //
 // Any Where() conditions are merged into the WHERE clause alongside the PK.
-// Returns the number of rows affected. Recursively saves associations.
+// Returns the number of rows affected.
+//
+// CAUTION — recursive association save (AQ-03): Update recursively saves
+// every loaded association, exactly like Create. An entity read with
+// Find + Preload carries its children in memory, so updating one scalar
+// field ALSO re-writes every loaded child from that in-memory snapshot —
+// silently overwriting concurrent changes to those children, and without
+// the extra writes showing in the returned rows-affected count. When
+// associations are about to be written, Update logs a WARN naming them.
+// Call [Query.WithoutAssociations] to write only the entity's own row.
 func (q *Query[T]) Update(entity *T) (int64, error) {
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+	}
+
+	// AQ-03: make the recursive save visible before it happens. A loaded
+	// (non-zero) relation field is about to be re-written from the
+	// in-memory snapshot; name the associations and the opt-out.
+	if !q.skipAssociations && q.meta != nil && len(q.meta.Relations) > 0 {
+		v := reflect.ValueOf(entity).Elem()
+		var loaded []string
+		for name, rel := range q.meta.Relations {
+			f := v.FieldByName(rel.Field)
+			if f.IsValid() && !f.IsZero() {
+				loaded = append(loaded, name)
+			}
+		}
+		if len(loaded) > 0 {
+			sort.Strings(loaded)
+			q.client.logger.Warn("Update will recursively save the loaded associations from their in-memory snapshot — concurrent changes to those rows will be overwritten. Use WithoutAssociations() to write only this entity's row.",
+				"event", "quark.update.recursive_association_save",
+				"table", q.table,
+				"associations", strings.Join(loaded, ", "),
+			)
+		}
 	}
 
 	if hook, ok := any(entity).(BeforeUpdateHook); ok {
@@ -2133,6 +2173,19 @@ func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns [
 // Example:
 //
 //	affected, err := quark.For[User](ctx, client).DeleteBatch([]any{1, 2, 3})
+//
+// DeleteBatchOf is the typed-slice form of [Query.DeleteBatch] (AQ-07): it
+// accepts the ids as they usually arrive — []int64 from a previous query,
+// []string for natural keys — and performs the []any conversion once,
+// internally. Package-level function because Go methods cannot introduce a
+// second type parameter.
+//
+//	ids := []int64{1, 2, 3}
+//	n, err := quark.DeleteBatchOf(quark.For[User](ctx, client), ids)
+func DeleteBatchOf[T any, V any](q *Query[T], ids []V) (int64, error) {
+	return q.DeleteBatch(anySlice(ids))
+}
+
 func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)

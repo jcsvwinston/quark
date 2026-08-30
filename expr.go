@@ -28,9 +28,13 @@ type Expr interface {
 // --- Leaves ---
 
 // Col references a column by name. The name is validated through
-// SQLGuard.ValidateIdentifier — the AST inherits the same identifier
-// safety the rest of the builder enforces. The wildcard "*" is accepted
-// as-is for use inside aggregate calls (e.g. Func("COUNT", Col("*"))).
+// SQLGuard.ValidateQualifiedIdentifier — the AST inherits the same
+// identifier safety the rest of the builder enforces, and additionally
+// accepts a one-level qualified form ("orders.total") with each segment
+// validated and quoted separately, so a JOIN query can disambiguate
+// shared column names through the AST (AQ-01). The wildcard "*" is
+// accepted as-is for use inside aggregate calls (e.g. Func("COUNT",
+// Col("*"))).
 func Col(name string) Expr { return colExpr{name: name} }
 
 type colExpr struct{ name string }
@@ -39,10 +43,11 @@ func (c colExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	if c.name == "*" {
 		return "*", nil, nil
 	}
-	if err := g.ValidateIdentifier(c.name); err != nil {
+	quoted, err := g.QuoteQualifiedIdentifier(d, c.name)
+	if err != nil {
 		return "", nil, err
 	}
-	return d.Quote(c.name), nil, nil
+	return quoted, nil, nil
 }
 
 // Lit binds a Go value as a SQL parameter. The value never reaches the

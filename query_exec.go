@@ -894,10 +894,16 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 		if hasCols {
 			quoted := make([]string, len(q.selectCols))
 			for i, col := range q.selectCols {
-				if err := q.guard.ValidateIdentifier(col); err != nil {
+				// Qualified form under JOINs (AQ-01) + opt-in
+				// strict-columns membership (AQ-02).
+				qc, err := q.quoteColumn(col)
+				if err != nil {
 					return "", nil, err
 				}
-				quoted[i] = q.dialect.Quote(col)
+				if err := q.checkColumnKnown(col, false); err != nil {
+					return "", nil, err
+				}
+				quoted[i] = qc
 			}
 			sqlBuf.WriteString(strings.Join(quoted, ", "))
 		}
@@ -1019,10 +1025,16 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	if len(q.groupBy) > 0 {
 		quotedGrp := make([]string, len(q.groupBy))
 		for i, col := range q.groupBy {
-			if err := q.guard.ValidateIdentifier(col); err != nil {
+			// Qualified form under JOINs (AQ-01) + opt-in strict-columns
+			// membership (AQ-02); aliases from SelectExpr are groupable.
+			qc, err := q.quoteColumn(col)
+			if err != nil {
 				return "", nil, err
 			}
-			quotedGrp[i] = q.dialect.Quote(col)
+			if err := q.checkColumnKnown(col, true); err != nil {
+				return "", nil, err
+			}
+			quotedGrp[i] = qc
 		}
 		sqlBuf.WriteString(" GROUP BY ")
 		sqlBuf.WriteString(strings.Join(quotedGrp, ", "))
@@ -1077,10 +1089,16 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 			if i > 0 {
 				sqlBuf.WriteString(", ")
 			}
-			if err := q.guard.ValidateIdentifier(o.column); err != nil {
+			// Qualified form under JOINs (AQ-01) + opt-in strict-columns
+			// membership (AQ-02); aliases from SelectExpr are orderable.
+			quotedOrd, err := q.quoteColumn(o.column)
+			if err != nil {
 				return "", nil, err
 			}
-			sqlBuf.WriteString(q.dialect.Quote(o.column))
+			if err := q.checkColumnKnown(o.column, true); err != nil {
+				return "", nil, err
+			}
+			sqlBuf.WriteString(quotedOrd)
 			if o.desc {
 				sqlBuf.WriteString(" DESC")
 			} else {
@@ -1201,6 +1219,61 @@ func substitutePathMarkers(fragment string, expectedMarkers int, dialect Dialect
 	return b.String(), count, nil
 }
 
+// quoteColumn validates and quotes a column reference for the SELECT /
+// WHERE / GROUP BY / ORDER BY surfaces. When the query carries JOINs, a
+// one-level "table.column" qualification is accepted and each segment is
+// validated and quoted separately — without it, no column whose name both
+// joined tables share (the PK included) could be filtered at all, because
+// the unqualified name is ambiguous for the engine and the guard rejected
+// the dotted form (AQ-01). Without JOINs the historical single-identifier
+// rule stands, so the guard loses no strictness on the common case.
+func (q *BaseQuery) quoteColumn(col string) (string, error) {
+	if len(q.joins) > 0 {
+		return q.guard.QuoteQualifiedIdentifier(q.dialect, col)
+	}
+	if err := q.guard.ValidateIdentifier(col); err != nil {
+		return "", err
+	}
+	return q.dialect.Quote(col), nil
+}
+
+// checkColumnKnown enforces the opt-in strict-columns mode (AQ-02, see
+// [WithStrictColumns]): when enabled, a plain column reference must be a
+// column the model's metadata knows, so a typo surfaces as ErrInvalidQuery
+// naming the valid columns instead of silently matching nothing (SQLite's
+// double-quoted-string fallback degrades an unknown "column" to a string
+// literal and returns wrong rows with err == nil).
+//
+// Deliberate escape hatches, all documented on the option: queries with
+// JOINs are exempt (they legitimately reference other tables' columns),
+// raw fragments (WhereExpr / WhereJSON / HavingAggregate) never reach this
+// check, and allowAliases lets ORDER BY / GROUP BY reference a SelectExpr
+// alias. A model with no db-tagged fields has nothing to check against.
+func (q *BaseQuery) checkColumnKnown(col string, allowAliases bool) error {
+	if q.client == nil || !q.client.strictColumns || q.meta == nil || len(q.meta.FieldByCol) == 0 {
+		return nil
+	}
+	if len(q.joins) > 0 {
+		return nil
+	}
+	if _, ok := q.meta.FieldByCol[strings.ToLower(col)]; ok {
+		return nil
+	}
+	if allowAliases {
+		for _, e := range q.selectExprs {
+			if strings.EqualFold(e.alias, col) {
+				return nil
+			}
+		}
+	}
+	known := make([]string, len(q.meta.Fields))
+	for i := range q.meta.Fields {
+		known[i] = q.meta.Fields[i].Column
+	}
+	return fmt.Errorf("%w: unknown column %q for table %s (known columns: %s) — strict-columns mode is on (WithStrictColumns); use a known column, or WhereExpr/joins for anything outside the model",
+		ErrInvalidQuery, col, q.table, strings.Join(known, ", "))
+}
+
 // buildWhereClause recursively builds WHERE SQL from conditions,
 // handling AND/OR logic and grouped sub-conditions.
 func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []any, error) {
@@ -1237,11 +1310,20 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 			continue
 		}
 
-		// Normal condition
+		// Normal condition. quoteColumn accepts a one-level qualified
+		// identifier when the query has JOINs (AQ-01); checkColumnKnown is
+		// the opt-in strict-columns membership check (AQ-02) — a no-op
+		// unless WithStrictColumns is set on the client.
+		var quotedCol string
 		if !cond.isRaw {
-			if err := q.guard.ValidateIdentifier(cond.column); err != nil {
+			qc, err := q.quoteColumn(cond.column)
+			if err != nil {
 				return "", nil, err
 			}
+			if err := q.checkColumnKnown(cond.column, false); err != nil {
+				return "", nil, err
+			}
+			quotedCol = qc
 		}
 		// Raw expressions with empty operator are written as-is plus any
 		// '?' markers in the fragment substituted for dialect placeholders.
@@ -1282,7 +1364,7 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 			args = append(args, cond.extraArgs...)
 			argIndex += n
 		} else {
-			condSQL.WriteString(q.dialect.Quote(cond.column))
+			condSQL.WriteString(quotedCol)
 		}
 		condSQL.WriteString(" ")
 		condSQL.WriteString(cond.operator)
@@ -1519,6 +1601,12 @@ func (q *Query[T]) aggregate(fn, column string) (float64, error) {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
 	if err := q.guard.ValidateIdentifier(column); err != nil {
+		return 0, err
+	}
+	// Strict-columns (AQ-02): an aggregate over a typo'd column is the same
+	// silent-wrong-result class as a typo'd WHERE (SQLite degrades the quoted
+	// unknown to a string literal; SUM('agee') is 0 with err == nil).
+	if err := q.checkColumnKnown(column, false); err != nil {
 		return 0, err
 	}
 

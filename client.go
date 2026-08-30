@@ -29,11 +29,25 @@ type Client struct {
 	driverName string
 	dataSource string
 
+	// borrowedDB marks a *sql.DB handed in by the caller via [NewWithDB]:
+	// quark did not open it, so [Client.Close] (and every failed-construction
+	// path) leaves it open — its lifecycle belongs to the host that owns the
+	// pool. Replica pools quark opens itself are closed regardless.
+	borrowedDB bool
+
 	// strictReads is the opt-in enforcement level for unbounded reads and
 	// N+1 detection (#247, set by WithStrictReads). The zero value
 	// StrictReadsOff keeps the historical behaviour; the read-path gates
 	// check it with a single integer comparison.
 	strictReads StrictReadsMode
+
+	// strictColumns is the opt-in membership check for plain column
+	// references (AQ-02, set by WithStrictColumns): Where / OrderBy /
+	// GroupBy / Select / aggregate columns must be columns the model's
+	// metadata knows, so a typo fails with ErrInvalidQuery instead of
+	// silently matching nothing. Off (the zero value) keeps the
+	// historical charset-only validation.
+	strictColumns bool
 
 	// Read replicas (F6-5, ADR-0015). replicaDSNs is set by WithReplicas;
 	// New() opens one read-only *sql.DB per DSN into replicas. Reads route
@@ -228,9 +242,60 @@ func (c *Client) GetClient(ctx context.Context) (*Client, error) {
 //
 // The dialect is auto-detected from the driver name. You can override it with WithDialect().
 func New(driverName, dataSource string, opts ...any) (*Client, error) {
-	// The variadic is ...any so PoolOption and Option both fit, which used
-	// to mean anything else was silently discarded (DX audit A4). Reject
-	// unknown values up front, naming each one.
+	if err := validateClientOpts("quark.New", opts); err != nil {
+		return nil, err
+	}
+
+	// Open database connection
+	db, err := sql.Open(driverName, dataSource)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrConnection, err)
+	}
+
+	return newClient(db, driverName, dataSource, false, opts)
+}
+
+// NewWithDB creates a quark Client on top of an EXISTING *sql.DB, reusing
+// the caller's connection pool instead of opening a second one. This is the
+// seam for host frameworks that already own a pool (e.g. Nucleus): the host
+// keeps managing the pool's lifecycle and sizing, and quark speaks through
+// it.
+//
+// driverName is still required — it drives dialect auto-detection exactly
+// as in [New] (override with WithDialect for a custom driver). The handle
+// is pinged before the client is returned, so a dead pool fails fast with
+// ErrConnection.
+//
+// Ownership rules, on purpose:
+//
+//   - [Client.Close] does NOT close a borrowed *sql.DB — the owner opened
+//     it, the owner closes it. Replica pools opened by quark via
+//     WithReplicas ARE closed, since quark opened those.
+//
+//   - PoolOption values (WithMaxOpenConns, …) are applied to the SHARED
+//     handle: passing one is an explicit request to tune the host's pool.
+//     Omit them to leave the host's pool configuration untouched.
+//
+//   - [Client.WithOptions] derives the new client over the same shared
+//     handle.
+//
+//     db, _ := sql.Open("pgx", dsn) // the host's pool
+//     client, err := quark.NewWithDB("pgx", db)
+func NewWithDB(driverName string, db *sql.DB, opts ...any) (*Client, error) {
+	if db == nil {
+		return nil, fmt.Errorf("%w: quark.NewWithDB requires a non-nil *sql.DB", ErrConnection)
+	}
+	if err := validateClientOpts("quark.NewWithDB", opts); err != nil {
+		return nil, err
+	}
+	return newClient(db, driverName, "", true, opts)
+}
+
+// validateClientOpts rejects values that are neither PoolOption nor Option.
+// The variadic is ...any so both fit, which used to mean anything else was
+// silently discarded (DX audit A4). Reject unknown values up front, naming
+// each one.
+func validateClientOpts(caller string, opts []any) error {
 	var badOpts []string
 	for i, opt := range opts {
 		switch opt.(type) {
@@ -240,14 +305,22 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 		}
 	}
 	if len(badOpts) > 0 {
-		return nil, fmt.Errorf("quark.New: invalid option(s) — want quark PoolOption or Option values, e.g. quark.WithMaxOpenConns(25), not the constructor itself or arbitrary values: %s",
-			strings.Join(badOpts, "; "))
+		return fmt.Errorf("%s: invalid option(s) — want quark PoolOption or Option values, e.g. quark.WithMaxOpenConns(25), not the constructor itself or arbitrary values: %s",
+			caller, strings.Join(badOpts, "; "))
 	}
+	return nil
+}
 
-	// Open database connection
-	db, err := sql.Open(driverName, dataSource)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrConnection, err)
+// newClient is the shared construction core behind [New] and [NewWithDB].
+// borrowed marks a caller-owned *sql.DB: construction failures and
+// [Client.Close] must not close a handle quark did not open.
+func newClient(db *sql.DB, driverName, dataSource string, borrowed bool, opts []any) (*Client, error) {
+	// closeDB releases the handle on a failed construction — never for a
+	// borrowed pool, whose lifecycle belongs to the caller.
+	closeDB := func() {
+		if !borrowed {
+			_ = db.Close()
+		}
 	}
 
 	// Apply pool options before creating the client
@@ -273,6 +346,7 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 		limits:     DefaultLimits(),
 		driverName: driverName,
 		dataSource: dataSource,
+		borrowedDB: borrowed,
 		// Cache stampede defaults (F4-5, ADR-0011). The wrapper is
 		// installed below if WithCacheStore is configured. Options can
 		// override these before the wrapper is built.
@@ -316,7 +390,7 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 	// A5: no auto-detected dialect and no WithDialect from the options —
 	// fail construction instead of guessing an engine.
 	if c.dialect == nil {
-		_ = db.Close()
+		closeDB()
 		return nil, fmt.Errorf("%w: cannot auto-detect a dialect for driver %q — pass quark.WithDialect(...) (or RegisterDialect) to use this driver", ErrDialectNotSupported, driverName)
 	}
 
@@ -572,8 +646,15 @@ func (c *Client) Raw() *sql.DB {
 // Close closes the underlying database connection and any read-replica
 // pools (F6-5). The primary's error is returned; replica close errors are
 // joined so none is silently dropped.
+//
+// For a client built with [NewWithDB] the primary *sql.DB is BORROWED:
+// Close leaves it open (its owner closes it) and only releases the replica
+// pools quark itself opened.
 func (c *Client) Close() error {
-	err := c.db.Close()
+	var err error
+	if !c.borrowedDB {
+		err = c.db.Close()
+	}
 	for _, r := range c.replicas {
 		if cerr := r.Close(); cerr != nil {
 			err = errors.Join(err, cerr)
@@ -589,7 +670,14 @@ func (c *Client) Dialect() Dialect {
 
 // WithOptions creates a new client with the same database connection but different options.
 // This is useful for tests that need to create clients with different configurations.
+//
+// A client built with [NewWithDB] derives the new client over the SAME
+// shared *sql.DB (there is no DSN to reopen from); a client built with
+// [New] re-opens its own pool from the stored DSN, as before.
 func (c *Client) WithOptions(opts ...any) (*Client, error) {
+	if c.borrowedDB {
+		return NewWithDB(c.driverName, c.db, opts...)
+	}
 	return New(c.driverName, c.dataSource, opts...)
 }
 

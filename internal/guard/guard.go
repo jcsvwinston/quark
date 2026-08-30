@@ -107,6 +107,45 @@ func (g *SQLGuard) ValidateIdentifier(name string) error {
 	return nil
 }
 
+// ValidateQualifiedIdentifier accepts a plain identifier ("total") or a
+// one-level qualified one ("orders.total"), validating each dot-separated
+// segment with the exact rules of ValidateIdentifier. At most one qualifier
+// is allowed — "a.b.c" is rejected — and both segments must independently
+// pass the charset, length, and reserved-keyword checks, so the dotted form
+// widens what a column reference can NAME without widening what it can
+// CONTAIN. Callers gate acceptance of the qualified form themselves (the
+// query builder only allows it when the query has JOINs).
+func (g *SQLGuard) ValidateQualifiedIdentifier(name string) error {
+	dot := strings.IndexByte(name, '.')
+	if dot < 0 {
+		return g.ValidateIdentifier(name)
+	}
+	table, column := name[:dot], name[dot+1:]
+	if strings.IndexByte(column, '.') >= 0 {
+		return fmt.Errorf("%w: identifier %q may carry at most one qualifier (table.column)",
+			ErrInvalidIdentifier, name)
+	}
+	if err := g.ValidateIdentifier(table); err != nil {
+		return err
+	}
+	return g.ValidateIdentifier(column)
+}
+
+// QuoteQualifiedIdentifier validates a possibly-qualified identifier and
+// quotes each segment separately with the dialect's Quoter:
+// "orders.total" → `"orders"."total"`. Quoting the segments (never the
+// whole string) is what keeps the dotted form injection-safe — the dot is
+// structural, everything else goes through Quote.
+func (g *SQLGuard) QuoteQualifiedIdentifier(q Quoter, name string) (string, error) {
+	if err := g.ValidateQualifiedIdentifier(name); err != nil {
+		return "", err
+	}
+	if dot := strings.IndexByte(name, '.'); dot >= 0 {
+		return q.Quote(name[:dot]) + "." + q.Quote(name[dot+1:]), nil
+	}
+	return q.Quote(name), nil
+}
+
 // ValidateIdentifiers checks multiple identifiers at once.
 func (g *SQLGuard) ValidateIdentifiers(names ...string) error {
 	for _, name := range names {

@@ -400,6 +400,17 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 	if n, err := quark.For[domain.Account](rec.Mark(ctx, QM("DeleteBatch")), client).DeleteBatch([]any{ub[0].ID, ub[1].ID}); err != nil || n != 2 {
 		return fmt.Errorf("DeleteBatch: n=%d err=%v", n, err)
 	}
+	// DeleteBatchOf (AQ-07): la forma tipada sobre ids []int64 — una fila
+	// extra sembrada ex profeso (rol member para no tocar el count de
+	// viewers que asierta DeleteBy más abajo).
+	typedExtra := &domain.Account{Email: mail(10), Name: "badv-typed", Role: "member", Active: true}
+	if err := quark.For[domain.Account](ctx, client).Create(typedExtra); err != nil {
+		return fmt.Errorf("seed DeleteBatchOf: %w", err)
+	}
+	rec.Note(QF("DeleteBatchOf"))
+	if n, err := quark.DeleteBatchOf(quark.For[domain.Account](ctx, client), []int64{typedExtra.ID}); err != nil || n != 1 {
+		return fmt.Errorf("DeleteBatchOf: n=%d err=%v", n, err)
+	}
 	if n, err := scopedAcc(rec.Mark(ctx, QM("DeleteBy"))).Where("role", "=", "viewer").DeleteBy(); err != nil || n != 1 {
 		return fmt.Errorf("DeleteBy: n=%d err=%v", n, err)
 	}

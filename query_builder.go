@@ -76,19 +76,24 @@ type BaseQuery struct {
 	// when no explicit Limit() is present. No effect without
 	// WithStrictReads.
 	allowUnbounded bool
-	unscoped       bool   // if true, soft-delete filter is dropped (WithTrashed semantics)
-	onlyTrashed    bool   // if true, the soft-delete filter is inverted to IS NOT NULL
-	tenantID       string // for RowLevelSecurityClient isolation
-	tenantCol      string // column name for tenant isolation
-	cache          CacheConfig
-	groupBy        []string          // GROUP BY columns
-	having         []condition       // HAVING conditions
-	distinct       bool              // SELECT DISTINCT
-	lock           LockOptions       // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
-	ctes           []cteEntry        // common table expressions (WITH ...) prepended to the SELECT
-	selectExprs    []selectExprEntry // AST projections rendered in the SELECT list (window funcs, scalar subqueries, aliased computations)
-	setOps         []setOpEntry      // UNION / INTERSECT / EXCEPT operands appended after the base SELECT
-	err            error             // stores initialization error from ClientProvider
+	// skipAssociations disables the recursive association save in
+	// Create/Update (set by WithoutAssociations, AQ-03): only the entity's
+	// own row is written; loaded belongs_to/has_one/has_many/m2m fields are
+	// left untouched in the database.
+	skipAssociations bool
+	unscoped         bool   // if true, soft-delete filter is dropped (WithTrashed semantics)
+	onlyTrashed      bool   // if true, the soft-delete filter is inverted to IS NOT NULL
+	tenantID         string // for RowLevelSecurityClient isolation
+	tenantCol        string // column name for tenant isolation
+	cache            CacheConfig
+	groupBy          []string          // GROUP BY columns
+	having           []condition       // HAVING conditions
+	distinct         bool              // SELECT DISTINCT
+	lock             LockOptions       // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
+	ctes             []cteEntry        // common table expressions (WITH ...) prepended to the SELECT
+	selectExprs      []selectExprEntry // AST projections rendered in the SELECT list (window funcs, scalar subqueries, aliased computations)
+	setOps           []setOpEntry      // UNION / INTERSECT / EXCEPT operands appended after the base SELECT
+	err              error             // stores initialization error from ClientProvider
 
 	// typedScanResolved memoizes the F6-2 generated-scanner lookup so the
 	// reflect.Type lookup + registry read happen once per query rather than
@@ -177,6 +182,29 @@ func (q *Query[T]) Preload(relations ...string) *Query[T] {
 	return c
 }
 
+// WithoutAssociations disables the recursive association save for this
+// query's Create/Update: only the entity's own row is written; whatever
+// the relation fields hold in memory is NOT persisted.
+//
+// This is the opt-out for the AQ-03 lost-update trap: an entity read with
+// Find + Preload carries its children loaded, so a later Update of just
+// one scalar field also re-wrote every loaded child with the in-memory
+// snapshot — silently overwriting any concurrent change to those children
+// (the extra UPDATEs are not reflected in the returned rows-affected).
+//
+//	got, _ := quark.For[User](ctx, client).Preload("Posts").Find(1)
+//	got.Name = "renamed"
+//	// writes ONLY users; the loaded got.Posts stay untouched in the DB
+//	rows, err := quark.For[User](ctx, client).WithoutAssociations().Update(&got)
+//
+// Without this call, Update keeps its historical recursive-save behaviour
+// (and logs a WARN naming the associations it is about to write).
+func (q *Query[T]) WithoutAssociations() *Query[T] {
+	c := q.clone()
+	c.skipAssociations = true
+	return c
+}
+
 // Unscoped ignores soft-delete filters for the query, returning both
 // trashed and non-trashed rows. Equivalent to WithTrashed; kept for
 // backward compatibility.
@@ -237,6 +265,29 @@ func (q *Query[T]) WhereIn(column string, values []any) *Query[T] {
 		logic:    "AND",
 	})
 	return c
+}
+
+// WhereInOf is the typed-slice form of [Query.WhereIn] (AQ-07): it accepts
+// any element type ([]int64, []string, …) and performs the []any conversion
+// once, internally — the caller no longer hand-writes the conversion loop
+// that a []int64 of ids from a previous query used to force. It is a
+// package-level function because Go methods cannot introduce a second type
+// parameter.
+//
+//	ids := []int64{1, 2, 3}
+//	users, err := quark.WhereInOf(quark.For[User](ctx, client), "id", ids).List()
+func WhereInOf[T any, V any](q *Query[T], column string, values []V) *Query[T] {
+	return q.WhereIn(column, anySlice(values))
+}
+
+// anySlice widens a typed slice to []any for the variadic-less APIs that
+// bind each element as its own SQL parameter (WhereIn, DeleteBatch).
+func anySlice[V any](values []V) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
 }
 
 // WhereBetween adds a WHERE ... BETWEEN condition.
@@ -333,11 +384,28 @@ func (q *Query[T]) Or(fn func(*Query[T]) *Query[T]) *Query[T] {
 }
 
 // OrderBy adds an ORDER BY clause.
+//
+// direction must be "ASC" or "DESC" (case-insensitive); the empty string
+// keeps its historical meaning of ASC. Any other value stashes
+// ErrInvalidQuery on the query and surfaces at execution — the same
+// contract the operator whitelist enforces. Before this validation,
+// anything that wasn't exactly "DESC"/"desc" (including "Desc") silently
+// ordered ascending (AQ-06).
 func (q *Query[T]) OrderBy(column string, direction string) *Query[T] {
 	c := q.clone()
+	desc := false
+	switch {
+	case direction == "" || strings.EqualFold(direction, "ASC"):
+		// ascending — the default
+	case strings.EqualFold(direction, "DESC"):
+		desc = true
+	default:
+		c.err = fmt.Errorf("%w: OrderBy direction %q is not valid — use \"ASC\" or \"DESC\" (case-insensitive; empty means ASC)", ErrInvalidQuery, direction)
+		return c
+	}
 	c.orderBy = ownedAppend(c.orderBy, order{
 		column: column,
-		desc:   direction == "DESC" || direction == "desc",
+		desc:   desc,
 	})
 	return c
 }

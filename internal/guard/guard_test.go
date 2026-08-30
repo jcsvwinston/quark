@@ -444,3 +444,66 @@ func TestValidateJoinOn_BoundMethod(t *testing.T) {
 		t.Error("bound ValidateJoinOn accepted injectable expression")
 	}
 }
+
+// --- ValidateQualifiedIdentifier / QuoteQualifiedIdentifier (AQ-01) ---
+
+func TestValidateQualifiedIdentifier_Valid(t *testing.T) {
+	g := guard.New()
+	for _, name := range []string{
+		"users", "users.id", "orders.total", "j_users.created_at", "_t._c",
+	} {
+		if err := g.ValidateQualifiedIdentifier(name); err != nil {
+			t.Errorf("ValidateQualifiedIdentifier(%q) = %v, want nil", name, err)
+		}
+	}
+}
+
+func TestValidateQualifiedIdentifier_Invalid(t *testing.T) {
+	g := guard.New()
+	for _, name := range []string{
+		"",               // empty
+		"a.b.c",          // more than one qualifier
+		".id",            // empty table segment
+		"users.",         // empty column segment
+		"users..id",      // empty middle segment
+		"users.id; DROP", // injection in column segment
+		"users.SELECT",   // reserved keyword segment
+		`users."id"`,     // quotes in segment
+		"users.id ",      // whitespace
+	} {
+		if err := g.ValidateQualifiedIdentifier(name); !errors.Is(err, guard.ErrInvalidIdentifier) {
+			t.Errorf("ValidateQualifiedIdentifier(%q): errors.Is(ErrInvalidIdentifier)=false, err=%v", name, err)
+		}
+	}
+}
+
+func TestQuoteQualifiedIdentifier_QuotesEachSegment(t *testing.T) {
+	g := guard.New()
+	q := fakeQuoter{}
+	got, err := g.QuoteQualifiedIdentifier(q, "users.id")
+	if err != nil {
+		t.Fatalf("QuoteQualifiedIdentifier: %v", err)
+	}
+	if got != `"users"."id"` {
+		t.Errorf("QuoteQualifiedIdentifier = %q, want %q", got, `"users"."id"`)
+	}
+	// Plain identifiers keep the single-quote path.
+	got, err = g.QuoteQualifiedIdentifier(q, "users")
+	if err != nil {
+		t.Fatalf("QuoteQualifiedIdentifier plain: %v", err)
+	}
+	if got != `"users"` {
+		t.Errorf("QuoteQualifiedIdentifier plain = %q, want %q", got, `"users"`)
+	}
+}
+
+func TestQuoteQualifiedIdentifier_RejectsInvalid(t *testing.T) {
+	g := guard.New()
+	if _, err := g.QuoteQualifiedIdentifier(fakeQuoter{}, "a.b.c"); !errors.Is(err, guard.ErrInvalidIdentifier) {
+		t.Errorf("expected ErrInvalidIdentifier, got %v", err)
+	}
+}
+
+type fakeQuoter struct{}
+
+func (fakeQuoter) Quote(s string) string { return `"` + s + `"` }
