@@ -6,6 +6,7 @@ SQLGuard, limits, middleware, observers, and cache store.
 | Symbol | Signature | Purpose |
 | --- | --- | --- |
 | `New` | `New(driverName, dataSource string, opts ...any) (*Client, error)` | Open a connection, ping it, return a configured client. |
+| `NewWithDB` | `NewWithDB(driverName string, db *sql.DB, opts ...any) (*Client, error)` | Mount quark on an existing `*sql.DB`, reusing the host's pool. |
 | `For` | `For[T any](ctx, provider ClientProvider) *Query[T]` | Create a typed query builder for model `T`. |
 | `WithDialect` | `WithDialect(d Dialect) Option` | Override the auto-detected dialect. |
 | `WithLogger` | `WithLogger(l *slog.Logger) Option` | Set the structured logger. |
@@ -14,12 +15,13 @@ SQLGuard, limits, middleware, observers, and cache store.
 | `WithCacheStore` | `WithCacheStore(s CacheStore) Option` | Attach a cache backend. |
 | `WithMiddleware` | `WithMiddleware(m Middleware) Option` | Add middleware to the execution chain. |
 | `WithQueryObserver` | `WithQueryObserver(o QueryObserver) Option` | Add a post-execution observer. |
+| `WithStrictColumns` | `WithStrictColumns() Option` | Opt-in check that plain column references exist on the model. |
 | `WithDeadlockRetry` | `WithDeadlockRetry(maxAttempts int) Option` | Retry `Tx` closures on a driver deadlock. |
 | `WithDefaultTZ` | `WithDefaultTZ(loc *time.Location) Option` | Fallback timezone for `time.Time` columns. |
 | `RawQuery` | `RawQuery(ctx, query string, args ...any) (*sql.Rows, error)` | Run raw SQL that returns rows. |
 | `Exec` | `Exec(ctx, query string, args ...any) error` | Run raw SQL that returns no rows. |
 | `Raw` | `Raw() *sql.DB` | Return the underlying `*sql.DB`. |
-| `Close` | `Close() error` | Close the underlying `*sql.DB`. |
+| `Close` | `Close() error` | Close the underlying `*sql.DB` (a borrowed one from `NewWithDB` stays open). |
 | `Dialect` | `Dialect() Dialect` | Return the active dialect. |
 
 ## New
@@ -68,6 +70,36 @@ Errors:
 | --- | --- |
 | `sql.Open` fails | wraps `ErrConnection` |
 | `PingContext` fails | wraps `ErrConnection` |
+
+## NewWithDB
+
+### `NewWithDB(driverName string, db *sql.DB, opts ...any) (*Client, error)`
+
+Mounts quark on an **existing** `*sql.DB`, reusing the caller's connection
+pool instead of opening a second one. This is the integration seam for host
+frameworks that already own a pool: the host keeps managing the pool's
+lifecycle and sizing, and quark speaks through it.
+
+```go
+db, err := sql.Open("pgx", dsn) // the host's pool
+if err != nil {
+    return err
+}
+client, err := quark.NewWithDB("pgx", db)
+```
+
+`driverName` still drives dialect auto-detection, exactly as in `New`. The
+handle is pinged before the client is returned, so a dead pool fails fast with
+`ErrConnection`.
+
+Ownership rules:
+
+- `Close` does **not** close a borrowed `*sql.DB` — the owner opened it, the
+  owner closes it. Replica pools quark opens via `WithReplicas` are closed.
+- `PoolOption` values (`WithMaxOpenConns`, …) are applied to the shared handle:
+  passing one is an explicit request to tune the host's pool. Omit them to
+  leave the host's pool configuration untouched.
+- `WithOptions` derives the new client over the same shared handle.
 
 ## Options
 
@@ -175,6 +207,23 @@ client, err := quark.New("postgres", dsn,
     quark.WithQueryObserver(&MetricsObserver{}),
 )
 ```
+
+### `WithStrictColumns() Option`
+
+Enables the opt-in column-membership check: plain column references in
+`Where` / `WhereIn` / `WhereBetween` / `OrderBy` / `GroupBy` / `Select` /
+`Having` and the aggregates must be columns the model declares, or the query
+fails with `ErrInvalidQuery` naming the unknown column and listing the valid
+ones. Queries with joins, the expression AST, and the raw paths are exempt;
+`OrderBy` / `GroupBy` may reference a `SelectExpr` alias. Off by default.
+
+```go
+client, err := quark.New("pgx", dsn, quark.WithStrictColumns())
+```
+
+See [Strict column names](../../guides/querying#strict-column-names) for the
+motivation (SQLite silently degrades a typo'd quoted column to a string
+literal).
 
 ### `WithDeadlockRetry(maxAttempts int) Option`
 
@@ -310,7 +359,9 @@ invalidation, observers, and tenant routing.
 
 ### `Close() error`
 
-Closes the underlying `*sql.DB`.
+Closes the underlying `*sql.DB` and any read-replica pools quark opened. For a
+client built with `NewWithDB` the primary handle is **borrowed**: `Close`
+leaves it open (its owner closes it) and only releases the replica pools.
 
 ```go
 defer client.Close()

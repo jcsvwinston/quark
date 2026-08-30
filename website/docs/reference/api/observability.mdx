@@ -57,7 +57,13 @@ type QueryEvent struct {
 ```
 
 Operations include values such as `SELECT`, `EXEC`, `QUERY_ROW`,
-`SELECT (stream)`, `SELECT (cursor)`, `RAW_QUERY`, and `RAW_EXEC`.
+`SELECT (stream)`, `SELECT (cursor)`, `PRELOAD`, `RAW_QUERY`, and `RAW_EXEC`.
+
+`PRELOAD` covers the batched eager-loading SELECTs that `Preload` issues
+(`… WHERE fk IN (…)` — join-table lookups included). They flow through the
+same observer pipeline as every other operation, so they also feed the
+slow-query log below. `Rows` is `0` for these events: the rows are consumed
+by the relation mapper after the event is emitted.
 
 ## Middleware
 
@@ -113,7 +119,7 @@ Fields on the log record:
 | --- | --- | --- |
 | `duration_ms` | int64 | The observed duration in milliseconds. |
 | `threshold_ms` | int64 | The configured threshold in milliseconds. |
-| `operation` | string | The `QueryEvent.Operation` value — `SELECT`, `SELECT (stream)`, `SELECT (cursor)`, `QUERY_ROW`, `EXEC`, `RAW_QUERY`, or `RAW_EXEC`. |
+| `operation` | string | The `QueryEvent.Operation` value — `SELECT`, `SELECT (stream)`, `SELECT (cursor)`, `PRELOAD`, `QUERY_ROW`, `EXEC`, `RAW_QUERY`, or `RAW_EXEC`. |
 | `table` | string | The Quark-managed table, when known (raw queries leave it empty). |
 | `rows` | int64 | Rows affected for `EXEC` / rows returned for `QUERY_ROW`; zero otherwise. |
 | `sql` | string | The parameterised SQL. **Bind arguments are NOT included** — the same redaction principle as OTel spans (below). |

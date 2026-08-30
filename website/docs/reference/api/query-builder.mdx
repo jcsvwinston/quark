@@ -14,12 +14,13 @@ q := quark.For[User](ctx, client)
 | --- | --- |
 | `Where(column, operator string, value any)` | Adds an `AND` predicate. |
 | `WhereIn(column string, values []any)` | Adds `column IN (...)`. |
+| `WhereInOf[T, V](q *Query[T], column string, values []V)` | Package-level typed-slice form of `WhereIn` (no `[]any` conversion loop). |
 | `WhereBetween(column string, start, end any)` | Adds `column BETWEEN ? AND ?`. |
 | `WhereNot(column, operator string, value any)` | Adds `NOT (column operator value)`. |
 | `Or(fn func(*Query[T]) *Query[T])` | Adds a grouped OR branch. |
 | `WhereJSON(column, path, operator string, value any)` | Adds a dialect JSON extraction predicate. |
 | `WhereSubquery(column, operator, subquery string)` | Adds a raw subquery predicate when raw SQL is enabled. |
-| `OrderBy(column, direction string)` | Adds `ORDER BY`. |
+| `OrderBy(column, direction string)` | Adds `ORDER BY`. Direction is `ASC`/`DESC` (case-insensitive, `""` = `ASC`); anything else fails with `ErrInvalidQuery`. |
 | `Limit(n int)` | Sets result limit. |
 | `Offset(n int)` | Sets offset. |
 | `Select(columns ...string)` | Selects model-table columns. |
@@ -58,6 +59,11 @@ Supported operators:
 Column identifiers and operators are validated by SQLGuard. Values are passed as
 driver parameters.
 
+When the query has at least one join, `Where` / `OrderBy` / `GroupBy` /
+`Select` / `Col` also accept a one-level qualified name (`table.column`); each
+segment is validated and quoted separately. See
+[Qualified column names under a join](../../guides/querying#qualified-column-names-under-a-join).
+
 ## WhereIn
 
 ```go
@@ -67,6 +73,14 @@ users, err := quark.For[User](ctx, client).
 ```
 
 Avoid empty slices. Most SQL engines reject `IN ()`.
+
+For a typed slice, `WhereInOf` performs the `[]any` conversion internally (a
+package-level function — Go methods cannot add a second type parameter):
+
+```go
+ids := []int64{1, 2, 3}
+users, err := quark.WhereInOf(quark.For[User](ctx, client), "id", ids).List()
+```
 
 ## WhereBetween
 

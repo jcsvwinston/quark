@@ -36,10 +36,14 @@ SQLGuard's checks are **lexical, not semantic**. It asks whether an identifier i
 does not ask whether that column or table exists. A well-formed but unknown
 column passes the guard and is rejected by the database at execution time, as
 usual. Blocking injection-shaped input is the job; mirroring your schema is not.
+(The opt-in `WithStrictColumns` client option adds the semantic half — column
+membership against the model's metadata — on top of the guard; see
+[Strict column names](../guides/querying#strict-column-names).)
 
 | Category | Examples | Validation |
 |----------|----------|-----------|
 | Column / table names | `"name"`, `"created_at"`, `"users"` | Lexical: must match `[A-Za-z_][A-Za-z0-9_]*`, not be a reserved SQL keyword, and be ≤64 characters. Rejections return `ErrInvalidIdentifier`. |
+| Qualified columns (queries with joins) | `"users.id"`, `"orders.total"` | One dot at most; **each segment** must independently pass the identifier rules above, and each is quoted separately (`"users"."id"`). Only accepted where the query carries a JOIN (and always by the `Col` AST leaf). |
 | Operators | `"="`, `">="`, `"LIKE"`, `"IN"` | Checked against an allowed operator set; anything else returns `ErrInvalidQuery`. |
 | Keywords | `"ASC"`, `"DESC"` | Checked against an allowed keyword list. |
 

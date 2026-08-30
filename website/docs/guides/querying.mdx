@@ -66,6 +66,32 @@ A null check takes `nil` as its value:
 quark.For[User](ctx, client).Where("deleted_at", "IS NULL", nil).List()
 ```
 
+### Strict column names
+
+The identifier validation above stops injection, but a *typo* is still a valid
+identifier — and what happens next depends on the engine: PostgreSQL fails at
+runtime with its own error, while SQLite degrades the double-quoted unknown
+column to a string literal, so `Where("agee", ">", 1)` silently matches every
+row with no error at all.
+
+The opt-in `WithStrictColumns` client option closes that gap: plain column
+references in `Where` / `WhereIn` / `WhereBetween` / `OrderBy` / `GroupBy` /
+`Select` / `Having` and the aggregates must be columns the model declares, or
+the query fails with [`ErrInvalidQuery`](/docs/reference/api/errors) naming the
+unknown column and listing the valid ones:
+
+```go
+client, err := quark.New("pgx", dsn, quark.WithStrictColumns())
+
+_, err = quark.For[User](ctx, client).Where("agee", ">", 1).List()
+// invalid query: unknown column "agee" for table users (known columns: id, name, age) …
+```
+
+Escape hatches, by design: queries with joins are exempt (they legitimately
+reference the other table's columns), the expression AST and raw paths are
+never checked, and `OrderBy` / `GroupBy` may reference a `SelectExpr` alias.
+The option is off by default for backward compatibility.
+
 ### Sets and ranges
 
 ```go
@@ -84,6 +110,18 @@ if len(ids) == 0 {
 }
 users, err := quark.For[User](ctx, client).WhereIn("id", ids).List()
 ```
+
+When your values arrive as a typed slice — `[]int64` of ids from a previous
+query is the common case — use `WhereInOf` instead of hand-converting to
+`[]any`. It is a package-level function (Go methods cannot add a second type
+parameter) with the same semantics as `WhereIn`:
+
+```go
+ids := []int64{1, 2, 3}
+users, err := quark.WhereInOf(quark.For[User](ctx, client), "id", ids).List()
+```
+
+`DeleteBatchOf` does the same for [`DeleteBatch`](/docs/guides/batch-operations).
 
 ### Negation and OR groups
 
@@ -113,6 +151,11 @@ users, err := quark.For[User](ctx, client).
     Offset(40).
     List()
 ```
+
+The direction is validated: `"ASC"` and `"DESC"` match case-insensitively, the
+empty string means `ASC`, and anything else fails with
+[`ErrInvalidQuery`](/docs/reference/api/errors) at execution — it is not
+silently treated as ascending.
 
 `Paginate(pageSize, page)` runs the count and the limited select together and
 hands back a `Page[T]` with everything a paginated UI needs. Pages are
@@ -251,10 +294,25 @@ The joined table is available for filtering and for `ON`, but not in the output.
 To read joined columns, go through a view, a read model, or
 [raw SQL](#raw-sql). For the same reason, the soft-delete filter is qualified to
 the base table (`"orders"."deleted_at" IS NULL`).
-
-One more constraint: `Where` and `Select` still take simple identifiers, so they
-do not accept dotted names like `users.active`.
 :::
+
+### Qualified column names under a join
+
+When the query has at least one join, `Where`, `OrderBy`, `GroupBy`, `Select`,
+and the AST leaf `Col` accept a **one-level qualified** name — `table.column` —
+so you can disambiguate columns both tables share (the primary key included):
+
+```go
+orders, err := quark.For[Order](ctx, client).
+    Join("users").On("users.id", "=", "orders.user_id").
+    Where("users.id", "=", userID).          // unambiguous, filters on users
+    OrderBy("orders.total", "DESC").
+    List()
+```
+
+Each segment is validated with the same identifier rules as everything else and
+quoted separately (`"users"."id"`), so the dotted form adds no injection
+surface. Without a join the historical rule stands: dotted names are rejected.
 
 ## Reusable scopes
 
