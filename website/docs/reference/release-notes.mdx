@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.7.0** {/* x-release-please-version */} on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.7.1** {/* x-release-please-version */} on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade:
@@ -17,6 +17,22 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.7.1
+
+A patch that closes a cache isolation gap under native row-level security.
+
+Under `RowLevelSecurityNative` the engine enforces tenant isolation with a
+session variable and a `CREATE POLICY`, so the query builder injects no
+`WHERE` predicate and left the tenant out of the L2 cache key. Two tenants
+issuing the same query therefore hashed to the same key over the one cache
+store the client shares, and a `.Cache()` result filled by one tenant was
+served verbatim to the next. The engine's policies protected the database;
+nothing protected the cache. The native path now carries the tenant in the
+cache key only — the query still relies on the policy for filtering, so
+`WHERE` injection, soft-delete scoping and create auto-fill stay inert. The
+regression was reproduced against a real PostgreSQL engine with policies and
+a non-superuser role before the fix.
 
 ## v1.7.0
 
