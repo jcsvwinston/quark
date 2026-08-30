@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1](https://github.com/jcsvwinston/quark/compare/v1.7.0...v1.7.1) (2026-08-30)
+
+
+### Fixed
+
+* **cache:** la clave de caché lleva el tenant bajo RLS nativo — la L2 servía filas de otro tenant ([#304](https://github.com/jcsvwinston/quark/issues/304)) ([180b5b3](https://github.com/jcsvwinston/quark/commit/180b5b33f198c210fb0152662a0abf5e78758a79))
+
 ## [1.7.0](https://github.com/jcsvwinston/quark/compare/v1.6.1...v1.7.0) (2026-08-29)
 
 
