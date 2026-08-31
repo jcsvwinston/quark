@@ -26,9 +26,18 @@ import (
 	"github.com/jcsvwinston/quark/examples/superapp/recorder"
 	"github.com/jcsvwinston/quark/examples/superapp/workload"
 
+	// Registrar el driver ya no basta: hay que registrar también cómo reporta
+	// unicidad, deadlock y pérdida de conexión (ADR-0023), o esos predicados
+	// contestan false. Una aplicación de verdad importa quark/drivers/<motor>;
+	// esta vive en el módulo de Quark y no puede, así que usa los mismos
+	// predicados desde el mismo sitio.
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
+
+	"github.com/jcsvwinston/quark/internal/driverclassify"
 )
+
+func init() { driverclassify.RegisterAll() }
 
 func main() {
 	var (

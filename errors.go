@@ -8,6 +8,7 @@ package quark
 import (
 	"context"
 	"errors"
+	"github.com/jcsvwinston/quark/quarkdriver"
 	"strings"
 
 	"github.com/jcsvwinston/quark/internal/guard"
@@ -110,12 +111,12 @@ var (
 	// EventListener (PostgreSQL LISTEN/NOTIFY) after Close was called.
 	// The dedicated connection has been returned to the pool; create a
 	// fresh listener via ListenerFactory.CreateListener. See ADR-0019.
-	ErrListenerClosed = errors.New("event listener closed")
+	ErrListenerClosed = quarkdriver.ErrListenerClosed
 
 	// ErrNoSubscription indicates Receive was called on an EventListener
 	// that has no active channel subscription — Listen must be called at
 	// least once before Receive. See ADR-0019.
-	ErrNoSubscription = errors.New("event listener has no channel subscribed")
+	ErrNoSubscription = quarkdriver.ErrNoSubscription
 )
 
 // wrapDBError maps low-level database/context errors to quark sentinel errors.

@@ -48,6 +48,8 @@ var dialectMethod = regexp.MustCompile(`^\(\*?\w*Dialect\)\.`)
 // API público si se añade una interfaz nueva.
 var interfaceTypes = map[string]bool{
 	"EventListener": true, "Event": true, "EventBus": true, "QueryObserver": true,
+	// quarkdriver.Listener es el tipo real detrás del alias EventListener.
+	"Listener":   true,
 	"Middleware": true, "Executor": true, "DBConn": true, "DBConnector": true,
 	"CacheStore": true, "CacheLocker": true, "ClientProvider": true, "ColumnTypeMapper": true,
 	"SchemaIntrospector": true, "MigrationLock": true, "MigrationLocker": true,
@@ -72,6 +74,25 @@ func recvType(name string) string {
 // símbolos callable que conscientemente NO se ejercen. Se preservan al regenerar.
 var manualReasons = map[string]string{
 	"github.com/jcsvwinston/quark.RowLevelSecurity": "alias deprecado de RowLevelSecurityClient (desde v1.0, se retira en v2.0); el exerciser cubre RowLevelSecurityClient en su lugar",
+
+	// Contrato de los módulos de driver (ADR-0023). Es superficie de AUTOR DE
+	// DRIVER, no de aplicación: lo llama el init() de cada módulo, no el
+	// código que consulta una base de datos. Ejercerlo desde el superapp
+	// probaría que la función existe, no que el driver clasifica bien — que es
+	// lo que sí prueba la suite de conformidad de cada módulo
+	// (quarkdriver/drivertest), con errores REALES del motor.
+	"github.com/jcsvwinston/quark/quarkdriver.Register":             reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.MustRegister":         reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.Classifiers":          reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.RegisteredEngines":    reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.HasEngine":            reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.RegisterListener":     reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.MustRegisterListener": reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.LookupListener":       reasonDriverContract,
+
+	// El kit de conformidad recibe *testing.T: sólo es invocable desde un
+	// test, y lo ejecutan los cinco módulos de driver en los suyos.
+	"github.com/jcsvwinston/quark/quarkdriver/drivertest.Verify": reasonTestKit,
 
 	// Stored routines/procedures: ejecutar uno necesita un fixture DB-side por
 	// motor (TVF/proc); no portable en el arnés in-process. La construcción del
@@ -121,10 +142,11 @@ var manualReasons = map[string]string{
 }
 
 const (
-	reasonRoutine = "stored routine/proc: ejecutar necesita un fixture DB-side por motor; no portable in-process (el SQL se cubre a nivel dialecto) (denominador S7-coverage)"
-	reasonRedis   = "necesita un Redis vivo; ejercido contra redis real en recorder/infra_test.go (tag superapp_infra), fuera del run por-motor del gate (denominador S7-coverage)"
-	reasonCLIRun  = "entrypoint CLI/instalador/verificador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant (install y verify con PG real); ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)"
-	reasonTestKit = "helper de kit de testing (recibe testing.TB): solo invocable desde un test; cubierto por ejecución en quarktest/quarktest_test.go (denominador S7-coverage)"
+	reasonRoutine        = "stored routine/proc: ejecutar necesita un fixture DB-side por motor; no portable in-process (el SQL se cubre a nivel dialecto) (denominador S7-coverage)"
+	reasonRedis          = "necesita un Redis vivo; ejercido contra redis real en recorder/infra_test.go (tag superapp_infra), fuera del run por-motor del gate (denominador S7-coverage)"
+	reasonCLIRun         = "entrypoint CLI/instalador/verificador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant (install y verify con PG real); ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)"
+	reasonDriverContract = "contrato de módulo de driver (ADR-0023): lo llama el init() de cada módulo, no el código de una aplicación; su comportamiento lo prueba la suite de conformidad de cada driver con errores REALES del motor (denominador S7-coverage)"
+	reasonTestKit        = "helper de kit de testing (recibe testing.TB): solo invocable desde un test; cubierto por ejecución en quarktest/quarktest_test.go (denominador S7-coverage)"
 
 	reasonSeedRegistry = "registro de seeders simétrico a migrate.Register: lo llama el init() de los ficheros de seeder generados y lo consume `quark seed run` (exerciser cli); el superapp no compila seeders de usuario (denominador S7-coverage)"
 )

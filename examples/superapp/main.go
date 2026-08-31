@@ -33,12 +33,29 @@ import (
 
 	// Drivers SQL: el binario consumidor los registra (engine.Up sólo entrega
 	// driver+DSN; quien hace sql.Open es quark.New dentro de exercise.Run).
+	//
+	// Desde ADR-0023 registrar el driver ya no basta: hay que registrar
+	// también cómo ese driver reporta unicidad, deadlock y pérdida de
+	// conexión, o esos predicados contestan false y el gate lo caza —como hizo
+	// la primera vez que se corrió esto sin ellos, con IsUniqueViolation sin
+	// reconocer una violación REAL de SQLite y WithDeadlockRetry sin recuperar
+	// a la víctima en cuatro motores—.
+	//
+	// Una aplicación de verdad importa `quark/drivers/<motor>`, que hace las
+	// dos cosas de una vez. Esta no puede: vive en el módulo de Quark, y esos
+	// módulos importan Quark, así que el requisito sería circular. Registra
+	// los mismos predicados desde el mismo sitio; el camino real lo cubre la
+	// suite de conformidad de cada módulo.
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/microsoft/go-mssqldb"
 	_ "github.com/sijms/go-ora/v2"
 	_ "modernc.org/sqlite"
+
+	"github.com/jcsvwinston/quark/internal/driverclassify"
 )
+
+func init() { driverclassify.RegisterAll() }
 
 // healthRow es una fila sintética de la matriz (no es un símbolo): resume, por
 // motor, si su corrida terminó sin error funcional ni fuga. El prefijo "!!"

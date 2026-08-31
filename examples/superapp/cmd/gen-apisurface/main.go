@@ -42,6 +42,13 @@ var inScope = []string{
 	"github.com/jcsvwinston/quark/quarkmigrate",
 	"github.com/jcsvwinston/quark/quarktenant",
 	"github.com/jcsvwinston/quark/quarktest",
+	// El contrato de los módulos de driver (ADR-0023) es superficie pública
+	// como cualquier otra: quien escribe un driver de terceros programa
+	// contra él. Además EventListener y EventPayload son ALIAS de tipos de
+	// aquí, así que sin esta entrada sus métodos desaparecerían del
+	// inventario sin que nadie los hubiera quitado.
+	"github.com/jcsvwinston/quark/quarkdriver",
+	"github.com/jcsvwinston/quark/quarkdriver/drivertest",
 }
 
 const loadMode = packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps
