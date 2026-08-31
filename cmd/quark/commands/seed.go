@@ -9,8 +9,8 @@ import (
 	"text/template"
 
 	"github.com/fatih/color"
-	"github.com/jcsvwinston/quark"
 	clidb "github.com/jcsvwinston/quark/cmd/quark/internal/db"
+	"github.com/jcsvwinston/quark/seed"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -19,24 +19,17 @@ var (
 	seedName string
 )
 
-// SeederFunc is the signature for a registered seeder function.
-type SeederFunc func(ctx context.Context, client *quark.Client) error
+// SeederFunc is the signature for a registered seeder function. It is an alias
+// of seed.Func so the older `commands.RegisterSeeder(name, fn)` recipe keeps
+// compiling; new code registers via a seeder file's init() with seed.Register.
+type SeederFunc = seed.Func
 
-// seederRegistry holds seeders registered via RegisterSeeder; seederOrder
-// remembers registration order, which is the order `seed run` promises. A map
-// alone iterates randomly — every all-seeders run used a different order.
-var (
-	seederRegistry = map[string]SeederFunc{}
-	seederOrder    []string
-)
-
-// RegisterSeeder registers a named seeder function.
-// Call this from your main package before invoking commands.Main.
+// RegisterSeeder registers a named seeder function. It delegates to
+// seed.Register so the CLI has a single registry regardless of whether the
+// seeder self-registered (the generated files now do) or a main wired it by
+// hand. Kept for the pre-1.8 embed recipe.
 func RegisterSeeder(name string, fn SeederFunc) {
-	if _, exists := seederRegistry[name]; !exists {
-		seederOrder = append(seederOrder, name)
-	}
-	seederRegistry[name] = fn
+	seed.Register(name, fn)
 }
 
 func init() {
@@ -115,9 +108,11 @@ func runSeedCreate(name string) error {
 	path := filepath.Join(dir, filename)
 
 	data := struct {
-		Name string
+		Name     string
+		SeedName string
 	}{
-		Name: snakeToCamel(name),
+		Name:     snakeToCamel(name),
+		SeedName: name,
 	}
 
 	tmpl, _ := template.New("seeder").Parse(seederTemplate)
@@ -132,6 +127,7 @@ func runSeedCreate(name string) error {
 	}
 
 	fmt.Printf("Created seeder: %s\n", path)
+	fmt.Printf("  It self-registers via init(); run it through your runner: go run ./cmd/<app> seed run\n")
 	return nil
 }
 
@@ -139,16 +135,20 @@ func runSeedRun() error {
 	// Same contract as migrate up/down (QK-P1-1): the standalone binary has
 	// no way to see the project's seeders, so a "successful" run that seeded
 	// nothing must exit non-zero, not 0.
-	if len(seederRegistry) == 0 {
+	if seed.Count() == 0 {
 		return fmt.Errorf(`no seeders are registered in this binary — cannot run.
 
-Seeders register via commands.RegisterSeeder from YOUR main before running
-the CLI:
+Seeders register themselves from an init(), like migrations. Files scaffolded
+by 'quark seed create' already call seed.Register:
 
-    commands.RegisterSeeder("users", seeders.SeedUsers)
-    commands.Main()
+    func init() { seed.Register("users", SeedUsers) }
 
-commands.Main prints errors to stderr and exits non-zero on failure.
+They reach the CLI when a runner blank-imports the seeders package (the runner
+'quark init' writes already does this):
+
+    import _ "github.com/you/yourapp/seeders" // side-effect: registers seeders
+
+Build and run that runner, not the standalone 'quark' binary.
 
 See the CLI guide ("Embedding the same operations in your own binary")`)
 	}
@@ -162,7 +162,7 @@ See the CLI guide ("Embedding the same operations in your own binary")`)
 	ctx := context.Background()
 
 	if seedName != "" {
-		fn, ok := seederRegistry[seedName]
+		fn, ok := seed.Get(seedName)
 		if !ok {
 			return fmt.Errorf("seeder %q not found; use 'seed list' to see available seeders", seedName)
 		}
@@ -177,8 +177,8 @@ See the CLI guide ("Embedding the same operations in your own binary")`)
 	// Run all seeders in registration order
 	color.Cyan("Running all seeders...")
 	success, failed := 0, 0
-	for _, name := range seederOrder {
-		fn, ok := seederRegistry[name]
+	for _, name := range seed.Names() {
+		fn, ok := seed.Get(name)
 		if !ok {
 			continue
 		}
@@ -199,12 +199,12 @@ See the CLI guide ("Embedding the same operations in your own binary")`)
 }
 
 func runSeedList() {
-	if len(seederRegistry) == 0 {
+	if seed.Count() == 0 {
 		color.Yellow("No seeders registered.")
 		return
 	}
 	color.Cyan("Registered seeders:")
-	for _, name := range seederOrder {
+	for _, name := range seed.Names() {
 		fmt.Printf("  - %s\n", name)
 	}
 }

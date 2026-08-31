@@ -24,6 +24,7 @@ import (
 
 	"github.com/jcsvwinston/quark"
 	"github.com/jcsvwinston/quark/migrate"
+	"github.com/jcsvwinston/quark/seed"
 	"github.com/spf13/viper"
 
 	"context"
@@ -105,9 +106,8 @@ func TestMigrateStatusFreshDatabaseListsPending(t *testing.T) {
 func TestSeedRunHonorsRegistrationOrder(t *testing.T) {
 	withSQLiteConfig(t)
 
-	oldRegistry, oldOrder := seederRegistry, seederOrder
-	seederRegistry, seederOrder = map[string]SeederFunc{}, nil
-	t.Cleanup(func() { seederRegistry, seederOrder = oldRegistry, oldOrder })
+	seed.Reset()
+	t.Cleanup(seed.Reset)
 
 	var got []string
 	names := []string{"zeta", "alpha", "mike", "juliet", "bravo", "yankee", "echo", "quebec"}

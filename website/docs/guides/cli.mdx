@@ -26,7 +26,36 @@ go install github.com/jcsvwinston/quark/cmd/quark@latest
 | `gen` | Generate typed accessors / binders (see [Code Generation](codegen)). |
 
 The CLI reads its connection from a `.quark.yml` config (created by `quark init`)
-or from `QUARK_DATABASE_DEFAULT_DRIVER` / `QUARK_DATABASE_DEFAULT_DSN`.
+or from `QUARK_DATABASE_DEFAULT_DRIVER` / `QUARK_DATABASE_DEFAULT_DSN`. When a
+key is missing the error names the exact keys, the env vars, and `quark init`,
+so you are never left guessing what to set.
+
+## Starting a project
+
+```bash
+quark init --dialect postgresql
+```
+
+`init` scaffolds the layout (`models/`, `migrations/`, `seeders/`), a
+`.quark.yml`, and the small runner your project needs (`cmd/<app>/main.go`,
+described below). If the directory is not already inside a Go module it also
+writes a `go.mod` so the runner's imports resolve — pass `--module your/path`
+to choose the import path, or edit the generated `go.mod` afterwards. When the
+directory is already inside a module, `init` leaves it untouched and derives
+the import path from it.
+
+It finishes by printing the real next steps, in order:
+
+```text
+Next steps:
+  1. Edit go.mod if you want a different module path.
+  2. go get github.com/jcsvwinston/quark@latest
+  3. quark migrate create initial_schema --from-models ./models --dialect postgresql
+  4. go run ./cmd/<app> migrate up
+```
+
+The runner is what runs migrations and seeders — the standalone `quark` binary
+cannot (see [below](#embedding-the-same-operations-in-your-own-binary)).
 
 ## Migrations from the CLI
 
@@ -151,11 +180,35 @@ package main
 
 import (
     _ "github.com/you/yourapp/migrations" // side-effect: registers migrations
+    _ "github.com/you/yourapp/seeders"    // side-effect: registers seeders
 
     "github.com/jcsvwinston/quark/cmd/quark/commands"
 )
 
 func main() { commands.Main() }
+```
+
+Both migrations and seeders register themselves from an `init()`, so
+blank-importing their packages is all the runner needs. `quark migrate create`
+and `quark seed create` write files that already do this — a scaffolded seeder
+is:
+
+```go
+package seeders
+
+import (
+    "context"
+
+    "github.com/jcsvwinston/quark"
+    "github.com/jcsvwinston/quark/seed"
+)
+
+func init() { seed.Register("demo_users", SeedDemoUsers) }
+
+func SeedDemoUsers(ctx context.Context, client *quark.Client) error {
+    // ...
+    return nil
+}
 ```
 
 `commands.Main` executes the root command, prints any error to stderr and

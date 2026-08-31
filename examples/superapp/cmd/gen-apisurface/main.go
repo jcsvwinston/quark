@@ -38,6 +38,7 @@ var inScope = []string{
 	"github.com/jcsvwinston/quark/cache/redis",
 	"github.com/jcsvwinston/quark/otel",
 	"github.com/jcsvwinston/quark/migrate",
+	"github.com/jcsvwinston/quark/seed",
 	"github.com/jcsvwinston/quark/quarkmigrate",
 	"github.com/jcsvwinston/quark/quarktenant",
 	"github.com/jcsvwinston/quark/quarktest",

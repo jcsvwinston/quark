@@ -191,6 +191,9 @@ func runInspectTable(name string) error {
 	if err := checkInspectFormat(); err != nil {
 		return err
 	}
+	if err := validateTableName(name); err != nil {
+		return err
+	}
 
 	client, err := cli_db.GetQuarkClient()
 	if err != nil {
@@ -245,6 +248,9 @@ func checkInspectFormat() error {
 func runInspectSQL() error {
 	if inspectModel == "" {
 		return fmt.Errorf("specify a table name with --model <table>")
+	}
+	if err := validateTableName(inspectModel); err != nil {
+		return err
 	}
 
 	client, err := cli_db.GetQuarkClient()

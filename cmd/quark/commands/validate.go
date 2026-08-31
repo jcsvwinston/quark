@@ -52,6 +52,9 @@ fail on DB columns the model does not map.`,
 		if validateTable == "" {
 			return fmt.Errorf("specify a table name with --table <name> or as an argument")
 		}
+		if err := validateTableName(validateTable); err != nil {
+			return err
+		}
 		return runValidate()
 	},
 }

@@ -61,8 +61,22 @@ func loadModelsForDDL(dir string) ([]ddlModel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading models from %s: %w", dir, err)
 	}
-	if packages.PrintErrors(pkgs) > 0 {
-		return nil, fmt.Errorf("models package %s has load errors (does it compile?)", dir)
+	// packages.Load returns zero packages (with no per-package error) when the
+	// pattern resolves to nothing — most often because dir is not inside a Go
+	// module. Report THAT, not a misleading "no model structs" (QC-4).
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("no Go package found at %s — check the path exists and is inside a Go module (run 'go mod init' or 'quark init' first)", dir)
+	}
+	// Compile errors are the real cause when the package exists but does not
+	// type-check; surfacing them beats claiming there are no models (QC-4).
+	var loadErrs []string
+	for _, p := range pkgs {
+		for _, e := range p.Errors {
+			loadErrs = append(loadErrs, e.Error())
+		}
+	}
+	if len(loadErrs) > 0 {
+		return nil, fmt.Errorf("the models package %s does not compile — fix these first:\n  %s", dir, strings.Join(loadErrs, "\n  "))
 	}
 
 	var models []ddlModel
@@ -81,7 +95,7 @@ func loadModelsForDDL(dir string) ([]ddlModel, error) {
 		}
 	}
 	if len(models) == 0 {
-		return nil, fmt.Errorf("no model structs with db tags found in %s", dir)
+		return nil, fmt.Errorf("%s compiled but defines no model structs (no exported struct carries `db` tags)", dir)
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
 	return models, nil

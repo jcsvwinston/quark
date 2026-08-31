@@ -3474,6 +3474,36 @@
       "pkg": "github.com/jcsvwinston/quark/quarktest",
       "name": "Tx",
       "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/seed",
+      "name": "Count",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/seed",
+      "name": "Func",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/seed",
+      "name": "Get",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/seed",
+      "name": "Names",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/seed",
+      "name": "Register",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/seed",
+      "name": "Reset",
+      "kind": "func"
     }
   ]
 }

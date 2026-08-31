@@ -108,6 +108,15 @@ func generateFromTables() error {
 	var firstErr error
 	for _, tableName := range tables {
 		tableName = strings.TrimSpace(tableName)
+		// --from-table values are user input interpolated into introspection
+		// SQL; guard the identifier before it reaches the query (AQ-09/QC-3).
+		if err := validateTableName(tableName); err != nil {
+			color.Red("%v", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
 		info, err := internaldb.GetTableInfo(sqlDB, dialect, tableName)
 		if err != nil {
 			color.Red("Error introspecting table %s: %v", tableName, err)
