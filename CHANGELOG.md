@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0](https://github.com/jcsvwinston/quark/compare/v1.7.1...v1.8.0) (2026-08-31)
+
+
+### Added
+
+* **query:** cierra los hallazgos core de la auditoría (AQ-01..14) y la costura NewWithDB ([#306](https://github.com/jcsvwinston/quark/issues/306)) ([863961b](https://github.com/jcsvwinston/quark/commit/863961b84403dfd64fd4380574f19e54697726a4))
+
+
+### Fixed
+
+* **cli:** sanea el primer contacto del CLI y valida identificadores ([#309](https://github.com/jcsvwinston/quark/issues/309)) ([cb5a5ad](https://github.com/jcsvwinston/quark/commit/cb5a5ad3d9f4b76105cd555621ac4316db28e9d1))
+
 ## [1.7.1](https://github.com/jcsvwinston/quark/compare/v1.7.0...v1.7.1) (2026-08-30)
 
 
