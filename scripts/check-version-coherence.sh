@@ -71,3 +71,35 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 echo "roadmap OK: sin versiones hardcodeadas"
+
+# ---------------------------------------------------------------------------
+# SECURITY.md sin versiones fósiles como soportadas (DI-2). Con v1.7.1
+# publicada, la tabla de «Supported Versions» seguía diciendo v1.2.x/v1.1.x:
+# la política («latest two tagged minors») era correcta, pero los números
+# llevaban cinco minors congelados y el require_mention de arriba no los ve
+# (solo exige que la versión ACTUAL aparezca, no que las viejas desaparezcan).
+# Falla si alguna versión anterior a (minor actual − 1) figura en una fila
+# marcada como soportada (✅).
+# ---------------------------------------------------------------------------
+cur_major=${version%%.*}
+minor_rest=${version#*.}
+cur_minor=${minor_rest%%.*}
+stale=0
+while IFS= read -r line; do
+  case "$line" in
+    *"✅"*) ;;
+    *) continue ;;
+  esac
+  for v in $(printf '%s\n' "$line" | grep -oE 'v[0-9]+\.[0-9]+' || true); do
+    v_major=${v#v}; v_major=${v_major%%.*}
+    v_minor=${v##*.}
+    if [ "$v_major" -lt "$cur_major" ] || { [ "$v_major" -eq "$cur_major" ] && [ "$v_minor" -lt $((cur_minor - 1)) ]; }; then
+      echo "ERROR: SECURITY.md marca ${v}.x como soportada, pero la versión actual es v${version} — la política cubre solo los dos últimos minors taggeados" >&2
+      stale=1
+    fi
+  done
+done < SECURITY.md
+if [ "$stale" -ne 0 ]; then
+  exit 1
+fi
+echo "SECURITY.md OK: ninguna versión anterior a v${cur_major}.$((cur_minor - 1)) figura como soportada"

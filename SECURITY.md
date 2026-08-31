@@ -9,9 +9,8 @@ current tag for security updates.
 | Version | Supported |
 |---------|-----------|
 | `main` | ✅ |
-| `v1.2.x` | ✅ |
-| `v1.1.x` | ✅ |
-| `v1.0.x` and earlier | ❌ — please upgrade |
+| Latest two tagged minors | ✅ |
+| Older tags | ❌ — please upgrade |
 
 ---
 
@@ -54,12 +53,12 @@ If you find a bypass for any of these mechanisms, it is considered a critical se
 
 ## Dependency and Toolchain Advisories
 
-v1.2.0 pinned the Go toolchain to **go1.26.5** and **pgx v5.9.2** to pick up
-upstream security fixes that had accumulated against the versions pinned at
-v1.1.5. Quark does not maintain its own advisory list — the source of truth
-is the [Go vulnerability database](https://vuln.go.dev/) as reported by
+Quark does not maintain its own advisory list — the source of truth is the
+[Go vulnerability database](https://vuln.go.dev/) as reported by
 `govulncheck ./...`, which runs in CI on every PR and push to `main`. A
 finding that is actually reachable from Quark's code fails the build.
+Toolchain and dependency pins are bumped as advisories land; each bump is
+recorded in the [CHANGELOG](CHANGELOG.md).
 
 ---
 
