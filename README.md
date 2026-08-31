@@ -21,23 +21,42 @@
 ## 📌 Status
 
 Quark is **v1.8.0** <!-- x-release-please-version --> on the stable `v1.x` line
-(v1.2.0 closed the scaling deferrals; v1.1.0 was the hardening minor; v1.0.0 the first stable release under SemVer). Phases 0–6 are complete: the core query builder, CRUD, schema-as-code migrations across all six dialects (Oracle now in blocking CI), multi-tenancy, caché, hooks/events/audit log, observability, opt-in code generation, read replicas with failover, and pluggable sharding. `v1.x` keeps API compatibility; breaking changes go to `v2.x` with a `docs/MIGRATION_v2.0.0.md`. v1.0 was gated on the qualitative checklist in [`docs/V1_GATE.md`](docs/V1_GATE.md) (cross-engine coverage, structural gaps closed or consciously waived), not on a performance target — [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so code generation is a type-safety feature, not a speedup. Known limitations consciously deferred at each minor are listed in the release notes ([`docs/RELEASE_NOTES_v1.6.1.md`](docs/RELEASE_NOTES_v1.6.1.md) for the current line).
+(v1.2.0 closed the scaling deferrals; v1.1.0 was the hardening minor; v1.0.0 the first stable release under SemVer). Phases 0–6 are complete: the core query builder, CRUD, schema-as-code migrations across all six dialects (Oracle now in blocking CI), multi-tenancy, caché, hooks/events/audit log, observability, opt-in code generation, read replicas with failover, and pluggable sharding. `v1.x` keeps API compatibility; breaking changes go to `v2.x` with a `docs/MIGRATION_v2.0.0.md`. v1.0 was gated on the qualitative checklist in [`docs/V1_GATE.md`](docs/V1_GATE.md) (cross-engine coverage, structural gaps closed or consciously waived), not on a performance target — [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so code generation is a type-safety feature, not a speedup. Known limitations consciously deferred at each minor are listed in the release notes ([`docs/RELEASE_NOTES_v1.8.0.md`](docs/RELEASE_NOTES_v1.8.0.md) for the current line).
 
-The **v1.6.1** patch fixes the guardrail that shipped in v1.6.0 believing
-more about your database than it had checked. `verify-rls-policies` asked
-PostgreSQL whether a policy with the expected NAME existed and stopped
-there, so a policy called `<table>_tenant_isolation` with `USING (true)` —
-right name, no predicate — earned a green light while every tenant read
-every row. That is worse than no check at all: a green check is what stops
-an operator from looking. It now reads the policy's `USING` and `WITH
-CHECK` expressions and demands the two things that make them isolate — a
-reference to your tenant column and a read of the session variable the
-router sets — and it runs with the plain client the package's own docs
-prescribe, which it previously could not.
+The **v1.8.0** minor closes the core and CLI findings of an end-to-end audit,
+and most of them share a shape: a query or a command that was accepted and
+then quietly did something other than what it said. With a join in the query,
+filtering on a column whose name exists in both tables — the primary key
+included — could not be expressed at all, because the identifier guard
+rejected the qualified `orders.id` while the engine rejected the bare `id` as
+ambiguous; `Where`, `OrderBy`, `GroupBy`, `Select` and `Col` now accept the
+`table.column` form when the query has joins. `WithStrictColumns()` checks
+column names against the registered model: the identifier guard is lexical, so
+`Where("agee", ">", 1)` passed it as well-formed, and on SQLite an unknown
+identifier degrades to a string literal — the query returned every row of the
+table and reported nothing. `WithoutAssociations()` asks `Update` and `Create`
+to write this entity's row only, so a change another writer made to a
+preloaded child between your read and your update is not overwritten from your
+in-memory snapshot. `NewWithDB` mounts Quark on a `*sql.DB` the host
+application already owns, instead of a second DSN and a second pool. On the
+CLI, `quark init` outside a Go module no longer scaffolds a project whose
+first command fails, generated seeders register themselves, and the values of
+`--table` and `--model` reach introspection SQL through `SQLGuard`.
 
-The **v1.6.0** minor adds `quarktest` (a per-test SQLite database backed by
-a file, schema from your models, and a transaction that always rolls back)
-and `quarktenant.VerifyRLSPolicies`, the preflight above.
+The **v1.7.x** line is about telling one database failure from another.
+`IsUniqueViolation` and `IsDeadlock` answer the question a write handler
+actually has — was this a duplicate I can explain to the user, or something I
+should not have swallowed — matching on the code the driver reports rather
+than on message text, so they are unaffected by the server's language or by
+wording changes between driver releases. The classification behind them was
+also blind where the installation guide points: under `lib/pq` none of its
+three internal uses recognised anything, so `WithDeadlockRetry` never retried
+and a downed read replica was never detected as one, neither of them reporting
+an error. The v1.7.1 patch closes a cache leak under `RowLevelSecurityNative`:
+the tenant was missing from the L2 cache key, so two tenants issuing the same
+query shared an entry and a `.Cache()` fill for one was served to the other —
+the engine's row-level security protected the database, and nothing protected
+the cache.
 
 The **v1.3.3** patch closes the native row-level-security correctness backlog: `Create` and `Update` now scope their implicit transaction to the operation like every other entry point — a write from a long-lived context (batch job, CLI, worker) no longer keeps a pooled connection idle in transaction until that context ends, later DDL on the touched table no longer blocks behind its locks, and a row you just wrote is visible to reads on the same context; the executor returns its pooled connection on every path even when the driver panics; and driver or transaction errors on the `QueryRow` path reach `Scan` intact instead of being masked as `ErrNoRows`. The test matrix gains a `-race` lane.
 

@@ -50,13 +50,25 @@ if [ ! -f "$minor_notes" ]; then
   fail=1
 fi
 
+# El README enlaza las notas de LA MINOR ACTUAL. El require_mention de arriba
+# solo exige que la cadena v${version} aparezca en alguna parte del README, y
+# la línea del marcador x-release-please-version — que release-please bumpa
+# sola — ya la satisface: todo lo que hay debajo puede envejecer sin que nada
+# proteste. Pasó con el puntero «for the current line», que se quedó en
+# v1.6.1 dos minors después (y con los párrafos narrativos que colgaban de
+# él). El fichero ya se exige arriba; aquí se exige que el README APUNTE a él.
+if ! grep -qF "$minor_notes" README.md; then
+  echo "ERROR: README.md no enlaza ${minor_notes} — el puntero de la línea actual quedó en una minor anterior" >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo >&2
   echo "Release checklist: bump the version mentions above and add the minor's RELEASE_NOTES file." >&2
   exit 1
 fi
 
-echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/release-notes, '## v${version}' section present, ${minor_notes} present"
+echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/release-notes, '## v${version}' section present, ${minor_notes} present and linked from README"
 
 # ---------------------------------------------------------------------------
 # Roadmap sin versiones (QK6-5). QK5-2 quitó la versión hardcodeada del
