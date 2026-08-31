@@ -29,6 +29,7 @@
 | [0020](0020-cross-instance-cache-stampede-coordination.md) | Coordinación de cache-stampede cross-instancia vía capacidad opcional `CacheLocker` (opt-in, wait-and-reread) | Accepted | v1.2 |
 | [0021](0021-shard-key-from-entity.md) | Shard key desde la entidad vía interfaz `ShardKeyer` (helper `WithShardKeyOf` caller-side, no un hook del router) | Accepted | v1.2 |
 | [0022](0022-scatter-gather-cross-shard-reads.md) | Scatter-gather cross-shard reads vía funcs explícitas (`ScatterGather`/`ScatterCount`), merge caller-side, agregados no-COUNT diferidos | Accepted | v1.2 |
+| [0023](0023-driver-modules.md) | Los drivers salen a módulos propios; el contrato vive en `quarkdriver` y los tres predicados de clasificación viajan juntos porque ninguno falla al no reconocer — contesta `false` | Accepted | v1.9 |
 
 ## Cómo añadir un ADR nuevo
 

@@ -11,10 +11,7 @@ import (
 	"net"
 	"strings"
 
-	gomysql "github.com/go-sql-driver/mysql"
-	mssql "github.com/microsoft/go-mssqldb"
-	goora "github.com/sijms/go-ora/v2/network"
-	moderncsqlite "modernc.org/sqlite"
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 // pgSQLState extracts the five-character SQLSTATE from a PostgreSQL driver
@@ -62,45 +59,14 @@ func isUniqueViolation(err error) bool {
 		return state == "23505"
 	}
 
-	// MySQL / MariaDB. 1062 = ER_DUP_ENTRY.
-	var mysqlErr *gomysql.MySQLError
-	if errors.As(err, &mysqlErr) {
-		return mysqlErr.Number == 1062
-	}
-
-	// SQL Server. 2627 = unique constraint violation; 2601 = unique index.
-	// mssql.Error has a value receiver Error() and Number is int32; the
-	// untyped int literals below assign without overflow.
-	var mssqlErr mssql.Error
-	if errors.As(err, &mssqlErr) {
-		return mssqlErr.Number == 2627 || mssqlErr.Number == 2601
-	}
-
-	// Oracle. ORA-00001 = unique constraint violated. go-ora/v2 may return
-	// *network.OracleError directly or wrapped inside *network.SessionError;
-	// errors.As walks the Unwrap chain, so a single check covers both shapes
-	// — do not "optimize" this to a direct type switch.
-	var oraErr *goora.OracleError
-	if errors.As(err, &oraErr) {
-		return oraErr.ErrCode == 1
-	}
-
-	// SQLite mattn/go-sqlite3 — cgo-only driver, so its error types only
-	// exist in cgo builds. The check lives behind a build tag
-	// (db_errors_cgo.go / db_errors_nocgo.go): a CGO_ENABLED=0 build — the
-	// default of scratch/distroless Dockerfiles and of every cross-compile —
-	// must keep compiling (DX-1). The pure-Go modernc driver below covers
-	// SQLite classification for those builds with the same numeric codes.
-	if isMattnUniqueViolation(err) {
-		return true
-	}
-
-	// SQLite modernc.org/sqlite. Same numeric extended codes.
-	var moderncErr *moderncsqlite.Error
-	if errors.As(err, &moderncErr) {
-		code := moderncErr.Code()
-		return code == 2067 /* SQLITE_CONSTRAINT_UNIQUE */ ||
-			code == 1555 /* SQLITE_CONSTRAINT_PRIMARYKEY */
+	// Every other engine is classified by the module that supplies its
+	// driver's error types. A classifier answers only for its own driver, so
+	// consulting them in turn is safe — the first true is the engine the
+	// error came from.
+	for _, c := range quarkdriver.Classifiers() {
+		if c.UniqueViolation(err) {
+			return true
+		}
 	}
 
 	return false
@@ -133,22 +99,10 @@ func isDeadlock(err error) bool {
 		return state == "40P01"
 	}
 
-	// MySQL / MariaDB.
-	var mysqlErr *gomysql.MySQLError
-	if errors.As(err, &mysqlErr) {
-		return mysqlErr.Number == 1213
-	}
-
-	// SQL Server.
-	var mssqlErr mssql.Error
-	if errors.As(err, &mssqlErr) {
-		return mssqlErr.Number == 1205
-	}
-
-	// Oracle.
-	var oraErr *goora.OracleError
-	if errors.As(err, &oraErr) {
-		return oraErr.ErrCode == 60
+	for _, c := range quarkdriver.Classifiers() {
+		if c.Deadlock(err) {
+			return true
+		}
 	}
 
 	return false
@@ -200,21 +154,8 @@ func isTransientConnErr(err error) bool {
 		}
 	}
 
-	// MySQL / MariaDB: 2002 can't-connect, 2003 can't-connect, 2006
-	// server-gone-away, 2013 lost-connection-during-query.
-	var mysqlErr *gomysql.MySQLError
-	if errors.As(err, &mysqlErr) {
-		switch mysqlErr.Number {
-		case 2002, 2003, 2006, 2013:
-			return true
-		}
-	}
-
-	// SQL Server: transport-level connection errors.
-	var mssqlErr mssql.Error
-	if errors.As(err, &mssqlErr) {
-		switch mssqlErr.Number {
-		case 233, 10053, 10054, 10060:
+	for _, c := range quarkdriver.Classifiers() {
+		if c.TransientConn(err) {
 			return true
 		}
 	}

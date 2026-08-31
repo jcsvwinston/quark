@@ -119,6 +119,66 @@ jobs:
       - name: Cross-compile linux/arm64
         run: GOOS=linux GOARCH=arm64 go build ./...
 
+  drivers:
+    name: Driver modules
+    runs-on: ubuntu-latest
+
+    # The drivers are SEPARATE modules (ADR-0023), so the root
+    # `go test ./...` does not reach them. Without this lane they would ship
+    # untested — and what they carry decides whether a rejected insert is
+    # reported as "already taken", whether a deadlocked transaction is
+    # retried, and whether a downed replica is failed over.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Link them to the tree under review: their go.mod pins a PUBLISHED
+      # quark, so without the workspace a change to the contract in this very
+      # PR would be tested against the previous release instead of against
+      # itself.
+      - name: Link the driver modules to this tree
+        run: >
+          go work init .
+          drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
+
+      - name: Build, vet and test
+        run: |
+          set -euo pipefail
+          for m in drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle; do
+            echo "== $m"
+            (cd "$m" && go build ./... && go vet ./... && go test ./...)
+          done
+
+      # The point of the split, asserted rather than assumed: the library must
+      # not reach a driver again. It names pgx separately because the
+      # LISTEN/NOTIFY listener is the import that would bring it back, and it
+      # would come back through a feature rather than through a classifier.
+      - name: The library links no driver
+        run: |
+          set -euo pipefail
+          if go list -deps . 2>/dev/null | grep -E 'go-sql-driver|jackc/pgx|modernc\.org/sqlite|go-mssqldb|sijms/go-ora|mattn/go-sqlite3'; then
+            echo "::error::a driver is reachable from the quark library again — that is what ADR-0023 removed" >&2
+            exit 1
+          fi
+          echo "OK: no driver reachable from the library"
+
+      # The number is the point of the arc, so it is worth failing on rather
+      # than rediscovering by hand. The ceiling has slack over the measured
+      # 159 so ordinary additions do not trip it; a driver coming back does.
+      - name: The library stays small
+        run: |
+          set -euo pipefail
+          n=$(go list -deps . | wc -l | tr -d ' ')
+          echo "packages reachable from the library: $n"
+          if [ "$n" -gt 200 ]; then
+            echo "::error::the library graph grew to $n packages (ceiling 200). ADR-0023 measured 159; something large came back." >&2
+            exit 1
+          fi
+
   govulncheck:
     name: govulncheck
     # H-Q5. SECURITY.md points at the Go vulnerability database as the

@@ -6,6 +6,7 @@ package quark
 import (
 	"context"
 	"fmt"
+	"github.com/jcsvwinston/quark/quarkdriver"
 	"log/slog"
 )
 
@@ -122,26 +123,18 @@ func (b *OTelEventBus) Publish(ctx context.Context, event Event) error {
 // --- Legacy LISTEN/NOTIFY placeholder (renamed in v0.9.0) ---
 
 // EventPayload represents a message received from a database event channel.
-type EventPayload struct {
-	Channel string
-	Payload string
-}
+//
+// It is an alias: the type is defined in quarkdriver, because a listener
+// module has to construct it without compiling the ORM (ADR-0026 shape).
+// Callers see no difference.
+type EventPayload = quarkdriver.EventPayload
 
 // EventListener defines an interface for listening to database events.
-// This is typically implemented via PubSub mechanisms like PostgreSQL's LISTEN/NOTIFY.
-type EventListener interface {
-	// Listen subscribes to a specific channel.
-	Listen(ctx context.Context, channel string) error
-
-	// Unlisten unsubscribes from a channel.
-	Unlisten(ctx context.Context, channel string) error
-
-	// Receive blocks until an event is received, returning the payload or an error.
-	Receive(ctx context.Context) (EventPayload, error)
-
-	// Close terminates the listener connection.
-	Close() error
-}
+//
+// It is an alias for quarkdriver.Listener, defined there so that the
+// PostgreSQL implementation can live in the driver module that has the pgx
+// connection it needs. Callers see no difference.
+type EventListener = quarkdriver.Listener
 
 // ListenerFactory is a dialect-agnostic factory for creating
 // [EventListener]s over a database PubSub channel (PostgreSQL
@@ -176,10 +169,20 @@ func (f *ListenerFactory) CreateListener() (EventListener, error) {
 		return nil, fmt.Errorf("%w: LISTEN/NOTIFY listener is PostgreSQL-only, dialect %q has no equivalent (ADR-0019)",
 			ErrDialectNotSupported, f.client.dialect.Name())
 	}
-	return &pgListener{
-		db:    f.client.db,
-		guard: f.client.guard,
-	}, nil
+	newListener, ok := quarkdriver.LookupListener("postgres")
+	if !ok {
+		// The listener needs the pgx connection underneath database/sql, so
+		// it ships with the driver module rather than with the ORM. Saying
+		// which import is missing is the whole point: the alternative is a
+		// nil listener and a panic three lines into the caller's loop.
+		return nil, fmt.Errorf("%w: the PostgreSQL listener ships with the driver module and is not imported yet.\n\n"+
+			"\tAdd it to your build:\n\n"+
+			"\t\tgo get github.com/jcsvwinston/quark/drivers/postgres\n\n"+
+			"\tand import it for its side effect:\n\n"+
+			"\t\timport _ \"github.com/jcsvwinston/quark/drivers/postgres\"",
+			ErrDialectNotSupported)
+	}
+	return newListener(f.client.db, f.client.guard)
 }
 
 // Notify triggers a database PubSub notification (PostgreSQL

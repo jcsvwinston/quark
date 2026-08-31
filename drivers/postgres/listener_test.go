@@ -1,52 +1,32 @@
 // Copyright 2026 jcsvwinston
 // SPDX-License-Identifier: Apache-2.0
 
-package quark_test
+package postgres_test
 
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/jcsvwinston/quark"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
-
-// TestCreateListener_NonPGReturnsErrDialectNotSupported verifies the
-// inbound LISTEN/NOTIFY listener is PostgreSQL-only: every other dialect
-// returns ErrDialectNotSupported (ADR-0019). Runs on SQLite, no
-// integration needed.
-func TestCreateListener_NonPGReturnsErrDialectNotSupported(t *testing.T) {
-	t.Parallel()
-	c, err := quark.New("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("new sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = c.Close() })
-
-	listener, err := quark.NewListenerFactory(c).CreateListener()
-	if !errors.Is(err, quark.ErrDialectNotSupported) {
-		t.Fatalf("CreateListener on sqlite: got err=%v, want ErrDialectNotSupported", err)
-	}
-	if listener != nil {
-		t.Fatalf("CreateListener on sqlite returned a non-nil listener: %#v", listener)
-	}
-}
 
 // TestPgListener_RoundTrip exercises the inbound listener against a real
 // PostgreSQL engine: subscribe to a channel, emit via Notify on a
 // separate pooled connection, and assert Receive returns the payload.
 // Also covers an invalid channel name, Unlisten, and idempotent Close.
 //
-// Runs only when QUARK_TEST_POSTGRES_DSN is set (or under
-// -tags=integration via testcontainers). LISTEN/NOTIFY is PG-only, so
-// this cannot run on SQLite.
+// Runs only when QUARK_TEST_POSTGRES_DSN is set. LISTEN/NOTIFY is
+// PostgreSQL-only, so this cannot run on SQLite.
 func TestPgListener_RoundTrip(t *testing.T) {
-	dsn := resolvePostgresDSN(t)
+	// This module cannot reach the root module's testcontainers helper, so
+	// it reads the DSN directly. CI sets it; the container path still exists
+	// in the root module's own suites.
+	dsn := os.Getenv("QUARK_TEST_POSTGRES_DSN")
 	if dsn == "" {
-		t.Skip("QUARK_TEST_POSTGRES_DSN not set (rebuild with -tags=integration to spin up a container)")
+		t.Skip("QUARK_TEST_POSTGRES_DSN not set")
 	}
 
 	ctx := context.Background()
