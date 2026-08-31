@@ -20,6 +20,8 @@ see [Getting Started](../../guides/getting-started) and
 | `HardDelete` | `HardDelete(entity *T) (int64, error)` | Permanently delete by PK even when soft delete is enabled. |
 | `DeleteBy` | `DeleteBy() (int64, error)` | Hard-delete rows matching the current `Where` clauses. |
 | `DeleteBatch` | `DeleteBatch(ids []any) (int64, error)` | Hard-delete rows by primary-key values. |
+| `DeleteBatchOf` | `DeleteBatchOf[T, V](q *Query[T], ids []V) (int64, error)` | Package-level typed-slice form of `DeleteBatch`. |
+| `WithoutAssociations` | `WithoutAssociations() *Query[T]` | Disable the recursive association save for this `Create`/`Update`. |
 | `Upsert` | `Upsert(entity *T, conflictCols, updateCols []string) error` | Insert or update one entity on conflict. |
 | `UpsertBatch` | `UpsertBatch(entities []*T, conflictCols, updateCols []string) error` | Bulk insert-or-update. |
 | `UpdateBatch` | `UpdateBatch(entities []*T) error` | Update many entities by PK in one transaction. |
@@ -119,6 +121,24 @@ logs a `WARN` line so you notice the silent skip.
 The zero-value filter is preserved on `Update` itself for behavioural
 compatibility; reach for `Track + Save` when you want to mutate a struct
 freely and let Quark decide what to write.
+:::
+
+:::caution Recursive association save
+`Update` recursively saves every **loaded** association, exactly like
+`Create`. An entity read with `Find` + `Preload` carries its children in
+memory, so updating one scalar field also re-writes every loaded child from
+that snapshot — overwriting concurrent changes to those rows, and without the
+extra writes showing in the returned rows-affected count. `Update` logs a
+`WARN` naming the associations it is about to write; chain
+`WithoutAssociations()` to write only the entity's own row:
+
+```go
+got, _ := quark.For[User](ctx, client).Preload("Posts").Find(1)
+got.Name = "renamed"
+rows, err := quark.For[User](ctx, client).WithoutAssociations().Update(&got)
+```
+
+See [Relations — Update re-saves loaded associations](../../guides/relations#update-re-saves-loaded-associations--opt-out-with-withoutassociations).
 :::
 
 `Update` merges primary-key predicates with any existing query `Where` clauses:

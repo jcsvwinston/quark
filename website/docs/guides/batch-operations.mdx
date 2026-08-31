@@ -146,6 +146,14 @@ fmt.Println(missing)
 to set `deleted_at` under an explicit predicate. WHERE-based deletes bypass
 lifecycle hooks — load the rows and loop through `Delete` if you need them.
 
+When the ids arrive as a typed slice, `DeleteBatchOf` performs the `[]any`
+conversion internally (a package-level function, like `WhereInOf`):
+
+```go
+ids := []int64{10, 11, 12}
+affected, err := quark.DeleteBatchOf(quark.For[User](ctx, client), ids)
+```
+
 ## A data-sync workflow
 
 The four together make a typical sync readable end to end:

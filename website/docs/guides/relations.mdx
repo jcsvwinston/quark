@@ -123,6 +123,31 @@ fmt.Println(len(loaded[0].Posts), "posts; profile loaded:", loaded[0].Profile !=
 This is handy for aggregate-style writes; for tightly controlled domain logic you
 can still save each table explicitly inside a transaction.
 
+### Update re-saves loaded associations — opt out with WithoutAssociations
+
+`Update` runs the same recursive save as `Create`. That matters for the
+read-modify-write pattern: an entity read with `Find` + `Preload` carries its
+children **in memory**, so updating one scalar field also re-writes every
+loaded child from that snapshot — silently overwriting whatever changed in
+those rows since your read, and without the extra writes showing in the
+returned rows-affected count. When `Update` is about to write associations it
+logs a WARN naming them.
+
+To write only the entity's own row, chain `WithoutAssociations()`:
+
+```go
+got, _ := quark.For[Author](ctx, client).Preload("Posts").Find(1)
+got.Name = "Ada L."
+
+// writes ONLY authors; the loaded got.Posts stay untouched in the database
+rows, err := quark.For[Author](ctx, client).WithoutAssociations().Update(&got)
+```
+
+`WithoutAssociations` applies to `Create` too, and to every relation kind
+(`belongs_to` dependencies included). The default behaviour is unchanged for
+backward compatibility — the WARN is there so the recursive write never
+happens behind your back.
+
 ## Many to many
 
 ```go
@@ -164,10 +189,12 @@ Any *other* driver error — a foreign-key violation, a missing table, a broken
 connection — is wrapped with a `linkM2M:` prefix and propagated, with the
 underlying error still reachable through `errors.Unwrap`.
 
-:::note Use the long form `rel:"many_to_many"`
-`rel:"m2m"` is accepted by the eager-loading path, but `Migrate` and recursive
-saves expect the long form. With `rel:"m2m"` the join table won't be created and
-links won't be written — so write `rel:"many_to_many"` in new models.
+:::note `rel:"m2m"` is an alias of `rel:"many_to_many"`
+The short form is normalized at tag-parse time, so `Migrate`, the recursive
+save, and `Preload` all treat it identically to the long form. (Historically
+only the eager-loading path accepted the alias — the join table was never
+created and links were never written — so models written against older
+versions should still prefer the long form for clarity.)
 :::
 
 ## Polymorphic relations
@@ -222,7 +249,8 @@ row-level isolation.
 | --- | --- | --- |
 | `relation X not found` | `Preload` uses the Go field name, not the table name. | `Preload("Posts")`, not `Preload("posts")`. |
 | Empty relation slice | Parent or foreign key is zero. | Ensure parent rows have persisted primary keys. |
-| Join table missing | Used `rel:"m2m"`, or forgot to `Migrate` the parent. | Use `rel:"many_to_many"` and run `Migrate`. |
+| Join table missing | Forgot to `Migrate` the parent model. | Run `Migrate` with both models. |
+| Children clobbered on `Update` | The entity carried preloaded associations; `Update` re-saved them from the in-memory snapshot. | Chain `WithoutAssociations()`, or update with `UpdateFields`. |
 | Belongs-to FK not set | Related value is zero or the field was omitted. | Provide the related struct, or set the FK manually. |
 | Cross-tenant preload leak | Related model lacks the tenant column. | Add the tenant column to related models under row-level isolation. |
 

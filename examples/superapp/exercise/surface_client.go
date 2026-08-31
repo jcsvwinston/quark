@@ -2,6 +2,7 @@ package exercise
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -165,10 +166,49 @@ func surfaceClientMethods(ctx context.Context, client *quark.Client, rec *record
 	// puede rechazar (la FK ya existe, etc.) — sólo se asierta que no panica.
 	_ = aux.AddForeignKey(ctx, "projects", "surf_fk_probe", []string{"owner_id"}, "accounts", []string{"id"}, "", "")
 
+	// NewWithDB (PR-COH-02): quark montado sobre un *sql.DB del HOST — el
+	// pool se comparte (mismo handle) y Close del client NO lo cierra: su
+	// ciclo de vida es del dueño. Es la costura para frameworks que ya
+	// gestionan su pool (Nucleus).
+	hostDB, err := sql.Open(conn.Driver, conn.DSN)
+	if err != nil {
+		return fmt.Errorf("surface host sql.Open: %w", err)
+	}
+	defer hostDB.Close()
+	shared, err := quark.NewWithDB(conn.Driver, hostDB)
+	if err != nil {
+		return fmt.Errorf("surface NewWithDB: %w", err)
+	}
+	if shared.Raw() != hostDB {
+		return fmt.Errorf("surface NewWithDB: el client no reutiliza el *sql.DB del host")
+	}
+	if _, err := quark.For[domain.Account](ctx, shared).Count(); err != nil {
+		return fmt.Errorf("surface NewWithDB count: %w", err)
+	}
+	if err := shared.Close(); err != nil {
+		return fmt.Errorf("surface NewWithDB close: %w", err)
+	}
+	if err := hostDB.PingContext(ctx); err != nil {
+		return fmt.Errorf("surface NewWithDB: Close cerró el pool prestado: %w", err)
+	}
+
+	// WithStrictColumns (AQ-02): un typo de columna muere en build con
+	// ErrInvalidQuery (nombrando las columnas válidas) en vez de degradar
+	// en runtime al criterio del motor.
+	strict, err := quark.New(conn.Driver, conn.DSN, quark.WithStrictColumns())
+	if err != nil {
+		return fmt.Errorf("surface strict client: %w", err)
+	}
+	defer strict.Close()
+	if _, err := quark.For[domain.Account](ctx, strict).Where("emial", "=", "x").Limit(1).List(); !errors.Is(err, quark.ErrInvalidQuery) {
+		return fmt.Errorf("surface WithStrictColumns: esperaba ErrInvalidQuery para columna inexistente, got %v", err)
+	}
+
 	rec.Note(
 		CM("Validate"), CM("GetClient"), CM("Exec"), CM("WithOptions"), CM("RawQuery"),
 		CM("BeginTx"), CM("EnableAuditLog"), CM("DisableAuditLog"), CM("UseEventBus"), CM("AddForeignKey"),
 		CM("DeferredCommitFailures"), CM("BlockedPanicCleanups"),
+		QF("NewWithDB"), QF("WithStrictColumns"),
 	)
 	return nil
 }

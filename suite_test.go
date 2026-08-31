@@ -193,6 +193,10 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testBB2JoinProjection(ctx, t, client)
 	})
 
+	t.Run("QualifiedColumns", func(t *testing.T) {
+		testQualifiedColumns(ctx, t, client)
+	})
+
 	t.Run("Events", func(t *testing.T) {
 		testEvents(ctx, t, client)
 	})

@@ -1107,6 +1107,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).WithoutAssociations",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Routine[T]).First",
       "kind": "method"
     },
@@ -2037,6 +2042,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "DeleteBatchOf",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "DenseRank",
       "kind": "func"
     },
@@ -2493,6 +2503,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewWindow",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "NewWithDB",
       "kind": "func"
     },
     {
@@ -2982,6 +2997,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "WhereInOf",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "Window",
       "kind": "type"
     },
@@ -3088,6 +3108,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithSlowQueryThreshold",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "WithStrictColumns",
       "kind": "func"
     },
     {

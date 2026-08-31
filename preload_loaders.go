@@ -9,7 +9,30 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 )
+
+// preloadQuery runs one eager-loading SELECT and feeds it into the observer
+// pipeline as a QueryEvent with Operation "PRELOAD" (AQ-04). The loaders
+// used to call executeQuery directly, so the batched `WHERE fk IN (...)`
+// child SELECTs — precisely the heavy queries an operator wants to see —
+// were invisible to every QueryObserver and to the slow-query log (which
+// piggybacks on the same notifyObservers pipeline). The row count is not
+// known at emit time (the rows are scanned by the caller), so Rows stays 0,
+// matching the "SELECT (stream)" event contract.
+func (q *BaseQuery) preloadQuery(ctx context.Context, table, sqlStr string, args []any) (*sql.Rows, error) {
+	start := time.Now()
+	rows, err := q.executeQuery(ctx, sqlStr, args)
+	q.notifyObservers(QueryEvent{
+		SQL:       sqlStr,
+		Args:      args,
+		Duration:  time.Since(start),
+		Error:     err,
+		Table:     table,
+		Operation: "PRELOAD",
+	})
+	return rows, err
+}
 
 // loadStandard handles has_one / has_many / belongs_to relations against a
 // reflect.Value of the parent slice. Refactor of the old generic
@@ -88,7 +111,7 @@ func (q *BaseQuery) loadStandard(parents reflect.Value, ownerMeta *ModelMeta, re
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 		defer cancel()
 
-		rows, err := q.executeQuery(ctx, query, args)
+		rows, err := q.preloadQuery(ctx, relModel.Table, query, args)
 		if err != nil {
 			return fmt.Errorf("failed to load relation %s: %w", relName, err)
 		}
@@ -145,7 +168,7 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 		defer cancel()
 
-		joinRows, err := q.executeQuery(ctx, joinQuery, chunk)
+		joinRows, err := q.preloadQuery(ctx, relMeta.JoinTable, joinQuery, chunk)
 		if err != nil {
 			return fmt.Errorf("failed to load join table for relation %s: %w", relName, err)
 		}
@@ -211,7 +234,7 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 		defer cancel()
 
-		rows, err := q.executeQuery(ctx, relQuery, args)
+		rows, err := q.preloadQuery(ctx, relModel.Table, relQuery, args)
 		if err != nil {
 			return fmt.Errorf("failed to load m2m relation %s: %w", relName, err)
 		}
@@ -309,7 +332,7 @@ func (q *BaseQuery) loadPolymorphic(parents reflect.Value, ownerMeta *ModelMeta,
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 		defer cancel()
 
-		rows, err := q.executeQuery(ctx, polyQuery, args)
+		rows, err := q.preloadQuery(ctx, relModel.Table, polyQuery, args)
 		if err != nil {
 			return fmt.Errorf("failed to load polymorphic relation %s: %w", relName, err)
 		}

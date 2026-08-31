@@ -83,6 +83,9 @@ func TestExercisersSQLite(t *testing.T) {
 		QF("NewTypedColumn"), QF("Col"), QF("Lit"), QF("Eq"), QF("NewWindow"), QF("Over"), QF("RowNumber"),
 		QF("(*JoinBuilder[T]).On"), QF("(*JoinBuilder[T]).OnRaw"),
 		QF("(*TrackedQuery[T]).Find"), QF("(*Tracked[T]).Save"),
+		// Auditoría core (AQ-02/03/07 + PR-COH-02): superficie nueva.
+		QF("WhereInOf"), QF("DeleteBatchOf"), QM("WithoutAssociations"),
+		QF("NewWithDB"), QF("WithStrictColumns"),
 	} {
 		if !seen[k] {
 			t.Errorf("cobertura: falta el símbolo %s", k)
