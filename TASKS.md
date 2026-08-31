@@ -1,4 +1,12 @@
-# Quark — backlog táctico
+# Quark — backlog táctico (histórico)
+
+> **⚠️ Documento histórico — congelado en la era v1.1.x (última edición
+> 2026-06-20).** Este backlog dejó de mantenerse tras el overhaul documental
+> de v1.1.5; el estado vivo del proyecto son los **issues de GitHub** y el
+> historial de versiones de `CLAUDE.md`. Se conserva como registro del
+> trabajo v0.x–v1.1.x (gate v1.0, bug-bash, doc-sync). Las secciones de
+> tooling (§ "Bug-bash hallazgos", § "Superapp") siguen siendo el destino de
+> escritura de sus agentes, pero el resto no refleja el estado actual.
 
 > **🧪 Bug-bash post-v1.0 — herramienta operativa de calidad.** Con
 > v1.0.0 publicada y los 5 items §A del V1_GATE.md cerrados, el bloqueante
