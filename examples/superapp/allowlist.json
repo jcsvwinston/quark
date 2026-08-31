@@ -402,6 +402,12 @@
     "github.com/jcsvwinston/quark/quarktenant.VerifyRLSPolicies": "entrypoint CLI/instalador/verificador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant (install y verify con PG real); ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktest.Migrate": "helper de kit de testing (recibe testing.TB): solo invocable desde un test; cubierto por ejecución en quarktest/quarktest_test.go (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarktest.SQLite": "helper de kit de testing (recibe testing.TB): solo invocable desde un test; cubierto por ejecución en quarktest/quarktest_test.go (denominador S7-coverage)",
-    "github.com/jcsvwinston/quark/quarktest.Tx": "helper de kit de testing (recibe testing.TB): solo invocable desde un test; cubierto por ejecución en quarktest/quarktest_test.go (denominador S7-coverage)"
+    "github.com/jcsvwinston/quark/quarktest.Tx": "helper de kit de testing (recibe testing.TB): solo invocable desde un test; cubierto por ejecución en quarktest/quarktest_test.go (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/seed.Count": "registro de seeders simétrico a migrate.Register: lo llama el init() de los ficheros de seeder generados y lo consume `quark seed run` (exerciser cli); el superapp no compila seeders de usuario (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/seed.Func": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/seed.Get": "registro de seeders simétrico a migrate.Register: lo llama el init() de los ficheros de seeder generados y lo consume `quark seed run` (exerciser cli); el superapp no compila seeders de usuario (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/seed.Names": "registro de seeders simétrico a migrate.Register: lo llama el init() de los ficheros de seeder generados y lo consume `quark seed run` (exerciser cli); el superapp no compila seeders de usuario (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/seed.Register": "registro de seeders simétrico a migrate.Register: lo llama el init() de los ficheros de seeder generados y lo consume `quark seed run` (exerciser cli); el superapp no compila seeders de usuario (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/seed.Reset": "registro de seeders simétrico a migrate.Register: lo llama el init() de los ficheros de seeder generados y lo consume `quark seed run` (exerciser cli); el superapp no compila seeders de usuario (denominador S7-coverage)"
   }
 }

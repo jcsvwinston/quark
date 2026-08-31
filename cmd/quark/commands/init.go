@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/fatih/color"
@@ -12,49 +14,123 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// detectGoModule reads <dir>/go.mod and derives project.module and
-// project.name for the generated config. Falling back to the old
-// github.com/user/myapp placeholder only when there is no readable module
-// line — an initialized Go project should never see its own config point at
-// somebody else's module path.
-func detectGoModule(dir string) (module, name string) {
-	module, name = "github.com/user/myapp", "myapp"
-
-	f, err := os.Open(filepath.Join(dir, "go.mod"))
-	if err != nil {
-		return module, name
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
+// moduleLineFrom parses the `module <path>` line out of a go.mod file's
+// contents, or "" if there is none.
+func moduleLineFrom(gomod []byte) string {
+	scanner := bufio.NewScanner(strings.NewReader(string(gomod)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "module ") {
 			continue
 		}
-		mod := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "module")), `"`)
-		if mod == "" {
-			return module, name
-		}
-		module = mod
-		if i := strings.LastIndex(mod, "/"); i >= 0 {
-			name = mod[i+1:]
-		} else {
-			name = mod
-		}
-		return module, name
+		return strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "module")), `"`)
 	}
-	return module, name
+	return ""
+}
+
+// resolveModule finds the module that <dir> belongs to by walking up looking
+// for a go.mod, and returns the import path OF dir itself (the module path
+// extended by dir's relative position under the module root). found is false
+// when dir is not inside any Go module — the caller then scaffolds a go.mod so
+// the generated runner's imports resolve instead of pointing at a placeholder
+// module that matches nothing (QC-1).
+func resolveModule(dir string) (modulePath, projectName string, found bool) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", "", false
+	}
+	cur := abs
+	for {
+		if data, err := os.ReadFile(filepath.Join(cur, "go.mod")); err == nil {
+			mod := moduleLineFrom(data)
+			if mod == "" {
+				return "", "", false
+			}
+			rel, err := filepath.Rel(cur, abs)
+			if err != nil {
+				return "", "", false
+			}
+			modulePath = mod
+			if rel != "." {
+				modulePath = mod + "/" + filepath.ToSlash(rel)
+			}
+			return modulePath, moduleBaseName(modulePath), true
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", "", false // reached the filesystem root
+		}
+		cur = parent
+	}
+}
+
+// moduleBaseName is the last path element of a module path — the conventional
+// project/binary name.
+func moduleBaseName(module string) string {
+	if i := strings.LastIndex(module, "/"); i >= 0 {
+		return module[i+1:]
+	}
+	return module
+}
+
+// moduleNameChars keeps a derived module name to a safe token; anything else
+// collapses to the fallback below.
+var moduleNameChars = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
+
+// deriveModuleName picks a module path for a scaffolded go.mod when the user
+// did not pass --module: the sanitized base name of the target directory, or
+// "myapp" when that yields nothing usable. It is deliberately a bare name (no
+// domain) so the user can rename it before publishing; the scaffold stays
+// coherent either way because the runner imports whatever this resolves to.
+func deriveModuleName(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "myapp"
+	}
+	base := moduleNameChars.ReplaceAllString(filepath.Base(abs), "")
+	base = strings.Trim(base, ".-")
+	if base == "" {
+		return "myapp"
+	}
+	return base
+}
+
+// ensureGoModule guarantees dir is inside a Go module, creating a minimal
+// go.mod when it is not, and returns the import path of dir plus whether it
+// scaffolded the file. Without a module the runner 'quark init' writes cannot
+// build and `go run ./cmd/<app>` fails instantly — the QC-1 defect.
+func ensureGoModule(dir string) (modulePath, projectName string, created bool, err error) {
+	if mod, name, found := resolveModule(dir); found {
+		return mod, name, false, nil
+	}
+
+	module := initModule
+	if module == "" {
+		module = deriveModuleName(dir)
+	}
+	goVersion := strings.TrimPrefix(runtime.Version(), "go")
+	// runtime.Version() is like "go1.26.6"; go.mod wants "1.26".
+	if parts := strings.SplitN(goVersion, ".", 3); len(parts) >= 2 {
+		goVersion = parts[0] + "." + parts[1]
+	}
+	content := fmt.Sprintf("module %s\n\ngo %s\n", module, goVersion)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(content), 0o644); err != nil {
+		return "", "", false, fmt.Errorf("creating go.mod: %w", err)
+	}
+	fmt.Printf("  Created go.mod (module %s)\n", module)
+	return module, moduleBaseName(module), true, nil
 }
 
 var (
 	initDir     string
 	initDialect string
+	initModule  string
 )
 
 func init() {
 	initCmd.Flags().StringVar(&initDir, "dir", ".", "Base directory for initialization")
 	initCmd.Flags().StringVar(&initDialect, "dialect", "postgresql", "Default database dialect (postgresql|postgres|mysql|mariadb|sqlite|mssql|sqlserver|oracle)")
+	initCmd.Flags().StringVar(&initModule, "module", "", "Module path for a scaffolded go.mod when the directory is not already inside a Go module (default: the directory name)")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -82,6 +158,19 @@ func runInit() error {
 
 	fmt.Printf("Initializing Quark project in %s...\n", initDir)
 
+	if err := os.MkdirAll(initDir, 0o755); err != nil {
+		return fmt.Errorf("creating directory %s: %w", initDir, err)
+	}
+
+	// Guarantee a Go module BEFORE scaffolding the runner and config: without
+	// one, the runner's imports point at a placeholder module that matches
+	// nothing and `go run ./cmd/<app>` fails instantly (QC-1). This resolves
+	// (or creates) the module path so everything downstream lines up.
+	moduleName, projectName, createdGoMod, err := ensureGoModule(initDir)
+	if err != nil {
+		return err
+	}
+
 	// Create directories
 	dirs := []string{
 		"models",
@@ -102,7 +191,6 @@ func runInit() error {
 	if _, err := os.Stat(configPath); err == nil {
 		color.Yellow("Warning: .quark.yml already exists. Skipping.")
 	} else {
-		moduleName, projectName := detectGoModule(initDir)
 		config := map[string]interface{}{
 			"project": map[string]string{
 				"name":   projectName,
@@ -150,16 +238,37 @@ func runInit() error {
 	// DX-10: close the CLI cycle. The standalone quark binary cannot see
 	// project migrations/seeders (they register via init()), so every
 	// project needs a small runner — the CLI used to dictate it in an error
-	// message without ever writing it. init knows the module path, so it
-	// scaffolds the runner plus the package stubs that make it compile on
-	// day one (the migrations/ and seeders/ dirs start empty).
-	moduleName, projectName := detectGoModule(initDir)
+	// message without ever writing it. init knows the module path (resolved
+	// or scaffolded above), so it writes the runner plus the package stubs
+	// that make it compile on day one (the migrations/ and seeders/ dirs
+	// start empty).
 	if err := writeRunnerScaffold(initDir, moduleName, projectName); err != nil {
 		return err
 	}
 
-	color.Green("\nQuark project initialized successfully!")
+	color.Green("\nQuark project initialized.")
+	printInitNextSteps(projectName, createdGoMod)
 	return nil
+}
+
+// printInitNextSteps prints the commands that actually work from here, in
+// order. The old success message just said "initialized successfully!" and
+// the runner's own banner told the user to `go run ./cmd/<app> migrate up` —
+// a command that fails instantly until the quark dependency is fetched (and,
+// before this change, until a go.mod even existed). QC-1: say the true next
+// steps.
+func printInitNextSteps(projectName string, createdGoMod bool) {
+	fmt.Println("\nNext steps:")
+	step := 1
+	if createdGoMod {
+		fmt.Printf("  %d. Edit go.mod if you want a different module path.\n", step)
+		step++
+	}
+	fmt.Printf("  %d. go get github.com/jcsvwinston/quark@latest   # add the runtime dependency\n", step)
+	step++
+	fmt.Printf("  %d. quark migrate create initial_schema --from-models ./models --dialect %s\n", step, initDialect)
+	step++
+	fmt.Printf("  %d. go run ./cmd/%s migrate up                   # run it through YOUR runner, not the standalone binary\n", step, projectName)
 }
 
 func getDSNPlaceholder(dialect string) string {

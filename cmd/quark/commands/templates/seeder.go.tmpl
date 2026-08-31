@@ -2,8 +2,16 @@ package seeders
 
 import (
 	"context"
+
 	"github.com/jcsvwinston/quark"
+	"github.com/jcsvwinston/quark/seed"
 )
+
+// init registers this seeder so `quark seed run` finds it once the seeders
+// package is compiled into your runner (symmetric to how migrations register).
+func init() {
+	seed.Register("{{.SeedName}}", Seed{{.Name}})
+}
 
 func Seed{{.Name}}(ctx context.Context, client *quark.Client) error {
 	// Write your seeding logic here

@@ -109,6 +109,15 @@ var manualReasons = map[string]string{
 	"github.com/jcsvwinston/quark/quarktest.Tx":               reasonTestKit,
 	"github.com/jcsvwinston/quark/quarkmigrate.Run":           reasonCLIRun,
 	"github.com/jcsvwinston/quark/quarkmigrate.RunWithOutput": reasonCLIRun,
+
+	// Registro de seeders (simétrico a migrate.Register): lo llama el init()
+	// de los ficheros de seeder generados y lo consume `quark seed run`
+	// (exerciser cli), nunca el superapp — que no compila seeders de usuario.
+	"github.com/jcsvwinston/quark/seed.Register": reasonSeedRegistry,
+	"github.com/jcsvwinston/quark/seed.Get":      reasonSeedRegistry,
+	"github.com/jcsvwinston/quark/seed.Names":    reasonSeedRegistry,
+	"github.com/jcsvwinston/quark/seed.Count":    reasonSeedRegistry,
+	"github.com/jcsvwinston/quark/seed.Reset":    reasonSeedRegistry,
 }
 
 const (
@@ -116,6 +125,8 @@ const (
 	reasonRedis   = "necesita un Redis vivo; ejercido contra redis real en recorder/infra_test.go (tag superapp_infra), fuera del run por-motor del gate (denominador S7-coverage)"
 	reasonCLIRun  = "entrypoint CLI/instalador/verificador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant (install y verify con PG real); ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)"
 	reasonTestKit = "helper de kit de testing (recibe testing.TB): solo invocable desde un test; cubierto por ejecución en quarktest/quarktest_test.go (denominador S7-coverage)"
+
+	reasonSeedRegistry = "registro de seeders simétrico a migrate.Register: lo llama el init() de los ficheros de seeder generados y lo consume `quark seed run` (exerciser cli); el superapp no compila seeders de usuario (denominador S7-coverage)"
 )
 
 const (

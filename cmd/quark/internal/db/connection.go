@@ -2,21 +2,60 @@ package db
 
 import (
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/jcsvwinston/quark"
 	"github.com/spf13/viper"
 )
 
+// missingConfigError builds an actionable error for an absent connection: it
+// names the concrete config keys / env vars and the one command that writes
+// them, instead of the old bare "database configuration missing" that left the
+// user guessing (QC-5). keyPrefix is e.g. "database.default"; envPrefix is its
+// QUARK_ env spelling.
+func missingConfigError(role, keyPrefix, envPrefix string) error {
+	label := "database"
+	if role != "" {
+		label = role + " database"
+	}
+	return fmt.Errorf(`%s configuration missing: set %s.driver and %s.dsn.
+
+Fix it one of these ways:
+  - run 'quark init' to scaffold a .quark.yml, then edit the dsn, or
+  - set %s_DRIVER and %s_DSN in the environment, or
+  - point the CLI at a config file with --config <path>`,
+		label, keyPrefix, keyPrefix, envPrefix, envPrefix)
+}
+
+// cliLogger returns the logger the CLI installs on every client. It is quiet
+// by default — the per-command "quark client initialized" INFO line that used
+// to print on every invocation is suppressed (AQ-16) — while WARN/ERROR still
+// surface. Pass --debug to restore INFO.
+func cliLogger() *slog.Logger {
+	level := slog.LevelWarn
+	if viper.GetBool("debug") {
+		level = slog.LevelInfo
+	}
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+}
+
+// clientOptions are the options every CLI-opened client shares: the tuned
+// limits and the quiet logger. quark.New takes ...any, so this returns []any.
+func clientOptions() []any {
+	return []any{quark.WithLimits(cliLimits()), quark.WithLogger(cliLogger())}
+}
+
 func GetQuarkClient() (*quark.Client, error) {
 	driver := viper.GetString("database.default.driver")
 	dsn := viper.GetString("database.default.dsn")
 
 	if driver == "" || dsn == "" {
-		return nil, fmt.Errorf("database configuration missing")
+		return nil, missingConfigError("", "database.default", "QUARK_DATABASE_DEFAULT")
 	}
 
-	return quark.New(DriverName(driver), dsn, quark.WithLimits(cliLimits()))
+	return quark.New(DriverName(driver), dsn, clientOptions()...)
 }
 
 func GetAdminQuarkClient() (*quark.Client, error) {
@@ -24,10 +63,10 @@ func GetAdminQuarkClient() (*quark.Client, error) {
 	dsn := viper.GetString("database.admin.dsn")
 
 	if driver == "" || dsn == "" {
-		return nil, fmt.Errorf("admin database configuration missing")
+		return nil, missingConfigError("admin", "database.admin", "QUARK_DATABASE_ADMIN")
 	}
 
-	return quark.New(DriverName(driver), dsn, quark.WithLimits(cliLimits()))
+	return quark.New(DriverName(driver), dsn, clientOptions()...)
 }
 
 // GetTenantQuarkClient opens a client connected to ONE tenant's database.
@@ -56,10 +95,10 @@ func GetTenantQuarkClient(tenantID string) (*quark.Client, error) {
 		}
 		driver := viper.GetString("database.default.driver")
 		if driver == "" {
-			return nil, fmt.Errorf("database configuration missing")
+			return nil, missingConfigError("", "database.default", "QUARK_DATABASE_DEFAULT")
 		}
 		dsn := strings.ReplaceAll(tmpl, "{tenant}", tenantID)
-		return quark.New(DriverName(driver), dsn, quark.WithLimits(cliLimits()))
+		return quark.New(DriverName(driver), dsn, clientOptions()...)
 	case "schema_per_tenant":
 		return nil, fmt.Errorf("schema_per_tenant migrations are not supported by the standalone CLI: the migrator would run against the connection's default schema, not the tenant's. Run migrations from your own binary with a TenantRouter (see the multi-tenant guide)")
 	default:
