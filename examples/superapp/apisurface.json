@@ -1592,26 +1592,6 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
-      "name": "(EventListener).Close",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(EventListener).Listen",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(EventListener).Receive",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(EventListener).Unlisten",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
       "name": "(Executor).ExecContext",
       "kind": "method"
     },
@@ -3318,6 +3298,106 @@
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "WithSpanRedaction",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Listener).Close",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Listener).Listen",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Listener).Receive",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Listener).Unlisten",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Classifier",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Classifiers",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ErrListenerClosed",
+      "kind": "var"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ErrNoSubscription",
+      "kind": "var"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "EventPayload",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "HasEngine",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Listener",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "LookupListener",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "MustRegister",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "MustRegisterListener",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "NewListenerFunc",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Register",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "RegisterListener",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "RegisteredEngines",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
+      "name": "Case",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
+      "name": "Verify",
       "kind": "func"
     },
     {
