@@ -94,6 +94,13 @@ var manualReasons = map[string]string{
 	// test, y lo ejecutan los cinco módulos de driver en los suyos.
 	"github.com/jcsvwinston/quark/quarkdriver/drivertest.Verify": reasonTestKit,
 
+	// La pista del driver ausente sólo se puede ejercer en un binario que NO
+	// enlace ese driver, y el superapp los enlaza los seis por definición:
+	// llamarla aquí probaría que la función devuelve texto, no que el arranque
+	// dice qué importar. Eso lo cubren sus tests de mesa en quarkdriver.
+	"github.com/jcsvwinston/quark/quarkdriver.MissingDriverHint": reasonMissingDriver,
+	"github.com/jcsvwinston/quark/quarkdriver.IsRegistered":      reasonMissingDriver,
+
 	// Stored routines/procedures: ejecutar uno necesita un fixture DB-side por
 	// motor (TVF/proc); no portable en el arnés in-process. La construcción del
 	// SQL está cubierta a nivel dialecto (BuildRoutineQuery/BuildProcedureCall).
@@ -145,6 +152,7 @@ const (
 	reasonRoutine        = "stored routine/proc: ejecutar necesita un fixture DB-side por motor; no portable in-process (el SQL se cubre a nivel dialecto) (denominador S7-coverage)"
 	reasonRedis          = "necesita un Redis vivo; ejercido contra redis real en recorder/infra_test.go (tag superapp_infra), fuera del run por-motor del gate (denominador S7-coverage)"
 	reasonCLIRun         = "entrypoint CLI/instalador/verificador: necesita args + sesión DB viva (PG para RLS); cubierto por el exerciser cli + tests de tenant (install y verify con PG real); ParseAction/DefaultInstallOptions sí se ejercen (denominador S7-coverage)"
+	reasonMissingDriver  = "pista de driver ausente: sólo observable en un binario que NO enlace ese driver, y el superapp enlaza los seis; cubierta por los tests de mesa de quarkdriver (denominador S7-coverage)"
 	reasonDriverContract = "contrato de módulo de driver (ADR-0023): lo llama el init() de cada módulo, no el código de una aplicación; su comportamiento lo prueba la suite de conformidad de cada driver con errores REALES del motor (denominador S7-coverage)"
 	reasonTestKit        = "helper de kit de testing (recibe testing.TB): solo invocable desde un test; cubierto por ejecución en quarktest/quarktest_test.go (denominador S7-coverage)"
 
