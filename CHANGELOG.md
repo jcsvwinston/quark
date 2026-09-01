@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0](https://github.com/jcsvwinston/quark/compare/v1.8.0...v1.9.0) (2026-09-01)
+
+
+### Added
+
+* **drivers:** los drivers salen a módulos propios y Quark deja de cargar sus tipos de error ([#312](https://github.com/jcsvwinston/quark/issues/312)) ([31a2052](https://github.com/jcsvwinston/quark/commit/31a2052bf451ff943ed8b221e56152fcbf2b1d4f))
+
+
+### Fixed
+
+* **release:** el tag de un módulo Go lleva barra, no guion ([#326](https://github.com/jcsvwinston/quark/issues/326)) ([294ef87](https://github.com/jcsvwinston/quark/commit/294ef87217a5624ef2902c239442fb8559357344))
+
 ## [1.8.0](https://github.com/jcsvwinston/quark/compare/v1.7.1...v1.8.0) (2026-08-31)
 
 
