@@ -1,5 +1,5 @@
 {
-  ".": "1.8.0",
+  ".": "1.9.0",
   "drivers/mssql": "0.0.0",
   "drivers/mysql": "0.0.0",
   "drivers/oracle": "0.0.0",
