@@ -90,7 +90,8 @@
       "component": "drivers/mssql",
       "include-component-in-tag": true,
       "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0"
+      "release-as": "0.1.0",
+      "tag-separator": "/"
     },
     "drivers/mysql": {
       "package-name": "github.com/jcsvwinston/quark/drivers/mysql",
@@ -98,7 +99,8 @@
       "component": "drivers/mysql",
       "include-component-in-tag": true,
       "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0"
+      "release-as": "0.1.0",
+      "tag-separator": "/"
     },
     "drivers/oracle": {
       "package-name": "github.com/jcsvwinston/quark/drivers/oracle",
@@ -106,7 +108,8 @@
       "component": "drivers/oracle",
       "include-component-in-tag": true,
       "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0"
+      "release-as": "0.1.0",
+      "tag-separator": "/"
     },
     "drivers/postgres": {
       "package-name": "github.com/jcsvwinston/quark/drivers/postgres",
@@ -114,7 +117,8 @@
       "component": "drivers/postgres",
       "include-component-in-tag": true,
       "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0"
+      "release-as": "0.1.0",
+      "tag-separator": "/"
     },
     "drivers/sqlite": {
       "package-name": "github.com/jcsvwinston/quark/drivers/sqlite",
@@ -122,7 +126,8 @@
       "component": "drivers/sqlite",
       "include-component-in-tag": true,
       "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0"
+      "release-as": "0.1.0",
+      "tag-separator": "/"
     }
   },
   "separate-pull-requests": true
