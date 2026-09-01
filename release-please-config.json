@@ -88,31 +88,41 @@
       "package-name": "github.com/jcsvwinston/quark/drivers/mssql",
       "release-type": "go",
       "component": "drivers/mssql",
-      "include-component-in-tag": true
+      "include-component-in-tag": true,
+      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
+      "release-as": "0.1.0"
     },
     "drivers/mysql": {
       "package-name": "github.com/jcsvwinston/quark/drivers/mysql",
       "release-type": "go",
       "component": "drivers/mysql",
-      "include-component-in-tag": true
+      "include-component-in-tag": true,
+      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
+      "release-as": "0.1.0"
     },
     "drivers/oracle": {
       "package-name": "github.com/jcsvwinston/quark/drivers/oracle",
       "release-type": "go",
       "component": "drivers/oracle",
-      "include-component-in-tag": true
+      "include-component-in-tag": true,
+      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
+      "release-as": "0.1.0"
     },
     "drivers/postgres": {
       "package-name": "github.com/jcsvwinston/quark/drivers/postgres",
       "release-type": "go",
       "component": "drivers/postgres",
-      "include-component-in-tag": true
+      "include-component-in-tag": true,
+      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
+      "release-as": "0.1.0"
     },
     "drivers/sqlite": {
       "package-name": "github.com/jcsvwinston/quark/drivers/sqlite",
       "release-type": "go",
       "component": "drivers/sqlite",
-      "include-component-in-tag": true
+      "include-component-in-tag": true,
+      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
+      "release-as": "0.1.0"
     }
   },
   "separate-pull-requests": true
