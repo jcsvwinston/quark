@@ -20,7 +20,7 @@
 
 ## 📌 Status
 
-Quark is **v1.9.0** <!-- x-release-please-version --> on the stable `v1.x` line
+Quark is **v1.10.0** <!-- x-release-please-version --> on the stable `v1.x` line
 (v1.2.0 closed the scaling deferrals; v1.1.0 was the hardening minor; v1.0.0 the first stable release under SemVer). Phases 0–6 are complete: the core query builder, CRUD, schema-as-code migrations across all six dialects (Oracle now in blocking CI), multi-tenancy, caché, hooks/events/audit log, observability, opt-in code generation, read replicas with failover, and pluggable sharding. `v1.x` keeps API compatibility; breaking changes go to `v2.x` with a `docs/MIGRATION_v2.0.0.md`. v1.0 was gated on the qualitative checklist in [`docs/V1_GATE.md`](docs/V1_GATE.md) (cross-engine coverage, structural gaps closed or consciously waived), not on a performance target — [ADR-0017](docs/adr/0017-codegen-type-safety-not-perf-gate.md) retired the ≥3× codegen performance gate, so code generation is a type-safety feature, not a speedup. Known limitations consciously deferred at each minor are listed in the release notes ([`docs/RELEASE_NOTES_v1.9.0.md`](docs/RELEASE_NOTES_v1.9.0.md) for the current line).
 
 The **v1.9.0** minor takes the database drivers out of the library: each engine
