@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/jcsvwinston/quark/quarkdriver"
 	"log/slog"
 	"strings"
 	"sync"
@@ -244,6 +245,17 @@ func (c *Client) GetClient(ctx context.Context) (*Client, error) {
 func New(driverName, dataSource string, opts ...any) (*Client, error) {
 	if err := validateClientOpts("quark.New", opts); err != nil {
 		return nil, err
+	}
+
+	// Each engine's driver ships as its own module (ADR-0023), so the most
+	// likely reason sql.Open fails here is a missing import — and
+	// database/sql answers that with `unknown driver "sqlite" (forgotten
+	// import?)`, which names neither the module nor the line to add. Check
+	// first, so the message can.
+	if !quarkdriver.IsRegistered(driverName) {
+		if hint := quarkdriver.MissingDriverHint(driverName); hint != "" {
+			return nil, fmt.Errorf("%w: %s", ErrConnection, hint)
+		}
 	}
 
 	// Open database connection

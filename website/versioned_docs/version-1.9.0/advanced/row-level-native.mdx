@@ -1,0 +1,322 @@
+---
+sidebar_position: 2
+title: PostgreSQL Native RLS
+description: Engine-enforced row-level security on PostgreSQL via set_config + CREATE POLICY, so even raw SQL can't escape tenant isolation.
+---
+
+# PostgreSQL Native Row-Level Security
+
+`RowLevelSecurityNative` moves tenant isolation into PostgreSQL itself. The
+database decides which rows a tenant may see, so **no Go code can step around
+the policy — not even `client.Raw()`**.
+
+It works in two parts:
+
+- Quark runs every query inside a transaction that first calls
+  `set_config('app.tenant_id', <tenant>, true)`.
+- A `CREATE POLICY` on each tenant table filters rows against that setting.
+
+This strategy is PostgreSQL-only. On the other five engines use
+[`RowLevelSecurityClient`](multi-tenant#row-level-isolation), which injects the
+`WHERE` clause from Go. A Native router over a non-PostgreSQL client fails
+loudly rather than falling back to something weaker:
+
+```go
+_, err := quark.For[Order](tenantCtx, nativeRouter).List() // non-PG base client
+// errors.Is(err, quark.ErrUnsupportedFeature) == true
+```
+
+## Native vs Client — when to use which
+
+| Concern | `RowLevelSecurityNative` | `RowLevelSecurityClient` |
+| --- | --- | --- |
+| Where the filter runs | PostgreSQL engine | Quark query builder |
+| `client.Raw()` / `Exec()` | Filtered by the policy | Bypasses the predicate |
+| Dialects | PostgreSQL only | All six |
+| Setup | One `CREATE POLICY` per table | None |
+| Per-query cost | Implicit transaction + `set_config` | None |
+| Use when | Production; bypass risk matters | Cross-dialect dev / staging |
+
+A router uses one strategy or the other, never both, and Native is not a
+drop-in upgrade of Client. They enforce isolation in different places. Native
+leans on real PostgreSQL policies plus a transaction-scoped session variable, so
+the database itself rejects rows the tenant may not see — raw SQL included.
+Client mode only adds a predicate to the queries Quark builds. Switching means
+installing policies, not flipping a stricter flag.
+
+## Setup
+
+### 1. Install the policy on each tenant table
+
+Either run the DDL yourself, or embed the `quarktenant` library and let it emit
+the DDL from your registered models.
+
+**Option A — `quarktenant` (recommended).** A tiny `main.go` registers your
+models and delegates to `quarktenant.Run`, which emits one
+`ALTER TABLE … ENABLE/FORCE ROW LEVEL SECURITY` pair plus one
+`CREATE POLICY <table>_tenant_isolation` per table:
+
+```go
+func main() {
+    client, _ := quark.New("pgx", os.Getenv("QUARK_DSN"),
+        quark.WithLimits(quark.Limits{AllowRawQueries: true}))
+    defer client.Close()
+
+    _ = client.RegisterModel(&models.Order{}, &models.Invoice{})
+    os.Exit(quarktenant.Run(context.Background(), os.Args[1:], client))
+}
+```
+
+```bash
+go run ./cmd/tenant install-rls-policies --dry-run   # print the DDL, no change
+go run ./cmd/tenant install-rls-policies             # apply (takes a migration lock first)
+go run ./cmd/tenant install-rls-policies --tenant-col=org_id --native-rls-var=app.org_id
+```
+
+A runnable example is at
+[`examples/tenant-rls-native/`](https://github.com/jcsvwinston/quark/blob/main/examples/tenant-rls-native/main.go).
+
+**Option B — manual DDL** through your normal migration pipeline:
+
+```sql
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY orders_tenant_isolation ON orders
+    USING (tenant_id = current_setting('app.tenant_id', true)::text)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::text);
+```
+
+Two parts matter: `WITH CHECK` stops a tenant from *writing* rows for another
+tenant (without it, isolation is read-only), and `FORCE ROW LEVEL SECURITY`
+removes PostgreSQL's default exemption for the table owner — which your app role
+usually is, so without `FORCE` the policy would be decorative.
+
+:::caution UUID / BIGINT tenant IDs need an explicit cast
+`current_setting()` returns TEXT. A TEXT/VARCHAR tenant column works with the
+default `::text`; a `UUID` or `BIGINT` column needs `--cast=uuid` (or `::uuid` /
+`::bigint` in manual DDL), or the comparison fails and the policy returns zero
+rows.
+:::
+
+### 2. Configure the router
+
+```go
+cfg := quark.DefaultTenantConfig()
+cfg.Strategy = quark.RowLevelSecurityNative
+cfg.BaseClient = pgClient
+// cfg.NativeRLSVar = "app.tenant_id"  // default; override to match your policy
+router := quark.NewTenantRouter(cfg, ResolveTenant, nil)
+```
+
+### 3. Query — both paths set the tenant transparently
+
+```go
+// Recommended for multi-step work: one transaction, one set_config.
+err := router.Tx(tenantCtx, func(tx *quark.Tx) error {
+    orders, err := quark.ForTx[Order](tenantCtx, tx).Where("status", "=", "paid").List()
+    // ...
+    return err
+})
+
+// Single short read: implicit transaction per call.
+orders, _ := quark.For[Order](tenantCtx, router).Where("status", "=", "paid").List()
+```
+
+Both reach PostgreSQL with `app.tenant_id` set to the resolved tenant; the policy
+filters server-side.
+
+:::note Use `router.Tx` for anything non-trivial
+`For[T](ctx, router)` wraps each call in its own implicit transaction, because
+`set_config(..., is_local=true)` only takes effect inside one. When that
+transaction closes depends on the operation:
+
+- **Writes and single-row reads** commit before the call returns, so a write is
+  durable the moment you get control back.
+- **Multi-row reads** commit an instant after the operation completes.
+- **`Iter` / `Cursor`** keep their transaction open until you close the cursor,
+  holding a pooled connection and a shared lock on the table for the life of
+  the stream.
+
+For multi-step work, batch jobs, and streaming, run inside `router.Tx` instead —
+one transaction, opened and committed exactly where you can see it.
+:::
+
+## Verify enforcement at startup
+
+Point a Native router at a database where the DDL was never applied, and there
+is no predicate at all: every tenant reads every row, and nothing errors. Make
+startup fail instead:
+
+```go
+if _, err := quarktenant.VerifyRLSPolicies(ctx, client, quarktenant.DefaultInstallOptions()); err != nil {
+    log.Fatal(err) // names each table, its exact gap, and the remedy
+}
+```
+
+For each registered model it checks four things: `relrowsecurity` (row-level
+security is enabled), `relforcerowsecurity` (unless you opted out of `FORCE`),
+that the `<table>_tenant_isolation` policy exists — and **what that policy
+actually says**.
+
+That last one matters more than it sounds. A policy carrying the right name
+can still isolate nothing:
+
+```sql
+CREATE POLICY orders_tenant_isolation ON orders USING (true) WITH CHECK (true);
+```
+
+Right name, no predicate — every tenant reads every row. So the check reads the
+policy's `USING` and `WITH CHECK` expressions and demands the two things that
+make them isolate at all: a reference to your tenant column, and a read of the
+session variable the router sets. A policy that filters the wrong column, reads
+the wrong variable, leaves the write path open, or was narrowed to a single
+command by a later `ALTER POLICY` fails the check and the error says which.
+
+What it does not judge: a setup that isolates through several hand-written
+policies, or one that restricts by role. It verifies the policy this package
+installs, and reports anything else as a deviation rather than guessing.
+
+The tenant runner exposes the same check as a CI or deploy gate, with exit `1`
+for "not enforced" and exit `2` for an operational error:
+
+```bash
+go run ./tenant verify-rls-policies
+```
+
+`--tenant-col` and `--native-rls-var` are honoured here — the check needs them
+to know what a correct policy looks like, so verifying with a column your
+install never used now fails instead of returning a green light. Flags that
+only shape the install (`--dry-run`, `--cast`, `--lock-name`, `--lock-timeout`)
+are refused for this action rather than silently ignored.
+
+## Raw SQL under Native
+
+`client.RawQuery` and `client.Exec` go straight to the pool, so they skip the
+implicit transaction that sets `app.tenant_id`. Under Native that is **not a
+hole**: with no tenant set, the policy's `USING` clause returns zero rows and an
+`INSERT` fails its `WITH CHECK` — the engine stays in control either way.
+
+It is still rarely what you want, because you lose both the tenant scope and the
+builder. So a Native router's base client logs a warning when raw SQL runs while
+a tenant is resolvable:
+
+```
+event=quark.tenant.raw_under_native_rls op=RawQuery tenant=acme
+```
+
+For tenant-scoped access, use the builder against the router (`For[T]` or
+`router.Tx` + `ForTx[T]`). `client.Raw()` takes no context, so it's never routed
+through `set_config` — reserve it for schema/maintenance, not tenant data.
+
+## Troubleshooting
+
+**Queries return rows from OTHER tenants** — the dangerous failure, and it is
+silent: the router sets the session variable on every query, but nothing
+forces PostgreSQL to use it.
+
+1. The policies were never installed — with no `CREATE POLICY`, RLS applies
+   no predicate at all. [`quarktenant.VerifyRLSPolicies`](#verify-enforcement-at-startup)
+   catches this at boot; to check by hand, run
+   `SELECT * FROM pg_policies WHERE tablename = '<table>'`.
+2. `FORCE ROW LEVEL SECURITY` is missing and the application role OWNS the
+   table — the owner is exempt from policies by default, so the policy is
+   decorative. Re-emit the DDL with `FORCE` (the installer's default).
+
+**Query returns zero rows when it shouldn't** — the usual sign the variable
+never reaches the query:
+
+1. `set_config` never ran for this query — typically raw SQL outside
+   `router.Tx` or `For[T]`. The setting reads `NULL`, which filters everything
+   out.
+2. The policy's cast and the tenant column's type disagree. Compare the
+   policy's `USING` clause with the column type.
+
+**A migration or DDL statement hangs** (`ALTER TABLE`, `DROP TABLE`, an index
+build) — something is holding a lock on the table, and under Native the usual
+suspects are implicit transactions that have not finalized yet:
+
+1. An open `Iter`/`Cursor` stream. Its transaction — connection and
+   `ACCESS SHARE` lock included — lives until the cursor closes (an abandoned
+   cursor is reclaimed when `QueryTimeout` expires). Close cursors promptly,
+   or run the stream inside `router.Tx`.
+2. You are on a release up to 1.3.2. On those versions, `Create` (and an
+   `Update` that falls back to an insert) held its implicit transaction open
+   until the **caller's** context ended. Under a long-lived context — a CLI
+   tool or a batch job on `context.Background()` — every insert parked an
+   `idle in transaction` session, and later DDL blocked behind those locks
+   indefinitely. Current releases scope the transaction to the operation, so
+   it drains on its own. On affected versions, give each operation a
+   short-lived context or write through `router.Tx`.
+
+To see the culprits:
+`SELECT pid, state, query FROM pg_stat_activity WHERE state = 'idle in transaction'`
+— each row is a transaction holding its locks with no statement running.
+
+**`ErrUnsupportedFeature: RowLevelSecurityNative requires PostgreSQL`** — the
+router's base client isn't on PG. Switch to `RowLevelSecurityClient` for non-PG.
+
+**`new row violates row-level security policy`** — the row's `tenant_id` disagrees
+with `current_setting('app.tenant_id')`; make sure the field is set and matches
+the resolver for the current context.
+
+## Migrating from the client-side strategy
+
+1. Install the policy + `FORCE ROW LEVEL SECURITY`.
+2. Switch the router to `RowLevelSecurityNative` on the next deploy.
+3. Re-audit `client.Raw()` callers — under Client they bypassed the builder's
+   filter; under Native the engine's policy now catches them.
+4. Update any test that asserted the literal `WHERE tenant_id = ?` text — the SQL
+   no longer carries it (the engine does).
+
+## Limitations
+
+- **No `LISTEN/NOTIFY` integration here** — outbound CRUD events ship via
+  [`Client.UseEventBus`](events).
+- **Policies aren't auto-removed** when you drop the router; manage them in your
+  schema migrations.
+- **Streaming holds its transaction open.** `Iter`/`Cursor` under the
+  implicit-transaction path keep their transaction — connection and shared
+  locks included — until the cursor closes; `QueryTimeout` bounds an abandoned
+  one. Every other operation releases its transaction as the call completes.
+  For long streams, prefer `router.Tx`.
+- **Writes are durable before the call returns.** Under the implicit `For[T]`
+  transaction, `Update`, `Delete`, `Create`, and `Upsert` all commit inside
+  the call. By the time you get control back, the row is visible from any
+  other connection — so a `2xx` sent right after `Create` never runs ahead of
+  durability. A commit failure comes back as that call's own error, never as
+  a success followed by a silent rollback. (Older releases deferred the commit
+  of `INSERT … RETURNING` to a background goroutine, so a reader could briefly
+  miss a row that `Create` had already returned. Current releases don't.)
+
+  Deferred commits now happen only on the multi-row read path — operations
+  that return `*sql.Rows`. That transaction commits an instant after the
+  operation's context ends, which changes *when the pooled connection is
+  released*, not whether the data is durable. If one of those commits fails,
+  Quark logs it at `ERROR` and increments
+  [`Client.DeferredCommitFailures`](../reference/api/client#deferredcommitfailures).
+  Alert on that counter.
+
+  For multi-step units of work, `router.Tx` is still the right tool: one
+  transaction, opened and committed where you can see it.
+- **A driver panic can strand a connection.** If the driver panics inside an
+  implicit transaction, Quark rolls the transaction back and returns the
+  pooled connection on a *detached* goroutine — after a panic `database/sql`
+  may still hold internal locks, and a same-goroutine rollback would deadlock
+  on them. If those locks are never released, the cleanup blocks and the
+  connection stays out of the pool.
+
+  A watchdog makes that visible. A cleanup that overruns the client's
+  `QueryTimeout` is logged once at `ERROR` and counted in
+  [`Client.BlockedPanicCleanups`](../reference/api/client#blockedpaniccleanups).
+  Alert on that counter alongside `DeferredCommitFailures`: each unit is one
+  held connection, and recovering it may take a process restart. The cleanup
+  keeps retrying either way.
+- **An empty single-row read always means "the policy filtered every row".**
+  Single-row operations — `Count`, aggregates, `Create` reading back
+  `INSERT … RETURNING` — never disguise an isolation failure as `sql.ErrNoRows`.
+  If Quark cannot even set the tenant variable (acquiring the connection,
+  opening the implicit transaction, or the `set_config` call itself fails), it
+  returns that error instead. The message names the stage that failed
+  (`native rls: begin tx: …`, `native rls: set_config: …`) and keeps the
+  original cause intact for `errors.Is`.
