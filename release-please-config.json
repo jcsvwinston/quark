@@ -83,6 +83,37 @@
           "path": "website/docs/reference/release-notes.mdx"
         }
       ]
+    },
+    "drivers/mssql": {
+      "package-name": "github.com/jcsvwinston/quark/drivers/mssql",
+      "release-type": "go",
+      "component": "drivers/mssql",
+      "include-component-in-tag": true
+    },
+    "drivers/mysql": {
+      "package-name": "github.com/jcsvwinston/quark/drivers/mysql",
+      "release-type": "go",
+      "component": "drivers/mysql",
+      "include-component-in-tag": true
+    },
+    "drivers/oracle": {
+      "package-name": "github.com/jcsvwinston/quark/drivers/oracle",
+      "release-type": "go",
+      "component": "drivers/oracle",
+      "include-component-in-tag": true
+    },
+    "drivers/postgres": {
+      "package-name": "github.com/jcsvwinston/quark/drivers/postgres",
+      "release-type": "go",
+      "component": "drivers/postgres",
+      "include-component-in-tag": true
+    },
+    "drivers/sqlite": {
+      "package-name": "github.com/jcsvwinston/quark/drivers/sqlite",
+      "release-type": "go",
+      "component": "drivers/sqlite",
+      "include-component-in-tag": true
     }
-  }
+  },
+  "separate-pull-requests": true
 }
