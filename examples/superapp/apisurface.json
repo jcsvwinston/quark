@@ -3352,12 +3352,27 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "IsRegistered",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Known",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Listener",
       "kind": "type"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LookupListener",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "MissingDriverHint",
       "kind": "func"
     },
     {
