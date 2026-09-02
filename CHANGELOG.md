@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0](https://github.com/jcsvwinston/quark/compare/v1.9.0...v1.10.0) (2026-09-01)
+
+
+### Added
+
+* **quarkdriver:** el error guiado nombra el módulo, y se salda la deuda de doc de v1.9.0 ([#336](https://github.com/jcsvwinston/quark/issues/336)) ([354975d](https://github.com/jcsvwinston/quark/commit/354975de437ca5b25adf782329d94898dc77e19d))
+
 ## [1.9.0](https://github.com/jcsvwinston/quark/compare/v1.8.0...v1.9.0) (2026-09-01)
 
 
