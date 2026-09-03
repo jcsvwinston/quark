@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/jcsvwinston/quark"
+	_ "github.com/jcsvwinston/quark/drivers/mysql"
 )
 
 // Order represents a complex order model

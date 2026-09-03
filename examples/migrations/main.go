@@ -6,9 +6,9 @@
 // for a Quark-managed schema. Adapt this to your project by
 // replacing the models in `myModels()` and the DSN in `loadDSN()`.
 //
-//	go run ./examples/migrations plan     # show what would change
-//	go run ./examples/migrations verify   # exit 1 if drift (CI gate)
-//	go run ./examples/migrations apply    # actually run the plan
+//	go run . plan     # show what would change
+//	go run . verify   # exit 1 if drift (CI gate)
+//	go run . apply    # actually run the plan
 package main
 
 import (
@@ -19,7 +19,7 @@ import (
 	"github.com/jcsvwinston/quark"
 	"github.com/jcsvwinston/quark/quarkmigrate"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/jcsvwinston/quark/drivers/sqlite"
 )
 
 // User and Post are the example models. In a real project these

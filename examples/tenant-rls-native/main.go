@@ -9,11 +9,11 @@
 // Usage:
 //
 //	QUARK_DSN=postgres://app:pw@localhost:5432/myapp \
-//	  go run ./examples/tenant-rls-native install-rls-policies --dry-run
+//	  go run . install-rls-policies --dry-run
 //
 // or, to apply for real:
 //
-//	go run ./examples/tenant-rls-native install-rls-policies
+//	go run . install-rls-policies
 //
 // The library only supports PostgreSQL; running this against any
 // other dialect returns ExitError with a clear message.
@@ -27,7 +27,7 @@ import (
 	"github.com/jcsvwinston/quark"
 	"github.com/jcsvwinston/quark/quarktenant"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/jcsvwinston/quark/drivers/postgres"
 )
 
 // Order and Invoice stand in for the real models the host

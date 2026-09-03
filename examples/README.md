@@ -2,6 +2,21 @@
 
 This directory contains real-world examples of Quark ORM usage with different database engines.
 
+Each engine example is its **own Go module** (`examples/<name>/go.mod`), because
+it imports the driver the way an application does — through the Quark driver
+module (`_ "github.com/jcsvwinston/quark/drivers/sqlite"`, `…/drivers/postgres`,
+…), which registers the `database/sql` driver and teaches Quark to classify its
+errors. Those modules import Quark, so the library module cannot require them;
+local `replace` directives point each example at this checkout instead. Run an
+example from inside its directory:
+
+```bash
+cd examples/sqlite && go run .
+```
+
+To copy an example into your own project, drop the two `replace` lines and
+`go get` the two modules it requires.
+
 ## Prerequisites
 
 To run the PostgreSQL and MySQL examples, you need a database reachable at
@@ -21,28 +36,28 @@ The SQLite and sharding examples need no infrastructure at all.
 The SQLite example is self-contained and creates a local `example.db` file.
 
 ```bash
-go run ./examples/sqlite/main.go
+cd examples/sqlite && go run .
 ```
 
 ### 2. PostgreSQL (Multi-Tenant RLS)
 Demonstrates Row Level Security (RLS) isolation and automatic tenant ID injection.
 
 ```bash
-go run ./examples/postgres/main.go
+cd examples/postgres && go run .
 ```
 
 ### 3. MySQL (Transactions & Streaming)
 Demonstrates transactional operations and memory-efficient result streaming using `Iter()`.
 
 ```bash
-go run ./examples/mysql/main.go
+cd examples/mysql && go run .
 ```
 
 ### 4. MSSQL (Pagination & Builders)
 Demonstrates pagination using the OFFSET/FETCH syntax required by SQL Server.
 
 ```bash
-go run ./examples/mssql/main.go
+cd examples/mssql && go run .
 ```
 
 ### 5. Oracle
@@ -59,7 +74,7 @@ key via `ShardRouter`, proving per-shard disjoint storage and the keyless-query
 rejection. See the [Sharding guide](https://jcsvwinston.github.io/quark/docs/advanced/sharding).
 
 ```bash
-go run ./examples/sharding/main.go
+cd examples/sharding && go run .
 ```
 
 ## Cleaning Up

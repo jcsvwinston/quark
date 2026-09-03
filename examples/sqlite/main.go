@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jcsvwinston/quark"
-	_ "modernc.org/sqlite"
+	_ "github.com/jcsvwinston/quark/drivers/sqlite"
 )
 
 // User represents a real-world user model
