@@ -685,10 +685,13 @@ func (q *BaseQuery) scanReturning(row *sql.Row, v reflect.Value) error {
 // Update updates the entity by its primary key with partial-update semantics:
 // only fields whose value is non-zero for their type are written.
 //
-// CAUTION — zero-value trap (P0-4 — pending dirty tracking in Phase 1):
-// because zero values are skipped, calling Update cannot write false to a
-// bool, 0 to an integer, "" to a string, or nil to a pointer/slice/map.
-// To write a zero value explicitly, use UpdateFields or UpdateMap.
+// CAUTION — zero-value trap: because zero values are skipped, calling Update
+// cannot write false to a bool, 0 to an integer, "" to a string, or nil to a
+// pointer/slice/map. This is the documented semantics of Update on the v1
+// line and is not scheduled to change within it. To write a zero value
+// explicitly, use UpdateFields or UpdateMap; to write exactly the fields that
+// changed since a read, load the entity with [Query.Track] and call
+// [Tracked.Save], which diffs against the snapshot and writes zero values.
 // When Update skips a scalar zero (false / 0 / ""), it logs a WARN so callers
 // notice the silent skip; skipped nil pointers/slices/maps are the expected
 // "absent" case and do not warn.

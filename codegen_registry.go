@@ -166,21 +166,21 @@ func lookupTypedBinder(t reflect.Type) (TypedBinder, bool) {
 	return fn, ok
 }
 
-// ErrGeneratedStub is returned by the placeholder scanner/binder that F6-1
-// generated code registers. F6-1 ships the generation pipeline and the
-// registry contract but not the typed fast path itself (that is F6-2 for
-// scanning and F6-3 for binding); until then the generated functions are
-// inert. They are never reached at runtime in F6-1 because the hot paths do
-// not yet consult the registry, and once they do, the contract-version gate
-// keeps a v1 stub from being used by a newer runtime.
-var ErrGeneratedStub = errors.New("quark: generated code is an F6-1 stub; the typed fast path lands in F6-2/F6-3")
+// ErrGeneratedStub is returned by a generated scanner or binder for an
+// operation the generated code does not cover: today, BindUpdate (the
+// generated binder handles INSERT only) and models whose primary key is not
+// an integer. The runtime treats it as "not covered" and takes the
+// reflection path, so it is transparent to callers — it only surfaces when
+// generated code is invoked directly, or when a generated file predates the
+// current contract version and the version gate keeps it from being used.
+var ErrGeneratedStub = errors.New("quark: generated code does not cover this operation (UPDATE/partial/batch binding, or a non-integer primary key); the reflection path is used instead")
 
-// StubScanner is the inert scanner registered by F6-1 generated code. See
-// ErrGeneratedStub.
+// StubScanner is the inert scanner registered by generated code that predates
+// typed scanners (contract v1). See ErrGeneratedStub.
 func StubScanner(*sql.Rows, any) error { return ErrGeneratedStub }
 
-// StubBinder is the inert binder registered by F6-1 generated code. See
-// ErrGeneratedStub.
+// StubBinder is the inert binder registered by generated code that predates
+// typed binders (contract v1 and v2). See ErrGeneratedStub.
 func StubBinder(any, BindMode) ([]string, []any, error) { return nil, nil, ErrGeneratedStub }
 
 // GeneratedBinderRegistered reports whether a compatible generated binder is
