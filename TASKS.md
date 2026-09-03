@@ -1,5 +1,10 @@
 # Quark — backlog táctico (histórico)
 
+> **Documento histórico (congelado 2026-06-20), superado por los issues de
+> GitHub, el historial de versiones de `CLAUDE.md` y las notas de release
+> (`RELEASE_NOTES_v*.md` en `docs/`).** Sus items describen el estado de la era
+> v1.1.x, no el actual.
+
 > **⚠️ Documento histórico — congelado en la era v1.1.x (última edición
 > 2026-06-20).** Este backlog dejó de mantenerse tras el overhaul documental
 > de v1.1.5; el estado vivo del proyecto son los **issues de GitHub** y el

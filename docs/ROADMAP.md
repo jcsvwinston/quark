@@ -1,6 +1,12 @@
 # Quark ORM Roadmap
 
-> Aligned with the phased plan in [`docs/ANALISIS_MADUREZ.md`](ANALISIS_MADUREZ.md) §4. Each Phase ends with a release tag.
+> **Historical record of the phased plan (v0.1 → v1.2).** The live, public
+> roadmap is [`website/docs/reference/roadmap.mdx`](../website/docs/reference/roadmap.mdx)
+> (published at https://jcsvwinston.github.io/quantum/quark/); what shipped
+> after v1.2 is in the `RELEASE_NOTES_v*.md` files of this directory and the version history in
+> `CLAUDE.md`. This file follows the phased plan of
+> [`docs/ANALISIS_MADUREZ.md`](ANALISIS_MADUREZ.md) §4 (itself historical) and
+> is kept for the phase-by-phase trace; it is not updated for new minors.
 
 ## v0.1.x (baseline) — completed
 

@@ -16,9 +16,11 @@ in the main repository.
 
 ## Summary table
 
+Compared against GORM v1.30 (the first release with the generics API), sqlx v1.4 and ent v0.14, as of 2026-09.
+
 | | Quark | GORM | sqlx | Ent |
 |---|:---:|:---:|:---:|:---:|
-| Native Generics (no `interface{}`) | ✅ | partial¹ | ❌ | ✅ |
+| Native Generics (no `interface{}`) | ✅ | ✅ since v1.30¹ | ❌ | ✅ |
 | Compile-time column accessors | ✅ (opt-in codegen) | ❌ | ❌ | ✅ (required codegen) |
 | SQL Injection Guard | identifier + value | value only² | manual | value only² |
 | 6 Dialects, zero config switch | ✅ | ✅ | ❌ | partial |
@@ -34,17 +36,18 @@ in the main repository.
 | Transactional hooks (`OnCommit`/`OnRollback`) | ✅ | ✅ | ❌ | ✅ |
 | Event bus of CRUD (post-commit) | ✅ synchronous, at-least-once | ❌ | ❌ | partial |
 | Audit log built-in | ✅ atomic with CRUD tx | ❌ | ❌ | partial |
-| `stdlib` `*sql.DB` — no magic pool | ✅ | ✅ | ✅ | ❌ |
+| `stdlib` `*sql.DB` — no magic pool | ✅ | ✅ | ✅ | ✅⁶ |
 | OpenTelemetry — traces **and metrics** | ✅ | plugin (traces only) | ❌ | plugin |
 | Batch Ops (Delete/Upsert/Update) | ✅⁴ | partial⁴ | ❌ | partial⁴ |
 | Automatic dialect detection (MariaDB vs MySQL) | ✅ (v1.1) | ❌ | ❌ | ❌ |
 | Inbound `LISTEN/NOTIFY` listener | ✅ PostgreSQL (v1.1) | ❌ | ❌ | ❌ |
 
-> ¹ GORM v2 core API uses `interface{}`; generic wrappers exist but are not part of the primary API.
+> ¹ GORM 1.30 (2025) added an official generics API — `gorm.G[User](db).Where(...).Find(ctx)` — alongside the classic `interface{}`-based one, which the bulk of its documentation and plugin ecosystem still uses. Both are supported; the generic one is opt-in per call.
 > ² GORM and ent use parameterized queries that protect *values* against injection. Quark additionally validates *identifiers* (column/table names, operators, JSON paths, JOIN-ON clauses) at the API layer. See [SQLGuard](sqlguard) for a detailed breakdown.
 > ³ GORM queries can mutate shared state when chained; `Session(&gorm.Session{NewDB: true})` mitigates this but is opt-in.
 > ⁴ GORM supports `CreateInBatches`; batch DELETE and batch UPDATE require custom loops. Ent supports batch create; batch UPDATE/DELETE require raw queries or custom extensions. Quark chunks automatically so a large slice never overruns the driver limit: `DeleteBatch` has always chunked its `IN` clause (1000 elements, Oracle's `IN` ceiling), and since v1.1.0 `CreateBatch` also chunks by bind-parameter count (capped well under SQL Server's ~2100-parameter limit).
 > ⁵ Quark wraps the cache backing with stampede protection (singleflight plus probabilistic early refresh), so a hot key never produces a database stampede on miss. No competitor in this matrix ships stampede protection out of the box.
+> ⁶ ent runs on `database/sql`: `ent.Driver(entsql.OpenDB(dialect, db))` wraps an existing `*sql.DB`, and `ent.Open` calls `sql.Open` underneath. It does not manage its own pool.
 
 ---
 
@@ -60,15 +63,18 @@ users, err := quark.For[User](ctx, client).
 // users is []User
 ```
 
-### GORM v2
+### GORM
 
 ```go
+// Classic API — Find takes interface{}; a wrong destination type compiles silently
 var users []User
 result := db.Where("active = ?", true).Find(&users)
-// Find takes interface{} — wrong type compiles silently
+
+// Generics API (v1.30+) — typed at compile time
+users, err := gorm.G[User](db).Where("active = ?", true).Find(ctx)
 ```
 
-GORM v2 ships generic wrappers (`db.Find[T]`) but they are not part of the core primary API; the predominant documentation uses `interface{}`.
+GORM 1.30 added `gorm.G[T]` as an official entry point next to the classic one. The classic `interface{}` API remains the default in its documentation and is what most plugins are written against; the generic path is opt-in per call.
 
 ### sqlx
 

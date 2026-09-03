@@ -2,11 +2,13 @@
 
 This page justifies every cell in the README comparison table with code examples and precise reasoning. The goal is not to disparage other projects but to articulate clearly where the trade-offs lie.
 
+Compared against GORM v1.30 (the first release with the generics API), sqlx v1.4 and ent v0.14, as of 2026-09. The other projects move; when a cell stops being true, fix the cell, not the date.
+
 ---
 
 ## 1. Native Generics (no `interface{}`)
 
-**Claim:** Quark avoids `interface{}` in its core public API; GORM v2 does not.
+**Claim:** Quark's only public API is generic. GORM has had an official generics API since v1.30 (2025) next to its classic `interface{}`-based one; which one you get depends on the entry point you call.
 
 ### Quark
 
@@ -16,17 +18,20 @@ users, err := quark.For[User](ctx, client).Where("active", "=", true).List()
 // users is []User at compile time.
 ```
 
-### GORM v2
+### GORM
 
 ```go
+// Classic API: db.Find takes an interface{} destination — the compiler cannot verify the type.
 var users []User
-// db.Find takes an interface{} destination — the compiler cannot verify the type.
 db.Where("active = ?", true).Find(&users)
+
+// Generics API (gorm.io/gorm v1.30+): typed at compile time.
+users, err := gorm.G[User](db).Where("active = ?", true).Find(ctx)
 ```
 
-GORM v2's `Find`, `First`, `Create`, and `Save` all accept `interface{}`. Generic wrappers exist in community packages but are not part of the core API.
+GORM 1.30 added `gorm.G[T]` as an official, supported entry point; the classic `Find`/`First`/`Create`/`Save` still accept `interface{}`, and most of the documentation and third-party plugins are written against them. The two coexist in the same `*gorm.DB`.
 
-**Verdict:** Quark `✅` — GORM `partial` (core API uses interface{}, generics are add-on).
+**Verdict:** Quark `✅` — GORM `✅ since v1.30` (the generic path is opt-in per call; the classic `interface{}` path remains the default in docs and ecosystem).
 
 ---
 
@@ -191,7 +196,32 @@ client, _ := quark.New("postgres", "postgres://user:pass@localhost/db",
 
 ---
 
-## 8. Batch Operations
+## 8. `stdlib` `*sql.DB` — no magic pool
+
+**Claim:** Quark, GORM, sqlx and ent all run on `database/sql`; none of the four manages its own connection pool.
+
+### Quark
+
+```go
+client, _ := quark.New("pgx", dsn, quark.WithMaxOpenConns(25)) // opens a *sql.DB
+client, _  = quark.NewWithDB("pgx", db)                         // or reuses yours
+```
+
+### ent
+
+```go
+db, _ := sql.Open("pgx", dsn)                        // database/sql
+drv := entsql.OpenDB(dialect.Postgres, db)           // entgo.io/ent/dialect/sql
+client := ent.NewClient(ent.Driver(drv))
+```
+
+`ent.Open` calls `sql.Open` underneath; `entsql.OpenDB` wraps an existing `*sql.DB`. Earlier versions of this table marked ent `❌` here, which was wrong.
+
+**Verdict:** `✅` for all four.
+
+---
+
+## 9. Batch Operations
 
 **Claim:** Quark provides chunked `DeleteBatch`, dialect-optimal `UpsertBatch`, and atomic `UpdateBatch`.
 

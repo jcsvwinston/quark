@@ -24,13 +24,15 @@ catches people out when they containerize.
 `distroless` Dockerfiles and for every cross-compile
 (`GOOS=linux GOARCH=arm64 …`), so nothing here needs special handling.
 
-The one cgo-dependent piece is the `mattn/go-sqlite3` error classifier, and it
-sits behind a build tag. Pure-Go builds classify SQLite errors through
-`modernc.org/sqlite` instead, using the same numeric codes — that is the driver
-the [installation guide](../guides/installation) recommends anyway.
+None of the driver modules needs cgo: `drivers/sqlite` links the pure-Go
+`modernc.org/sqlite`, and every other engine's driver is pure Go as well. The
+one cgo-dependent SQLite driver, `mattn/go-sqlite3`, is not what the
+[installation guide](../guides/installation) recommends; if you use it anyway,
+register your own classifier for it (it reports the same numeric codes as
+modernc) and keep the build tag in mind.
 
-So the only rule is: if you use SQLite in a static binary, use
-`modernc.org/sqlite`. Every other engine's driver is already pure Go.
+So the only rule is: if you use SQLite in a static binary, import
+`github.com/jcsvwinston/quark/drivers/sqlite`.
 
 ## Size the connection pool
 

@@ -114,9 +114,24 @@ After running production services on GORM, three patterns kept causing incidents
 
 ## 🚀 Quick Start
 
+Install the library and the driver module for your engine. The driver module
+registers the `database/sql` driver **and** teaches Quark to recognise that
+driver's errors — importing the bare driver instead opens the database just
+as well, but `IsUniqueViolation`, deadlock retry and replica failover then
+answer `false` for everything (Quark logs a WARN at `New` when that happens).
+
 ```bash
 go get github.com/jcsvwinston/quark
+go get github.com/jcsvwinston/quark/drivers/sqlite
 ```
+
+| Engine | Driver module (`go get` + blank import) | Name for `quark.New` |
+|---|---|---|
+| SQLite | `github.com/jcsvwinston/quark/drivers/sqlite` | `sqlite` |
+| PostgreSQL | `github.com/jcsvwinston/quark/drivers/postgres` | `pgx` |
+| MySQL / MariaDB | `github.com/jcsvwinston/quark/drivers/mysql` | `mysql` |
+| SQL Server | `github.com/jcsvwinston/quark/drivers/mssql` | `sqlserver` |
+| Oracle | `github.com/jcsvwinston/quark/drivers/oracle` | `oracle` |
 
 ```go
 package main
@@ -126,7 +141,7 @@ import (
     "log"
 
     "github.com/jcsvwinston/quark"
-    _ "modernc.org/sqlite"
+    _ "github.com/jcsvwinston/quark/drivers/sqlite"
 )
 
 type User struct {
@@ -172,10 +187,12 @@ func main() {
 }
 ```
 
-**Switch to PostgreSQL** — change one line, zero query code changes:
+**Switch to PostgreSQL** — change the driver import and the driver name, zero query code changes:
 
 ```go
-client, _ = quark.New("postgres", "postgres://user:pass@localhost/db")
+import _ "github.com/jcsvwinston/quark/drivers/postgres"
+
+client, _ = quark.New("pgx", "postgres://user:pass@localhost/db")
 ```
 
 See the per-dialect runnable examples under [`examples/`](examples/) (one folder per supported engine).
@@ -188,7 +205,7 @@ See the per-dialect runnable examples under [`examples/`](examples/) (one folder
 >
 > ```bash
 > git clone https://github.com/jcsvwinston/quark
-> go run ./examples/sqlite
+> cd quark/examples/sqlite && go run .
 > ```
 
 ---
@@ -197,22 +214,25 @@ See the per-dialect runnable examples under [`examples/`](examples/) (one folder
 
 Most Go ORMs make you choose between safety and ergonomics. Quark doesn't.
 
+Compared against GORM v1.30 (generics API), sqlx v1.4 and ent v0.14, as of 2026-09.
+
 | | Quark | GORM | sqlx | ent |
 |---|:---:|:---:|:---:|:---:|
-| Native Generics (no `interface{}`) | ✅ | partial¹ | ❌ | ✅ |
+| Native Generics (no `interface{}`) | ✅ | ✅ since v1.30¹ | ❌ | ✅ |
 | SQL Injection Guard | identifier + value | value only² | manual | value only² |
 | 6 Dialects, zero config switch | ✅ | ✅ | ❌ | partial |
 | Native Multi-Tenant (DB/Schema/RLS) | ✅ | manual/plugin | manual | manual/interceptor |
 | Immutable Query Builder | ✅ | mutable³ | N/A | ✅ |
 | Integrated L2 Cache | ✅ | plugin | ❌ | ❌ |
-| `stdlib` `*sql.DB` — no magic pool | ✅ | ✅ | ✅ | ❌ |
+| `stdlib` `*sql.DB` — no magic pool | ✅ | ✅ | ✅ | ✅⁵ |
 | OpenTelemetry built-in | ✅ | plugin | ❌ | plugin |
 | Batch Ops (Delete/Upsert/Update) | ✅ | partial⁴ | ❌ | partial |
 
-> ¹ GORM v2 core API uses `interface{}`; generic wrappers exist but are not part of the primary API.  
+> ¹ GORM 1.30 (2025) added an official generics API — `gorm.G[User](db).Where(...).Find(ctx)` — alongside the classic `interface{}`-based one, which the bulk of its documentation and ecosystem still uses. Both are supported; the generic one is opt-in per call.  
 > ² GORM and ent use parameterized queries that protect *values* against injection. Quark additionally validates *identifiers* (column/table names) at the API layer. See [docs/comparison.md](docs/comparison.md) for a detailed breakdown with code examples.  
 > ³ GORM queries can mutate shared state when chained; `Session(&gorm.Session{NewDB: true})` mitigates this but is opt-in.  
-> ⁴ GORM supports `CreateInBatches`; batch DELETE and batch UPDATE require custom loops.
+> ⁴ GORM supports `CreateInBatches`; batch DELETE and batch UPDATE require custom loops.  
+> ⁵ ent runs on `database/sql`: `ent.Driver(entsql.OpenDB(dialect, db))` wraps an existing `*sql.DB`, and `ent.Open` calls `sql.Open` underneath. It does not manage its own pool.
 
 For a cell-by-cell justification with code examples, see **[docs/comparison.md](docs/comparison.md)**.
 
@@ -460,17 +480,27 @@ go install github.com/jcsvwinston/quark/cmd/quark@latest
 
 ```
 github.com/jcsvwinston/quark
-├── *.go                  Core ORM (client, query builder, CRUD, dialect)
+├── *.go                  Core ORM (client, query builder, CRUD, dialects, migrations, cache, tenancy, replicas, sharding)
+├── quarkdriver/          Contract a driver module implements (error classifier, LISTEN/NOTIFY listener); leaf package
+│   └── drivertest/       Conformance kit for driver modules
+├── drivers/              One module per engine (own go.mod): postgres, mysql, sqlite, mssql, oracle
 ├── cache/
 │   ├── memory/           In-memory L2 cache
 │   └── redis/            Redis L2 cache
-├── migrate/              Versioned migration engine
-├── otel/                 OpenTelemetry middleware
-├── internal/             Private implementation (guard, schema, introspection)
+├── migrate/              Versioned migration registry and migrator
+├── quarkmigrate/         Programmatic migration helpers used by the CLI and by applications
+├── quarktenant/          Tenant provisioning and native RLS policy install/verify (PostgreSQL)
+├── quarktest/            Test kit: throwaway SQLite clients for unit tests
+├── seed/                 Seeder registry used by generated seeders
+├── otel/                 OpenTelemetry middleware (traces and metrics)
+├── internal/             Private implementation (guard, schema, introspection, driver classifiers)
 ├── cmd/
 │   └── quark/            CLI tool
-├── examples/             Runnable examples per dialect
-└── docs/                 Architecture, API reference, multi-tenancy guide
+├── examples/             Runnable examples (own modules) and the superapp acceptance harness
+├── benchmarks/           Benchmark harness (own module) against database/sql, GORM and ent
+├── bugbash/              Bug-bash harness (own module)
+├── website/              Docusaurus source of the published documentation
+└── docs/                 Internal notes: ADRs, playbooks, release notes, roadmap
 ```
 
 ---
