@@ -419,6 +419,22 @@ func newClient(db *sql.DB, driverName, dataSource string, borrowed bool, opts []
 		)
 	}
 
+	// ADR-0023: the driver's error types live in its module, and a program
+	// that imports the bare driver instead (`_ "modernc.org/sqlite"`) opens
+	// fine and then classifies nothing — IsUniqueViolation, WithDeadlockRetry
+	// and replica failover all answer false, with no signal. Say so once per
+	// client, through the caller's logger. PostgreSQL is exempt on purpose:
+	// its SQLSTATE is read through a method every PostgreSQL driver exposes,
+	// so it needs no classifier (see quarkdriver and db_errors.go).
+	if engine, needs := classifierEngineFor(c.dialect.Name()); needs && !quarkdriver.HasEngine(engine) {
+		c.logger.Warn("no error classifier is registered for this engine: IsUniqueViolation, deadlock retry and read-replica failover will answer false for every error this driver reports. Import the driver through its Quark module instead of the bare driver.",
+			"event", "quark.driver.no_classifier",
+			"dialect", c.dialect.Name(),
+			"driver", driverName,
+			"hint", quarkdriver.MissingDriverHint(driverName),
+		)
+	}
+
 	// Open read replicas (F6-5, ADR-0015) after options, since WithReplicas
 	// records the DSNs as a client option. Each replica gets the same pool
 	// options as the primary and is pinged; any failure closes everything
@@ -691,6 +707,26 @@ func (c *Client) WithOptions(opts ...any) (*Client, error) {
 		return NewWithDB(c.driverName, c.db, opts...)
 	}
 	return New(c.driverName, c.dataSource, opts...)
+}
+
+// classifierEngineFor maps a dialect name to the engine name a driver module
+// registers its quarkdriver.Classifier under, and reports whether the
+// dialect needs one at all. PostgreSQL does not — its SQLSTATE is read
+// through the SQLState() method rather than a driver type — and custom
+// dialects are unknown to the driver modules, so both answer false.
+func classifierEngineFor(dialectName string) (engine string, needs bool) {
+	switch dialectName {
+	case "mysql", "mariadb":
+		return "mysql", true
+	case "sqlite":
+		return "sqlite", true
+	case "mssql":
+		return "sqlserver", true
+	case "oracle":
+		return "oracle", true
+	default:
+		return "", false
+	}
 }
 
 func containsAny(s string, substrs ...string) bool {
