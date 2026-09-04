@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/jcsvwinston/quark/compare/drivers/mssql/v0.1.0...drivers/mssql/v0.1.1) (2026-09-04)
+
+
+### Fixed
+
+* **quarkdriver:** accept drivers registered under their alias, warn without a classifier, and align docs with driver modules ([#338](https://github.com/jcsvwinston/quark/issues/338)) ([0b9dc6d](https://github.com/jcsvwinston/quark/commit/0b9dc6d9d63d33626a955d365e4431eeb67f3c8e))
+
 ## 0.1.0 (2026-09-01)
 
 
