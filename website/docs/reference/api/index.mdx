@@ -43,8 +43,8 @@ package main
 import (
     "context"
 
-    _ "github.com/lib/pq"
     "github.com/jcsvwinston/quark"
+    _ "github.com/jcsvwinston/quark/drivers/postgres"
 )
 
 type User struct {
@@ -54,7 +54,7 @@ type User struct {
 }
 
 func main() {
-    client, _ := quark.New("postgres", "...")
+    client, _ := quark.New("pgx", "...")
     ctx := context.Background()
     
     // Create

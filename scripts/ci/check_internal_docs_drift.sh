@@ -39,7 +39,11 @@ import sys
 docs_dir = os.environ["DOCS_DIR"]
 
 # 1) Enlaces markdown relativos: [texto](ruta.md) / (ruta.md#ancla).
+#    Se buscan fuera de los bloques de código: un enlace no puede vivir en un
+#    fence, y el código Go con genéricos —`gorm.G[User](db)`— tiene
+#    exactamente la forma de un enlace a un fichero llamado `db`.
 link_re = re.compile(r'\[[^\]]*\]\((?!https?://|mailto:|#)([^)\s]+)\)')
+fence_re = re.compile(r'^```.*?^```[ \t]*$', re.MULTILINE | re.DOTALL)
 # 2) Rutas de fichero en `código`, restringidas a los directorios de PRIMER
 #    NIVEL de este repo. La restricción no es cosmética: buena parte de la
 #    documentación describe el árbol del LECTOR (`handlers/`, `models/`,
@@ -73,7 +77,7 @@ for dirpath, dirnames, filenames in os.walk(docs_dir):
         page = os.path.join(dirpath, filename)
         text = open(page, encoding="utf-8", errors="ignore").read()
 
-        for target in link_re.findall(text):
+        for target in link_re.findall(fence_re.sub("", text)):
             target = target.split("#", 1)[0]
             if not target:
                 continue  # enlace a un ancla de la propia página

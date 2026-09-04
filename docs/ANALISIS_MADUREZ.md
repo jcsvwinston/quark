@@ -1,5 +1,7 @@
 # Análisis de madurez de Quark ORM
 
+> **Documento histórico (2026-05-10), superado por el estado real del código.** De las 18 brechas que describe, 16 están cerradas desde v1.0–v1.10 (AST de expresiones, CTE/window/set-ops/locking, diff de esquema real, lock de migración, RLS nativa de PostgreSQL, stampede, métricas OTel, réplicas, sharding, hooks post-commit, event bus, audit, testcontainers en CI, tipos ricos). Se conserva como acta del análisis que llevó a v1.0. Para el estado vivo: los [ADRs](adr/README.md), las [notas de release](RELEASE_NOTES_v1.10.0.md), el [roadmap público](../website/docs/reference/roadmap.mdx) y los issues de GitHub. La comparativa vigente con otros ORMs es [`comparison.md`](comparison.md).
+
 > **Fecha:** 2026-05-10
 > **Alcance:** auditoría estática del repositorio `github.com/jcsvwinston/quark`, comparativa con ORMs Go y de otros lenguajes, y plan de fases para cerrar las brechas detectadas.
 > **Tono:** crítico, sin marketing. Escrito a petición del autor para tener un mapa honesto del estado real.

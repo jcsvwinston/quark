@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jcsvwinston/quark"
-	_ "github.com/microsoft/go-mssqldb"
+	_ "github.com/jcsvwinston/quark/drivers/mssql"
 )
 
 // Product represents a product model

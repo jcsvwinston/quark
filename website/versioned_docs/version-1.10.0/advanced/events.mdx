@@ -127,12 +127,13 @@ connection, and the pool rotates connections freely). Every non-PostgreSQL
 dialect returns `ErrDialectNotSupported`.
 
 :::caution Driver requirement
-The listener needs the **pgx** driver in `database/sql` mode — open the client
-with `quark.New("pgx", dsn)` after importing
-`_ "github.com/jackc/pgx/v5/stdlib"`. It reaches under the pool for the raw
-`*pgx.Conn`, so a client opened with `lib/pq` (the driver the installation
-guide suggests as a general default) fails with `ErrDialectNotSupported` at
-`Listen` time even though the dialect is PostgreSQL.
+The listener lives in the `drivers/postgres` module, which registers it with
+Quark when imported — open the client with `quark.New("pgx", dsn)` after
+importing `_ "github.com/jcsvwinston/quark/drivers/postgres"`. It reaches under
+the pool for the raw pgx connection, so a client opened with `lib/pq`, or with
+pgx imported directly instead of through the module, fails with
+`ErrDialectNotSupported` at `CreateListener` time even though the dialect is
+PostgreSQL.
 :::
 
 ```go

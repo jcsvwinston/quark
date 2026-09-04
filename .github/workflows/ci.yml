@@ -179,6 +179,74 @@ jobs:
             exit 1
           fi
 
+  # The published driver modules are consumed WITHOUT this repository's
+  # workspace: `go get github.com/jcsvwinston/quark/drivers/sqlite` resolves
+  # their go.mod as committed. The `drivers` job above links them to the tree
+  # through go.work, which is right for testing the contract but hides a
+  # go.mod that does not stand on its own — v0.1.0 shipped requiring a quark
+  # without quarkdriver, and only the workspace made it build. This lane is
+  # the consumer's view: no workspace, tidy must be a no-op, and the module
+  # must build against the quark it pins.
+  drivers-standalone:
+    name: Driver modules (standalone, no workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Tidy, build and vet each driver module against its pinned quark
+        env:
+          GOWORK: "off"
+        run: |
+          set -euo pipefail
+          for m in drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle; do
+            echo "== $m"
+            (
+              cd "$m"
+              go mod tidy
+              if ! git diff --exit-code -- go.mod go.sum; then
+                echo "::error::$m/go.mod or go.sum is not tidy on its own (run: cd $m && GOWORK=off go mod tidy)" >&2
+                exit 1
+              fi
+              go build ./...
+              go vet ./...
+            )
+          done
+
+  # The runnable examples are their own modules (examples/<engine>/go.mod):
+  # they import the driver modules the way an application does, and those
+  # modules import Quark, so the library module cannot require them without a
+  # cycle (ADR-0023). Local replace directives point them at this tree, so
+  # this lane needs no workspace either — but the root `go build ./...` does
+  # not reach them, and without this lane an example could stop compiling
+  # against the API it demonstrates.
+  examples:
+    name: Examples (own modules)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and vet each example module
+        env:
+          GOWORK: "off"
+        run: |
+          set -euo pipefail
+          for m in $(find examples -mindepth 2 -maxdepth 2 -name go.mod -exec dirname {} \; | sort); do
+            echo "== $m"
+            # -o /dev/null: a module with a single main package would
+            # otherwise write an executable into the tree.
+            (cd "$m" && go vet ./... && go build -o /dev/null .)
+          done
+
   govulncheck:
     name: govulncheck
     # H-Q5. SECURITY.md points at the Go vulnerability database as the

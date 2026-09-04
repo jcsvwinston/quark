@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jcsvwinston/quark"
+	_ "github.com/jcsvwinston/quark/drivers/postgres"
 )
 
 // Product represents a multi-tenant product model using RLS

@@ -7,17 +7,18 @@ description: Requirements, database drivers, optional packages, pool configurati
 # Installation
 
 Quark is a regular Go module built on `database/sql`. You install the ORM once,
-then add the driver for the database engine you use — Quark doesn't wrap or
-replace driver DSNs.
+then add the **driver module** for the database engine you use — Quark doesn't
+wrap or replace driver DSNs.
 
 ```bash
 go get github.com/jcsvwinston/quark
+go get github.com/jcsvwinston/quark/drivers/sqlite   # or postgres, mysql, mssql, oracle
 ```
 
 | Requirement | Notes |
 | --- | --- |
-| Go 1.25+ | Quark declares `go 1.25.7` in `go.mod`; build with Go 1.25 or newer. |
-| A `database/sql` driver | Owns the wire protocol and DSN format; added with a blank import. |
+| Go 1.25+ | Quark declares `go 1.25.7` in `go.mod` and pins a `toolchain`; with Go 1.25 installed the Go command downloads that toolchain on first build (`GOTOOLCHAIN=auto`, the default). |
+| A driver module | Registers the `database/sql` driver (wire protocol, DSN format) **and** tells Quark how to classify that driver's errors. Added with a blank import. |
 | Driver name for `quark.New` | The dialect is auto-detected from it; override with `WithDialect`. |
 
 Quark is on the stable `v1.x` line. There's also a `quark` CLI for migrations,
@@ -27,25 +28,40 @@ model generation, schema inspection, and tenant jobs —
 
 ## Pick a driver
 
-Install exactly the driver you need:
+Each engine ships as its own module under `drivers/`. Install exactly the one
+you need and import it for its side effect; the module pulls in the underlying
+`database/sql` driver, so you don't add that one yourself:
 
-| Engine | Driver | Dialect |
-| --- | --- | --- |
-| SQLite | `modernc.org/sqlite` | `quark.SQLite()` |
-| PostgreSQL | `github.com/lib/pq` | `quark.PostgreSQL()` |
-| MySQL | `github.com/go-sql-driver/mysql` | `quark.MySQL()` |
-| MariaDB | `github.com/go-sql-driver/mysql` | `quark.MariaDB()` |
-| SQL Server | `github.com/microsoft/go-mssqldb` | `quark.MSSQL()` |
-| Oracle | `github.com/sijms/go-ora/v2` | `quark.Oracle()` |
+| Engine | Module (`go get` + `import _`) | Name for `quark.New` | Underlying driver | Dialect |
+| --- | --- | --- | --- | --- |
+| SQLite | `github.com/jcsvwinston/quark/drivers/sqlite` | `sqlite` | `modernc.org/sqlite` | `quark.SQLite()` |
+| PostgreSQL | `github.com/jcsvwinston/quark/drivers/postgres` | `pgx` | `github.com/jackc/pgx/v5/stdlib` | `quark.PostgreSQL()` |
+| MySQL | `github.com/jcsvwinston/quark/drivers/mysql` | `mysql` | `github.com/go-sql-driver/mysql` | `quark.MySQL()` |
+| MariaDB | `github.com/jcsvwinston/quark/drivers/mysql` | `mysql` | `github.com/go-sql-driver/mysql` | `quark.MariaDB()` (auto-detected) |
+| SQL Server | `github.com/jcsvwinston/quark/drivers/mssql` | `sqlserver` | `github.com/microsoft/go-mssqldb` | `quark.MSSQL()` |
+| Oracle | `github.com/jcsvwinston/quark/drivers/oracle` | `oracle` | `github.com/sijms/go-ora/v2` | `quark.Oracle()` |
+
+Why a module and not the bare driver: Quark classifies errors by the codes the
+driver reports, and naming a driver's error type means importing that driver.
+Keeping those types in a per-engine module is what lets a program link only
+the engine it talks to. If you import the bare driver instead
+(`_ "modernc.org/sqlite"`), the database still opens, but Quark cannot tell a
+duplicate key from a deadlock from a dropped connection: `IsUniqueViolation`,
+`WithDeadlockRetry` and read-replica failover all answer `false` for every
+error. `quark.New` logs a WARN (`quark.driver.no_classifier`) when it detects
+that, naming the module to import. Opening without any driver at all fails
+with an error that names the `go get` and the import line.
 
 SQLite is the easiest place to start — there's no external service to run. Three
 engines have a wrinkle worth knowing before you pick a driver:
 
-- **PostgreSQL.** Either `lib/pq` or `github.com/jackc/pgx/v5/stdlib` works, and
-  both report errors the same way to Quark. The one feature `lib/pq` cannot
-  serve is the inbound `LISTEN/NOTIFY` listener
-  ([Events](../advanced/events)), which needs pgx and `quark.New("pgx", dsn)`.
-  If you expect to use it, start with pgx and skip the migration later.
+- **PostgreSQL.** The module registers pgx, so the driver name is `"pgx"`.
+  Quark reads PostgreSQL error codes through the `SQLState()` method every
+  PostgreSQL driver exposes, so a client opened with `lib/pq` and
+  `quark.New("postgres", dsn)` also classifies errors correctly — it is the one
+  engine where the bare driver loses nothing except the inbound `LISTEN/NOTIFY`
+  listener ([Events](../advanced/events)), which lives in `drivers/postgres`
+  and needs the pgx connection. If you expect to use it, start with the module.
 - **MySQL.** Add `parseTime=true` to the DSN when you scan `time.Time` fields,
   or the driver hands back raw bytes.
 - **MariaDB.** It speaks the MySQL wire protocol through the same `"mysql"`
@@ -63,7 +79,7 @@ import (
     "log"
 
     "github.com/jcsvwinston/quark"
-    _ "modernc.org/sqlite"
+    _ "github.com/jcsvwinston/quark/drivers/sqlite"
 )
 
 type User struct {
@@ -104,10 +120,10 @@ Only the import and the driver name change — your models and queries don't:
 ```go
 import (
     "github.com/jcsvwinston/quark"
-    _ "github.com/lib/pq"
+    _ "github.com/jcsvwinston/quark/drivers/postgres"
 )
 
-client, err := quark.New("postgres", "postgres://user:pass@localhost/app?sslmode=disable")
+client, err := quark.New("pgx", "postgres://user:pass@localhost/app?sslmode=disable")
 ```
 
 The auto-detected dialect drives placeholder syntax, identifier quoting,
@@ -117,6 +133,7 @@ The auto-detected dialect drives placeholder syntax, identifier quoting,
 
 | Package | Purpose |
 | --- | --- |
+| `…/quark/drivers/<engine>` | Driver module per engine (see [Pick a driver](#pick-a-driver)). |
 | `…/quark/cache/memory` | In-process `CacheStore` with tag invalidation. |
 | `…/quark/cache/redis` | Redis-backed `CacheStore`. |
 | `…/quark/otel` | OpenTelemetry middleware. |

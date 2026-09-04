@@ -7,7 +7,7 @@
 // the rest of the ORM is unaware sharding exists.
 //
 // This example is self-contained: it uses two file-based SQLite databases as
-// shards so it runs with `go run ./examples/sharding/main.go` and no Docker.
+// shards so it runs with `cd examples/sharding && go run .` and no Docker.
 // Sharding is engine-agnostic — to shard across real Postgres/MySQL instances,
 // open each shard with that driver/DSN; the routing code is identical.
 //
@@ -25,7 +25,7 @@ import (
 	"sort"
 
 	"github.com/jcsvwinston/quark"
-	_ "modernc.org/sqlite"
+	_ "github.com/jcsvwinston/quark/drivers/sqlite"
 )
 
 // Account lives in exactly one shard, chosen by its owner. It implements

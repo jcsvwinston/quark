@@ -38,10 +38,10 @@ import (
     "log/slog"
 
     "github.com/jcsvwinston/quark"
-    _ "github.com/lib/pq"
+    _ "github.com/jcsvwinston/quark/drivers/postgres"
 )
 
-client, err := quark.New("postgres", "postgres://user:pass@localhost/app?sslmode=disable",
+client, err := quark.New("pgx", "postgres://user:pass@localhost/app?sslmode=disable",
     quark.WithLogger(slog.Default()),
 )
 if err != nil {

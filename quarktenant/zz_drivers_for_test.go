@@ -3,7 +3,7 @@
 
 package quarktenant
 
-// Quark carries no driver's error types (ADR-0027). These tests open
+// Quark carries no driver's error types (ADR-0023). These tests open
 // databases, so the test binary links them the way an application would —
 // through the shared predicates, so this file and the drivers/ modules cannot
 // drift apart.

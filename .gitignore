@@ -5,8 +5,21 @@
 # without also matching the cmd/quark/ source tree.
 /quark
 /gen-apisurface
+# The superapp acceptance binary (`go build ./examples/superapp`), 42 MB —
+# it was committed once by accident (#312).
+/superapp
 blog-api
 /migrations
+
+# Example binaries: each engine example is its own module with one `main`,
+# so `go build` inside it writes an executable named after the directory.
+/examples/sqlite/sqlite
+/examples/postgres/postgres
+/examples/mysql/mysql
+/examples/mssql/mssql
+/examples/migrations/migrations
+/examples/sharding/sharding
+/examples/tenant-rls-native/tenant-rls-native
 
 # Example database files
 *.db
