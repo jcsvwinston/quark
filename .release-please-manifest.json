@@ -1,8 +1,8 @@
 {
-  ".": "1.10.0",
-  "drivers/mssql": "0.1.0",
-  "drivers/mysql": "0.1.0",
-  "drivers/oracle": "0.1.0",
-  "drivers/postgres": "0.1.0",
-  "drivers/sqlite": "0.1.0"
+  ".": "1.10.1",
+  "drivers/mssql": "0.1.1",
+  "drivers/mysql": "0.1.1",
+  "drivers/oracle": "0.1.1",
+  "drivers/postgres": "0.1.1",
+  "drivers/sqlite": "0.1.1"
 }
