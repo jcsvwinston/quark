@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.1](https://github.com/jcsvwinston/quark/compare/v1.10.0...v1.10.1) (2026-09-04)
+
+
+### Fixed
+
+* **quarkdriver:** accept drivers registered under their alias, warn without a classifier, and align docs with driver modules ([#338](https://github.com/jcsvwinston/quark/issues/338)) ([0b9dc6d](https://github.com/jcsvwinston/quark/commit/0b9dc6d9d63d33626a955d365e4431eeb67f3c8e))
+
 ## [1.10.0](https://github.com/jcsvwinston/quark/compare/v1.9.0...v1.10.0) (2026-09-01)
 
 
