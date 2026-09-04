@@ -18,6 +18,29 @@ Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
 
+## v1.10.1
+
+A maintenance release for the driver-module seam opened in v1.9.0.
+
+`quark.New("postgres", …)` with `lib/pq` linked, and `quark.New("sqlite3",
+…)` with `mattn/go-sqlite3`, failed in v1.10.0 asking you to import a module
+that was already there: the registration check only looked for the alias
+(`pgx`, `sqlite`). Both names are now accepted, and when a driver for the
+same engine is linked under another name the message says so.
+
+When a driver is registered by a plain import instead of its
+`drivers/<engine>` module, the client now logs a warning: without the
+module, `IsUniqueViolation`, deadlock retry and replica failover answer
+`false` in silence.
+
+The five driver modules require this release line and build on their own;
+CI verifies each one without a workspace. The README, the installation and
+getting-started guides, the deployment and events pages and every example
+import `drivers/<engine>`; the comparison table is dated and corrected
+(GORM ships generics since 1.30; ent runs on `database/sql`). Examples with a
+driver are their own modules (`cd examples/<engine> && go run .`). The
+40 MB test binary that was tracked in the repository is gone.
+
 ## v1.10.0
 
 When a driver module is missing, the error now names it.
