@@ -89,8 +89,6 @@
       "release-type": "go",
       "component": "drivers/mssql",
       "include-component-in-tag": true,
-      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0",
       "tag-separator": "/"
     },
     "drivers/mysql": {
@@ -98,8 +96,6 @@
       "release-type": "go",
       "component": "drivers/mysql",
       "include-component-in-tag": true,
-      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0",
       "tag-separator": "/"
     },
     "drivers/oracle": {
@@ -107,8 +103,6 @@
       "release-type": "go",
       "component": "drivers/oracle",
       "include-component-in-tag": true,
-      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0",
       "tag-separator": "/"
     },
     "drivers/postgres": {
@@ -116,8 +110,6 @@
       "release-type": "go",
       "component": "drivers/postgres",
       "include-component-in-tag": true,
-      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0",
       "tag-separator": "/"
     },
     "drivers/sqlite": {
@@ -125,10 +117,8 @@
       "release-type": "go",
       "component": "drivers/sqlite",
       "include-component-in-tag": true,
-      "bootstrap-sha": "0b66dd1547afa16e0aa2f007cdcd557ed564abd7",
-      "release-as": "0.1.0",
       "tag-separator": "/"
     }
   },
-  "separate-pull-requests": true
+  "separate-pull-requests": false
 }
