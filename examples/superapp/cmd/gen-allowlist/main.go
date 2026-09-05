@@ -49,7 +49,7 @@ var dialectMethod = regexp.MustCompile(`^\(\*?\w*Dialect\)\.`)
 var interfaceTypes = map[string]bool{
 	"EventListener": true, "Event": true, "EventBus": true, "QueryObserver": true,
 	// quarkdriver.Listener es el tipo real detrás del alias EventListener.
-	"Listener":   true,
+	"Listener": true, "IdentifierValidator": true,
 	"Middleware": true, "Executor": true, "DBConn": true, "DBConnector": true,
 	"CacheStore": true, "CacheLocker": true, "ClientProvider": true, "ColumnTypeMapper": true,
 	"SchemaIntrospector": true, "MigrationLock": true, "MigrationLocker": true,
@@ -73,7 +73,18 @@ func recvType(name string) string {
 // manualReasons son las excepciones curadas a mano (no derivables del kind):
 // símbolos callable que conscientemente NO se ejercen. Se preservan al regenerar.
 var manualReasons = map[string]string{
-	"github.com/jcsvwinston/quark.RowLevelSecurity": "alias deprecado de RowLevelSecurityClient (desde v1.0, se retira en v2.0); el exerciser cubre RowLevelSecurityClient en su lugar",
+	// QK-6/QK-8 (auditoría de madurez 2026-09-03): opciones del migrador y
+	// contrato público del listener. Los ejerce el paquete migrate y el
+	// módulo de driver, no el flujo del superapp.
+	"github.com/jcsvwinston/quark/migrate.WithoutLock":                     "opción del migrador (QK-6): la ejerce migrate/a1_lock_tx_test.go; el superapp corre en un solo proceso y migra con el lock por defecto (denominador S7-coverage)",
+	"github.com/jcsvwinston/quark/migrate.WithLockTimeout":                 "opción del migrador (QK-6): documentada y probada en migrate/; el superapp no la varía (denominador S7-coverage)",
+	"github.com/jcsvwinston/quark/migrate.WithLockName":                    "opción del migrador (QK-6): documentada y probada en migrate/; el superapp no la varía (denominador S7-coverage)",
+	"github.com/jcsvwinston/quark/migrate.WithLogger":                      "opción del migrador (QK-6): la ejerce migrate/a1_lock_tx_test.go (denominador S7-coverage)",
+	"github.com/jcsvwinston/quark.(*Client).Logger":                        "accesor del logger del cliente (QK-6): lo consume el migrador; no es un entry point de aplicación (denominador S7-coverage)",
+	"github.com/jcsvwinston/quark/quarkdriver.RegisterListenerFactory":     "contrato de módulo de driver (QK-8): lo llama el init() del módulo de PostgreSQL al adoptar el contrato público; RegisterListener lo adapta mientras tanto (denominador S7-coverage)",
+	"github.com/jcsvwinston/quark/quarkdriver.MustRegisterListenerFactory": "contrato de módulo de driver (QK-8): init() del módulo, no código de aplicación (denominador S7-coverage)",
+	"github.com/jcsvwinston/quark/quarkdriver.LookupListenerFactory":       "contrato de módulo de driver (QK-8): lo llama el ORM al abrir un listener (events.go); no es un entry point de aplicación (denominador S7-coverage)",
+	"github.com/jcsvwinston/quark.RowLevelSecurity":                        "alias deprecado de RowLevelSecurityClient (desde v1.0, se retira en v2.0); el exerciser cubre RowLevelSecurityClient en su lugar",
 
 	// Contrato de los módulos de driver (ADR-0023). Es superficie de AUTOR DE
 	// DRIVER, no de aplicación: lo llama el init() de cada módulo, no el

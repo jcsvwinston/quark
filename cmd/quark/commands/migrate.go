@@ -218,7 +218,7 @@ func runMigrateUp() error {
 	}
 	defer client.Close()
 
-	migrator := migrate.NewMigrator(client)
+	migrator := newCLIMigrator(client)
 	ctx := context.Background()
 
 	if migrateDryRun {
@@ -239,7 +239,7 @@ func runMigrateDown() error {
 	}
 	defer client.Close()
 
-	migrator := migrate.NewMigrator(client)
+	migrator := newCLIMigrator(client)
 	if err := migrator.Down(context.Background(), migrateDownSteps); err != nil {
 		return fmt.Errorf("reverting migrations: %w", err)
 	}
@@ -253,7 +253,7 @@ func runMigrateStatus() error {
 	}
 	defer client.Close()
 
-	migrator := migrate.NewMigrator(client)
+	migrator := newCLIMigrator(client)
 	ctx := context.Background()
 
 	// Init is idempotent (dialect-aware IF NOT EXISTS); without it, status on
@@ -305,7 +305,7 @@ func runMigrateVersion() error {
 	}
 	defer client.Close()
 
-	migrator := migrate.NewMigrator(client)
+	migrator := newCLIMigrator(client)
 	ctx := context.Background()
 	// Same fresh-database contract as `migrate status`: report "none applied"
 	// rather than a missing-table error.

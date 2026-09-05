@@ -82,6 +82,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Client).Logger",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Migrate",
       "kind": "method"
     },
@@ -3222,6 +3227,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
+      "name": "MigratorOption",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "NewMigrator",
       "kind": "func"
     },
@@ -3243,6 +3253,26 @@
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "Reset",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/migrate",
+      "name": "WithLockName",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/migrate",
+      "name": "WithLockTimeout",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/migrate",
+      "name": "WithLogger",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/migrate",
+      "name": "WithoutLock",
       "kind": "func"
     },
     {
@@ -3302,6 +3332,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(IdentifierValidator).ValidateIdentifier",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Listener).Close",
       "kind": "method"
     },
@@ -3352,6 +3387,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "IdentifierValidator",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "IsRegistered",
       "kind": "func"
     },
@@ -3367,7 +3407,17 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ListenerFactory",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LookupListener",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "LookupListenerFactory",
       "kind": "func"
     },
     {
@@ -3387,6 +3437,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "MustRegisterListenerFactory",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "NewListenerFunc",
       "kind": "type"
     },
@@ -3398,6 +3453,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "RegisterListener",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "RegisterListenerFactory",
       "kind": "func"
     },
     {

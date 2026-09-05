@@ -667,6 +667,16 @@ func (c *Client) Exec(ctx context.Context, query string, args ...any) error {
 
 // Raw returns the underlying *sql.DB for advanced operations.
 // Use with caution - this bypasses quark's safety features.
+// Logger returns the logger the client was built with (WithLogger), or the
+// process default: the migrator and anything else that reports on the
+// client's behalf writes through it instead of to stdout (QK-6).
+func (c *Client) Logger() *slog.Logger {
+	if c == nil || c.logger == nil {
+		return slog.Default()
+	}
+	return c.logger
+}
+
 func (c *Client) Raw() *sql.DB {
 	return c.db
 }
