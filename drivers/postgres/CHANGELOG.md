@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/jcsvwinston/quark/compare/drivers/postgres/v0.1.2...drivers/postgres/v0.1.3) (2026-09-05)
+
+
+### Fixed
+
+* **drivers/postgres:** register the listener through the public ListenerFactory contract ([#352](https://github.com/jcsvwinston/quark/issues/352)) ([f9ac926](https://github.com/jcsvwinston/quark/commit/f9ac926a4defbebf7726a94c50bf19947f5ae72e))
+
 ## [0.1.2](https://github.com/jcsvwinston/quark/compare/drivers/postgres/v0.1.1...drivers/postgres/v0.1.2) (2026-09-05)
 
 
