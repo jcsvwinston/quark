@@ -377,6 +377,7 @@
     "github.com/jcsvwinston/quark/otel.Option": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/otel.RedactArgs": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/otel.RedactionMode": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark/quarkdriver.(IdentifierValidator).ValidateIdentifier": "método de interfaz: contrato ejercido vía las implementaciones (sus métodos concretos se cuentan aparte), no un entry point invocable directo (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarkdriver.(Listener).Close": "método de interfaz: contrato ejercido vía las implementaciones (sus métodos concretos se cuentan aparte), no un entry point invocable directo (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarkdriver.(Listener).Listen": "método de interfaz: contrato ejercido vía las implementaciones (sus métodos concretos se cuentan aparte), no un entry point invocable directo (denominador S7-coverage)",
     "github.com/jcsvwinston/quark/quarkdriver.(Listener).Receive": "método de interfaz: contrato ejercido vía las implementaciones (sus métodos concretos se cuentan aparte), no un entry point invocable directo (denominador S7-coverage)",

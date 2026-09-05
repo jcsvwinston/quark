@@ -189,7 +189,7 @@ func runTenantMigrate(id string) error {
 	}
 	defer client.Close()
 
-	migrator := migrate.NewMigrator(client)
+	migrator := newCLIMigrator(client)
 	if err := migrator.Up(context.Background(), 0); err != nil {
 		return fmt.Errorf("migrating tenant %s: %w", id, err)
 	}

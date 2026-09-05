@@ -49,7 +49,7 @@ var dialectMethod = regexp.MustCompile(`^\(\*?\w*Dialect\)\.`)
 var interfaceTypes = map[string]bool{
 	"EventListener": true, "Event": true, "EventBus": true, "QueryObserver": true,
 	// quarkdriver.Listener es el tipo real detrás del alias EventListener.
-	"Listener":   true,
+	"Listener":   true, "IdentifierValidator": true,
 	"Middleware": true, "Executor": true, "DBConn": true, "DBConnector": true,
 	"CacheStore": true, "CacheLocker": true, "ClientProvider": true, "ColumnTypeMapper": true,
 	"SchemaIntrospector": true, "MigrationLock": true, "MigrationLocker": true,
