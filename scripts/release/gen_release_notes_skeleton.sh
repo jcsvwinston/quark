@@ -110,4 +110,18 @@ print(f"bumpeada la línea marcada de CLAUDE.md a v{version}")
 PY_BUMP
 fi
 
+# El README apunta a las notas narrativas de LA MINOR ACTUAL («for the current
+# line»); check-version-coherence.sh exige el enlace. En una minor nueva el
+# puntero se mueve aquí; en un patch la minor no cambia y no hay nada que mover.
+minor_notes="docs/RELEASE_NOTES_v${version%.*}.0.md"
+if ! grep -qF "$minor_notes" README.md; then
+  prev=$(grep -oE 'docs/RELEASE_NOTES_v[0-9]+\.[0-9]+\.0\.md' README.md | sort -uV | tail -1)
+  if [ -n "$prev" ]; then
+    sed -i.bak "s#${prev}#${minor_notes}#g" README.md && rm -f README.md.bak
+    echo "README.md: puntero de notas ${prev} → ${minor_notes}"
+  else
+    echo "AVISO: README.md no enlaza ninguna docs/RELEASE_NOTES_vX.Y.0.md; enlaza ${minor_notes} a mano" >&2
+  fi
+fi
+
 echo "Recuerda: la prosa final es tuya. El guard de coherencia valida menciones y sección."
