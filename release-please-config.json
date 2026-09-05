@@ -61,8 +61,7 @@
   ],
   "packages": {
     ".": {
-      "package-name": "github.com/jcsvwinston/quark",
-      "release-type": "go",
+        "release-type": "go",
       "exclude-paths": [
         "examples/superapp",
         "bugbash",
