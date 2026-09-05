@@ -1,0 +1,223 @@
+---
+sidebar_position: 12
+title: Web Frameworks
+description: Use Quark from net/http, chi, Echo, Gin and Nucleus — one client per process, the request context per query, and the driver module linked so a duplicate key becomes a 409.
+---
+
+# Using Quark from a web framework
+
+Quark has no framework dependency: a handler needs a `*quark.Client` and a
+`context.Context`, and every router hands you both. The pattern is the same
+whichever one you use:
+
+1. Build **one** `*quark.Client` at startup and share it between handlers. It
+   owns the connection pool; opening a client per request would open a pool
+   per request.
+2. Open every query with the **request's context** —
+   `quark.For[Note](ctx, client)` — so a cancelled request or a deadline
+   reaches the database instead of leaving the query running.
+3. Blank-import the **driver module** for your engine
+   (`_ "github.com/jcsvwinston/quark/drivers/sqlite"`). It registers the
+   `database/sql` driver and the error classifier behind
+   `quark.IsUniqueViolation`; importing the bare driver boots just the same
+   and silently turns the 409 below into a 500. See
+   [Pick a driver](installation#pick-a-driver).
+
+Each section below is a runnable example under `examples/` in the
+repository, its own Go module with a test that drives the handlers through
+`httptest`. They all serve the same two routes over this model:
+
+```go
+type Note struct {
+    ID        int64     `db:"id" pk:"true" json:"id"`
+    Title     string    `db:"title" quark:"unique,not_null" json:"title"`
+    Body      string    `db:"body" json:"body"`
+    CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+```
+
+Titles are unique on purpose: the POST handler has a duplicate to classify.
+
+## net/http
+
+The standard library is enough. The request context is `r.Context()`:
+
+```go
+client, err := quark.New("sqlite", "notes.db")
+if err != nil {
+    log.Fatal(err)
+}
+defer client.Close()
+if err := client.Migrate(context.Background(), &Note{}); err != nil {
+    log.Fatal(err)
+}
+
+mux := http.NewServeMux()
+mux.HandleFunc("GET /notes", func(w http.ResponseWriter, r *http.Request) {
+    notes, err := quark.For[Note](r.Context(), client).OrderBy("id", "DESC").Limit(100).List()
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    w.Header().Set("Content-Type", "application/json")
+    _ = json.NewEncoder(w).Encode(notes)
+})
+mux.HandleFunc("POST /notes", func(w http.ResponseWriter, r *http.Request) {
+    var n Note
+    if err := json.NewDecoder(r.Body).Decode(&n); err != nil || n.Title == "" {
+        http.Error(w, "title is required", http.StatusBadRequest)
+        return
+    }
+    if err := quark.For[Note](r.Context(), client).Create(&n); err != nil {
+        if quark.IsUniqueViolation(err) {
+            http.Error(w, "a note with that title already exists", http.StatusConflict)
+            return
+        }
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    w.WriteHeader(http.StatusCreated)
+    _ = json.NewEncoder(w).Encode(n)
+})
+log.Fatal(http.ListenAndServe(":8080", mux))
+```
+
+## chi
+
+chi handlers are plain `http.HandlerFunc`s, so the snippet above works
+unchanged inside `r.Get` / `r.Post`. The example wires the router in a
+`newRouter(client) http.Handler` function so the test can hand it a
+throwaway database:
+
+```go
+r := chi.NewRouter()
+r.Use(middleware.Recoverer)
+r.Get("/notes", func(w http.ResponseWriter, r *http.Request) {
+    notes, err := quark.For[Note](r.Context(), client).OrderBy("id", "DESC").Limit(100).List()
+    // ...
+})
+r.Post("/notes", func(w http.ResponseWriter, r *http.Request) {
+    // ... quark.For[Note](r.Context(), client).Create(&n)
+})
+```
+
+Full example:
+[`examples/chi`](https://github.com/jcsvwinston/quark/tree/main/examples/chi).
+
+## Echo
+
+Echo wraps the request: the context is `c.Request().Context()`, and
+returning an error from a handler lets Echo's error handler answer. The
+example builds the server in `newServer(client) *echo.Echo`:
+
+```go
+e := echo.New()
+e.Use(middleware.Recover())
+e.GET("/notes", func(c echo.Context) error {
+    notes, err := quark.For[Note](c.Request().Context(), client).OrderBy("id", "DESC").Limit(100).List()
+    if err != nil {
+        return err
+    }
+    return c.JSON(http.StatusOK, notes)
+})
+e.POST("/notes", func(c echo.Context) error {
+    var n Note
+    if err := c.Bind(&n); err != nil || n.Title == "" {
+        return c.JSON(http.StatusBadRequest, map[string]string{"error": "title is required"})
+    }
+    if err := quark.For[Note](c.Request().Context(), client).Create(&n); err != nil {
+        if quark.IsUniqueViolation(err) {
+            return c.JSON(http.StatusConflict, map[string]string{"error": "a note with that title already exists"})
+        }
+        return err
+    }
+    return c.JSON(http.StatusCreated, n)
+})
+```
+
+Full example:
+[`examples/echo`](https://github.com/jcsvwinston/quark/tree/main/examples/echo).
+
+## Gin
+
+In Gin the request is the `c.Request` field, so the context is
+`c.Request.Context()`. The example builds the engine in
+`newEngine(client) *gin.Engine`:
+
+```go
+r := gin.New()
+r.Use(gin.Recovery())
+r.GET("/notes", func(c *gin.Context) {
+    notes, err := quark.For[Note](c.Request.Context(), client).OrderBy("id", "DESC").Limit(100).List()
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+    c.JSON(http.StatusOK, notes)
+})
+r.POST("/notes", func(c *gin.Context) {
+    var n Note
+    if err := c.ShouldBindJSON(&n); err != nil || n.Title == "" {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "title is required"})
+        return
+    }
+    if err := quark.For[Note](c.Request.Context(), client).Create(&n); err != nil {
+        if quark.IsUniqueViolation(err) {
+            c.JSON(http.StatusConflict, gin.H{"error": "a note with that title already exists"})
+            return
+        }
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+    c.JSON(http.StatusCreated, n)
+})
+```
+
+Full example:
+[`examples/gin`](https://github.com/jcsvwinston/quark/tree/main/examples/gin).
+
+## Nucleus
+
+Nucleus applications are built from modules, and a Quark-backed feature is
+a module that wraps the client. The CLI writes that module for you:
+
+```bash
+quark init --dialect sqlite --with nucleus
+```
+
+adds `internal/<app>/module.go` to the plain `init` layout: a
+`nucleus.Module[struct{}]` whose `OnStart` registers and migrates the
+model, whose `Routes` serve `GET`/`POST /api/notes` through
+`quark.For[Note](c.Request.Context(), client)`, and which declares its own
+access rules — Nucleus denies by default, so a route without a policy row
+answers 403 even when it is registered. The file blank-imports the driver
+module for the dialect you chose, and reads are open to anonymous callers;
+the `create` row is a development default, scope it to a role before the
+service faces a network.
+
+Quark does not depend on Nucleus (Nucleus depends on Quark), so `init`
+writes the module as source and leaves `main.go` to you. Mount it where the
+application is built:
+
+```go
+client, err := quark.New("sqlite", dsn)
+// ...
+app, err := nucleus.New().
+    FromConfigFile("nucleus.yml").
+    Mount(shop.Module(client)).
+    Build()
+```
+
+For a whole application generated around this seam — configuration, policy
+file, migrations, the admin panel — start from the Nucleus side instead:
+`nucleus new <app> --with quark` writes the application and the same module
+shape. The `init` flag is for adding a Quark feature to a Nucleus project you
+already have, or for keeping the data layer in a repository of its own.
+
+## Testing handlers
+
+Every example ships a `main_test.go` that needs no server: it builds a client
+on a temporary SQLite file, migrates the model, and drives the router with
+`httptest.NewRecorder` — empty list, created note, duplicate title as 409,
+missing title as 400. For the transaction-per-test isolation pattern and the
+`quarktest` kit, see [Testing](testing).

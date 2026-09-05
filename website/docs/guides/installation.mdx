@@ -140,7 +140,9 @@ The auto-detected dialect drives placeholder syntax, identifier quoting,
 | `…/quark/migrate` | Versioned migration registry and migrator. |
 
 The core package has no framework dependency — use it from HTTP handlers,
-workers, CLIs, or any layer that can pass a `context.Context`.
+workers, CLIs, or any layer that can pass a `context.Context`. For the
+handler pattern in net/http, chi, Echo, Gin and Nucleus, see
+[Web Frameworks](frameworks).
 
 ## Pool configuration
 

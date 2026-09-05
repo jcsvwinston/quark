@@ -57,6 +57,33 @@ Next steps:
 The runner is what runs migrations and seeders — the standalone `quark` binary
 cannot (see [below](#embedding-the-same-operations-in-your-own-binary)).
 
+### With Nucleus
+
+```bash
+quark init --dialect sqlite --with nucleus
+```
+
+`--with nucleus` adds one file to the layout above: `internal/<app>/module.go`,
+a Nucleus module that wraps the Quark client — an example model, `OnStart`
+registering and migrating it, `GET`/`POST /api/notes` routes, the module's own
+access rules and CSRF exemption, and the driver module for the chosen dialect
+blank-imported so a duplicate key answers 409. The runner and the rest of the
+layout are unchanged. The next steps then add the Nucleus dependency and the
+mount line:
+
+```text
+  3. go get github.com/jcsvwinston/nucleus@latest # the host framework of internal/shop
+  4. In main: client, err := quark.New("sqlite", dsn) and nucleus.New().FromConfigFile("nucleus.yml").Mount(shop.Module(client))
+     For the whole application generated around this module (config, policy file, admin panel):
+       nucleus new shop --with quark
+```
+
+Quark does not depend on Nucleus, so the module is written as source and
+`main.go` stays yours; `nucleus new <app> --with quark` is the path when you
+want the whole application generated. An unknown `--with` target fails before
+anything is written, like an unknown dialect. See
+[Web Frameworks](frameworks#nucleus) for the module's shape.
+
 ## Migrations from the CLI
 
 ```bash
