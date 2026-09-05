@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0](https://github.com/jcsvwinston/quark/compare/v1.10.1...v1.11.0) (2026-09-05)
+
+
+### Added
+
+* **migrate:** the migrator takes the schema lock by default, logs through the client and runs transactional migrations; the listener contract is public ([#350](https://github.com/jcsvwinston/quark/issues/350)) ([e99d9be](https://github.com/jcsvwinston/quark/commit/e99d9beda5339cbaf5c0242ce1410ee646a5983e))
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.10.1 ([#348](https://github.com/jcsvwinston/quark/issues/348)) ([e8d4d28](https://github.com/jcsvwinston/quark/commit/e8d4d2867fe954c4917990c508242bffafe7a4b8))
+
 ## [1.10.1](https://github.com/jcsvwinston/quark/compare/v1.10.0...v1.10.1) (2026-09-04)
 
 
