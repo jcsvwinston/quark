@@ -12,7 +12,7 @@ replace github.com/jcsvwinston/quark => ../..
 replace github.com/jcsvwinston/quark/drivers/postgres => ../../drivers/postgres
 
 require (
-	github.com/jcsvwinston/quark v1.10.1
+	github.com/jcsvwinston/quark v1.11.0
 	github.com/jcsvwinston/quark/drivers/postgres v0.1.0
 )
 
