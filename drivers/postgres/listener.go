@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/jcsvwinston/quark/internal/guard"
 	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
@@ -24,8 +23,8 @@ import (
 var errNotPGXConn = errors.New("quark/drivers/postgres: LISTEN/NOTIFY requires the pgx driver")
 
 func init() {
-	quarkdriver.MustRegisterListener("postgres", func(db *sql.DB, g *guard.SQLGuard) (quarkdriver.Listener, error) {
-		return &listener{db: db, guard: g}, nil
+	quarkdriver.MustRegisterListenerFactory("postgres", func(db *sql.DB, v quarkdriver.IdentifierValidator) (quarkdriver.Listener, error) {
+		return &listener{db: db, guard: v}, nil
 	})
 }
 
@@ -42,7 +41,7 @@ func init() {
 // goroutine; to stop, cancel the Receive context and then Close.
 type listener struct {
 	db    *sql.DB
-	guard *guard.SQLGuard
+	guard quarkdriver.IdentifierValidator // the ORM's SQL guard, through the public contract
 
 	mu     sync.Mutex
 	conn   *sql.Conn // dedicated, acquired lazily on first Listen
