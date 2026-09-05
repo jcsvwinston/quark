@@ -42,19 +42,36 @@ type Listener interface {
 	Close() error
 }
 
-// NewListenerFunc builds a Listener over an open pool. The guard is passed
-// through because channel names reach the server as identifiers, and quoting
-// them is the same job the ORM does everywhere else — a listener module must
-// not grow its own escaping.
+// IdentifierValidator is the one thing a listener needs from the ORM's SQL
+// guard: channel names reach the server as identifiers, and validating them
+// is the same job the ORM does everywhere else — a listener module must not
+// grow its own escaping. It is an interface so a listener module implements
+// ListenerFactory without importing an internal package: the previous
+// contract named *internal/guard.SQLGuard, which compiled only by path
+// prefix and which no third party could have implemented (QK-8). The ORM's
+// *quark.SQLGuard satisfies it.
+type IdentifierValidator interface {
+	ValidateIdentifier(name string) error
+}
+
+// ListenerFactory builds a Listener over an open pool.
+type ListenerFactory func(db *sql.DB, v IdentifierValidator) (Listener, error)
+
+// NewListenerFunc is the previous shape of ListenerFactory, kept so a driver
+// module built against it keeps registering; it names an internal type,
+// which is why ListenerFactory replaces it.
+//
+// Deprecated: implement ListenerFactory and register it with
+// RegisterListenerFactory.
 type NewListenerFunc func(db *sql.DB, g *guard.SQLGuard) (Listener, error)
 
 var (
 	listenerMu sync.RWMutex
-	listeners  = map[string]NewListenerFunc{}
+	listeners  = map[string]ListenerFactory{}
 )
 
-// RegisterListener records the listener constructor for engine.
-func RegisterListener(engine string, f NewListenerFunc) error {
+// RegisterListenerFactory records the listener constructor for engine.
+func RegisterListenerFactory(engine string, f ListenerFactory) error {
 	if engine == "" {
 		return fmt.Errorf("quarkdriver: engine name is required")
 	}
@@ -70,19 +87,58 @@ func RegisterListener(engine string, f NewListenerFunc) error {
 	return nil
 }
 
+// MustRegisterListenerFactory is RegisterListenerFactory for use in an init().
+func MustRegisterListenerFactory(engine string, f ListenerFactory) {
+	if err := RegisterListenerFactory(engine, f); err != nil {
+		panic(err)
+	}
+}
+
+// LookupListenerFactory returns the constructor registered for engine.
+func LookupListenerFactory(engine string) (ListenerFactory, bool) {
+	listenerMu.RLock()
+	defer listenerMu.RUnlock()
+	f, ok := listeners[engine]
+	return f, ok
+}
+
+// RegisterListener records a constructor of the previous shape. The ORM
+// always hands the factory its own guard, so the adapter's type assertion
+// holds; a caller passing another validator gets an error, not a panic.
+//
+// Deprecated: use RegisterListenerFactory.
+func RegisterListener(engine string, f NewListenerFunc) error {
+	if f == nil {
+		return fmt.Errorf("quarkdriver: %s: listener constructor is required", engine)
+	}
+	return RegisterListenerFactory(engine, func(db *sql.DB, v IdentifierValidator) (Listener, error) {
+		g, ok := v.(*guard.SQLGuard)
+		if !ok {
+			return nil, fmt.Errorf("quarkdriver: %s: this listener was registered with the previous contract and needs the ORM's guard, got %T", engine, v)
+		}
+		return f(db, g)
+	})
+}
+
 // MustRegisterListener is RegisterListener for use in an init().
+//
+// Deprecated: use MustRegisterListenerFactory.
 func MustRegisterListener(engine string, f NewListenerFunc) {
 	if err := RegisterListener(engine, f); err != nil {
 		panic(err)
 	}
 }
 
-// LookupListener returns the constructor registered for engine.
+// LookupListener returns the constructor registered for engine in the
+// previous shape.
+//
+// Deprecated: use LookupListenerFactory.
 func LookupListener(engine string) (NewListenerFunc, bool) {
-	listenerMu.RLock()
-	defer listenerMu.RUnlock()
-	f, ok := listeners[engine]
-	return f, ok
+	f, ok := LookupListenerFactory(engine)
+	if !ok {
+		return nil, false
+	}
+	return func(db *sql.DB, g *guard.SQLGuard) (Listener, error) { return f(db, g) }, true
 }
 
 // The sentinels a Listener implementation returns. They live here, not in

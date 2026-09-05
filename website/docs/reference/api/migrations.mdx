@@ -15,7 +15,8 @@ migrations — see the [Migrations guide](../../guides/migrations).
 | `Client.AddForeignKey` | `AddForeignKey(ctx, table, constraintName string, columns []string, refTable string, refColumns []string, onDelete, onUpdate string) error` | Adds a foreign key constraint. |
 | `migrate.Register` | `Register(m *Migration)` | Registers a migration in the global registry. |
 | `migrate.Reset` | `Reset()` | Clears the registry (tests). |
-| `migrate.NewMigrator` | `NewMigrator(client *quark.Client) *Migrator` | Binds a migrator to a client. |
+| `migrate.NewMigrator` | `NewMigrator(client *quark.Client, opts ...MigratorOption) *Migrator` | Binds a migrator to a client. Options: `WithoutLock()`, `WithLockTimeout(d)`, `WithLockName(name)`, `WithLogger(l)`. |
+| `Migration.UpTx` / `Migration.DownTx` | `func(ctx, tx *sql.Tx) error` | Transactional forms: migration and ledger row commit together where the engine rolls DDL back. |
 | `Migrator.Init` | `Init(ctx) error` | Creates the `quark_migrations` tracking table. |
 | `Migrator.Up` | `Up(ctx, steps int) error` | Applies pending migrations (ID order). |
 | `Migrator.UpDryRun` | `UpDryRun(ctx, steps int) error` | Prints pending migrations without running them. |
@@ -136,15 +137,20 @@ Clears the migration registry. Intended for tests.
 
 ## Migrator
 
-### `migrate.NewMigrator(client *quark.Client) *Migrator`
+### `migrate.NewMigrator(client *quark.Client, opts ...MigratorOption) *Migrator`
 
 Creates a migrator bound to a client.
 
 ```go
 migrator := migrate.NewMigrator(client)
+migrator = migrate.NewMigrator(client, migrate.WithLockTimeout(time.Minute), migrate.WithLogger(logger))
 ```
 
-The migrator stores applied migration IDs in `quark_migrations`.
+The migrator stores applied migration IDs in `quark_migrations`. `Up` and
+`Down` take the engine's cluster-wide migration lock by default (`quark:schema`,
+30s timeout); `WithoutLock()` skips it, `WithLockName` and `WithLockTimeout`
+tune it, and `WithLogger` routes the progress lines (the default is the
+client's logger). SQLite has no distributed lock and proceeds without one.
 
 ### `Init(ctx context.Context) error`
 

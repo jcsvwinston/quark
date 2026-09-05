@@ -182,11 +182,47 @@ err := migrator.Up(ctx, 0)    // apply all pending
 err = migrator.Down(ctx, 1)   // revert the last one
 ```
 
+`Up` and `Down` take the cluster-wide migration lock before touching the
+schema — `pg_advisory_lock` on PostgreSQL, `GET_LOCK` on MySQL and MariaDB,
+`sp_getapplock` on SQL Server, `DBMS_LOCK` on Oracle — so two replicas
+running `migrate up` at the same time apply each migration once. SQLite has
+no distributed lock and a single writer, so nothing is taken there. Options:
+
+```go
+migrator := migrate.NewMigrator(client,
+    migrate.WithLockTimeout(time.Minute),   // default 30s
+    migrate.WithLockName("myapp:schema"),   // default "quark:schema"
+    migrate.WithLogger(logger),             // default: the client's logger
+)
+migrator = migrate.NewMigrator(client, migrate.WithoutLock()) // single process, no lock
 ```
-[dry-run] Pending migrations (not applied):
-  [pending] 202605050001_add_users_email_index — add users email index
-Applying migration: 202605050001_add_users_email_index ...
-Applied 1 migrations.
+
+Progress goes through the logger, not stdout:
+
+```
+level=INFO msg="migrate: applying" id=202605050001_add_users_email_index name="add users email index"
+level=INFO msg="migrate: applied" count=1
+```
+
+A migration can be written in its transactional form, `UpTx` / `DownTx`,
+which receive a `*sql.Tx`. On engines that roll DDL back (PostgreSQL, SQLite,
+SQL Server) the migration and its ledger row commit together, so a migration
+that fails halfway leaves neither behind. On MySQL, MariaDB and Oracle DDL
+commits itself: only the ledger row is atomic with the last statement, and
+the migrator says so at debug level.
+
+```go
+migrate.Register(&migrate.Migration{
+    ID: "202605050002_add_orders", Name: "add orders",
+    UpTx: func(ctx context.Context, tx *sql.Tx) error {
+        _, err := tx.ExecContext(ctx, `CREATE TABLE orders (id BIGSERIAL PRIMARY KEY)`)
+        return err
+    },
+    DownTx: func(ctx context.Context, tx *sql.Tx) error {
+        _, err := tx.ExecContext(ctx, `DROP TABLE orders`)
+        return err
+    },
+})
 ```
 
 Pass `steps > 0` to limit how many to apply/revert; `0` means all. Applied IDs are

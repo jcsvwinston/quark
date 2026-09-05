@@ -169,7 +169,7 @@ func (f *ListenerFactory) CreateListener() (EventListener, error) {
 		return nil, fmt.Errorf("%w: LISTEN/NOTIFY listener is PostgreSQL-only, dialect %q has no equivalent (ADR-0019)",
 			ErrDialectNotSupported, f.client.dialect.Name())
 	}
-	newListener, ok := quarkdriver.LookupListener("postgres")
+	newListener, ok := quarkdriver.LookupListenerFactory("postgres")
 	if !ok {
 		// The listener needs the pgx connection underneath database/sql, so
 		// it ships with the driver module rather than with the ORM. Saying

@@ -40,7 +40,7 @@ quark/
 ## Reglas duras
 
 1. **Tests deben pasar en los 6 motores antes de mergear a `main`.** SQLite corre in-process; PostgreSQL/MySQL/MariaDB/MSSQL vía testcontainers y Oracle vía `docker run` (`gvenzl/oracle-free`; ver `.github/workflows/ci.yml`). La matriz por-motor ya es bloqueante en CI (F0-8 cerrado). Si tu cambio toca SQL, abre PR sólo cuando los 6 estén verdes.
-2. **Conventional Commits obligatorio** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `BREAKING CHANGE:` en el footer). Ya está documentado en `CONTRIBUTING.md`. No mezcles tipos en un commit.
+2. **Conventional Commits obligatorio** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `BREAKING CHANGE:` en el footer), **en inglés**: el producto habla inglés (QADR-0007) y el título del squash es la línea del changelog y de la release — CI rechaza un título de PR en español (`scripts/ci/check_pr_title_english.sh`). Ya está documentado en `CONTRIBUTING.md`. No mezcles tipos en un commit. Un `!` o un `BREAKING CHANGE:` es una MAJOR de Quark y, por QADR-0002, de toda la suite: se decide antes del merge.
 3. **API y docs se modifican en el mismo PR.** Cualquier cambio que añada/cambie/elimine API pública requiere su entrada en `website/docs/` y en `CHANGELOG.md` dentro del mismo PR. PRs sin esto los rechaza el `code-reviewer` (`.claude/agents/code-reviewer.md`).
 4. **Bugs P0 antes que features.** Mientras haya bugs P0 abiertos (issues de GitHub), no se trabaja en Fase 1+ del plan. Cualquier feature con un P0 abierto se rechaza.
 5. **No introduzcas reflect en hot paths sin discutirlo.** Reflect-everywhere es deuda conocida (ver §1.1 de ANALISIS_MADUREZ); el codegen es la salida, entregada en Fase 6 (v1.0.0). No añadas reflect adicional sin abrir issue primero.
