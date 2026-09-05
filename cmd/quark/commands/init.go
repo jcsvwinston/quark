@@ -269,13 +269,19 @@ func runInit() error {
 	}
 
 	// --with nucleus: the Quark side of the seam with Nucleus, as source
-	// text the host mounts. Quark cannot import Nucleus (Nucleus imports
-	// Quark), so this is the most the CLI can write without a cycle; the
-	// whole application around it is `nucleus new <app> --with quark`.
+	// text the host mounts. Quark is the autonomous data layer of the suite
+	// and carries no framework dependency (QADR-0001/0006), so the CLI
+	// cannot compile the module against Nucleus: it writes the module and
+	// the nucleus.yml the printed mount line reads, and leaves main.go to
+	// the reader; the whole application around it is `nucleus new <app>
+	// --with quark`.
 	pkg := ""
 	if withNucleus {
 		pkg = packageIdent(projectName)
 		if err := writeNucleusModule(initDir, pkg, projectName, initDialect); err != nil {
+			return err
+		}
+		if err := writeNucleusConfig(initDir, initDialect); err != nil {
 			return err
 		}
 	}
@@ -308,6 +314,7 @@ func printInitNextSteps(projectName string, createdGoMod bool, nucleusPkg string
 		fmt.Printf("  %d. go get github.com/jcsvwinston/nucleus@latest # the host framework of internal/%s\n", step, nucleusPkg)
 		step++
 		fmt.Printf("  %d. In main: client, err := quark.New(%q, dsn) and nucleus.New().FromConfigFile(\"nucleus.yml\").Mount(%s.Module(client))\n", step, clidb.DriverName(initDialect), nucleusPkg)
+		fmt.Printf("     nucleus.yml is written here and names the .quark.yml database; edit both if you change it.\n")
 		step++
 		fmt.Printf("     For the whole application generated around this module (config, policy file, admin panel):\n")
 		fmt.Printf("       nucleus new %s --with quark\n", projectName)
@@ -381,6 +388,63 @@ func writeNucleusModule(dir, pkg, projectName, dialect string) error {
 	}
 	fmt.Printf("  Created internal/%s/module.go (Nucleus module wrapping the Quark client — mount it with .Mount(%s.Module(client)))\n", pkg, pkg)
 	return nil
+}
+
+// writeNucleusConfig writes nucleus.yml, the minimum
+// nucleus.New().FromConfigFile("nucleus.yml") needs to boot, next to
+// .quark.yml and pointing at the same database. The printed next step names
+// the file, so init has to write it: before this the recipe compiled and
+// died at boot with "open nucleus.yml: no such file or directory". An
+// existing file is never overwritten (`nucleus new` writes a fuller one).
+func writeNucleusConfig(dir, dialect string) error {
+	path := filepath.Join(dir, "nucleus.yml")
+	if _, err := os.Stat(path); err == nil {
+		color.Yellow("Warning: nucleus.yml already exists. Skipping.")
+		return nil
+	}
+	content := fmt.Sprintf(`# Written by 'quark init --with nucleus': the minimum
+# nucleus.New().FromConfigFile("nucleus.yml") needs to boot. The database is
+# the one .quark.yml names, so the host and the Quark client open the same
+# one; change both together. 'nucleus new <app> --with quark' writes the
+# full file (CORS, CSRF, RBAC policy file, rate limits) — see the Nucleus
+# configuration reference for every key.
+database_default: default
+databases:
+  default:
+    url: %s
+host: 127.0.0.1
+port: 8080
+env: development
+log_level: info
+`, nucleusDatabaseURL(dialect))
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("creating nucleus.yml: %w", err)
+	}
+	fmt.Println("  Created nucleus.yml (the host configuration FromConfigFile reads; same database as .quark.yml)")
+	return nil
+}
+
+// nucleusDatabaseURL maps a dialect `quark init` accepts to the database URL
+// Nucleus reads from nucleus.yml (databases.<alias>.url). Nucleus takes a URL
+// and derives the driver from its scheme (mysql:// becomes the tcp() DSN,
+// sqlite:// a path), so the form differs from getDSNPlaceholder; the database
+// it names is the same one, so the host and the Quark client main builds open
+// one database.
+func nucleusDatabaseURL(dialect string) string {
+	switch dialect {
+	case "postgresql", "postgres":
+		return "postgres://user:pass@localhost/myapp?sslmode=disable"
+	case "mysql", "mariadb":
+		return "mysql://user:pass@localhost:3306/myapp"
+	case "sqlite":
+		return "sqlite://myapp.db"
+	case "mssql", "sqlserver":
+		return "sqlserver://user:pass@localhost:1433?database=myapp"
+	case "oracle":
+		return "oracle://user:pass@localhost:1521/xe"
+	default:
+		return ""
+	}
 }
 
 func getDSNPlaceholder(dialect string) string {

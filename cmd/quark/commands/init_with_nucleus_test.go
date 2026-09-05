@@ -3,10 +3,11 @@
 
 // `quark init --with nucleus` writes the Quark side of the Quark<->Nucleus
 // seam as SOURCE TEXT: a nucleus.Module[struct{}] that wraps a *quark.Client.
-// Quark cannot import Nucleus (Nucleus and Orbit import Quark — a cycle
-// across the release train), so these tests parse the emitted file and pin
-// the shape a Nucleus host expects; the only place the file is compiled
-// against a real Nucleus is the suite's own integration lane.
+// Quark is the autonomous data layer of the suite and carries no framework
+// dependency (QADR-0001/0006), so this repo never compiles the emitted file
+// against Nucleus: these tests parse it and pin the shape a Nucleus host
+// expects; the only place the file is compiled against a real Nucleus is the
+// suite's own integration lane.
 package commands
 
 import (
@@ -18,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // runInitArgs drives the real command line (`quark init <args>`) so a flag
@@ -101,11 +104,53 @@ func TestInitWithNucleusWritesModule(t *testing.T) {
 		"go get github.com/jcsvwinston/nucleus@latest",
 		"Mount(shop.Module(client))",
 		"nucleus new shop --with quark",
+		"Created nucleus.yml",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("next steps missing %q:\n%s", want, out)
 		}
 	}
+
+	// The next steps say FromConfigFile("nucleus.yml"), so the file must
+	// exist: without it the recipe compiles and dies at boot with "open
+	// nucleus.yml: no such file or directory". The minimum Nucleus needs is
+	// the default database (the one .quark.yml names, as a URL), and env.
+	cfg := readNucleusConfig(t, dir)
+	if got := cfg["database_default"]; got != "default" {
+		t.Errorf("nucleus.yml database_default = %v, want \"default\"", got)
+	}
+	if got := nucleusDefaultURL(t, cfg); got != "sqlite://myapp.db" {
+		t.Errorf("nucleus.yml databases.default.url = %q, want the .quark.yml database as a sqlite:// URL", got)
+	}
+	if got := cfg["env"]; got != "development" {
+		t.Errorf("nucleus.yml env = %v, want \"development\"", got)
+	}
+	if _, ok := cfg["port"].(int); !ok {
+		t.Errorf("nucleus.yml port = %v (%T), want an integer", cfg["port"], cfg["port"])
+	}
+}
+
+// readNucleusConfig parses the nucleus.yml init wrote under dir.
+func readNucleusConfig(t *testing.T, dir string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, "nucleus.yml"))
+	if err != nil {
+		t.Fatalf("init --with nucleus did not write nucleus.yml: %v", err)
+	}
+	var cfg map[string]any
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("nucleus.yml is not valid YAML: %v\n%s", err, raw)
+	}
+	return cfg
+}
+
+// nucleusDefaultURL returns databases.default.url from a parsed nucleus.yml.
+func nucleusDefaultURL(t *testing.T, cfg map[string]any) string {
+	t.Helper()
+	dbs, _ := cfg["databases"].(map[string]any)
+	def, _ := dbs["default"].(map[string]any)
+	url, _ := def["url"].(string)
+	return url
 }
 
 // The driver module the emitted file blank-imports follows the dialect, and
@@ -129,6 +174,33 @@ func TestInitWithNucleusFollowsDialectAndPackageName(t *testing.T) {
 		if !strings.Contains(string(src), want) {
 			t.Errorf("emitted module missing %q:\n%s", want, src)
 		}
+	}
+	// nucleus.yml follows the dialect too, as the URL form Nucleus parses.
+	if got := nucleusDefaultURL(t, readNucleusConfig(t, dir)); got != "postgres://user:pass@localhost/myapp?sslmode=disable" {
+		t.Errorf("nucleus.yml databases.default.url = %q, want the postgres:// placeholder", got)
+	}
+}
+
+// Every dialect init accepts maps to a URL Nucleus resolves to a driver
+// (postgres://, mysql://, sqlite://, sqlserver://, oracle://) and names the
+// same database as the .quark.yml placeholder.
+func TestNucleusDatabaseURLCoversEveryDialect(t *testing.T) {
+	for dialect, want := range map[string]string{
+		"postgresql": "postgres://user:pass@localhost/myapp?sslmode=disable",
+		"postgres":   "postgres://user:pass@localhost/myapp?sslmode=disable",
+		"mysql":      "mysql://user:pass@localhost:3306/myapp",
+		"mariadb":    "mysql://user:pass@localhost:3306/myapp",
+		"sqlite":     "sqlite://myapp.db",
+		"mssql":      "sqlserver://user:pass@localhost:1433?database=myapp",
+		"sqlserver":  "sqlserver://user:pass@localhost:1433?database=myapp",
+		"oracle":     "oracle://user:pass@localhost:1521/xe",
+	} {
+		if got := nucleusDatabaseURL(dialect); got != want {
+			t.Errorf("nucleusDatabaseURL(%q) = %q, want %q", dialect, got, want)
+		}
+	}
+	if got := nucleusDatabaseURL("bogus"); got != "" {
+		t.Errorf("nucleusDatabaseURL(bogus) = %q, want empty", got)
 	}
 }
 
@@ -155,6 +227,9 @@ func TestInitWithoutWithWritesNoModule(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "internal")); !os.IsNotExist(err) {
 		t.Fatalf("plain init must not write internal/: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "nucleus.yml")); !os.IsNotExist(err) {
+		t.Fatalf("plain init must not write nucleus.yml: %v", err)
+	}
 }
 
 // An existing module.go is never overwritten (same contract as the runner).
@@ -177,5 +252,22 @@ func TestInitWithNucleusKeepsExistingModule(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(modDir, "module.go"))
 	if string(got) != mine {
 		t.Fatalf("init overwrote a hand-written module.go:\n%s", got)
+	}
+}
+
+// An existing nucleus.yml (the fuller one `nucleus new` writes, or a
+// hand-tuned one) is never overwritten.
+func TestInitWithNucleusKeepsExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	mine := "database_default: default\ndatabases:\n  default:\n    url: sqlite://mine.db\nport: 9090\nenv: production\n"
+	if err := os.WriteFile(filepath.Join(dir, "nucleus.yml"), []byte(mine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runInitArgs(t, "--dir", dir, "--dialect", "sqlite", "--with", "nucleus"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "nucleus.yml"))
+	if string(got) != mine {
+		t.Fatalf("init overwrote an existing nucleus.yml:\n%s", got)
 	}
 }

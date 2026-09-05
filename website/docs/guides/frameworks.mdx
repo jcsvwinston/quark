@@ -195,9 +195,12 @@ module for the dialect you chose, and reads are open to anonymous callers;
 the `create` row is a development default, scope it to a role before the
 service faces a network.
 
-Quark does not depend on Nucleus (Nucleus depends on Quark), so `init`
-writes the module as source and leaves `main.go` to you. Mount it where the
-application is built:
+Quark has no dependency on Nucleus — it is the data layer the framework
+sits on — so `init` writes the module as source, adds a minimal
+`nucleus.yml` (the default database, pointing at the same one `.quark.yml`
+names, plus host, port and `env: development`; an existing file is kept),
+and leaves `main.go` to you. Mount the module where the application is
+built:
 
 ```go
 client, err := quark.New("sqlite", dsn)
