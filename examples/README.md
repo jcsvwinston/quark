@@ -77,6 +77,20 @@ rejection. See the [Sharding guide](https://jcsvwinston.github.io/quark/docs/adv
 cd examples/sharding && go run .
 ```
 
+### 7. chi, Echo, Gin (web frameworks)
+Self-contained (no Docker): the same notes API — `GET`/`POST /notes` over a
+SQLite file, one client shared by the handlers, the request context per query,
+and a duplicate title answered as 409 through the driver module's error
+classifier — on three routers. Each has a `main_test.go` that drives the
+handlers with `httptest`. See the
+[Web Frameworks guide](https://jcsvwinston.github.io/quark/docs/guides/frameworks).
+
+```bash
+cd examples/chi && go run .    # github.com/go-chi/chi
+cd examples/echo && go run .   # github.com/labstack/echo
+cd examples/gin && go run .    # github.com/gin-gonic/gin
+```
+
 ## Cleaning Up
 
 ```bash

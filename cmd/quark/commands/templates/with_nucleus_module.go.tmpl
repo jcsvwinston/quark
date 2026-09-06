@@ -1,0 +1,113 @@
+// Package {{.Package}} is the {{.Project}} feature as a Nucleus module, scaffolded
+// by 'quark init --with nucleus'. It wraps a *quark.Client: main builds the
+// client and the Nucleus application, then mounts this module. The module
+// owns its schema (migrated in OnStart), its routes and its access rules.
+//
+//	client, err := quark.New("{{.Driver}}", dsn)
+//	app, err := nucleus.New().
+//		FromConfigFile("nucleus.yml").
+//		Mount({{.Package}}.Module(client)).
+//		Build()
+//
+// For a whole application generated around this seam — config, policy file,
+// migrations, admin panel — start from the Nucleus side instead:
+//
+//	nucleus new {{.Project}} --with quark
+package {{.Package}}
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/jcsvwinston/nucleus/pkg/nucleus"
+	"github.com/jcsvwinston/quark"
+
+	// The driver module registers the database/sql driver AND the error
+	// classifier that turns a duplicate key into the 409 below. Importing
+	// the bare driver would boot just the same and silently lose it.
+	_ "github.com/jcsvwinston/quark/{{.DriverModule}}"
+)
+
+// Note is the example model. Replace it with your own: every struct with
+// `db` tags passed to RegisterModel in OnStart is migrated before the
+// server accepts requests.
+type Note struct {
+	ID        int64     `db:"id" pk:"true" json:"id"`
+	Title     string    `db:"title" quark:"unique,not_null" json:"title"`
+	Body      string    `db:"body" json:"body"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+type module struct {
+	client *quark.Client
+}
+
+// Module returns the {{.Project}} feature as a Nucleus module wrapping client.
+func Module(client *quark.Client) nucleus.ModuleSpec {
+	m := &module{client: client}
+
+	return nucleus.Module[struct{}]{
+		Name: "{{.Package}}",
+
+		// Nucleus denies by default: a route without a policy row answers
+		// 403 even when it is registered. Reads are open to anonymous
+		// callers. The create row is a development default so the POST
+		// below works on first boot — scope it to a role (Subject:
+		// "editor") before this faces a network. A deny row in the host's
+		// policy file always overrides these.
+		Policies: []nucleus.PolicyRule{
+			{Subject: "anonymous", Object: "/api/notes", Action: "read"},
+			{Subject: "anonymous", Object: "/api/notes", Action: "create"},
+		},
+
+		// JSON API paths carry no browser session, so CSRF does not apply.
+		CSRFExempt: []string{"/api/notes"},
+
+		OnStart: func(ctx context.Context, rt nucleus.Runtime, _ struct{}) error {
+			if err := m.client.RegisterModel(&Note{}); err != nil {
+				return err
+			}
+			if err := m.client.MigrateRegistered(ctx); err != nil {
+				return err
+			}
+			rt.Logger().Info("{{.Package}}: schema ready")
+			return nil
+		},
+
+		Routes: func(r nucleus.Router, _ struct{}) {
+			r.Get("/api/notes", m.list)
+			r.Post("/api/notes", m.create)
+		},
+	}.Build()
+}
+
+func (m *module) list(c *nucleus.Context) error {
+	notes, err := quark.For[Note](c.Request.Context(), m.client).OrderBy("id", "DESC").Limit(100).List()
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]any{"notes": notes, "count": len(notes)})
+}
+
+func (m *module) create(c *nucleus.Context) error {
+	var in struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	if err := json.NewDecoder(c.Request.Body).Decode(&in); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+	}
+	if in.Title == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "title is required"})
+	}
+	n := Note{Title: in.Title, Body: in.Body, CreatedAt: time.Now()}
+	if err := quark.For[Note](c.Request.Context(), m.client).Create(&n); err != nil {
+		if quark.IsUniqueViolation(err) {
+			return c.JSON(http.StatusConflict, map[string]string{"error": "a note with that title already exists"})
+		}
+		return err
+	}
+	return c.JSON(http.StatusCreated, n)
+}

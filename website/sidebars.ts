@@ -32,6 +32,7 @@ const sidebars: SidebarsConfig = {
         'guides/testing',
         'guides/cli',
         'guides/codegen',
+        'guides/frameworks',
       ],
     },
     {
