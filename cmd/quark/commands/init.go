@@ -132,7 +132,8 @@ var (
 	initWith    []string
 )
 
-// initWithTargets lists what --with knows how to write. Only "nucleus" today:
+// initWithTargets lists what --with knows how to write. Only "nucleus" today
+// (the module that mounts the client plus the nucleus.yml the framework boots from):
 // the Quark side of the Quark<->Nucleus seam, as a module the host mounts.
 var initWithTargets = []string{"nucleus"}
 
