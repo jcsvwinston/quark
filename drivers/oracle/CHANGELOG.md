@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/jcsvwinston/quark/compare/drivers/oracle/v0.1.2...drivers/oracle/v0.1.3) (2026-09-07)
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.11.0 ([ed9b64a](https://github.com/jcsvwinston/quark/commit/ed9b64a04e3abf74d0db981e5069f4fdce1b6fdf))
+
 ## [0.1.2](https://github.com/jcsvwinston/quark/compare/drivers/oracle/v0.1.1...drivers/oracle/v0.1.2) (2026-09-05)
 
 
