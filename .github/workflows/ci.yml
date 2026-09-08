@@ -580,3 +580,64 @@ jobs:
       - name: Run superapp acceptance (all engines, strict gate)
         timeout-minutes: 25
         run: go run ./examples/superapp -engines=all -gate=strict
+
+  # A3. This is the single check name branch protection should require on
+  # `main`: requiring the individual lanes means editing the protection rule
+  # every time one is added, renamed or split (the `integration` matrix alone
+  # publishes one check name per engine). Adding a lane therefore means adding
+  # its job id to the `needs:` list below — a lane that is not listed here does
+  # not gate a merge.
+  ci-required-gate:
+    name: CI Required Gate
+    runs-on: ubuntu-latest
+    # `always()` so the gate still runs, and still reports, when one of its
+    # needs failed or was cancelled. Without it the gate would itself be
+    # skipped, and a skipped required check does not block a pull request —
+    # the gate would go green by not running, which is the one thing it must
+    # never do.
+    if: always()
+    needs:
+      - lint
+      - static-build
+      - drivers
+      - drivers-standalone
+      - examples
+      - govulncheck
+      - test
+      - race
+      - benchmarks
+      - integration
+      - superapp
+
+    steps:
+      - name: Evaluate required CI results
+        env:
+          # The whole `needs` context as JSON, so the evaluation below reads
+          # exactly the list declared above and cannot drift from it when a
+          # lane is added or removed.
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+
+          echo "$NEEDS_JSON" | jq -r 'to_entries[] | "\(.key) result: \(.value.result)"'
+
+          # `skipped` passes: a lane whose own `if:` was false did not run and
+          # has nothing to report, so holding the merge on it would be a lie.
+          # Everything else fails — `failure` obviously, and `cancelled` too,
+          # because a lane that was stopped proves nothing and must not be
+          # read as green.
+          not_ok="$(
+            echo "$NEEDS_JSON" | jq -r '
+              [ to_entries[]
+                | select(.value.result != "success" and .value.result != "skipped")
+                | "\(.key) (\(.value.result))"
+              ] | join(", ")
+            '
+          )"
+
+          if [ -n "$not_ok" ]; then
+            echo "Required jobs that did not succeed: $not_ok"
+            exit 1
+          fi
+
+          echo "All required CI jobs passed."
