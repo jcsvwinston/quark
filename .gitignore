@@ -17,6 +17,9 @@ blog-api
 /examples/postgres/postgres
 /examples/mysql/mysql
 /examples/mssql/mssql
+/examples/chi/chi
+/examples/echo/echo
+/examples/gin/gin
 /examples/migrations/migrations
 /examples/sharding/sharding
 /examples/tenant-rls-native/tenant-rls-native
