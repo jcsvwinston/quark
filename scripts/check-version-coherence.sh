@@ -28,7 +28,10 @@ cd "$(dirname "$0")/.."
 # An equality nobody can satisfy by hand would stop the release train, so the
 # rows are written on the release branch by
 # scripts/release/gen_release_notes_skeleton.sh, which asks THIS file for the
-# set (--supported-minors) instead of reimplementing the rule.
+# set (--supported-minors) instead of reimplementing the rule. Guard and writer
+# therefore have to agree on WHICH rows are the policy, or the guard demands a
+# change its own remediation hint cannot make: both read the `| Version | ... |`
+# table and nothing else (supported_table below).
 #
 # Kept as a function because the self-test below feeds it tables that do not
 # exist in the tree; a guard that cannot be seen failing is a guard nobody
@@ -59,10 +62,40 @@ if [ "${1:-}" = "--supported-minors" ]; then
   exit 0
 fi
 
+# The rows of the supported-versions table, delimited EXACTLY the way
+# write_supported_versions in gen_release_notes_skeleton.sh delimits them: the
+# `| Version | ... |` header, its separator row, and the contiguous `|` rows
+# under it. Reading the whole file instead would let a ✅ in any other table
+# count as a version-support claim — and then the guard demands a change the
+# designated writer does not make, which is a release train stopped at a hint
+# that does not work.
+#
+# Exit 3: no table at all. Exit 1: a header with no separator row. Both are
+# errors and not silent passes; the writer refuses the same two files.
+supported_table() {
+  awk '
+    state == 0 {
+      if (tolower($0) ~ /^\|[ \t]*version[ \t]*\|/) { state = 1 }
+      next
+    }
+    state == 1 {
+      if ($0 ~ /^\|[-: |]+\|[ \t]*$/) { state = 2; next }
+      exit 1
+    }
+    state == 2 {
+      if (substr($0, 1, 1) != "|") { exit 0 }
+      print
+      next
+    }
+    END { if (state == 0) exit 3; if (state == 1) exit 1 }
+  ' "$1"
+}
+
 check_supported_versions() {
   local file=$1
   local released=$2
   local major rest minor listed required v v_major v_minor ok local_status
+  local rows table_status
   major=${released%%.*}
   rest=${released#*.}
   minor=${rest%%.*}
@@ -70,9 +103,20 @@ check_supported_versions() {
 
   required=$(supported_minors "$released")
 
-  # Every version named in a row marked supported. `v1.12.x` and `v1.12.0`
-  # both reduce to the minor, which is the granularity the policy speaks in.
-  listed=$(grep '✅' "$file" | grep -oE 'v[0-9]+\.[0-9]+' | sort -u | tr '\n' ' ' || true)
+  table_status=0
+  rows=$(supported_table "$file") || table_status=$?
+  if [ "$table_status" -eq 3 ]; then
+    echo "ERROR: ${file} has no '| Version | Supported |' table — the supported-versions policy is content a reader and this guard can check, not prose" >&2
+    return 1
+  elif [ "$table_status" -ne 0 ]; then
+    echo "ERROR: the supported-versions table in ${file} has no separator row under its header" >&2
+    return 1
+  fi
+
+  # Every version named in a row of THAT table marked supported. `v1.12.x` and
+  # `v1.12.0` both reduce to the minor, which is the granularity the policy
+  # speaks in.
+  listed=$(printf '%s\n' "$rows" | grep '✅' | grep -oE 'v[0-9]+\.[0-9]+' | sort -u | tr '\n' ' ' || true)
 
   for v in $listed; do
     v_major=${v#v}; v_major=${v_major%%.*}
@@ -110,9 +154,11 @@ check_supported_versions() {
   return $local_status
 }
 
-# Self-test: proves the check above rejects the four ways the table has drifted
-# or could drift. Runs in CI next to the guard itself (`--self-test`), because
-# the failure mode of a docs guard is passing quietly.
+# Self-test: proves the check above rejects the ways the table has drifted or
+# could drift, that it reads the policy table and nothing else, and that a file
+# without that table is an error rather than a quiet pass. Runs in CI next to
+# the guard itself (`--self-test`), because the failure mode of a docs guard is
+# passing quietly.
 if [ "${1:-}" = "--self-test" ]; then
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
@@ -135,29 +181,65 @@ if [ "${1:-}" = "--self-test" ]; then
     fi
   }
 
-  expect 0 "the current and previous minors, written out" 1.12.0 '| `main` | ✅ |
+  expect 0 "the current and previous minors, written out" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
 | `v1.12.x` | ✅ |
 | `v1.11.x` | ✅ |
 | Older tags | ❌ |'
-  expect 1 "a table that only describes the policy (no version to check)" 1.12.0 '| `main` | ✅ |
+  expect 1 "a table that only describes the policy (no version to check)" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
 | Latest two tagged minors | ✅ |
 | Older tags | ❌ |'
-  expect 1 "fossil minors left as supported" 1.12.0 '| `main` | ✅ |
+  expect 1 "fossil minors left as supported" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
 | `v1.2.x` | ✅ |
 | `v1.1.x` | ✅ |'
-  expect 1 "one minor behind the manifest" 1.12.0 '| `main` | ✅ |
+  expect 1 "one minor behind the manifest" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
 | `v1.11.x` | ✅ |
 | `v1.10.x` | ✅ |'
-  expect 1 "the previous minor demoted to unsupported" 1.12.0 '| `main` | ✅ |
+  expect 1 "the previous minor demoted to unsupported" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
 | `v1.12.x` | ✅ |
 | `v1.11.x` | ❌ |'
-  expect 1 "a minor the manifest has not released yet" 1.12.0 '| `main` | ✅ |
+  expect 1 "a minor the manifest has not released yet" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
 | `v1.13.x` | ✅ |
 | `v1.12.x` | ✅ |
 | `v1.11.x` | ✅ |'
-  expect 0 "the first release of a new major keeps the previous line" 2.0.0 '| `main` | ✅ |
+  expect 0 "the first release of a new major keeps the previous line" 2.0.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
 | `v2.0.x` | ✅ |
 | `v1.12.x` | ✅ |'
+  # Scope. A ✅ in another table of the same file is not a support claim about
+  # a Quark minor, and the writer would not touch it: a guard that read it
+  # would demand a change its own remediation hint cannot make.
+  expect 0 "a ✅ naming a version outside the policy table is not the policy" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ✅ |
+| Older tags | ❌ |
+
+## Engine support
+
+| Engine | Supported |
+|--------|-----------|
+| PostgreSQL | ✅ since v1.0.0 |'
+  expect 1 "no supported-versions table at all" 1.12.0 'Quark is **v1.12.0** — stable under SemVer.
+
+Security fixes land on `main` and on the latest two tagged minors.'
+  expect 1 "a header with no separator row" 1.12.0 '| Version | Supported |
+| `main` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ✅ |'
 
   if [ "$st_fail" -ne 0 ]; then
     exit 1
