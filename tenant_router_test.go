@@ -12,13 +12,14 @@ import (
 
 // TestRowLevelSecurityAliasBackwardCompat guards the contract from F5-1
 // (Fase 5): the legacy name RowLevelSecurity must remain a usable alias
-// of RowLevelSecurityClient until v1.0. If this test breaks, the alias
-// was removed prematurely or the underlying value drifted — both would
-// break existing callers compiled against v0.x.
+// of RowLevelSecurityClient for as long as it is declared. If this test
+// breaks, the alias was removed prematurely or the underlying value
+// drifted — both would break existing callers compiled against v0.x.
 //
 // Sunset: remove this test in the same PR that removes the
-// RowLevelSecurity alias declaration (scheduled for v1.0). Leaving it
-// here after the alias is gone is harmless but the file won't compile.
+// RowLevelSecurity alias declaration (v2.0.0, no earlier than
+// 2026-12-08 — see docs/deprecations/DEP-2026-001-rowlevelsecurity-alias.md).
+// Leaving it here after the alias is gone does not compile.
 //
 // See ADR-0012 §"Renombrado y deprecation" and tenant_router.go's
 // RowLevelSecurity declaration.

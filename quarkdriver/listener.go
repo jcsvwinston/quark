@@ -62,7 +62,10 @@ type ListenerFactory func(db *sql.DB, v IdentifierValidator) (Listener, error)
 // which is why ListenerFactory replaces it.
 //
 // Deprecated: implement ListenerFactory and register it with
-// RegisterListenerFactory.
+// RegisterListenerFactory. Naming the ORM's internal guard type in this
+// signature made the contract unimplementable outside this repository.
+// Scheduled for removal in v2.0.0, no earlier than 2026-12-08.
+// See docs/deprecations/DEP-2026-002-listener-registration-contract.md.
 type NewListenerFunc func(db *sql.DB, g *guard.SQLGuard) (Listener, error)
 
 var (
@@ -106,7 +109,10 @@ func LookupListenerFactory(engine string) (ListenerFactory, bool) {
 // always hands the factory its own guard, so the adapter's type assertion
 // holds; a caller passing another validator gets an error, not a panic.
 //
-// Deprecated: use RegisterListenerFactory.
+// Deprecated: use RegisterListenerFactory, which takes an
+// IdentifierValidator instead of the ORM's internal guard type.
+// Scheduled for removal in v2.0.0, no earlier than 2026-12-08.
+// See docs/deprecations/DEP-2026-002-listener-registration-contract.md.
 func RegisterListener(engine string, f NewListenerFunc) error {
 	if f == nil {
 		return fmt.Errorf("quarkdriver: %s: listener constructor is required", engine)
@@ -122,7 +128,10 @@ func RegisterListener(engine string, f NewListenerFunc) error {
 
 // MustRegisterListener is RegisterListener for use in an init().
 //
-// Deprecated: use MustRegisterListenerFactory.
+// Deprecated: use MustRegisterListenerFactory, which takes an
+// IdentifierValidator instead of the ORM's internal guard type.
+// Scheduled for removal in v2.0.0, no earlier than 2026-12-08.
+// See docs/deprecations/DEP-2026-002-listener-registration-contract.md.
 func MustRegisterListener(engine string, f NewListenerFunc) {
 	if err := RegisterListener(engine, f); err != nil {
 		panic(err)
@@ -132,7 +141,10 @@ func MustRegisterListener(engine string, f NewListenerFunc) {
 // LookupListener returns the constructor registered for engine in the
 // previous shape.
 //
-// Deprecated: use LookupListenerFactory.
+// Deprecated: use LookupListenerFactory. This form returns an adapter
+// closure, never the function that was registered.
+// Scheduled for removal in v2.0.0, no earlier than 2026-12-08.
+// See docs/deprecations/DEP-2026-002-listener-registration-contract.md.
 func LookupListener(engine string) (NewListenerFunc, bool) {
 	f, ok := LookupListenerFactory(engine)
 	if !ok {

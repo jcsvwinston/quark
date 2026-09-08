@@ -60,11 +60,13 @@ const (
 // constant value is identical, so existing code and serialized configs
 // continue to work without changes.
 //
-// Deprecated: use RowLevelSecurityClient. The alias is scheduled for
-// removal in v1.0. The name change clarifies that this strategy is
-// client-side WHERE injection, not engine-enforced RLS — see ADR-0012
-// and (when available) RowLevelSecurityNative for the engine-enforced
-// PostgreSQL variant introduced in Fase 5.
+// Deprecated: use RowLevelSecurityClient. The name change clarifies that
+// this strategy is client-side WHERE injection, not engine-enforced RLS —
+// see ADR-0012 and RowLevelSecurityNative for the engine-enforced
+// PostgreSQL variant.
+// Scheduled for removal in v2.0.0, no earlier than 2026-12-08.
+// See docs/deprecations/DEP-2026-001-rowlevelsecurity-alias.md for the
+// migration path and the reasoning behind both dates.
 const RowLevelSecurity = RowLevelSecurityClient
 
 // TenantConfig configures the TenantRouter.
