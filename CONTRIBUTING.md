@@ -184,9 +184,9 @@ go test -run TestBenchmarkEngines -v -timeout 10m
 
 `make check` reproduces CI's cheap lanes locally so the PR does not go red
 on things you could have caught in seconds: vet+gofmt, the three docs
-guards (product voice, docs lint, roadmap), version coherence, apisurface/
-allowlist freshness, the static builds (`CGO_ENABLED=0` and cross-compile),
-and the unit tests. The expensive lanes have their own targets — `make
+guards (product voice, docs lint, roadmap), version coherence, action pins,
+apisurface/allowlist freshness, the static builds (`CGO_ENABLED=0` and
+cross-compile), and the unit tests. The expensive lanes have their own targets — `make
 test-race`, `make test-all` (engine matrix), `make superapp` — and
 `make help` lists everything.
 
@@ -201,4 +201,16 @@ Two guards you WILL meet on your first API change:
 - **version coherence** (release PRs only): `scripts/check-version-coherence.sh`
   demands the docs bump in the same PR; release-please handles the version
   mentions and `scripts/release/gen_release_notes_skeleton.sh` writes the
-  release-notes skeletons.
+  release-notes skeletons. Two things in that PR are still yours: the release
+  notes prose, and SECURITY.md's supported-versions table — one row per
+  supported minor, which the guard derives from
+  `.release-please-manifest.json` and refuses to take on trust.
+
+And one you will meet the first time you touch a workflow:
+
+- **action pins**: `scripts/ci/check_action_pins.sh` requires every `uses:` to
+  name a 40-hex commit SHA with its tag in a trailing comment
+  (`uses: actions/checkout@11d5960… # v4.4.0`). Resolve the SHA with
+  `gh api repos/<owner>/<action>/commits/<tag> --jq .sha`. Dependabot moves
+  those pins forward weekly; the comment is how it (and you) know which
+  release a SHA is.

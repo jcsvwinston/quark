@@ -18,7 +18,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: PR title in English (QADR-0007)
         # The squash title becomes the changelog line and the release note of
         # an English-speaking product (QM-18). The title goes through an env
@@ -28,7 +28,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: bash scripts/ci/check_pr_title_english.sh
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -92,8 +92,24 @@ jobs:
         # release-notes still claimed v1.1.5/v1.1.2/v1.1.0. This fails the
         # release-please PR (and any later drift) until the user-facing
         # version mentions match .release-please-manifest.json and the
-        # current minor has a docs/RELEASE_NOTES_vX.Y.0.md.
+        # current minor has a docs/RELEASE_NOTES_vX.Y.0.md. It also holds
+        # SECURITY.md's supported-versions table to the manifest: the table
+        # is written by hand and had gone five minors stale before.
         run: bash scripts/check-version-coherence.sh
+
+      - name: version coherence self-test
+        # The supported-versions rule is fed tables that do not exist in the
+        # tree, so the run shows it rejecting each way the table can lie. A
+        # docs guard fails by passing quietly; this is what makes that visible.
+        run: bash scripts/check-version-coherence.sh --self-test
+
+      - name: action pins
+        # Every `uses:` in .github/workflows is a commit SHA with its tag in a
+        # trailing comment. A tag is a pointer somebody else can move under a
+        # job that has this repository checked out; the SHA is immutable, and
+        # the comment is what Dependabot (github-actions ecosystem, declared in
+        # .github/dependabot.yml) rewrites when it proposes the next one.
+        run: bash scripts/ci/check_action_pins.sh
 
       - name: superapp manifest freshness (S7-coverage)
         # The coverage gate's denominator (apisurface.json) and its
@@ -145,9 +161,9 @@ jobs:
     name: Static build (CGO_ENABLED=0 + cross)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -168,9 +184,9 @@ jobs:
     # reported as "already taken", whether a deadlocked transaction is
     # retried, and whether a downed replica is failed over.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -230,9 +246,9 @@ jobs:
     name: Driver modules (standalone, no workspace)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -267,9 +283,9 @@ jobs:
     name: Examples (own modules)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -294,9 +310,9 @@ jobs:
     # Quark's code, so a red run is actionable, not noise.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -331,9 +347,9 @@ jobs:
           --health-timeout 3s
           --health-retries 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -355,9 +371,9 @@ jobs:
     name: Race (-short)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -375,9 +391,9 @@ jobs:
     name: Benchmarks (smoke)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           # The benchmark module declares its own minimum Go version; pin
           # the toolchain to it so the module stays self-contained even if
@@ -471,9 +487,9 @@ jobs:
             # plain `:23-slim`; budget extra wall-clock for boot + suite.
             timeout: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -526,9 +542,9 @@ jobs:
     # single engine, so allow extra wall-clock headroom over its 35m.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true

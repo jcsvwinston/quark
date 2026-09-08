@@ -9,8 +9,10 @@
 help: ## Lista los targets con su descripción
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-check: lint docs-guards ## Las lanes baratas de CI: vet+gofmt, guards de docs, coherencia, superficie fresca, builds estáticos, tests unit
+check: lint docs-guards ## Las lanes baratas de CI: vet+gofmt, guards de docs, coherencia, pines de acciones, superficie fresca, builds estáticos, tests unit
 	bash scripts/check-version-coherence.sh
+	bash scripts/check-version-coherence.sh --self-test
+	bash scripts/ci/check_action_pins.sh
 	go run ./examples/superapp/cmd/gen-apisurface && go run ./examples/superapp/cmd/gen-allowlist
 	@git diff --quiet examples/superapp/apisurface.json examples/superapp/allowlist.json || \
 		{ echo "apisurface/allowlist rancios: commitea la regeneración (make regen)"; exit 1; }

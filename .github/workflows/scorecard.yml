@@ -1,0 +1,102 @@
+name: OpenSSF Scorecard
+
+# Supply-chain hygiene, measured instead of assumed. Scorecard runs the same
+# checks a consumer would run against this repository from the outside —
+# pinned dependencies, token permissions, dangerous workflow patterns, branch
+# protection, signed releases — and turns each one into a code scanning alert.
+#
+# It reports; it does not gate. The first run is the first measurement this
+# repository has ever had, so there is no threshold here yet: read the score,
+# then decide what to require.
+
+on:
+  schedule:
+    # Weekly, Monday 05:41 UTC. The analysis reads the repository and its
+    # public metadata, so a run per week is enough to notice drift without
+    # spending a run on every push.
+    - cron: '41 5 * * 1'
+  workflow_dispatch:
+
+# Least privilege. Nothing at workflow level writes; the one job that files
+# code scanning alerts asks for that scope itself.
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # A job-level block REPLACES the workflow default, so the read scopes the
+      # analysis needs are restated here: `contents` for the checkout and
+      # `actions` so the Branch-Protection and CI-Tests checks can read the
+      # workflow runs.
+      contents: read
+      actions: read
+      # Uploading the SARIF as code scanning alerts.
+      security-events: write
+      # OIDC. It is what publishing to the public OpenSSF dataset would use;
+      # while `publish_results` is false below no token is minted, and keeping
+      # the scope here makes turning publication on a one-line change.
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The analysis does not push anything; leaving the token in
+          # .git/config would hand it to every later step for no reason.
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publishing sends the score to the public OpenSSF dataset
+          # (api.securityscorecards.dev), which is a decision the owner has
+          # not taken. Until it is taken, the score is read from this run:
+          # the SARIF artifact below, the code scanning alerts, and the job
+          # summary.
+          publish_results: false
+
+      - name: Upload the SARIF as an artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload the SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: results.sarif
+
+      - name: Summarise the findings in the run
+        # The score is not published, so the run has to be readable on its own.
+        # Every value comes from the results file; nothing from the event
+        # context is interpolated into this shell (that is what keeps the
+        # Dangerous-Workflow check at 10/10).
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+
+          try:
+              sarif = json.load(open("results.sarif"))
+              results = (sarif.get("runs") or [{}])[0].get("results", [])
+          except Exception as exc:  # no results file: the analysis failed
+              print(f"Could not read results.sarif: {exc}")
+              raise SystemExit(0)
+
+          print("## OpenSSF Scorecard\n")
+          if not results:
+              print("No check reported a finding.")
+              raise SystemExit(0)
+          print("| Check | Level | Detail |")
+          print("|---|---|---|")
+          for r in results:
+              rule = r.get("ruleId", "?")
+              level = r.get("level", "?")
+              text = (r.get("message", {}).get("text") or "").replace("\n", " ")
+              print(f"| {rule} | {level} | {text[:160]} |")
+          PY

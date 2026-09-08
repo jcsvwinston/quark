@@ -9,6 +9,136 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# ---------------------------------------------------------------------------
+# SECURITY.md's supported-versions table (DI-2, tightened by the A3 audit).
+#
+# The table is the promise a consumer reads before deciding whether their tag
+# still gets security fixes, and it is written by hand — release-please bumps
+# the "Quark is vX.Y.Z" marker line above it and nothing else. The first
+# version of this check only rejected FOSSIL rows (a minor older than the
+# policy still marked supported), which left the two ways the table can lie
+# uncovered: saying nothing verifiable at all ("Latest two tagged minors",
+# true forever and useless to a reader holding v1.4.2), and falling one minor
+# behind without naming an old one.
+#
+# So the rule is now an equality, not a lower bound: the ✅ rows must name
+# exactly the minors the manifest resolves to — the current one and the one
+# before it, which is what the sentence above the table promises.
+#
+# Kept as a function because the self-test below feeds it tables that do not
+# exist in the tree; a guard that cannot be seen failing is a guard nobody
+# knows is broken.
+# ---------------------------------------------------------------------------
+check_supported_versions() {
+  local file=$1
+  local released=$2
+  local major rest minor listed required v v_major v_minor ok local_status
+  major=${released%%.*}
+  rest=${released#*.}
+  minor=${rest%%.*}
+  local_status=0
+
+  required="v${major}.${minor}"
+  if [ "$minor" -gt 0 ]; then
+    required="$required v${major}.$((minor - 1))"
+  fi
+
+  # Every version named in a row marked supported. `v1.12.x` and `v1.12.0`
+  # both reduce to the minor, which is the granularity the policy speaks in.
+  listed=$(grep '✅' "$file" | grep -oE 'v[0-9]+\.[0-9]+' | sort -u | tr '\n' ' ' || true)
+
+  for v in $listed; do
+    v_major=${v#v}; v_major=${v_major%%.*}
+    v_minor=${v##*.}
+    ok=0
+    if [ "$v_major" -eq "$major" ]; then
+      if [ "$v_minor" -eq "$minor" ]; then
+        ok=1
+      elif [ "$minor" -gt 0 ] && [ "$v_minor" -eq $((minor - 1)) ]; then
+        ok=1
+      fi
+    elif [ "$minor" -eq 0 ] && [ "$v_major" -eq $((major - 1)) ]; then
+      # Right after a major bump the second supported line is the last minor
+      # of the previous major, and the manifest does not record which one that
+      # was. Any minor of that line is accepted here; the current one is still
+      # demanded below.
+      ok=1
+    fi
+    if [ "$ok" -ne 1 ]; then
+      echo "ERROR: ${file} marks ${v}.x as supported, but the released version is v${released} — the policy covers the current minor and the one before it" >&2
+      local_status=1
+    fi
+  done
+
+  for v in $required; do
+    case " $listed " in
+      *" $v "*) ;;
+      *)
+        echo "ERROR: ${file} does not list ${v}.x as supported (the version in .release-please-manifest.json is ${released}) — write one table row per supported minor" >&2
+        local_status=1
+        ;;
+    esac
+  done
+
+  return $local_status
+}
+
+# Self-test: proves the check above rejects the four ways the table has drifted
+# or could drift. Runs in CI next to the guard itself (`--self-test`), because
+# the failure mode of a docs guard is passing quietly.
+if [ "${1:-}" = "--self-test" ]; then
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  st_fail=0
+
+  expect() {
+    # $1 = expected exit status, $2 = case name, $3 = released version,
+    # $4 = the table under test.
+    printf '%s\n' "$4" > "$tmp/SECURITY.md"
+    if check_supported_versions "$tmp/SECURITY.md" "$3" >/dev/null 2>&1; then
+      got=0
+    else
+      got=1
+    fi
+    if [ "$got" -ne "$1" ]; then
+      echo "SELF-TEST FAIL: $2 — expected exit $1, got $got" >&2
+      st_fail=1
+    else
+      echo "self-test OK: $2"
+    fi
+  }
+
+  expect 0 "the current and previous minors, written out" 1.12.0 '| `main` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ✅ |
+| Older tags | ❌ |'
+  expect 1 "a table that only describes the policy (no version to check)" 1.12.0 '| `main` | ✅ |
+| Latest two tagged minors | ✅ |
+| Older tags | ❌ |'
+  expect 1 "fossil minors left as supported" 1.12.0 '| `main` | ✅ |
+| `v1.2.x` | ✅ |
+| `v1.1.x` | ✅ |'
+  expect 1 "one minor behind the manifest" 1.12.0 '| `main` | ✅ |
+| `v1.11.x` | ✅ |
+| `v1.10.x` | ✅ |'
+  expect 1 "the previous minor demoted to unsupported" 1.12.0 '| `main` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ❌ |'
+  expect 1 "a minor the manifest has not released yet" 1.12.0 '| `main` | ✅ |
+| `v1.13.x` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ✅ |'
+  expect 0 "the first release of a new major keeps the previous line" 2.0.0 '| `main` | ✅ |
+| `v2.0.x` | ✅ |
+| `v1.12.x` | ✅ |'
+
+  if [ "$st_fail" -ne 0 ]; then
+    exit 1
+  fi
+  echo "SECURITY.md supported-versions self-test OK"
+  exit 0
+fi
+
 version=$(sed -nE 's/.*"\.": *"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' .release-please-manifest.json)
 if [ -z "$version" ]; then
   echo "could not read the version from .release-please-manifest.json" >&2
@@ -85,33 +215,16 @@ fi
 echo "roadmap OK: sin versiones hardcodeadas"
 
 # ---------------------------------------------------------------------------
-# SECURITY.md sin versiones fósiles como soportadas (DI-2). Con v1.7.1
-# publicada, la tabla de «Supported Versions» seguía diciendo v1.2.x/v1.1.x:
-# la política («latest two tagged minors») era correcta, pero los números
-# llevaban cinco minors congelados y el require_mention de arriba no los ve
-# (solo exige que la versión ACTUAL aparezca, no que las viejas desaparezcan).
-# Falla si alguna versión anterior a (minor actual − 1) figura en una fila
-# marcada como soportada (✅).
+# SECURITY.md's supported-versions table matches the manifest. With v1.7.1 out,
+# the table still said v1.2.x/v1.1.x — the policy sentence was right, the
+# numbers were five minors old, and the require_mention above cannot see it
+# (it only demands that the CURRENT version appears somewhere). The rule now
+# lives in check_supported_versions() at the top of this file, together with
+# the self-test that proves it fails.
 # ---------------------------------------------------------------------------
-cur_major=${version%%.*}
-minor_rest=${version#*.}
-cur_minor=${minor_rest%%.*}
-stale=0
-while IFS= read -r line; do
-  case "$line" in
-    *"✅"*) ;;
-    *) continue ;;
-  esac
-  for v in $(printf '%s\n' "$line" | grep -oE 'v[0-9]+\.[0-9]+' || true); do
-    v_major=${v#v}; v_major=${v_major%%.*}
-    v_minor=${v##*.}
-    if [ "$v_major" -lt "$cur_major" ] || { [ "$v_major" -eq "$cur_major" ] && [ "$v_minor" -lt $((cur_minor - 1)) ]; }; then
-      echo "ERROR: SECURITY.md marca ${v}.x como soportada, pero la versión actual es v${version} — la política cubre solo los dos últimos minors taggeados" >&2
-      stale=1
-    fi
-  done
-done < SECURITY.md
-if [ "$stale" -ne 0 ]; then
+if ! check_supported_versions SECURITY.md "$version"; then
+  echo >&2
+  echo "The supported-versions table is updated by hand in the release pull request, one row per supported minor." >&2
   exit 1
 fi
-echo "SECURITY.md OK: ninguna versión anterior a v${cur_major}.$((cur_minor - 1)) figura como soportada"
+echo "SECURITY.md OK: the supported-versions table names exactly the minors v${version} resolves to"
