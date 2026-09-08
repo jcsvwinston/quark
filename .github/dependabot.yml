@@ -97,10 +97,12 @@ updates:
 
   # Grouped for the same reason as the modules above: without a group this
   # ecosystem opens one pull request per action, and the workflows here use
-  # eight: actions/checkout, actions/setup-go, actions/upload-pages-artifact,
+  # twelve: actions/checkout, actions/setup-go, actions/upload-pages-artifact,
   # actions/deploy-pages, googleapis/release-please-action,
-  # ossf/scorecard-action, actions/upload-artifact and
-  # github/codeql-action/upload-sarif. They are named rather than counted so
+  # ossf/scorecard-action, actions/upload-artifact,
+  # github/codeql-action/upload-sarif, goreleaser/goreleaser-action,
+  # sigstore/cosign-installer, anchore/sbom-action/download-syft and
+  # actions/attest-build-provenance. They are named rather than counted so
   # that adding a workflow shows what this list owes.
   - package-ecosystem: github-actions
     directory: /

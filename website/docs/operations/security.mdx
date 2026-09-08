@@ -162,3 +162,7 @@ Before going to production:
 - [ ] `SafeMigrations` left at `true`
 - [ ] Query observers and any `IncludeArgs` telemetry reviewed against your data-retention policy
 - [ ] `Limits` guardrails (`QueryTimeout`, `MaxResults`, `MaxJoins`, `MaxWhereConditions`) set consciously, not disabled
+- [ ] If you deploy the `quark` CLI from a release archive, that archive
+      verified against its signature and its build provenance — see
+      [Verifying a release](verifying-releases), which also says how to tell
+      whether the release you have is one that carries them

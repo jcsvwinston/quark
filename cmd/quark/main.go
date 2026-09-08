@@ -11,6 +11,12 @@
 // and drive code generation from a model package with:
 //
 //	//go:generate quark gen ./...
+//
+// Releases cut from the first signed tag onward also publish a prebuilt
+// archive per platform, each with an SPDX SBOM beside it, a cosign signature
+// over the checksum file and a build provenance attestation. The
+// documentation page "Verifying a release", under Operations, has the two
+// commands that check one.
 package main
 
 import (

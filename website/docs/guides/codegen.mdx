@@ -33,6 +33,11 @@ forward compatibility, not for a dramatic speedup.**
 go install github.com/jcsvwinston/quark/cmd/quark@latest
 ```
 
+A signed prebuilt archive from the
+[releases page](https://github.com/jcsvwinston/quark/releases) does the same
+job; [Verifying a release](../operations/verifying-releases) says how to check
+one before you run it.
+
 Point `quark gen` at one or more packages (an import path, a directory, or
 `./...`). It writes a `quark_gen.go` into each package that has models:
 

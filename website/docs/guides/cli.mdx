@@ -13,6 +13,14 @@ migrations, schema inspection, model generation, seeding, and multi-tenant jobs.
 go install github.com/jcsvwinston/quark/cmd/quark@latest
 ```
 
+Releases cut from the first signed tag onward also publish prebuilt archives —
+Linux, macOS and Windows, amd64 and arm64 — each with an SPDX SBOM beside it, a
+checksum file, a cosign signature over that file and a build provenance
+attestation. Take one from the
+[releases page](https://github.com/jcsvwinston/quark/releases) if you would
+rather not build from source, and check it before you run it:
+[Verifying a release](../operations/verifying-releases) is the two commands.
+
 | Subcommand | What it does |
 |------------|--------------|
 | `init` | Scaffold a project (config + layout) for a chosen dialect. |
