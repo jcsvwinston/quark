@@ -479,14 +479,23 @@ func ToSnakeCase(s string) string {
 }
 
 // ColumnFromDBTag returns just the column-name portion of a db tag, stripping
-// any sizing options (e.g. "name,size=512" → "name"). Tags without a comma
-// are returned unchanged. Used by hot paths in package quark that read the
-// raw struct tag and need to feed identifiers to the SQL guard.
+// any sizing options (e.g. "name,size=512" → "name"). Used by hot paths in
+// package quark that read the raw struct tag and need to feed identifiers to
+// the SQL guard.
+//
+// The name is trimmed whether or not the tag carries options, which is what
+// keeps this function and parseDBTag naming the SAME column. They used to
+// disagree: parseDBTag trimmed unconditionally while this one trimmed only
+// after a comma, so db:" id " built the table with the column `id` (the
+// migration reads parseDBTag) and then looked the primary key up as ` id `
+// (FindPKs and columnFromDBTag read this one). The model migrated and every
+// operation by primary key failed afterwards, naming neither the field nor
+// the tag.
 func ColumnFromDBTag(tag string) string {
 	if i := strings.IndexByte(tag, ','); i >= 0 {
-		return strings.TrimSpace(tag[:i])
+		tag = tag[:i]
 	}
-	return tag
+	return strings.TrimSpace(tag)
 }
 
 // parseDBTag splits a db tag like "name,size=512" into the column name and
