@@ -9,19 +9,265 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# ---------------------------------------------------------------------------
+# SECURITY.md's supported-versions table (DI-2, tightened by the A3 audit).
+#
+# The table is the promise a consumer reads before deciding whether their tag
+# still gets security fixes. release-please bumps the "Quark is vX.Y.Z" marker
+# line above it and nothing else: the rows are content, not a version mention.
+# The first version of this check only rejected FOSSIL rows (a minor older
+# than the policy still marked supported), which left the two ways the table
+# can lie uncovered: saying nothing verifiable at all ("Latest two tagged
+# minors", true forever and useless to a reader holding v1.4.2), and falling
+# one minor behind without naming an old one.
+#
+# So the rule is now an equality, not a lower bound: the ✅ rows must name
+# exactly the minors the manifest resolves to — the current one and the one
+# before it, which is what the sentence above the table promises.
+#
+# An equality nobody can satisfy by hand would stop the release train, so the
+# rows are written on the release branch by
+# scripts/release/gen_release_notes_skeleton.sh, which asks THIS file for the
+# set (--supported-minors) instead of reimplementing the rule. Guard and writer
+# therefore have to agree on WHICH rows are the policy, or the guard demands a
+# change its own remediation hint cannot make: both read the `| Version | ... |`
+# table and nothing else (supported_table below).
+#
+# Kept as a function because the self-test below feeds it tables that do not
+# exist in the tree; a guard that cannot be seen failing is a guard nobody
+# knows is broken.
+# ---------------------------------------------------------------------------
+
+# The minors the policy covers for a released version: the current one and the
+# one before it. Right after a major bump (X.0.0) only the current one can be
+# derived — the manifest does not record the last minor of the previous major.
+supported_minors() {
+  local released=$1 major rest minor out
+  major=${released%%.*}
+  rest=${released#*.}
+  minor=${rest%%.*}
+  out="v${major}.${minor}"
+  if [ "$minor" -gt 0 ]; then
+    out="$out v${major}.$((minor - 1))"
+  fi
+  printf '%s\n' "$out"
+}
+
+if [ "${1:-}" = "--supported-minors" ]; then
+  if [ -z "${2:-}" ]; then
+    echo "usage: $0 --supported-minors X.Y.Z" >&2
+    exit 1
+  fi
+  supported_minors "$2"
+  exit 0
+fi
+
+# The rows of the supported-versions table, delimited EXACTLY the way
+# write_supported_versions in gen_release_notes_skeleton.sh delimits them: the
+# `| Version | ... |` header, its separator row, and the contiguous `|` rows
+# under it. Reading the whole file instead would let a ✅ in any other table
+# count as a version-support claim — and then the guard demands a change the
+# designated writer does not make, which is a release train stopped at a hint
+# that does not work.
+#
+# Exit 3: no table at all. Exit 1: a header with no separator row. Both are
+# errors and not silent passes; the writer refuses the same two files.
+supported_table() {
+  awk '
+    state == 0 {
+      if (tolower($0) ~ /^\|[ \t]*version[ \t]*\|/) { state = 1 }
+      next
+    }
+    state == 1 {
+      if ($0 ~ /^\|[-: |]+\|[ \t]*$/) { state = 2; next }
+      exit 1
+    }
+    state == 2 {
+      if (substr($0, 1, 1) != "|") { exit 0 }
+      print
+      next
+    }
+    END { if (state == 0) exit 3; if (state == 1) exit 1 }
+  ' "$1"
+}
+
+check_supported_versions() {
+  local file=$1
+  local released=$2
+  local major rest minor listed required v v_major v_minor ok local_status
+  local rows table_status
+  major=${released%%.*}
+  rest=${released#*.}
+  minor=${rest%%.*}
+  local_status=0
+
+  required=$(supported_minors "$released")
+
+  table_status=0
+  rows=$(supported_table "$file") || table_status=$?
+  if [ "$table_status" -eq 3 ]; then
+    echo "ERROR: ${file} has no '| Version | Supported |' table — the supported-versions policy is content a reader and this guard can check, not prose" >&2
+    return 1
+  elif [ "$table_status" -ne 0 ]; then
+    echo "ERROR: the supported-versions table in ${file} has no separator row under its header" >&2
+    return 1
+  fi
+
+  # Every version named in a row of THAT table marked supported. `v1.12.x` and
+  # `v1.12.0` both reduce to the minor, which is the granularity the policy
+  # speaks in.
+  listed=$(printf '%s\n' "$rows" | grep '✅' | grep -oE 'v[0-9]+\.[0-9]+' | sort -u | tr '\n' ' ' || true)
+
+  for v in $listed; do
+    v_major=${v#v}; v_major=${v_major%%.*}
+    v_minor=${v##*.}
+    ok=0
+    if [ "$v_major" -eq "$major" ]; then
+      if [ "$v_minor" -eq "$minor" ]; then
+        ok=1
+      elif [ "$minor" -gt 0 ] && [ "$v_minor" -eq $((minor - 1)) ]; then
+        ok=1
+      fi
+    elif [ "$minor" -eq 0 ] && [ "$v_major" -eq $((major - 1)) ]; then
+      # Right after a major bump the second supported line is the last minor
+      # of the previous major, and the manifest does not record which one that
+      # was. Any minor of that line is accepted here; the current one is still
+      # demanded below.
+      ok=1
+    fi
+    if [ "$ok" -ne 1 ]; then
+      echo "ERROR: ${file} marks ${v}.x as supported, but the released version is v${released} — the policy covers the current minor and the one before it" >&2
+      local_status=1
+    fi
+  done
+
+  for v in $required; do
+    case " $listed " in
+      *" $v "*) ;;
+      *)
+        echo "ERROR: ${file} does not list ${v}.x as supported (the version in .release-please-manifest.json is ${released}) — write one table row per supported minor" >&2
+        local_status=1
+        ;;
+    esac
+  done
+
+  return $local_status
+}
+
+# Self-test: proves the check above rejects the ways the table has drifted or
+# could drift, that it reads the policy table and nothing else, and that a file
+# without that table is an error rather than a quiet pass. Runs in CI next to
+# the guard itself (`--self-test`), because the failure mode of a docs guard is
+# passing quietly.
+if [ "${1:-}" = "--self-test" ]; then
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  st_fail=0
+
+  expect() {
+    # $1 = expected exit status, $2 = case name, $3 = released version,
+    # $4 = the table under test.
+    printf '%s\n' "$4" > "$tmp/SECURITY.md"
+    if check_supported_versions "$tmp/SECURITY.md" "$3" >/dev/null 2>&1; then
+      got=0
+    else
+      got=1
+    fi
+    if [ "$got" -ne "$1" ]; then
+      echo "SELF-TEST FAIL: $2 — expected exit $1, got $got" >&2
+      st_fail=1
+    else
+      echo "self-test OK: $2"
+    fi
+  }
+
+  expect 0 "the current and previous minors, written out" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ✅ |
+| Older tags | ❌ |'
+  expect 1 "a table that only describes the policy (no version to check)" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
+| Latest two tagged minors | ✅ |
+| Older tags | ❌ |'
+  expect 1 "fossil minors left as supported" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
+| `v1.2.x` | ✅ |
+| `v1.1.x` | ✅ |'
+  expect 1 "one minor behind the manifest" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
+| `v1.11.x` | ✅ |
+| `v1.10.x` | ✅ |'
+  expect 1 "the previous minor demoted to unsupported" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ❌ |'
+  expect 1 "a minor the manifest has not released yet" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
+| `v1.13.x` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ✅ |'
+  expect 0 "the first release of a new major keeps the previous line" 2.0.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
+| `v2.0.x` | ✅ |
+| `v1.12.x` | ✅ |'
+  # Scope. A ✅ in another table of the same file is not a support claim about
+  # a Quark minor, and the writer would not touch it: a guard that read it
+  # would demand a change its own remediation hint cannot make.
+  expect 0 "a ✅ naming a version outside the policy table is not the policy" 1.12.0 '| Version | Supported |
+|---------|-----------|
+| `main` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ✅ |
+| Older tags | ❌ |
+
+## Engine support
+
+| Engine | Supported |
+|--------|-----------|
+| PostgreSQL | ✅ since v1.0.0 |'
+  expect 1 "no supported-versions table at all" 1.12.0 'Quark is **v1.12.0** — stable under SemVer.
+
+Security fixes land on `main` and on the latest two tagged minors.'
+  expect 1 "a header with no separator row" 1.12.0 '| Version | Supported |
+| `main` | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ✅ |'
+
+  if [ "$st_fail" -ne 0 ]; then
+    exit 1
+  fi
+  echo "SECURITY.md supported-versions self-test OK"
+  exit 0
+fi
+
 version=$(sed -nE 's/.*"\.": *"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' .release-please-manifest.json)
 if [ -z "$version" ]; then
   echo "could not read the version from .release-please-manifest.json" >&2
   exit 1
 fi
 
+# The three sections below are independent debts of the SAME release pull
+# request, so all of them run and a single exit reports the aggregate. They
+# used to exit at the first red section, which meant the operator paid the
+# release-notes debts, re-ran, and only then learnt about the table — and the
+# release train, which prints this output when the guard is red, showed a
+# partial account of what was missing.
 fail=0
+mentions_fail=0
 
 require_mention() {
   local file=$1
   if ! grep -q "v${version}" "$file"; then
     echo "ERROR: ${file} does not mention v${version} (the version in .release-please-manifest.json)" >&2
-    fail=1
+    mentions_fail=1
   fi
 }
 
@@ -40,14 +286,14 @@ require_mention website/docs/reference/release-notes.mdx
 release_notes="website/docs/reference/release-notes.mdx"
 if ! grep -qE "^## v${version//./\\.}( |$)" "$release_notes"; then
   echo "ERROR: ${release_notes} no tiene una sección '## v${version}' (la versión del manifest necesita sus release notes)" >&2
-  fail=1
+  mentions_fail=1
 fi
 
 # Narrative release notes must exist for the current minor.
 minor_notes="docs/RELEASE_NOTES_v${version%.*}.0.md"
 if [ ! -f "$minor_notes" ]; then
   echo "ERROR: ${minor_notes} does not exist (narrative notes for the current minor)" >&2
-  fail=1
+  mentions_fail=1
 fi
 
 # El README enlaza las notas de LA MINOR ACTUAL. El require_mention de arriba
@@ -59,16 +305,15 @@ fi
 # él). El fichero ya se exige arriba; aquí se exige que el README APUNTE a él.
 if ! grep -qF "$minor_notes" README.md; then
   echo "ERROR: README.md no enlaza ${minor_notes} — el puntero de la línea actual quedó en una minor anterior" >&2
+  mentions_fail=1
+fi
+
+if [ "$mentions_fail" -ne 0 ]; then
+  echo "  ^ release checklist: bump the version mentions above and add the minor's RELEASE_NOTES file." >&2
   fail=1
+else
+  echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/release-notes, '## v${version}' section present, ${minor_notes} present and linked from README"
 fi
-
-if [ "$fail" -ne 0 ]; then
-  echo >&2
-  echo "Release checklist: bump the version mentions above and add the minor's RELEASE_NOTES file." >&2
-  exit 1
-fi
-
-echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/release-notes, '## v${version}' section present, ${minor_notes} present and linked from README"
 
 # ---------------------------------------------------------------------------
 # Roadmap sin versiones (QK6-5). QK5-2 quitó la versión hardcodeada del
@@ -78,40 +323,24 @@ echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/rele
 if grep -nE 'v[0-9]+\.[0-9]+\.[0-9]+' website/docs/reference/roadmap.mdx; then
   echo "ERROR: website/docs/reference/roadmap.mdx contiene una versión hardcodeada (las versiones viven en release-notes, que sí tiene guard)" >&2
   fail=1
+else
+  echo "roadmap OK: sin versiones hardcodeadas"
 fi
-if [ "$fail" -ne 0 ]; then
-  exit 1
-fi
-echo "roadmap OK: sin versiones hardcodeadas"
 
 # ---------------------------------------------------------------------------
-# SECURITY.md sin versiones fósiles como soportadas (DI-2). Con v1.7.1
-# publicada, la tabla de «Supported Versions» seguía diciendo v1.2.x/v1.1.x:
-# la política («latest two tagged minors») era correcta, pero los números
-# llevaban cinco minors congelados y el require_mention de arriba no los ve
-# (solo exige que la versión ACTUAL aparezca, no que las viejas desaparezcan).
-# Falla si alguna versión anterior a (minor actual − 1) figura en una fila
-# marcada como soportada (✅).
+# SECURITY.md's supported-versions table matches the manifest. With v1.7.1 out,
+# the table still said v1.2.x/v1.1.x — the policy sentence was right, the
+# numbers were five minors old, and the require_mention above cannot see it
+# (it only demands that the CURRENT version appears somewhere). The rule now
+# lives in check_supported_versions() at the top of this file, together with
+# the self-test that proves it fails.
 # ---------------------------------------------------------------------------
-cur_major=${version%%.*}
-minor_rest=${version#*.}
-cur_minor=${minor_rest%%.*}
-stale=0
-while IFS= read -r line; do
-  case "$line" in
-    *"✅"*) ;;
-    *) continue ;;
-  esac
-  for v in $(printf '%s\n' "$line" | grep -oE 'v[0-9]+\.[0-9]+' || true); do
-    v_major=${v#v}; v_major=${v_major%%.*}
-    v_minor=${v##*.}
-    if [ "$v_major" -lt "$cur_major" ] || { [ "$v_major" -eq "$cur_major" ] && [ "$v_minor" -lt $((cur_minor - 1)) ]; }; then
-      echo "ERROR: SECURITY.md marca ${v}.x como soportada, pero la versión actual es v${version} — la política cubre solo los dos últimos minors taggeados" >&2
-      stale=1
-    fi
-  done
-done < SECURITY.md
-if [ "$stale" -ne 0 ]; then
-  exit 1
+if check_supported_versions SECURITY.md "$version"; then
+  echo "SECURITY.md OK: the supported-versions table names exactly the minors v${version} resolves to"
+else
+  echo "  ^ write the rows from the manifest with 'bash scripts/release/gen_release_notes_skeleton.sh'" >&2
+  echo "    (it runs on the release branch, and the release train runs it there for you)." >&2
+  fail=1
 fi
-echo "SECURITY.md OK: ninguna versión anterior a v${cur_major}.$((cur_minor - 1)) figura como soportada"
+
+exit "$fail"

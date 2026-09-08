@@ -9,8 +9,19 @@ current tag for security updates.
 | Version | Supported |
 |---------|-----------|
 | `main` | ✅ |
-| Latest two tagged minors | ✅ |
+| `v1.12.x` | ✅ |
+| `v1.11.x` | ✅ |
 | Older tags | ❌ — please upgrade |
+
+The two minors above are the ones the sentence over the table resolves to
+today. They are written out, not left as a description, so that a reader can
+tell whether their tag is covered without knowing which minors exist — and so
+that CI can check the claim: `scripts/check-version-coherence.sh` derives the
+supported minors from `.release-please-manifest.json` and fails when this
+table names a different set. The rows are written in the release pull request
+by `scripts/release/gen_release_notes_skeleton.sh`, which reads the same
+manifest and asks the check itself which minors it demands — the equality has
+an author, not only a judge.
 
 ---
 
@@ -59,6 +70,25 @@ Quark does not maintain its own advisory list — the source of truth is the
 finding that is actually reachable from Quark's code fails the build.
 Toolchain and dependency pins are bumped as advisories land; each bump is
 recorded in the [CHANGELOG](CHANGELOG.md).
+
+---
+
+## Supply Chain
+
+Every GitHub Action this repository runs is pinned to a commit SHA with its
+tag in a trailing comment — `uses: actions/checkout@11d5960a… # v4.4.0`. A tag
+is a pointer its owner can move under a job that already has this tree checked
+out; a SHA is not. `scripts/ci/check_action_pins.sh` fails CI on a `uses:`
+that names anything else, and the `github-actions` ecosystem in
+[`.github/dependabot.yml`](.github/dependabot.yml) proposes the next SHA
+weekly: an unattended pin is worse than a tag, because it holds an action at
+the day someone wrote it down, security fixes included.
+
+An [OpenSSF Scorecard](https://scorecard.dev) analysis runs weekly and on
+demand ([`.github/workflows/scorecard.yml`](.github/workflows/scorecard.yml))
+and files each finding as a code scanning alert. It reports; it does not gate.
+Results are not published to the public OpenSSF dataset, so the score is read
+from the run itself.
 
 ---
 

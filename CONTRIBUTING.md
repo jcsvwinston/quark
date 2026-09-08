@@ -183,12 +183,13 @@ go test -run TestBenchmarkEngines -v -timeout 10m
 ## Before opening a PR: `make check`
 
 `make check` reproduces CI's cheap lanes locally so the PR does not go red
-on things you could have caught in seconds: vet+gofmt, the three docs
-guards (product voice, docs lint, roadmap), version coherence, apisurface/
-allowlist freshness, the static builds (`CGO_ENABLED=0` and cross-compile),
-and the unit tests. The expensive lanes have their own targets — `make
-test-race`, `make test-all` (engine matrix), `make superapp` — and
-`make help` lists everything.
+on things you could have caught in seconds: vet+gofmt, the five docs
+guards (product voice, internal-docs drift, docs-archive freshness,
+versioned-docs markers, docs lint), version coherence and the two
+self-tests that cover it, action pins, apisurface/allowlist freshness, the
+static builds (`CGO_ENABLED=0` and cross-compile), and the unit tests. The
+expensive lanes have their own targets — `make test-race`, `make test-all`
+(engine matrix), `make superapp` — and `make help` lists everything.
 
 Two guards you WILL meet on your first API change:
 
@@ -199,6 +200,22 @@ Two guards you WILL meet on your first API change:
   add a REASONED entry to `examples/superapp/cmd/gen-allowlist/main.go`
   and regenerate — an unclassified symbol fails the strict gate.
 - **version coherence** (release PRs only): `scripts/check-version-coherence.sh`
-  demands the docs bump in the same PR; release-please handles the version
-  mentions and `scripts/release/gen_release_notes_skeleton.sh` writes the
-  release-notes skeletons.
+  demands the docs bump in the same PR. release-please bumps the marked
+  version lines — in SECURITY.md that is the marker line only, not the
+  supported-versions table — and
+  `scripts/release/gen_release_notes_skeleton.sh` writes the rest on the
+  release branch: the release-notes skeletons and the table's rows, one per
+  supported minor, asking the guard itself (`--supported-minors`) which ones
+  those are so the rule has a single implementation. What is still yours in
+  that PR is the release notes prose. Both halves have a `--self-test` that
+  runs in CI, because a docs guard and a docs writer fail the same way: in
+  silence.
+
+And one you will meet the first time you touch a workflow:
+
+- **action pins**: `scripts/ci/check_action_pins.sh` requires every `uses:` to
+  name a 40-hex commit SHA with its tag in a trailing comment
+  (`uses: actions/checkout@11d5960… # v4.4.0`). Resolve the SHA with
+  `gh api repos/<owner>/<action>/commits/<tag> --jq .sha`. Dependabot moves
+  those pins forward weekly; the comment is how it (and you) know which
+  release a SHA is.
