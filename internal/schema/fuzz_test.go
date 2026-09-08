@@ -34,7 +34,8 @@ func clip(s string, n int) string {
 //   - The two readers of a db tag must name the same column. ColumnFromDBTag
 //     feeds identifiers to the SQL guard on the hot paths while parseDBTag
 //     feeds the schema; if they disagree about the column, the table is built
-//     with one name and queried with another.
+//     under one name and every statement that spells its columns out asks for
+//     the other.
 //   - Whatever parseDBTag understood must survive being written back out.
 //     Re-serialising the parsed options and parsing again has to yield the
 //     same values, or an option means something different on the second read
