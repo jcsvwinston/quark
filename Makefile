@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check lint test test-race test-all docs-guards regen superapp oracle-up
+.PHONY: help check lint test test-race test-all fuzz docs-guards regen superapp oracle-up
 
 help: ## Lista los targets con su descripción
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -38,6 +38,9 @@ test: ## Tests del módulo raíz (los de Redis se saltan sin QUARK_TEST_REDIS_AD
 
 test-race: ## La lane -race de CI (~5 min)
 	go test -race -short -count=1 -timeout 15m ./...
+
+fuzz: ## La lane de fuzzing corta de CI sobre las superficies de parseo (~45 s). FUZZTIME=2m para una tanda larga
+	bash scripts/ci/fuzz-short.sh $(FUZZTIME)
 
 test-all: ## Matriz completa: exporta los QUARK_TEST_*_DSN de los motores que tengas (Oracle: make oracle-up). Sin DSN, esa lane se salta.
 	go test ./... -count=1 -timeout 25m
