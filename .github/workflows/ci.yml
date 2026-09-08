@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: every job here only reads the tree. No job in this workflow
+# writes to the repository, comments on a pull request or mints an OIDC token,
+# so nothing needs more than `contents: read`. A job that ever does needs its
+# own `permissions:` block, not a wider default.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
@@ -105,6 +112,30 @@ jobs:
             git --no-pager diff --stat examples/superapp/apisurface.json examples/superapp/allowlist.json
             exit 1
           fi
+
+      - name: every Go module is covered by Dependabot
+        # .github/dependabot.yml names its directories one at a time: a glob
+        # would also match examples/oracle and examples/superapp, which belong
+        # to the root module and have no go.mod of their own. A hand-kept list
+        # is the kind that goes stale in silence — a new module would simply
+        # never be offered an update, with nothing on screen to say so. Fail
+        # instead, so a module and its entry land in the same pull request.
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in $(find . -name go.mod -not -path './*/node_modules/*' | sort); do
+            d=$(dirname "${f#./}")
+            if [ "$d" = "." ]; then
+              pattern='^[[:space:]]*directory:[[:space:]]*/[[:space:]]*$'
+            else
+              pattern="^[[:space:]]*-[[:space:]]*/${d}[[:space:]]*$"
+            fi
+            if ! grep -qE "$pattern" .github/dependabot.yml; then
+              echo "$f has no directory entry in .github/dependabot.yml"
+              missing=1
+            fi
+          done
+          exit "$missing"
 
   # DX-1 (auditoría DX 2026-08-16): CGO_ENABLED=0 es el modo por defecto de
   # los Dockerfile scratch/distroless y de todo cross-compile, y estuvo roto
@@ -271,9 +302,15 @@ jobs:
           cache: true
 
       - name: Run govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+        # Pinned to v1.3.0: govulncheck @latest (x/vuln v1.4.0) pulls
+        # golang.org/x/tools v0.46.0, whose typesinternal.ForEachElement panics
+        # on generic types ("ForEachElement called on type containing
+        # *types.TypeParam") under Go 1.26 — which aborts the scan for a
+        # generics-heavy module (panic, not a vuln finding). v1.3.0 is the last
+        # release that analyses cleanly. Unpin once a newer x/tools fixes the
+        # panic. The vulnerability database is fetched at run time, so a pinned
+        # binary still scans against current advisories. Same pin as Nucleus.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
 
   test:
     name: Test (SQLite)

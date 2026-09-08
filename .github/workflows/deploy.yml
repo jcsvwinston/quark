@@ -8,10 +8,11 @@ on:
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
+# Least privilege: the workflow reads, and only the job that talks to the Pages
+# API gets to write. `build` checks the tree out and uploads an artifact, which
+# needs nothing beyond read.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -38,6 +39,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

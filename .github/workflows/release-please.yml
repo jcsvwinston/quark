@@ -20,13 +20,17 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least privilege: the write that opens the release pull request and creates
+# the tag belongs to the one job that does it, not to the whole workflow.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: googleapis/release-please-action@v4
         # release-please-action@v4 still declares Node 20 in its
