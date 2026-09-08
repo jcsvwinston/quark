@@ -17,8 +17,13 @@
 #   - the rows of SECURITY.md's supported-versions table
 #   - CLAUDE.md's marked line and the README's release-notes pointer
 #
-# The version MENTIONS (README/SECURITY/CLAUDE/site header) are bumped by
-# release-please alone, via extra-files + x-release-please-version.
+# The version MENTIONS of the THREE files listed in
+# release-please-config.json's extra-files (README.md, SECURITY.md and the
+# site's release-notes header) are bumped by release-please alone, via
+# extra-files + x-release-please-version. CLAUDE.md is deliberately NOT one of
+# them — release-please's generic updater rewrites every occurrence of the old
+# version in a file, and CLAUDE.md quotes past versions in its history line —
+# so its marked line is bumped HERE; see the comment over that block below.
 #
 # SECURITY.md's TABLE is the exception: its rows are content, not a version
 # mention, and release-please leaves them alone while
@@ -337,10 +342,10 @@ else
   echo "ok: ${notes} ya existe"
 fi
 
-# CLAUDE.md queda FUERA de los extra-files de release-please a propósito: su
-# updater genérico reemplaza todas las apariciones de la versión anterior en
-# el fichero, y este cita versiones pasadas en su línea de historial — la
-# reescribía, falseando el registro. Aquí se bumpa solo la línea marcada.
+# CLAUDE.md is kept OUT of release-please's extra-files on purpose: its generic
+# updater replaces every occurrence of the previous version in the file, and
+# this one quotes past versions in its history line — it was rewriting them,
+# falsifying the record. Only the marked line is bumped here.
 if grep -q 'x-release-please-version' CLAUDE.md 2>/dev/null; then
   python3 - "$version" <<'PY_BUMP'
 import re, sys
