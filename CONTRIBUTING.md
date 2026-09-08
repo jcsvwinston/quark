@@ -183,12 +183,13 @@ go test -run TestBenchmarkEngines -v -timeout 10m
 ## Before opening a PR: `make check`
 
 `make check` reproduces CI's cheap lanes locally so the PR does not go red
-on things you could have caught in seconds: vet+gofmt, the three docs
-guards (product voice, docs lint, roadmap), version coherence and the two
+on things you could have caught in seconds: vet+gofmt, the five docs
+guards (product voice, internal-docs drift, docs-archive freshness,
+versioned-docs markers, docs lint), version coherence and the two
 self-tests that cover it, action pins, apisurface/allowlist freshness, the
-static builds (`CGO_ENABLED=0` and cross-compile), and the unit tests. The expensive lanes have their own targets — `make
-test-race`, `make test-all` (engine matrix), `make superapp` — and
-`make help` lists everything.
+static builds (`CGO_ENABLED=0` and cross-compile), and the unit tests. The
+expensive lanes have their own targets — `make test-race`, `make test-all`
+(engine matrix), `make superapp` — and `make help` lists everything.
 
 Two guards you WILL meet on your first API change:
 
