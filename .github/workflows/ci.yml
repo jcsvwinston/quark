@@ -368,6 +368,20 @@ jobs:
           QUARK_TEST_REDIS_ADDR: localhost:6379
         run: go test ./... -timeout 5m -v -count=1
 
+      - name: Fuzz (short, seeded)
+        # A3-15. Scorecard's Fuzzing check is a 10-point item the suite scored
+        # zero on, but the reason to keep this is the surfaces themselves: the
+        # SQL guard, the struct-tag parser and the dialect escaping all take
+        # untrusted input, and a hole in the first one is an injection. Each
+        # target asserts an invariant (round-trip, re-parse, "an accepted
+        # identifier cannot escape its quotes"), not just the absence of a
+        # panic. The step above already runs every target's seed corpus as an
+        # ordinary test; this adds a bounded amount of real mutation on top.
+        # -fuzztime is a wall-clock budget per target, so the lane cannot run
+        # long whatever the runner does — see the script for why the root
+        # package's target is seed-corpus only here.
+        run: bash scripts/ci/fuzz-short.sh
+
   # QK7-2: the race detector had no lane — data races only surfaced when
   # someone remembered to run -race by hand, and the gate was not even
   # reproducible (two 11000-row batch tests blew the default per-query

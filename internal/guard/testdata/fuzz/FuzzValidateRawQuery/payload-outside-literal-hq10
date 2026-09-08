@@ -1,0 +1,3 @@
+go test fuzz v1
+string("SELECT * FROM tags WHERE name = 'x'")
+string("'; DROP TABLE users--")

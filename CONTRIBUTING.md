@@ -156,6 +156,29 @@ export QUARK_TEST_ORACLE_DSN=oracle://quark:quark@localhost:1521/FREEPDB1
 make test-all
 ```
 
+### Fuzzing
+
+The parsing surfaces that take untrusted input — the SQL guard
+(`internal/guard`), the struct-tag parser and column-name derivation
+(`internal/schema`), and the dialect escaping (`Quote`, `JSONExtract`) — carry
+native Go fuzz targets. Their seed corpora run as ordinary tests on every `go
+test ./...`, so you get the regression value for free; the short mutation lane
+CI runs is:
+
+```bash
+make fuzz
+```
+
+To dig at one surface for longer, point `-fuzz` at a single target (the flag
+takes exactly one):
+
+```bash
+go test ./internal/guard -run '^$' -fuzz='^FuzzValidateJoinOn$' -fuzztime=5m
+```
+
+A crash writes the failing input to `testdata/fuzz/<target>/`. Commit that file
+with the fix: it becomes a seed and the case can never come back silently.
+
 ### Benchmarks
 
 ```bash
