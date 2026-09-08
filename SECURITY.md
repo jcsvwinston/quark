@@ -73,6 +73,42 @@ recorded in the [CHANGELOG](CHANGELOG.md).
 
 ---
 
+## Static Analysis (SAST)
+
+`govulncheck` reads Quark's dependencies; CodeQL reads Quark. It follows a
+value from where it enters the program to where it is used, which is the only
+way to see a caller-supplied string reaching a query, a path or a command
+several calls later — the layer below SQLGuard, which checks identifiers at
+the door.
+
+It is enabled as GitHub's **code scanning default setup**: a repository
+setting rather than a workflow file, which is why there is no
+`.github/workflows/codeql.yml` in this tree. It runs on every pull request and
+weekly on `main`, and it analyses three languages — Go, the GitHub Actions
+workflows, and the TypeScript under `website/`.
+
+Its Go pass covers **all eighteen modules** of this repository: the library,
+the five drivers, the two local harnesses and the ten runnable examples. The
+extractor discovers every `go.mod` in the tree and says so in the run log
+("extraction succeeded for all 18 discovered projects"), which is more than a
+hand-written workflow analysing the root module would see. Measured on 8
+September 2026: 3 min 07 s for Go, 1 min 18 s for TypeScript, 41 s for
+Actions, run in parallel.
+
+The two configurations are exclusive. GitHub documents that enabling default
+setup "will disable the existing workflow file and block any CodeQL analysis
+API uploads", so committing a `codeql.yml` here without first turning default
+setup off in **Settings → Code security** would add a lane that runs and then
+cannot publish what it found. If that setting is ever turned off, this section
+is the reminder that the repository then needs a workflow — and that the
+workflow has to cover Actions and TypeScript as well, or the move is a
+downgrade.
+
+It reports; it does not gate. Alerts appear in the Security tab and in a pull
+request's "Files changed"; no check fails because of one.
+
+---
+
 ## Supply Chain
 
 Every GitHub Action this repository runs is pinned to a commit SHA with its
