@@ -31,8 +31,12 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # The dispatch in the last step below: without `actions: write` that
+      # `gh workflow run` returns 403 and the tag ships with no assets.
+      actions: write
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
         # release-please-action@v4 still declares Node 20 in its
         # action.yml. GitHub forces Node 20 JS actions to Node 24 on
         # 2026-06-02; this env var opts in early so the workflow keeps
@@ -43,3 +47,23 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Tags cut by this workflow are created with the GITHUB_TOKEN, and
+      # GitHub suppresses events from that token to prevent workflow
+      # recursion — so release.yml's `push: tags` trigger NEVER fires for an
+      # automatic cut. Chain the asset build explicitly instead, at the ref of
+      # the freshly cut LIBRARY tag: that ref is what names the archives, what
+      # the release assets land on, and what the certificate identity ends in.
+      # release.yml is idempotent — it skips a release that already carries
+      # its archives, SBOMs, signature, certificate and attestation, and
+      # re-runs GoReleaser when any of those is missing.
+      #
+      # `tag_name` is the root package's tag. The five `drivers/<engine>`
+      # packages of this manifest have their own `<path>--tag_name` outputs
+      # and are deliberately not dispatched: they are Go modules consumed from
+      # the proxy and publish no binaries.
+      - name: Build release assets for the freshly cut root tag
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml -R "${{ github.repository }}" --ref "${{ steps.release.outputs.tag_name }}"

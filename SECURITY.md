@@ -92,6 +92,36 @@ from the run itself.
 
 ---
 
+## Verifying a Release
+
+Releases cut from the first signed tag onward publish six `quark` CLI archives
+(Linux, macOS and Windows on amd64 and arm64), one SPDX SBOM per archive, a
+`checksums.txt` covering all of them, a keyless cosign signature over that
+checksum file (`checksums.txt.sig` and `checksums.txt.pem`), and a build
+provenance attestation.
+
+Earlier releases publish no assets at all — every tag cut before this shipped
+has an empty asset list — because signing cannot be applied retroactively: a release is signed by the run that builds it, with a
+certificate minted for that run and valid for minutes. For those tags
+`go install github.com/jcsvwinston/quark/cmd/quark@vX.Y.Z` is the way in, and
+the Go module proxy's checksum database is what stands behind it. The release
+page tells you which kind you are looking at: a signed release lists
+`checksums.txt.sig`.
+
+There is no long-lived signing key, and none is published: what you verify is
+which workflow, in which repository, at which tag produced the release. The
+release workflow is dispatched at the **tag** ref, so the certificate identity
+ends in `.../release.yml@refs/tags/vX.Y.Z` — not `@refs/heads/main`, which is
+what every cosign example shows and what verifies nothing here.
+
+The two commands, with the exact identity string and the failure modes, are on
+the public site's
+[Operations → Verifying a release](https://jcsvwinston.github.io/quantum/quark/operations/verifying-releases)
+page (source:
+[`website/docs/operations/verifying-releases.mdx`](website/docs/operations/verifying-releases.mdx)).
+
+---
+
 ## Disclosure Policy
 
 We follow a **90-day coordinated disclosure** timeline:

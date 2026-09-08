@@ -1,0 +1,216 @@
+name: Release Asset Smoke
+
+# Runs on demand against an already published tag. It is deliberately not
+# chained to the release: the point is to ask the release page the same
+# questions a consumer asks, from outside, at any time — including long after
+# the run that produced the assets is gone.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to validate (e.g. v1.13.0)"
+        required: true
+        type: string
+
+# Every job downloads already published assets with `gh release download`,
+# which only reads the releases API. Nothing is written back.
+permissions:
+  contents: read
+
+jobs:
+  # Running the binary proves it works. It does not prove it is ours: an
+  # asset swapped on the release page runs just as happily. This job asks
+  # that question first, and it asks it of every asset the release publishes
+  # rather than only of the one archive the smokes happen to run: the cosign
+  # signature over `checksums.txt`, then every published archive and SBOM
+  # matched against that signed file, then build provenance for each
+  # archive. It then hands the smokes the digests out of the file it
+  # verified, so each of them checks the archive it downloaded instead of
+  # trusting the release page a second time.
+  provenance:
+    name: Signature And Provenance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    env:
+      TAG: ${{ inputs.tag }}
+    outputs:
+      linux_amd64: ${{ steps.digests.outputs.linux_amd64 }}
+      darwin_amd64: ${{ steps.digests.outputs.darwin_amd64 }}
+      darwin_arm64: ${{ steps.digests.outputs.darwin_arm64 }}
+      windows_amd64: ${{ steps.digests.outputs.windows_amd64 }}
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+
+      - name: Download every asset the release publishes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p verify
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir verify
+          for f in checksums.txt checksums.txt.sig checksums.txt.pem; do
+            if [ ! -f "verify/$f" ]; then
+              echo "::error::release $TAG publishes no $f — a release cut before signing was added cannot be verified"
+              exit 1
+            fi
+          done
+
+      # The identity is anchored to the TAG, not to main. Release Please
+      # chains the release workflow with `gh workflow run --ref <tag>`, so the
+      # OIDC token that signed these artifacts was minted at the tag ref and
+      # the certificate's subject ends in `@refs/tags/<tag>`. The identity
+      # every cosign example shows — `@refs/heads/main` — verifies nothing
+      # here.
+      - name: Verify the signature over the checksum file
+        run: |
+          set -euo pipefail
+          cosign verify-blob verify/checksums.txt \
+            --signature verify/checksums.txt.sig \
+            --certificate verify/checksums.txt.pem \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${TAG}"
+
+      # The signature covers the checksum file; the checksum file covers the
+      # six archives and the six SBOMs. This is the step that carries the
+      # trust across, and it carries it to all twelve — checking only the
+      # archive one smoke runs would leave the other five swappable and
+      # unchecked. `sha256sum -c` fails on a missing file as loudly as on a
+      # mismatched one, so this is also what proves the release published
+      # everything the signed file says it did.
+      - name: Verify every published asset against the signed checksum file
+        run: |
+          set -euo pipefail
+          cd verify
+          sha256sum -c checksums.txt
+
+      - name: Verify the build provenance of every archive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(verify/*.tar.gz verify/*.zip)
+          if [ "${#archives[@]}" -eq 0 ]; then
+            echo "::error::release $TAG publishes no archives"
+            exit 1
+          fi
+          for archive in "${archives[@]}"; do
+            gh attestation verify "$archive" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+
+      # Each smoke downloads its own archive from the release page, which is
+      # the surface this whole job exists to distrust. Publishing the digests
+      # out of the checksum file proved authentic above is what lets a smoke
+      # check what it actually received. The `.tar.gz|.zip` filter is what
+      # keeps `_linux_amd64.` from selecting the SBOM whose name starts with
+      # the archive's.
+      - name: Publish the verified digests to the smokes
+        id: digests
+        run: |
+          set -euo pipefail
+          for platform in linux_amd64 darwin_amd64 darwin_arm64 windows_amd64; do
+            digest=$(awk -v p="_${platform}." \
+              '$2 ~ /\.(tar\.gz|zip)$/ && index($2, p) { print $1; exit }' verify/checksums.txt)
+            if [ -z "$digest" ]; then
+              echo "::error::the signed checksum file lists no archive for $platform"
+              exit 1
+            fi
+            echo "$platform=$digest" >> "$GITHUB_OUTPUT"
+          done
+
+  # `quark version` prints the tag with its `v`, because the release stamps
+  # `v{{ .Version }}` into the binary so a downloaded CLI and a `go install`ed
+  # one report the same string. The archive NAME carries the version without
+  # it, which is why each smoke computes both.
+  linux:
+    name: Linux Asset Smoke
+    needs: provenance
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      DIGEST: ${{ needs.provenance.outputs.linux_amd64 }}
+    steps:
+      - name: Download and Run Linux Binary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist-test
+          VERSION="${TAG#v}"
+          PKG="quark_${VERSION}_linux_amd64.tar.gz"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$PKG" --dir dist-test
+          # The digest comes from the checksum file the gate verified, so an
+          # archive swapped between that job and this one fails here.
+          ( cd dist-test && echo "${DIGEST}  ${PKG}" | sha256sum -c - )
+          tar -xzf "dist-test/$PKG" -C dist-test
+          chmod +x dist-test/quark
+          dist-test/quark version | tee version.txt
+          grep -F "quark $TAG" version.txt
+
+  macos:
+    name: macOS Asset Smoke
+    needs: provenance
+    runs-on: macos-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      DIGEST_ARM64: ${{ needs.provenance.outputs.darwin_arm64 }}
+      DIGEST_AMD64: ${{ needs.provenance.outputs.darwin_amd64 }}
+    steps:
+      - name: Download and Run macOS Binary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist-test
+          VERSION="${TAG#v}"
+          ARCH="$(uname -m)"
+          if [ "$ARCH" = "arm64" ]; then
+            PKG="quark_${VERSION}_darwin_arm64.tar.gz"
+            DIGEST="$DIGEST_ARM64"
+          else
+            PKG="quark_${VERSION}_darwin_amd64.tar.gz"
+            DIGEST="$DIGEST_AMD64"
+          fi
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$PKG" --dir dist-test
+          # macOS has no sha256sum; shasum is in the base system. Same check.
+          ( cd dist-test && echo "${DIGEST}  ${PKG}" | shasum -a 256 -c - )
+          tar -xzf "dist-test/$PKG" -C dist-test
+          chmod +x dist-test/quark
+          dist-test/quark version | tee version.txt
+          grep -F "quark $TAG" version.txt
+
+  windows:
+    name: Windows Asset Smoke
+    needs: provenance
+    runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      DIGEST: ${{ needs.provenance.outputs.windows_amd64 }}
+    steps:
+      - name: Download and Run Windows Binary
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory -Path dist-test -Force | Out-Null
+          $version = $env:TAG.TrimStart('v')
+          $pkg = "quark_${version}_windows_amd64.zip"
+          gh release download "$env:TAG" --repo "$env:GITHUB_REPOSITORY" --pattern $pkg --dir dist-test
+          # Same check the other two smokes run, in the dialect this runner
+          # speaks: the digest comes from the checksum file the gate verified.
+          $expected = $env:DIGEST.ToLower()
+          $actual = (Get-FileHash "dist-test/$pkg" -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) {
+            throw "checksum mismatch for ${pkg}: signed checksum file says $expected, downloaded archive is $actual"
+          }
+          Expand-Archive -Path "dist-test/$pkg" -DestinationPath dist-test -Force
+          $output = & "./dist-test/quark.exe" version
+          $output | Tee-Object -FilePath version.txt
+          if (-not ($output -match "quark $env:TAG")) {
+            throw "unexpected version output: $output"
+          }

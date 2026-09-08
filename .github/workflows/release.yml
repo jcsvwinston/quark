@@ -1,0 +1,224 @@
+name: Release
+
+# `push: tags` only fires for tags pushed with user credentials. Tags cut by
+# release-please are created with the GITHUB_TOKEN, whose events GitHub
+# suppresses (workflow-recursion guard), so the Release Please workflow
+# chains this one via workflow_dispatch at the tag ref — github.ref_name is
+# the tag either way, and every step below keys off it.
+#
+# The pattern matches the LIBRARY tag only. Quark cuts six tags per train:
+# `vX.Y.Z` for the module at the root and `drivers/<engine>/vX.Y.Z` for each
+# of the five driver modules. A driver tag contains slashes, which `v*.*.*`
+# does not match, and there is nothing to build for one anyway — the drivers
+# are Go modules consumed from the proxy, not binaries.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+# Read-only by default: `verify` only checks out, builds and tests. `publish`
+# declares the three writes it needs in its own block.
+permissions:
+  contents: read
+
+env:
+  # The same opt-in the Release Please workflow carries: JavaScript actions
+  # that still declare Node 20 in their action.yml run on Node 24 instead of
+  # warning on every step.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  verify:
+    name: Verify Release Candidate
+    runs-on: ubuntu-latest
+
+    steps:
+      # First, and before a checkout: the tag is what names every archive, the
+      # release the assets land on, and the identity the signature is checked
+      # against. A run at anything else — a driver tag, a branch someone
+      # dispatched by hand from the UI — would publish assets under a name no
+      # verification command expects. `publish` needs this to hold and runs
+      # only if this job passes, so the whole workflow stops here in seconds
+      # rather than after a build.
+      - name: The ref is a library tag
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "::error::this workflow releases the library tag (vX.Y.Z); it was dispatched at '${GITHUB_REF_NAME}'"
+              echo "The five driver modules are consumed from the Go proxy and publish no binaries."
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The engine matrix belongs to CI on `main`, which has already run for
+      # the commit this tag points at. What is worth asking again here, of the
+      # exact tree about to be signed, is narrower: does it build the way
+      # GoReleaser will build it — no cgo, every package — and does the CLI
+      # that ships in the archives still behave.
+      - name: Build the way the release builds
+        run: CGO_ENABLED=0 go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: CLI tests
+        run: go test -short -count=1 ./cmd/...
+
+  publish:
+    name: Publish Artifacts
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      # All three are load-bearing and none replaces another: `contents` is
+      # what GoReleaser uploads the assets with (and what the "Check Existing
+      # Release" step below reads the releases API with), `id-token` is the
+      # OIDC token cosign signs with (keyless: no key lives in this
+      # repository), and `attestations` is what writes the build provenance.
+      # Dropping any one of them fails a different step.
+      contents: write
+      id-token: write
+      attestations: write
+
+    env:
+      # GoReleaser infers the version from the tags at HEAD, and in this
+      # repository that inference is one lexical accident away from wrong.
+      # Release Please cuts the library tag and the five
+      # `drivers/<engine>/vX.Y.Z` tags on the SAME commit — the sibling floors
+      # are raised as the first commit of every train — so six tags point at
+      # the release commit, and GoReleaser takes the first line of
+      # `git tag --points-at HEAD --sort=-version:refname`. That happens to be
+      # the library tag only because `v` sorts after `d`. Anywhere HEAD is not
+      # exactly on a tag GoReleaser falls back to `git describe --tags`, and
+      # that was measured on this tree: it picks `drivers/mssql/v0.1.3` and
+      # writes archives named
+      # `quark_drivers/mssql/v0.1.3-next_linux_amd64.tar.gz` — slashes and
+      # all, which become subdirectories under dist/. `github.ref_name` is the
+      # tag this run was dispatched at, and it is the only tag whose name
+      # should ever appear on an asset.
+      GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # goreleaser-action installs neither of these, and the config calls both
+      # by bare name. Installing them before GoReleaser runs means a missing
+      # tool fails here, in one line, instead of halfway through a release.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      # Release Please creates the GitHub Release before it dispatches this
+      # workflow, so "the release exists" says nothing about whether its
+      # assets do. The question that matters is whether the release is
+      # COMPLETE — archives, one SBOM per archive, the checksum file, its
+      # signature and its certificate — because a run that uploaded the six
+      # archives and then failed to sign leaves a release that "has assets"
+      # and would be skipped by every re-run, staying unsigned for good.
+      - name: Check Existing Release
+        id: release_check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          STATUS=$(curl -sS -o /tmp/release.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")
+          if [ "$STATUS" = "200" ]; then
+            jq -r '.assets[].name' /tmp/release.json > /tmp/assets.txt
+          else
+            : > /tmp/assets.txt
+          fi
+
+          count() { grep -cE "$1" /tmp/assets.txt || true; }
+          archives=$(count '\.(tar\.gz|zip)$')
+          sboms=$(count '\.spdx\.json$')
+          checksums=$(count '^checksums\.txt$')
+          signature=$(count '^checksums\.txt\.sig$')
+          certificate=$(count '^checksums\.txt\.pem$')
+
+          echo "archives=$archives sboms=$sboms checksums=$checksums signature=$signature certificate=$certificate"
+
+          if [ "$archives" -eq 0 ] || [ "$sboms" -ne "$archives" ] ||
+             [ "$checksums" -ne 1 ] || [ "$signature" -ne 1 ] || [ "$certificate" -ne 1 ]; then
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The assets are all there. The provenance attestation is NOT an
+          # asset — it lives in the attestations API — so the asset list
+          # cannot see it, and a run that signed and then failed to attest
+          # would look finished forever. Ask for it by the digest of the
+          # first archive the published checksum file lists: the attestation
+          # covers every entry in that file.
+          asset_url=$(jq -r '.assets[] | select(.name == "checksums.txt") | .url' /tmp/release.json)
+          curl -sSL -o /tmp/published_checksums.txt \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            "$asset_url"
+          digest=$(awk '$2 ~ /\.tar\.gz$/ { print $1; exit }' /tmp/published_checksums.txt)
+          attested=0
+          if [ -n "$digest" ]; then
+            ATT_STATUS=$(curl -sS -o /tmp/attestations.json -w "%{http_code}" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/attestations/sha256:${digest}")
+            if [ "$ATT_STATUS" = "200" ]; then
+              attested=$(jq -r '(.attestations // []) | length' /tmp/attestations.json)
+            fi
+          fi
+          echo "attestations=$attested for sha256:${digest:-<none>}"
+
+          if [ "$attested" -gt 0 ]; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish With GoReleaser
+        if: steps.release_check.outputs.complete != 'true'
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.14.1
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # One attestation over the checksum file covers every artifact listed in
+      # it — the six archives and the six SBOMs — instead of one round trip
+      # per artifact. `gh attestation verify <archive>` resolves it by digest,
+      # so a consumer never has to know that.
+      - name: Attest Build Provenance
+        if: steps.release_check.outputs.complete != 'true'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-checksums: dist/checksums.txt
+
+      - name: Skip Publish (Already Released)
+        if: steps.release_check.outputs.complete == 'true'
+        run: |
+          echo "Release ${GITHUB_REF_NAME} already carries signed, attested artifacts."

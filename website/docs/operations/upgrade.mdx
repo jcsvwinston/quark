@@ -71,7 +71,10 @@ go list -m github.com/jcsvwinston/quark
    ```
 
    Keeping the library and CLI on the same tag avoids chasing differences
-   between what your code does and what the tooling assumes.
+   between what your code does and what the tooling assumes. If you run the
+   CLI from a release archive rather than from `go install`, download the
+   archive for the new tag and verify its signature and provenance before you
+   replace the binary — [Verifying a release](verifying-releases).
 5. **Verify the schema before rolling out.** If you use the model-diff flow,
    `quarkmigrate verify` exits non-zero when the database has drifted from
    your models — run it in CI so an upgrade that changes type mapping or

@@ -471,6 +471,13 @@ Install:
 go install github.com/jcsvwinston/quark/cmd/quark@latest
 ```
 
+Releases cut from the first signed tag onward also publish prebuilt archives
+(Linux, macOS, Windows × amd64, arm64), each with an SPDX SBOM, a checksum
+file, a cosign signature over that file and a build provenance attestation.
+Grab one from the [releases page](https://github.com/jcsvwinston/quark/releases)
+and verify it before you run it — the two commands are on
+[Verifying a release](https://jcsvwinston.github.io/quantum/quark/operations/verifying-releases).
+
 | Command | Description |
 |---------|-------------|
 | `quark init` | Scaffold a new project with `.quark.yml` config |

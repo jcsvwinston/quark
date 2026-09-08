@@ -1,6 +1,9 @@
 # Binaries
 *.exe
 *.out
+# GoReleaser's output directory: six archives, six SBOMs and a checksum file,
+# rebuilt from scratch by every `goreleaser release --clean`.
+/dist
 # Anchored to the repo root so the compiled `./quark` binary is ignored
 # without also matching the cmd/quark/ source tree.
 /quark
