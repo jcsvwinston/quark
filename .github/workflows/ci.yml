@@ -113,6 +113,30 @@ jobs:
             exit 1
           fi
 
+      - name: every Go module is covered by Dependabot
+        # .github/dependabot.yml names its directories one at a time: a glob
+        # would also match examples/oracle and examples/superapp, which belong
+        # to the root module and have no go.mod of their own. A hand-kept list
+        # is the kind that goes stale in silence — a new module would simply
+        # never be offered an update, with nothing on screen to say so. Fail
+        # instead, so a module and its entry land in the same pull request.
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in $(find . -name go.mod -not -path './*/node_modules/*' | sort); do
+            d=$(dirname "${f#./}")
+            if [ "$d" = "." ]; then
+              pattern='^[[:space:]]*directory:[[:space:]]*/[[:space:]]*$'
+            else
+              pattern="^[[:space:]]*-[[:space:]]*/${d}[[:space:]]*$"
+            fi
+            if ! grep -qE "$pattern" .github/dependabot.yml; then
+              echo "$f has no directory entry in .github/dependabot.yml"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
   # DX-1 (auditoría DX 2026-08-16): CGO_ENABLED=0 es el modo por defecto de
   # los Dockerfile scratch/distroless y de todo cross-compile, y estuvo roto
   # (db_errors.go enlazaba mattn/go-sqlite3 sin build tag). Este job impide
