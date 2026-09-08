@@ -18,8 +18,10 @@ today. They are written out, not left as a description, so that a reader can
 tell whether their tag is covered without knowing which minors exist — and so
 that CI can check the claim: `scripts/check-version-coherence.sh` derives the
 supported minors from `.release-please-manifest.json` and fails when this
-table names a different set. The table is updated in the release pull request,
-alongside the release notes.
+table names a different set. The rows are written in the release pull request
+by `scripts/release/gen_release_notes_skeleton.sh`, which reads the same
+manifest and asks the check itself which minors it demands — the equality has
+an author, not only a judge.
 
 ---
 

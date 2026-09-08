@@ -12,6 +12,7 @@ help: ## Lista los targets con su descripción
 check: lint docs-guards ## Las lanes baratas de CI: vet+gofmt, guards de docs, coherencia, pines de acciones, superficie fresca, builds estáticos, tests unit
 	bash scripts/check-version-coherence.sh
 	bash scripts/check-version-coherence.sh --self-test
+	bash scripts/release/gen_release_notes_skeleton.sh --self-test
 	bash scripts/ci/check_action_pins.sh
 	go run ./examples/superapp/cmd/gen-apisurface && go run ./examples/superapp/cmd/gen-allowlist
 	@git diff --quiet examples/superapp/apisurface.json examples/superapp/allowlist.json || \

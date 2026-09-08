@@ -13,22 +13,52 @@ cd "$(dirname "$0")/.."
 # SECURITY.md's supported-versions table (DI-2, tightened by the A3 audit).
 #
 # The table is the promise a consumer reads before deciding whether their tag
-# still gets security fixes, and it is written by hand — release-please bumps
-# the "Quark is vX.Y.Z" marker line above it and nothing else. The first
-# version of this check only rejected FOSSIL rows (a minor older than the
-# policy still marked supported), which left the two ways the table can lie
-# uncovered: saying nothing verifiable at all ("Latest two tagged minors",
-# true forever and useless to a reader holding v1.4.2), and falling one minor
-# behind without naming an old one.
+# still gets security fixes. release-please bumps the "Quark is vX.Y.Z" marker
+# line above it and nothing else: the rows are content, not a version mention.
+# The first version of this check only rejected FOSSIL rows (a minor older
+# than the policy still marked supported), which left the two ways the table
+# can lie uncovered: saying nothing verifiable at all ("Latest two tagged
+# minors", true forever and useless to a reader holding v1.4.2), and falling
+# one minor behind without naming an old one.
 #
 # So the rule is now an equality, not a lower bound: the ✅ rows must name
 # exactly the minors the manifest resolves to — the current one and the one
 # before it, which is what the sentence above the table promises.
 #
+# An equality nobody can satisfy by hand would stop the release train, so the
+# rows are written on the release branch by
+# scripts/release/gen_release_notes_skeleton.sh, which asks THIS file for the
+# set (--supported-minors) instead of reimplementing the rule.
+#
 # Kept as a function because the self-test below feeds it tables that do not
 # exist in the tree; a guard that cannot be seen failing is a guard nobody
 # knows is broken.
 # ---------------------------------------------------------------------------
+
+# The minors the policy covers for a released version: the current one and the
+# one before it. Right after a major bump (X.0.0) only the current one can be
+# derived — the manifest does not record the last minor of the previous major.
+supported_minors() {
+  local released=$1 major rest minor out
+  major=${released%%.*}
+  rest=${released#*.}
+  minor=${rest%%.*}
+  out="v${major}.${minor}"
+  if [ "$minor" -gt 0 ]; then
+    out="$out v${major}.$((minor - 1))"
+  fi
+  printf '%s\n' "$out"
+}
+
+if [ "${1:-}" = "--supported-minors" ]; then
+  if [ -z "${2:-}" ]; then
+    echo "usage: $0 --supported-minors X.Y.Z" >&2
+    exit 1
+  fi
+  supported_minors "$2"
+  exit 0
+fi
+
 check_supported_versions() {
   local file=$1
   local released=$2
@@ -38,10 +68,7 @@ check_supported_versions() {
   minor=${rest%%.*}
   local_status=0
 
-  required="v${major}.${minor}"
-  if [ "$minor" -gt 0 ]; then
-    required="$required v${major}.$((minor - 1))"
-  fi
+  required=$(supported_minors "$released")
 
   # Every version named in a row marked supported. `v1.12.x` and `v1.12.0`
   # both reduce to the minor, which is the granularity the policy speaks in.
@@ -224,7 +251,8 @@ echo "roadmap OK: sin versiones hardcodeadas"
 # ---------------------------------------------------------------------------
 if ! check_supported_versions SECURITY.md "$version"; then
   echo >&2
-  echo "The supported-versions table is updated by hand in the release pull request, one row per supported minor." >&2
+  echo "Write the rows from the manifest with 'bash scripts/release/gen_release_notes_skeleton.sh'" >&2
+  echo "(it runs on the release branch, and the release train runs it there for you)." >&2
   exit 1
 fi
 echo "SECURITY.md OK: the supported-versions table names exactly the minors v${version} resolves to"

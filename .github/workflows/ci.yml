@@ -93,8 +93,10 @@ jobs:
         # release-please PR (and any later drift) until the user-facing
         # version mentions match .release-please-manifest.json and the
         # current minor has a docs/RELEASE_NOTES_vX.Y.0.md. It also holds
-        # SECURITY.md's supported-versions table to the manifest: the table
-        # is written by hand and had gone five minors stale before.
+        # SECURITY.md's supported-versions table to the manifest: the rows are
+        # content release-please does not bump, and had gone five minors stale
+        # before. gen_release_notes_skeleton.sh writes them on the release
+        # branch, so this equality has an author.
         run: bash scripts/check-version-coherence.sh
 
       - name: version coherence self-test
@@ -102,6 +104,13 @@ jobs:
         # tree, so the run shows it rejecting each way the table can lie. A
         # docs guard fails by passing quietly; this is what makes that visible.
         run: bash scripts/check-version-coherence.sh --self-test
+
+      - name: release skeleton self-test
+        # The other half of the same rule: gen_release_notes_skeleton.sh writes
+        # the supported-versions rows on the release branch, so the guard above
+        # has something that satisfies it. Same tables, seen from the side that
+        # fixes them — a writer of docs fails as quietly as a guard of docs.
+        run: bash scripts/release/gen_release_notes_skeleton.sh --self-test
 
       - name: action pins
         # Every `uses:` in .github/workflows is a commit SHA with its tag in a
