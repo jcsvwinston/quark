@@ -1,0 +1,75 @@
+# Dependency update proposals, weekly, grouped so a Monday brings one pull
+# request per family of modules rather than one per module and one per
+# dependency. Quark is several Go modules — the library at the root, the five
+# driver modules, and two local harnesses — so each family is listed on its
+# own, with the reason for every `ignore` written next to it.
+#
+# The runnable examples under examples/ are deliberately absent: every one of
+# them consumes the library and its driver through local `replace` directives
+# pointing back into this tree, so a proposal against their `require` block
+# would move a version the build never resolves.
+version: 2
+updates:
+  # The library module. This is the go.mod that ships to consumers and the one
+  # govulncheck scans, so its updates are the ones worth reading first.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+
+  # The five driver modules. They are released with their own tags and each
+  # one requires the library, so they are updated together but kept apart from
+  # the root: a bump here ends up in a driver release.
+  - package-ecosystem: gomod
+    directories:
+      - /drivers/mssql
+      - /drivers/mysql
+      - /drivers/oracle
+      - /drivers/postgres
+      - /drivers/sqlite
+    schedule:
+      interval: weekly
+    groups:
+      driver-modules:
+        patterns: ["*"]
+    ignore:
+      # The Quark requirement in a driver module is a floor, not a pin to keep
+      # current: it is raised on purpose as the first commit of each release
+      # train (see "fix(deps): raise the sibling module floors to quark
+      # v1.10.1", #348), because the module and the API it consumes ship
+      # together. Letting Dependabot close the gap would force every consumer
+      # of a driver onto the newest library minor without anyone deciding it.
+      - dependency-name: github.com/jcsvwinston/quark
+
+  # The two local harnesses. Neither is published; they exist so their
+  # dependencies (GORM, ent, the per-engine drivers) never reach the library's
+  # go.mod. They are still built in CI, so their dependencies still age.
+  - package-ecosystem: gomod
+    directories:
+      - /benchmarks
+      - /bugbash
+    schedule:
+      interval: weekly
+    groups:
+      harness-modules:
+        patterns: ["*"]
+    ignore:
+      # Both consume the library through `replace github.com/jcsvwinston/quark
+      # => ../`, so the version in their require block is never resolved —
+      # bugbash writes a zero pseudo-version there on purpose. Any bump of it
+      # is noise about a number nothing reads.
+      - dependency-name: github.com/jcsvwinston/quark
+
+  # Grouped for the same reason as the modules above: without a group this
+  # ecosystem opens one pull request per action, and the workflows here use
+  # five of them.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
