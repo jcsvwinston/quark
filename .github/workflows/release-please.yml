@@ -32,7 +32,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         # release-please-action@v4 still declares Node 20 in its
         # action.yml. GitHub forces Node 20 JS actions to Node 24 on
         # 2026-06-02; this env var opts in early so the workflow keeps
