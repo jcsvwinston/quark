@@ -263,6 +263,33 @@ if [ "${1:-}" = "--self-test" ]; then
     echo "self-test OK: version-less rows keep their place and text"
   fi
 
+  # The split this file's header states — release-please bumps the version
+  # mentions of the files in extra-files, this script bumps CLAUDE.md's marked
+  # line because CLAUDE.md is deliberately NOT one of them — is prose ABOUT a
+  # config file, and prose about a config file drifts from it silently: the
+  # header and CLAUDE.md's release checklist both named CLAUDE.md among the
+  # files release-please bumps while release-please never touched it, and the
+  # only thing that noticed was a reader. So the sentence is compared with the
+  # config here. If extra-files ever changes, this fails and names the two
+  # places to re-read; and if CLAUDE.md is ever added to it, it fails before
+  # the double bump reaches a release branch — release-please's generic
+  # updater rewrites EVERY occurrence of the old version in a file, and this
+  # one quotes past versions in its history line.
+  expected_extra="README.md SECURITY.md website/docs/reference/release-notes.mdx"
+  if ! extra_files=$(python3 -c "
+import json
+cfg = json.load(open('release-please-config.json'))
+print(' '.join(sorted(e['path'] for e in cfg['packages']['.'].get('extra-files', []))))
+"); then
+    echo "SELF-TEST FAIL: could not read extra-files out of release-please-config.json" >&2
+    st_fail=1
+  elif [ "$extra_files" != "$expected_extra" ]; then
+    echo "SELF-TEST FAIL: release-please-config.json's extra-files are now '$extra_files', not '$expected_extra' — the header of this script and the release checklist in CLAUDE.md both name the files release-please bumps, and say why CLAUDE.md is not one of them; re-read both before changing this expectation" >&2
+    st_fail=1
+  else
+    echo "self-test OK: extra-files names the three files the header names, and not CLAUDE.md"
+  fi
+
   if [ "$st_fail" -ne 0 ]; then
     exit 1
   fi
