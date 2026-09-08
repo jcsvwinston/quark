@@ -172,13 +172,20 @@ if [ -z "$version" ]; then
   exit 1
 fi
 
+# The three sections below are independent debts of the SAME release pull
+# request, so all of them run and a single exit reports the aggregate. They
+# used to exit at the first red section, which meant the operator paid the
+# release-notes debts, re-ran, and only then learnt about the table — and the
+# release train, which prints this output when the guard is red, showed a
+# partial account of what was missing.
 fail=0
+mentions_fail=0
 
 require_mention() {
   local file=$1
   if ! grep -q "v${version}" "$file"; then
     echo "ERROR: ${file} does not mention v${version} (the version in .release-please-manifest.json)" >&2
-    fail=1
+    mentions_fail=1
   fi
 }
 
@@ -197,14 +204,14 @@ require_mention website/docs/reference/release-notes.mdx
 release_notes="website/docs/reference/release-notes.mdx"
 if ! grep -qE "^## v${version//./\\.}( |$)" "$release_notes"; then
   echo "ERROR: ${release_notes} no tiene una sección '## v${version}' (la versión del manifest necesita sus release notes)" >&2
-  fail=1
+  mentions_fail=1
 fi
 
 # Narrative release notes must exist for the current minor.
 minor_notes="docs/RELEASE_NOTES_v${version%.*}.0.md"
 if [ ! -f "$minor_notes" ]; then
   echo "ERROR: ${minor_notes} does not exist (narrative notes for the current minor)" >&2
-  fail=1
+  mentions_fail=1
 fi
 
 # El README enlaza las notas de LA MINOR ACTUAL. El require_mention de arriba
@@ -216,16 +223,15 @@ fi
 # él). El fichero ya se exige arriba; aquí se exige que el README APUNTE a él.
 if ! grep -qF "$minor_notes" README.md; then
   echo "ERROR: README.md no enlaza ${minor_notes} — el puntero de la línea actual quedó en una minor anterior" >&2
+  mentions_fail=1
+fi
+
+if [ "$mentions_fail" -ne 0 ]; then
+  echo "  ^ release checklist: bump the version mentions above and add the minor's RELEASE_NOTES file." >&2
   fail=1
+else
+  echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/release-notes, '## v${version}' section present, ${minor_notes} present and linked from README"
 fi
-
-if [ "$fail" -ne 0 ]; then
-  echo >&2
-  echo "Release checklist: bump the version mentions above and add the minor's RELEASE_NOTES file." >&2
-  exit 1
-fi
-
-echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/release-notes, '## v${version}' section present, ${minor_notes} present and linked from README"
 
 # ---------------------------------------------------------------------------
 # Roadmap sin versiones (QK6-5). QK5-2 quitó la versión hardcodeada del
@@ -235,11 +241,9 @@ echo "version coherence OK: v${version} mentioned in README/SECURITY/CLAUDE/rele
 if grep -nE 'v[0-9]+\.[0-9]+\.[0-9]+' website/docs/reference/roadmap.mdx; then
   echo "ERROR: website/docs/reference/roadmap.mdx contiene una versión hardcodeada (las versiones viven en release-notes, que sí tiene guard)" >&2
   fail=1
+else
+  echo "roadmap OK: sin versiones hardcodeadas"
 fi
-if [ "$fail" -ne 0 ]; then
-  exit 1
-fi
-echo "roadmap OK: sin versiones hardcodeadas"
 
 # ---------------------------------------------------------------------------
 # SECURITY.md's supported-versions table matches the manifest. With v1.7.1 out,
@@ -249,10 +253,12 @@ echo "roadmap OK: sin versiones hardcodeadas"
 # lives in check_supported_versions() at the top of this file, together with
 # the self-test that proves it fails.
 # ---------------------------------------------------------------------------
-if ! check_supported_versions SECURITY.md "$version"; then
-  echo >&2
-  echo "Write the rows from the manifest with 'bash scripts/release/gen_release_notes_skeleton.sh'" >&2
-  echo "(it runs on the release branch, and the release train runs it there for you)." >&2
-  exit 1
+if check_supported_versions SECURITY.md "$version"; then
+  echo "SECURITY.md OK: the supported-versions table names exactly the minors v${version} resolves to"
+else
+  echo "  ^ write the rows from the manifest with 'bash scripts/release/gen_release_notes_skeleton.sh'" >&2
+  echo "    (it runs on the release branch, and the release train runs it there for you)." >&2
+  fail=1
 fi
-echo "SECURITY.md OK: the supported-versions table names exactly the minors v${version} resolves to"
+
+exit "$fail"
