@@ -8,6 +8,12 @@ name: OpenSSF Scorecard
 # It reports; it does not gate. The first run is the first measurement this
 # repository has ever had, so there is no threshold here yet: read the score,
 # then decide what to require.
+#
+# Two things come out of the run. The SARIF goes to code scanning, one alert
+# per check that falls below the action's bundled policy — that is where a
+# finding is read. The score is not in it: the aggregate exists only in the
+# JSON format, which is uploaded as the `scorecard-json` artifact and printed
+# as the first heading of the job summary.
 
 on:
   schedule:
@@ -71,32 +77,101 @@ jobs:
         with:
           sarif_file: results.sarif
 
-      - name: Summarise the findings in the run
+
+      # A Scorecard SARIF carries only the checks that fall below the action's
+      # bundled policy, so it can say what is wrong but never what the score
+      # is: the 2026-09-08 runs produced one finding here and none at all in a
+      # repository that cleared the policy, and no number in either case. The
+      # aggregate lives only in the JSON format, and `results_format` takes one
+      # value per run — the action analyses once and writes once (`scorecard.Run`
+      # then `scorecard.Format` in its main.go), and the only place it formats
+      # the same result a second time is inside the `publish_results: true`
+      # branch, which also signs that JSON and posts it to the public dataset.
+      # That is the decision left untaken above, so the score is bought with a
+      # second analysis instead: about twelve seconds, once a week.
+      - name: Run the analysis again for the score
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.json
+          results_format: json
+          publish_results: false
+
+      - name: Upload the JSON as an artifact
+        # Named the same in quark, nucleus and orbit so a later guard can read
+        # the four scores without a per-repository special case.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-json
+          path: results.json
+          retention-days: 5
+
+      - name: Report the score in the run summary
         # The score is not published, so the run has to be readable on its own.
         # Every value comes from the results file; nothing from the event
         # context is interpolated into this shell (that is what keeps the
-        # Dangerous-Workflow check at 10/10).
+        # Dangerous-Workflow check at 10/10). Nothing here fails the job
+        # either: there is no approved threshold yet, and picking one is the
+        # point of having the number.
         if: always()
         run: |
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
 
           try:
-              sarif = json.load(open("results.sarif"))
-              results = (sarif.get("runs") or [{}])[0].get("results", [])
-          except Exception as exc:  # no results file: the analysis failed
-              print(f"Could not read results.sarif: {exc}")
+              with open("results.json", encoding="utf-8") as handle:
+                  data = json.load(handle)
+          except Exception as exc:  # the analysis did not get as far as a file
+              print("## OpenSSF Scorecard\n")
+              print(f"The JSON results could not be read, so there is no score: {exc}")
               raise SystemExit(0)
 
+
+          def cell(value):
+              """One markdown table cell: no newlines, no unescaped pipes."""
+              return " ".join(str(value).split()).replace("|", "\\|")
+
+
+          checks = data.get("checks") or []
+          score = data.get("score")
+          repo = (data.get("repo") or {}).get("name") or "?"
+          commit = ((data.get("repo") or {}).get("commit") or "?")[:12]
+          version = (data.get("scorecard") or {}).get("version") or "?"
+
           print("## OpenSSF Scorecard\n")
-          if not results:
-              print("No check reported a finding.")
+          if isinstance(score, (int, float)):
+              print(f"### {score:.1f} / 10\n")
+          else:
+              print("### No aggregate score in the results\n")
+          print(f"`{repo}` at `{commit}` — scorecard {version}, {data.get('date', 'unknown date')}\n")
+          print("This run measures; it does not gate. No threshold is enforced here.\n")
+
+          if not checks:
+              print("The results carry no checks.")
               raise SystemExit(0)
-          print("| Check | Level | Detail |")
+
+
+          def rank(check):
+              value = check.get("score")
+              if isinstance(value, (int, float)) and value >= 0:
+                  return (0, value, check.get("name") or "")
+              return (1, 0, check.get("name") or "")
+
+
+          print("| Check | Score | Reason |")
           print("|---|---|---|")
-          for r in results:
-              rule = r.get("ruleId", "?")
-              level = r.get("level", "?")
-              text = (r.get("message", {}).get("text") or "").replace("\n", " ")
-              print(f"| {rule} | {level} | {text[:160]} |")
+          for check in sorted(checks, key=rank):
+              value = check.get("score")
+              if isinstance(value, (int, float)) and value >= 0:
+                  shown = f"{value:g}/10"
+              else:
+                  shown = "n/a"
+              print(f"| {cell(check.get('name') or '?')} | {shown} | {cell(check.get('reason') or '')} |")
+
+          skipped = [c for c in checks if not isinstance(c.get("score"), (int, float)) or c.get("score") < 0]
+          if skipped:
+              names = ", ".join(sorted(cell(c.get("name") or "?") for c in skipped))
+              print(
+                  f"\n`n/a` — the check did not apply to this repository and is left "
+                  f"out of the aggregate ({len(skipped)} of {len(checks)}): {names}."
+              )
           PY
