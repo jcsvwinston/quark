@@ -118,9 +118,9 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 
 ### Capa 1 — Decisiones arquitectónicas (`docs/adr/`)
 
-22 ADRs en formato MADR. Léelos cuando necesites **justificar o cuestionar** un patrón de Quark. Una decisión aceptada no se reabre sin un ADR sucesor.
+24 ADRs en formato MADR. Léelos cuando necesites **justificar o cuestionar** un patrón de Quark. Una decisión aceptada no se reabre sin un ADR sucesor.
 
-- [`docs/adr/README.md`](docs/adr/README.md) — índice (22 ADRs, 0001-0022).
+- [`docs/adr/README.md`](docs/adr/README.md) — índice (24 ADRs, 0001-0024).
 - ADR 0001 — Active Record, no Data Mapper.
 - ADR 0002 — Reflect default, codegen opt-in (Fase 6, v1.0.0; gate ≥3× retirado por 0017).
 - ADR 0003 — RLS cliente vía WHERE-injection (superseded por 0012).
@@ -143,6 +143,8 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 - ADR 0020 — Cache-stampede cross-instancia vía capacidad opcional `CacheLocker` (opt-in `WithCacheCrossInstance`, wait-and-reread).
 - ADR 0021 — Shard key desde la entidad vía interfaz `ShardKeyer` (`WithShardKeyOf` caller-side, no un hook del router).
 - ADR 0022 — Scatter-gather cross-shard reads vía funcs explícitas (`ScatterGather`/`ScatterCount`); merge caller-side (`ScatterMerge`), agregados no-COUNT diferidos.
+- ADR 0023 — Los drivers salen a módulos propios; el contrato vive en `quarkdriver` y los tres predicados de clasificación viajan juntos.
+- ADR 0024 — **Proposed**: el CLI a su propio módulo. Mide el hueco (117 de 128 módulos de la build list que ningún binario enlaza) y el coste (cuatro altas de registro, y la serie de versiones del `go install`).
 
 ### Capa 2 — Playbooks operativos por módulo (`docs/playbooks/`)
 
