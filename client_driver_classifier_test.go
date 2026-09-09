@@ -3,11 +3,7 @@
 
 package quark
 
-import (
-	"testing"
-
-	"github.com/jcsvwinston/quark/quarkdriver"
-)
+import "testing"
 
 // The WARN in newClient looks a classifier up by the engine name the driver
 // module registers under, which is not always the dialect name: SQL Server's
@@ -33,12 +29,8 @@ func TestClassifierEngineForMapsDialectsToRegisteredEngines(t *testing.T) {
 			t.Errorf("classifierEngineFor(%q) = (%q, %v), want (%q, %v)", dialect, engine, needs, want.engine, want.needs)
 		}
 	}
-	// Every engine the mapping names must be one the driver modules
-	// actually register — the test binary registers them all.
-	for _, dialect := range []string{"mysql", "mariadb", "sqlite", "mssql", "oracle"} {
-		engine, _ := classifierEngineFor(dialect)
-		if !quarkdriver.HasEngine(engine) {
-			t.Errorf("classifierEngineFor(%q) names engine %q, which no driver module registers", dialect, engine)
-		}
-	}
+	// That every engine named here is one a driver module actually registers
+	// is asserted from the other side, by the engine-suite module: it links
+	// the five driver modules, which the library's own test binary cannot —
+	// they import the library (ADR-0023, ADR-0024).
 }

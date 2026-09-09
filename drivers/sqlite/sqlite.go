@@ -17,14 +17,13 @@ package sqlite
 import (
 	_ "modernc.org/sqlite"
 
-	"github.com/jcsvwinston/quark/internal/driverclassify"
 	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 func init() {
 	quarkdriver.MustRegister("sqlite", quarkdriver.Classifier{
-		UniqueViolation: driverclassify.SQLiteUniqueViolation,
-		Deadlock:        driverclassify.SQLiteDeadlock,
-		TransientConn:   driverclassify.SQLiteTransientConn,
+		UniqueViolation: uniqueViolation,
+		Deadlock:        deadlock,
+		TransientConn:   transientConn,
 	})
 }

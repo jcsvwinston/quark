@@ -60,13 +60,17 @@ examples/superapp/
 
 ## Ejecución
 
+Desde **este directorio**: el superapp es su propio módulo de Go
+(ADR-0024), así que las rutas por defecto de `-manifest` y `-allowlist` —y el
+`REPORTS/` que escribe— son relativas a él.
+
 ```bash
 # un motor (gate off por defecto: sólo falla con asserts rojos / fugas)
-go run ./examples/superapp -engines=sqlite
+go run . -engines=sqlite
 
 # todos, gate estricto (falla si queda símbolo in-scope sin cubrir fuera de allowlist)
 # Oracle requiere el contenedor levantado + SUPERAPP_DSN_ORACLE
-go run ./examples/superapp -engines=all -gate=strict
+go run . -engines=all -gate=strict
 ```
 
 Emite a `REPORTS/superapp-<stamp>/`: **`matrix.txt`** (matriz método×motor con
@@ -82,11 +86,11 @@ incluidos vía su sentinel). Lo pendiente para cerrar el gate vive en S7 (CI) y 
 
 ```bash
 # SQLite, ~93k filas relacionadas (escala ×3 por defecto)
-go run ./examples/superapp/cmd/workload
+go run ./cmd/workload
 
 # más volumen / otro motor
-go run ./examples/superapp/cmd/workload -scale=10
-go run ./examples/superapp/cmd/workload -driver=pgx -dsn="$QUARK_TEST_POSTGRES_DSN"
+go run ./cmd/workload -scale=10
+go run ./cmd/workload -driver=pgx -dsn="$QUARK_TEST_POSTGRES_DSN"
 ```
 
 Siembra datos relacionados (accounts→projects→tasks, memberships con PK

@@ -63,18 +63,29 @@ go list -m github.com/jcsvwinston/quark
    against all six engines, but your models and queries are yours — the
    engine-specific paths (upserts, locking, set operations) deserve a real
    round-trip, not just unit tests.
-4. **Upgrade the CLI to the same version**, if you use it:
+4. **Upgrade the CLI too**, if you use it:
 
    ```bash
-   go install github.com/jcsvwinston/quark/cmd/quark@v1.3.1
+   go install github.com/jcsvwinston/quark/cmd/quark@latest
    quark version
    ```
 
-   Keeping the library and CLI on the same tag avoids chasing differences
-   between what your code does and what the tooling assumes. If you run the
-   CLI from a release archive rather than from `go install`, download the
-   archive for the new tag and verify its signature and provenance before you
-   replace the binary — [Verifying a release](verifying-releases).
+   The CLI is its own Go module with its own tag series, so there is no
+   library version to name here — `@latest` is the selector, and
+   `quark version` prints which Quark release the binary it just installed
+   carries:
+
+   ```text
+   quark v0.1.0 linux/amd64 (go1.26.6)
+   built against github.com/jcsvwinston/quark v1.13.0
+   ```
+
+   That second line is what to compare against the library version you just
+   moved to; the two are released together, so upgrading both in one sitting
+   keeps them equal. If you run the CLI from a release archive rather than
+   from `go install`, download the archive for the new library tag — the
+   archives are named after it — and verify its signature and provenance
+   before you replace the binary — [Verifying a release](verifying-releases).
 5. **Verify the schema before rolling out.** If you use the model-diff flow,
    `quarkmigrate verify` exits non-zero when the database has drifted from
    your models — run it in CI so an upgrade that changes type mapping or

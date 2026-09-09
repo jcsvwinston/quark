@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	_ "github.com/jcsvwinston/quark/drivers/postgres"
 	"github.com/jcsvwinston/quark/quarkdriver"
 )
@@ -33,5 +35,21 @@ func TestClassificationNeedsNoRegistration(t *testing.T) {
 func TestRegistersTheListener(t *testing.T) {
 	if _, ok := quarkdriver.LookupListener("postgres"); !ok {
 		t.Error("importing this module must register the LISTEN/NOTIFY listener")
+	}
+}
+
+// The other half of the rule the engine modules assert from their side: this
+// driver's error type MUST expose `SQLState() string`, because that method is
+// the whole reason this module registers no classifier. If a pgx release
+// dropped or renamed it, PostgreSQL would stop classifying entirely and no
+// classifier is registered to take over.
+func TestErrorExposesSQLState(t *testing.T) {
+	var err error = &pgconn.PgError{Code: "23505"}
+	s, ok := err.(interface{ SQLState() string })
+	if !ok {
+		t.Fatal("the pgx error type no longer exposes SQLState(): Quark classifies PostgreSQL through that method and this module registers no classifier")
+	}
+	if got := s.SQLState(); got != "23505" {
+		t.Errorf("SQLState() = %q, want \"23505\"", got)
 	}
 }

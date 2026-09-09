@@ -18,10 +18,12 @@
 # targets. For a real hunt, raise it: FUZZTIME=2m make fuzz.
 #
 # The root package's target (FuzzDialectEscaping) is deliberately NOT in the
-# timed list: instrumenting the root test binary means recompiling the whole
-# driver and testcontainers dependency tree with coverage, which costs minutes
-# on a cold cache and would blow the budget on its own. Its seed corpus runs
-# below instead — the mutation runs happen locally or on demand:
+# timed list: instrumenting the root test binary recompiles the package under
+# coverage, and the root package is the largest in the tree. That used to cost
+# minutes because the test binary also linked every driver and the whole
+# testcontainers tree; since ADR-0024 it does not, but the budget is still
+# better spent on the four guard targets. Its seed corpus runs below instead —
+# the mutation runs happen locally or on demand:
 #
 #   go test -run '^$' -fuzz='^FuzzDialectEscaping$' -fuzztime=2m .
 #

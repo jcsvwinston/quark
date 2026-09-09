@@ -6,11 +6,13 @@ name: Release
 # chains this one via workflow_dispatch at the tag ref — github.ref_name is
 # the tag either way, and every step below keys off it.
 #
-# The pattern matches the LIBRARY tag only. Quark cuts six tags per train:
-# `vX.Y.Z` for the module at the root and `drivers/<engine>/vX.Y.Z` for each
-# of the five driver modules. A driver tag contains slashes, which `v*.*.*`
-# does not match, and there is nothing to build for one anyway — the drivers
-# are Go modules consumed from the proxy, not binaries.
+# The pattern matches the LIBRARY tag only. Quark cuts up to seven tags per
+# train: `vX.Y.Z` for the module at the root, `drivers/<engine>/vX.Y.Z` for
+# each of the five driver modules, and `cmd/quark/vX.Y.Z` for the CLI. All six
+# of the others contain slashes, which `v*.*.*` does not match. The CLI tag is
+# the one worth naming: it IS the module that produces the binary, but its
+# archives are assets of the library release, so they are built and published
+# by the run at the library tag — this one — and never by a run at its own.
 on:
   push:
     tags:
@@ -49,6 +51,7 @@ jobs:
             *)
               echo "::error::this workflow releases the library tag (vX.Y.Z); it was dispatched at '${GITHUB_REF_NAME}'"
               echo "The five driver modules are consumed from the Go proxy and publish no binaries."
+              echo "The cmd/quark tag publishes none either: its archives ride on the library release, built by the run at the library tag."
               exit 1
               ;;
           esac
@@ -62,19 +65,36 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The CLI is its own module (ADR-0024) and requires the library by
+      # version. The workspace points that requirement at the tree being
+      # tagged, which is what the release build does too — without it, this
+      # job would check the CLI against the PREVIOUS release of the library.
+      - name: Link the CLI module to this tree
+        run: >
+          go work init .
+          cmd/quark
+          drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
+
       # The engine matrix belongs to CI on `main`, which has already run for
       # the commit this tag points at. What is worth asking again here, of the
       # exact tree about to be signed, is narrower: does it build the way
       # GoReleaser will build it — no cgo, every package — and does the CLI
       # that ships in the archives still behave.
       - name: Build the way the release builds
-        run: CGO_ENABLED=0 go build ./...
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 go build ./...
+          (cd cmd/quark && CGO_ENABLED=0 go build ./...)
 
       - name: go vet
-        run: go vet ./...
+        run: |
+          set -euo pipefail
+          go vet ./...
+          (cd cmd/quark && go vet ./...)
 
       - name: CLI tests
-        run: go test -short -count=1 ./cmd/...
+        working-directory: cmd/quark
+        run: go test -short -count=1 ./...
 
   publish:
     name: Publish Artifacts
@@ -129,6 +149,42 @@ jobs:
 
       - name: Install syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      # The CLI module requires the library by version, not through a replace
+      # directive: a published module carrying one is a module `go install`
+      # refuses. The workspace is what makes the release build the CLI against
+      # the tree being tagged rather than against the previous release —
+      # GoReleaser runs the Go command inside cmd/quark (`dir:` in the config)
+      # and picks this up.
+      - name: Link the CLI module to this tree
+        run: >
+          go work init .
+          cmd/quark
+          drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
+
+      # The version stamped into the binary comes from the CLI's OWN tag
+      # series (`cmd/quark/vX.Y.Z`), because that is the series
+      # `go install .../cmd/quark@latest` resolves and records — the two have
+      # to agree or the same program reports different versions depending on
+      # how it was obtained. A train that changes nothing under cmd/quark cuts
+      # no CLI tag, so the nearest one reachable from HEAD is the answer
+      # there; only a release cut before the CLI module had any tag at all
+      # falls back to the library tag.
+      - name: Resolve the CLI version to stamp
+        run: |
+          set -euo pipefail
+          cli_tag=$(git tag --points-at HEAD --sort=-version:refname | grep '^cmd/quark/v' | head -1 || true)
+          if [ -z "$cli_tag" ]; then
+            cli_tag=$(git describe --tags --match 'cmd/quark/v*' --abbrev=0 2>/dev/null || true)
+          fi
+          if [ -n "$cli_tag" ]; then
+            version="${cli_tag#cmd/quark/}"
+          else
+            echo "::warning::no cmd/quark tag is reachable from ${GITHUB_REF_NAME}; stamping the library tag instead"
+            version="$GITHUB_REF_NAME"
+          fi
+          echo "stamping CLI version $version"
+          echo "QUARK_CLI_VERSION=$version" >> "$GITHUB_ENV"
 
       # Release Please creates the GitHub Release before it dispatches this
       # workflow, so "the release exists" says nothing about whether its

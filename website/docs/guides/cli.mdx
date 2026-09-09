@@ -13,6 +13,16 @@ migrations, schema inspection, model generation, seeding, and multi-tenant jobs.
 go install github.com/jcsvwinston/quark/cmd/quark@latest
 ```
 
+The CLI is its own Go module, so `@latest` resolves its tags
+(`cmd/quark/vX.Y.Z`) rather than the library's, and its version numbers are
+their own series. `quark version` prints both — the CLI's, and the Quark
+release built into it:
+
+```text
+quark v0.1.0 linux/amd64 (go1.26.6)
+built against github.com/jcsvwinston/quark v1.13.0
+```
+
 Releases cut from the first signed tag onward also publish prebuilt archives —
 Linux, macOS and Windows, amd64 and arm64 — each with an SPDX SBOM beside it, a
 checksum file, a cosign signature over that file and a build provenance
@@ -211,8 +221,14 @@ err := client.Sync(ctx, quark.SyncOptions{DryRun: true}, &User{}, &Order{})
 To reuse the CLI's own command tree (`migrate`, `seed`, `tenant`, …) with your
 project's migrations compiled in, you need a small runner in your project —
 and `quark init` already writes it for you (`cmd/<app>/main.go`, plus the
-`migrations`/`seeders` doc stubs it imports). Written out, the whole runner
-is:
+`migrations`/`seeders` doc stubs it imports). The command tree lives in the
+CLI's module, so the runner needs it as a dependency of its own:
+
+```bash
+go get github.com/jcsvwinston/quark/cmd/quark@latest
+```
+
+Written out, the whole runner is:
 
 ```go
 // cmd/quark/main.go (in YOUR project)

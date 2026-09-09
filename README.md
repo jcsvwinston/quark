@@ -472,6 +472,12 @@ Install:
 go install github.com/jcsvwinston/quark/cmd/quark@latest
 ```
 
+The CLI is its own Go module, so `@latest` resolves its own tags
+(`cmd/quark/vX.Y.Z`) and its version numbers are not the library's — `quark
+version` prints both, the CLI's and the Quark release inside it. A selector
+naming a library version (`@v1.13.0`) does not resolve the CLI: use `@latest`,
+or a `cmd/quark` version.
+
 Releases cut from the first signed tag onward also publish prebuilt archives
 (Linux, macOS, Windows × amd64, arm64), each with an SPDX SBOM, a checksum
 file, a cosign signature over that file and a build provenance attestation.

@@ -127,9 +127,13 @@ jobs:
         # symbol must land with a refreshed manifest in the same PR, so the
         # gate can never silently stop counting it. Order matters —
         # gen-allowlist reads apisurface.json, so regenerate it first.
+        # The superapp is its own module since ADR-0024, so both generators
+        # run from inside it and write beside themselves. Its go.mod replaces
+        # every Quark requirement with this tree, so no workspace is needed:
+        # the surface being inventoried is the one in the pull request.
         run: |
-          go run ./examples/superapp/cmd/gen-apisurface
-          go run ./examples/superapp/cmd/gen-allowlist
+          set -euo pipefail
+          (cd examples/superapp && go run ./cmd/gen-apisurface && go run ./cmd/gen-allowlist)
           if ! git diff --quiet examples/superapp/apisurface.json examples/superapp/allowlist.json; then
             echo "apisurface.json / allowlist.json are stale. Run:"
             echo "  make regen"
@@ -140,11 +144,13 @@ jobs:
 
       - name: every Go module is covered by Dependabot
         # .github/dependabot.yml names its directories one at a time: a glob
-        # would also match examples/oracle and examples/superapp, which belong
-        # to the root module and have no go.mod of their own. A hand-kept list
-        # is the kind that goes stale in silence — a new module would simply
-        # never be offered an update, with nothing on screen to say so. Fail
-        # instead, so a module and its entry land in the same pull request.
+        # would also match examples/oracle, which belongs to the root module
+        # and has no go.mod of its own. A hand-kept list is the kind that goes
+        # stale in silence — a new module would simply never be offered an
+        # update, with nothing on screen to say so. Fail instead, so a module
+        # and its entry land in the same pull request. It has caught three
+        # already: the CLI, the superapp and the engine suites all became
+        # modules in one change (ADR-0024).
         run: |
           set -euo pipefail
           missing=0
@@ -177,11 +183,28 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The CLI is its own module (ADR-0024) and requires the library by
+      # version — it cannot carry a replace, because `go install` refuses a
+      # module whose go.mod has one. The workspace is what points that
+      # requirement at the tree under review; without it this lane would
+      # cross-compile the PREVIOUS release.
+      - name: Link the CLI module to this tree
+        run: >
+          go work init .
+          cmd/quark
+          drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
+
       - name: CGO_ENABLED=0 go build
-        run: CGO_ENABLED=0 go build ./...
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 go build ./...
+          (cd cmd/quark && CGO_ENABLED=0 go build ./...)
 
       - name: Cross-compile linux/arm64
-        run: GOOS=linux GOARCH=arm64 go build ./...
+        run: |
+          set -euo pipefail
+          GOOS=linux GOARCH=arm64 go build ./...
+          (cd cmd/quark && GOOS=linux GOARCH=arm64 go build ./...)
 
   drivers:
     name: Driver modules
@@ -287,7 +310,10 @@ jobs:
   # cycle (ADR-0023). Local replace directives point them at this tree, so
   # this lane needs no workspace either — but the root `go build ./...` does
   # not reach them, and without this lane an example could stop compiling
-  # against the API it demonstrates.
+  # against the API it demonstrates. Since ADR-0024 the acceptance harness
+  # (examples/superapp) is a module too, and this lane picks it up by the
+  # same find: compiling it here is cheap, and the expensive part — actually
+  # running it against six engines — is the `superapp` job below.
   examples:
     name: Examples (own modules)
     runs-on: ubuntu-latest
@@ -326,6 +352,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The CLI links every engine, so it is the artefact with the widest
+      # dependency surface in this repository — and the one people install.
+      # Scanning only the library would leave it unscanned.
+      - name: Link the CLI module to this tree
+        run: >
+          go work init .
+          cmd/quark
+          drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
+
       - name: Run govulncheck
         # Pinned to v1.3.0: govulncheck @latest (x/vuln v1.4.0) pulls
         # golang.org/x/tools v0.46.0, whose typesinternal.ForEachElement panics
@@ -335,7 +370,93 @@ jobs:
         # release that analyses cleanly. Unpin once a newer x/tools fixes the
         # panic. The vulnerability database is fetched at run time, so a pinned
         # binary still scans against current advisories. Same pin as Nucleus.
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
+        run: |
+          set -euo pipefail
+          go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
+          (cd cmd/quark && go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...)
+
+  # ADR-0024 moved the CLI into its own module, so the root `go test ./...`
+  # no longer reaches it — and the CLI is the binary this repository publishes
+  # and signs. This lane is its build, vet and test, run the way the release
+  # runs it: inside the module, linked to this tree through a workspace.
+  cli:
+    name: CLI module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The CLI requires the library and the five driver modules by version.
+      # A `replace` would be the obvious way to point them at this tree, and
+      # it is exactly what a published module must not carry: `go install`
+      # refuses one. So the workspace does it, here and in the release.
+      - name: Link the CLI module to this tree
+        run: >
+          go work init .
+          cmd/quark
+          drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
+
+      - name: Build, vet and test the CLI
+        working-directory: cmd/quark
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./... -count=1 -timeout 10m
+
+      # The point of the split, asserted rather than assumed. The CLI is meant
+      # to link every engine — that is why it exists as a separate module —
+      # and a driver that silently stopped being linked would leave the tool
+      # unable to talk to that database, with nothing failing until someone
+      # pointed it at one.
+      - name: The CLI links every engine
+        working-directory: cmd/quark
+        run: |
+          set -euo pipefail
+          deps=$(go list -deps .)
+          for drv in go-sql-driver/mysql jackc/pgx modernc.org/sqlite go-mssqldb sijms/go-ora; do
+            if ! echo "$deps" | grep -q "$drv"; then
+              echo "::error::the CLI no longer links $drv; it is the one binary that must speak to every engine" >&2
+              exit 1
+            fi
+          done
+          echo "OK: all five engines are linked into the CLI"
+
+  # The per-engine suites are their own module (ADR-0024). Without this lane
+  # they would not be built at all: the root `go test ./...` stops at the
+  # library's own module, and the integration matrix below only runs the
+  # engines it boots. This is the SQLite half — no containers, so it is as
+  # cheap as the library's own lane and covers the same test bodies the
+  # matrix later runs against the other five engines.
+  suites:
+    name: Engine suites (SQLite)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run the suites against SQLite
+        working-directory: internal/enginesuite
+        env:
+          QUARK_TEST_REDIS_ADDR: localhost:6379
+        run: go test ./... -timeout 15m -count=1
 
   test:
     name: Test (SQLite)
@@ -402,7 +523,14 @@ jobs:
           cache: true
 
       - name: Run tests with the race detector
-        run: go test -race -short -count=1 -timeout 15m ./...
+        run: |
+          set -euo pipefail
+          go test -race -short -count=1 -timeout 15m ./...
+          # Most of what the race detector is here for — the executor and pool
+          # concurrency exercised through a real SQLite database — lives in
+          # the engine-suite module since ADR-0024, so the lane has to reach
+          # it or it stops covering what it was added for.
+          (cd internal/enginesuite && go test -race -short -count=1 -timeout 20m ./...)
 
   # F6-8: the benchmark harness is its own module (separate go.mod with a
   # local `replace` directive), so the root `go test ./...` above does not
@@ -531,7 +659,25 @@ jobs:
 
       - name: Run ${{ matrix.engine }} suite
         timeout-minutes: ${{ matrix.timeout || 20 }}
+        # Inside the suites module (ADR-0024). The test NAMES are unchanged,
+        # so the filters above still say what they said; what moved is the
+        # directory they are run from. The module replaces every Quark
+        # requirement with this tree, so it needs no workspace.
+        working-directory: internal/enginesuite
         run: go test -tags=integration -timeout 25m -count=1 -run '^(${{ matrix.run }})$' -v ./...
+
+      # The CLI provisions tenants against a real PostgreSQL, and it is a
+      # module of its own now, so the run above cannot reach it. Postgres-only
+      # because that is the only engine these two exercise.
+      - name: Run the CLI's PostgreSQL tests
+        if: matrix.engine == 'postgres'
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          go work init . cmd/quark drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
+          cd cmd/quark
+          go test -tags=integration -timeout 14m -count=1 \
+            -run '^TestTenantProvisionSchemaPerTenantPostgres$' -v ./...
 
       # QK6-1: this lane's leg of the all-engines tests. The `/` in the
       # pattern splits it into (top-level regex)/(subtest regex), so only
@@ -541,6 +687,7 @@ jobs:
       # live there.
       - name: Run ${{ matrix.engine }} all-engines legs
         timeout-minutes: 15
+        working-directory: internal/enginesuite
         run: go test -tags=integration -timeout 14m -count=1 -run '^(TestCacheAllEngines|TestOtelAllEngines|TestBenchmarkEngines)$/^${{ matrix.leg }}$' -v .
 
   # S7-coverage: the superapp acceptance harness exercises Quark's public API
@@ -579,7 +726,11 @@ jobs:
 
       - name: Run superapp acceptance (all engines, strict gate)
         timeout-minutes: 25
-        run: go run ./examples/superapp -engines=all -gate=strict
+        # From inside its own module (ADR-0024): the manifest and allowlist
+        # paths default to this directory, and its go.mod already replaces
+        # every Quark requirement with this tree.
+        working-directory: examples/superapp
+        run: go run . -engines=all -gate=strict
 
   # A3. This is the single check name branch protection should require on
   # `main`: requiring the individual lanes means editing the protection rule
@@ -603,6 +754,8 @@ jobs:
       - drivers-standalone
       - examples
       - govulncheck
+      - cli
+      - suites
       - test
       - race
       - benchmarks

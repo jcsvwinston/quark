@@ -23,8 +23,11 @@ Para el estado **vivo** trabaja desde los issues de GitHub y [`docs/ROADMAP.md`]
 ```
 quark/
 ├── *.go                         ← código del ORM (paquete raíz)
-├── cache/, internal/, migrate/, otel/, cmd/quark/  ← subpaquetes
-├── examples/                    ← ejemplos por motor (sqlite/postgres/mysql/mssql/oracle)
+├── cache/, internal/, migrate/, otel/  ← subpaquetes de la biblioteca
+├── cmd/quark/                   ← el CLI, MÓDULO PROPIO (ADR-0024), tags cmd/quark/vX.Y.Z
+├── drivers/                     ← un módulo por motor (ADR-0023)
+├── internal/enginesuite/        ← las suites por motor, MÓDULO PROPIO sin publicar (ADR-0024)
+├── examples/                    ← ejemplos por motor (sqlite/postgres/mysql/mssql/oracle); superapp es módulo propio
 ├── docs/                        ← markdown fuente (ROADMAP, ARCHITECTURE, ANALISIS_MADUREZ…)
 ├── website/                     ← sitio Docusaurus publicado en GitHub Pages del repo quark (jcsvwinston.github.io/quark/) vía .github/workflows/deploy.yml
 │   ├── docusaurus.config.ts
@@ -144,7 +147,7 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 - ADR 0021 — Shard key desde la entidad vía interfaz `ShardKeyer` (`WithShardKeyOf` caller-side, no un hook del router).
 - ADR 0022 — Scatter-gather cross-shard reads vía funcs explícitas (`ScatterGather`/`ScatterCount`); merge caller-side (`ScatterMerge`), agregados no-COUNT diferidos.
 - ADR 0023 — Los drivers salen a módulos propios; el contrato vive en `quarkdriver` y los tres predicados de clasificación viajan juntos.
-- ADR 0024 — **Proposed**: el CLI a su propio módulo. Mide el hueco (117 de 128 módulos de la build list que ningún binario enlaza) y el coste (cuatro altas de registro, y la serie de versiones del `go install`).
+- ADR 0024 — El CLI a su propio módulo, con el superapp y las suites por motor. La build list del consumidor baja de 123 a 39 y el binario no cambia. El CLI se construye SIEMPRE dentro de un workspace (no puede llevar `replace`: `go install` lo rechaza) y tiene su propia serie de versiones; `quark version` imprime las dos. Notas de ejecución al final del ADR.
 
 ### Capa 2 — Playbooks operativos por módulo (`docs/playbooks/`)
 

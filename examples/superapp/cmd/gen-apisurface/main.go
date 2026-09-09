@@ -3,8 +3,8 @@
 // Quark (el paquete raíz + los subpaquetes públicos). Usa go/packages + go/types
 // (no reflexión), así que se puede `go install`ear y correr en CI.
 //
-//	go run ./examples/superapp/cmd/gen-apisurface            # escribe examples/superapp/apisurface.json
-//	go run ./examples/superapp/cmd/gen-apisurface -out=/tmp/x.json
+//	cd examples/superapp && go run ./cmd/gen-apisurface        # escribe apisurface.json
+//	cd examples/superapp && go run ./cmd/gen-apisurface -out=/tmp/x.json
 //
 // El formato lo define control.Manifest/Symbol (fuente única); el reconciliador
 // de control/manifest.go cruza esto contra lo que el recorder marca como
@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"go/types"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -54,7 +53,8 @@ var inScope = []string{
 const loadMode = packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps
 
 func main() {
-	out := flag.String("out", filepath.Join("examples", "superapp", "apisurface.json"), "ruta de salida")
+	// Relativa al directorio del módulo del superapp (ADR-0024).
+	out := flag.String("out", "apisurface.json", "ruta de salida")
 	stamp := flag.Bool("stamp", false, "incluir generated_at (off por defecto: fichero determinista para versionar)")
 	flag.Parse()
 

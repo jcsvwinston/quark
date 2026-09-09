@@ -8,7 +8,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jcsvwinston/quark/internal/driverclassify"
 	"github.com/jcsvwinston/quark/quarkdriver"
 	"github.com/jcsvwinston/quark/quarkdriver/drivertest"
 )
@@ -42,9 +41,9 @@ func TestConformance(t *testing.T) {
 	drivertest.Verify(t, drivertest.Case{
 		Engine: "sqlite",
 		Classifier: quarkdriver.Classifier{
-			UniqueViolation: driverclassify.SQLiteUniqueViolation,
-			Deadlock:        driverclassify.SQLiteDeadlock,
-			TransientConn:   driverclassify.SQLiteTransientConn,
+			UniqueViolation: uniqueViolation,
+			Deadlock:        deadlock,
+			TransientConn:   transientConn,
 		},
 		Unique: dup,
 		// Deadlock is nil on purpose: SQLite is single-writer and never picks
@@ -67,5 +66,28 @@ func mustFail(t *testing.T, db *sql.DB, stmt string) error {
 func TestRegistersTheSQLDriver(t *testing.T) {
 	if !slices.Contains(sql.Drivers(), "sqlite") {
 		t.Errorf("importing this module must register the \"sqlite\" driver; registered: %v", sql.Drivers())
+	}
+}
+
+// See the note on the same test in the MySQL module: Quark consults
+// `SQLState() string` before any registered classifier. The error has to be
+// provoked rather than fabricated here for the same reason as above.
+func TestErrorDoesNotExposeSQLState(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	for _, stmt := range []string{
+		"CREATE TABLE u (email TEXT NOT NULL UNIQUE)",
+		"INSERT INTO u (email) VALUES ('a@b.c')",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	dup := mustFail(t, db, "INSERT INTO u (email) VALUES ('a@b.c')")
+	if _, ok := dup.(interface{ SQLState() string }); ok {
+		t.Error("the SQLite error type now exposes SQLState(): Quark's PostgreSQL branch will shadow this engine's classifier")
 	}
 }

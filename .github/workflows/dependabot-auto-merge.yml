@@ -4,9 +4,9 @@ name: Dependabot auto-merge
 # dependency bump lands when CI says it is green instead of waiting for
 # somebody to notice it.
 #
-# This repository is eighteen Go modules (the library, five drivers, two
-# harnesses, ten examples) plus the GitHub Actions pins, so a Monday brings
-# several grouped proposals. Merging each one by hand means they queue up
+# This repository is twenty-one Go modules (the library, the CLI, five
+# drivers, three harnesses, ten examples) plus the GitHub Actions pins, so a
+# Monday brings several grouped proposals. Merging each one by hand means they queue up
 # unread, and a queue of unread bumps is how a dependency tree ages; clicking
 # merge on each one without reading it is the same thing with extra steps.
 # The judgement worth keeping is "is this the kind of update a machine may

@@ -4,7 +4,15 @@ project_name: quark
 
 builds:
   - id: quark
-    main: ./cmd/quark
+    # The CLI is its own Go module (ADR-0024), so the build happens INSIDE it.
+    # `dir` makes GoReleaser run the Go command there; `main` is then relative
+    # to that directory. The module requires the library by version rather
+    # than by a replace directive — a published module carrying a replace is
+    # one `go install` refuses — so the release job writes a go.work before
+    # this runs, which is what points the requirement at the tree being
+    # tagged instead of at the previous release.
+    dir: ./cmd/quark
+    main: .
     binary: quark
     env:
       - CGO_ENABLED=0
@@ -15,14 +23,28 @@ builds:
     goarch:
       - amd64
       - arm64
-    # The version the binary reports. `quark version` prefers this stamp and
-    # falls back to the module version in the build info, which is what a
-    # `go install .../cmd/quark@vX.Y.Z` binary carries — so the `v` prefix is
-    # part of the value on purpose: without it the same release would print
-    # `quark 1.13.0` when downloaded and `quark v1.13.0` when installed.
+    # Two versions, because since ADR-0024 there are two.
+    #
+    # `version` is the CLI's own, from the `cmd/quark/vX.Y.Z` series. It is
+    # what `go install .../cmd/quark@latest` records in the binary's build
+    # info, so stamping anything else here would make the same program report
+    # one string when downloaded and another when installed — which is the
+    # trap this stamp was added to avoid in the first place. The release job
+    # reads it off the CLI tag at HEAD and exports QUARK_CLI_VERSION; a local
+    # snapshot build has to export it too.
+    #
+    # `libraryVersion` is the ORM release the archive belongs to — the root
+    # tag, which is also what names the archive. Without it the release build
+    # would report "devel" for the library, because it resolves the library
+    # through the workspace rather than from the proxy.
     ldflags:
-      - -s -w -X github.com/jcsvwinston/quark/cmd/quark/commands.version=v{{ .Version }}
+      - -s -w -X github.com/jcsvwinston/quark/cmd/quark/commands.version={{ .Env.QUARK_CLI_VERSION }} -X github.com/jcsvwinston/quark/cmd/quark/commands.libraryVersion=v{{ .Version }}
 
+# The archives are assets of the LIBRARY release and are named after its tag:
+# the release workflow runs at `vX.Y.Z`, and that is the version a reader has
+# in hand when they follow the verification page. The binary inside reports
+# its own, shorter version series — see the ldflags above, and
+# website/docs/operations/verifying-releases.mdx, which explains the pair.
 archives:
   - id: cli-binaries
     ids:

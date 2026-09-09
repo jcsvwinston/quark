@@ -29,6 +29,12 @@ archive from the [releases page](https://github.com/jcsvwinston/quark/releases)
 [Verifying a release](../operations/verifying-releases) for how to check an
 archive) — but you don't need it to use the library.
 
+The CLI is a separate Go module with its own version numbers: `@latest`
+resolves a `cmd/quark/vX.Y.Z` tag, not a library one, so `@v1.13.0` and its
+kind do not select it. That is a packaging boundary and not a compatibility
+one — `quark version` prints the CLI's version and the Quark release inside
+it, and the two travel together in every release.
+
 ## Pick a driver
 
 Each engine ships as its own module under `drivers/`. Install exactly the one

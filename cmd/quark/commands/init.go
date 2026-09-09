@@ -311,6 +311,11 @@ func printInitNextSteps(projectName string, createdGoMod bool, nucleusPkg string
 	}
 	fmt.Printf("  %d. go get github.com/jcsvwinston/quark@latest   # add the runtime dependency\n", step)
 	step++
+	// The scaffolded runner imports this CLI's command tree, which is a
+	// module of its own since ADR-0024 — so it is a second `go get`, and
+	// leaving it out makes the runner fail to build on the first try.
+	fmt.Printf("  %d. go get github.com/jcsvwinston/quark/cmd/quark@latest # the command tree cmd/%s/main.go embeds\n", step, projectName)
+	step++
 	if nucleusPkg != "" {
 		fmt.Printf("  %d. go get github.com/jcsvwinston/nucleus@latest # the host framework of internal/%s\n", step, nucleusPkg)
 		step++
@@ -506,6 +511,10 @@ package %s
 //
 //	go run ./cmd/%s migrate up
 //	go run ./cmd/%s seed run
+//
+// The command tree comes from github.com/jcsvwinston/quark/cmd/quark, which
+// is its own module: add it with
+// 'go get github.com/jcsvwinston/quark/cmd/quark@latest'.
 //
 // commands.Main prints errors to stderr and exits non-zero on failure.
 package main

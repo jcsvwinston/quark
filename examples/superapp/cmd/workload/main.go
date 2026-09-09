@@ -2,9 +2,9 @@
 // informe ejecutivo, métricas y el log de la aplicación, para contrastar cómo
 // corre Quark con datos relacionados, consultas, transacciones y caché.
 //
-//	go run ./examples/superapp/cmd/workload                 # SQLite, escala ×3
-//	go run ./examples/superapp/cmd/workload -scale=10       # más volumen
-//	go run ./examples/superapp/cmd/workload -driver=pgx -dsn="$QUARK_TEST_POSTGRES_DSN"
+//	go run ./cmd/workload                 # SQLite, escala ×3
+//	go run ./cmd/workload -scale=10       # más volumen
+//	go run ./cmd/workload -driver=pgx -dsn="$QUARK_TEST_POSTGRES_DSN"
 //
 // Artefactos en -out (por defecto ./examples/superapp/REPORTS/workload-<stamp>/):
 // executive-report.md, metrics.json y quark.log.
@@ -26,18 +26,17 @@ import (
 	"github.com/jcsvwinston/quark/examples/superapp/recorder"
 	"github.com/jcsvwinston/quark/examples/superapp/workload"
 
-	// Registrar el driver ya no basta: hay que registrar también cómo reporta
-	// unicidad, deadlock y pérdida de conexión (ADR-0023), o esos predicados
-	// contestan false. Una aplicación de verdad importa quark/drivers/<motor>;
-	// esta vive en el módulo de Quark y no puede, así que usa los mismos
-	// predicados desde el mismo sitio.
-	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "modernc.org/sqlite"
-
-	"github.com/jcsvwinston/quark/internal/driverclassify"
+	// Registering the driver is not enough on its own: how the engine reports
+	// uniqueness, deadlock and connection loss has to be registered too
+	// (ADR-0023), or those predicates answer false. The driver modules do both,
+	// and this harness can import them now that it no longer shares the
+	// library's module (ADR-0024).
+	_ "github.com/jcsvwinston/quark/drivers/mssql"
+	_ "github.com/jcsvwinston/quark/drivers/mysql"
+	_ "github.com/jcsvwinston/quark/drivers/oracle"
+	_ "github.com/jcsvwinston/quark/drivers/postgres"
+	_ "github.com/jcsvwinston/quark/drivers/sqlite"
 )
-
-func init() { driverclassify.RegisterAll() }
 
 func main() {
 	var (

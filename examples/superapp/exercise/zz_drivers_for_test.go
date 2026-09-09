@@ -5,8 +5,12 @@ package exercise
 
 // Quark carries no driver's error types (ADR-0023). These tests open
 // databases, so the test binary links them the way an application would —
-// through the shared predicates, so this file and the drivers/ modules cannot
-// drift apart.
-import "github.com/jcsvwinston/quark/internal/driverclassify"
-
-func init() { driverclassify.RegisterAll() }
+// through the driver modules, which register the database/sql driver and the
+// error classifier in one import.
+import (
+	_ "github.com/jcsvwinston/quark/drivers/mssql"
+	_ "github.com/jcsvwinston/quark/drivers/mysql"
+	_ "github.com/jcsvwinston/quark/drivers/oracle"
+	_ "github.com/jcsvwinston/quark/drivers/postgres"
+	_ "github.com/jcsvwinston/quark/drivers/sqlite"
+)
