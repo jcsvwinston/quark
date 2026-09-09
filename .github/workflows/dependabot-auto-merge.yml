@@ -1,0 +1,421 @@
+name: Dependabot auto-merge
+
+# Arms GitHub's own auto-merge on a Dependabot pull request, so a routine
+# dependency bump lands when CI says it is green instead of waiting for
+# somebody to notice it.
+#
+# This repository is eighteen Go modules (the library, five drivers, two
+# harnesses, ten examples) plus the GitHub Actions pins, so a Monday brings
+# several grouped proposals. Merging each one by hand means they queue up
+# unread, and a queue of unread bumps is how a dependency tree ages; clicking
+# merge on each one without reading it is the same thing with extra steps.
+# The judgement worth keeping is "is this the kind of update a machine may
+# land", and that judgement is written down here once.
+#
+# WHAT THIS DOES NOT DO
+# ---------------------
+# It does not merge anything itself and it holds no bypass. It asks GitHub to
+# merge the pull request *when the required checks pass* — which means it is
+# worth exactly as much as branch protection on `main`. On an unprotected
+# branch there is nothing to wait for and "auto-merge" degrades into "merge
+# now", so the job below refuses to arm anything until `main` is protected and
+# requires the aggregating check by name. See "Preconditions" below.
+
+on:
+  # `pull_request`, deliberately, and never `pull_request_target`.
+  #
+  # `pull_request_target` runs the base branch's workflow with a token that
+  # has write access, for *any* pull request, forks included. A workflow that
+  # can merge, reachable from a fork, is the standard way to lose a
+  # repository, and the only thing standing between the two is the author
+  # remembering never to check out the head ref.
+  #
+  # `pull_request` has the property that makes this safe: a run triggered from
+  # a forked repository gets a read-only `GITHUB_TOKEN` no matter what the
+  # `permissions:` block below asks for. So the version of this file that a
+  # fork proposes cannot merge anything, including itself. Dependabot's
+  # branches live in this repository rather than in a fork, and for those runs
+  # the token starts read-only and is raised to write by the `permissions:`
+  # key on the one job that needs it — which is the arrangement GitHub
+  # documents for exactly this workflow.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Least privilege at the top: nothing at all. Each job restates the scopes it
+# needs, so the job that reads metadata cannot merge and the job that merges
+# is the only one holding a write token.
+permissions: {}
+
+concurrency:
+  # A Dependabot rebase fires `synchronize` while the previous run is still
+  # deciding. Only the newest decision matters.
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # The one aggregating status check in ci.yml. Branch protection requiring
+  # this name is what makes auto-merge mean "after every lane passed"; the
+  # arming job below refuses unless protection actually requires it.
+  REQUIRED_CHECK: CI Required Gate
+
+jobs:
+  eligibility:
+    name: Decide whether the update may merge itself
+    runs-on: ubuntu-latest
+
+    # Four conditions, none of them a title regex:
+    #  - the pull request was opened by Dependabot, and
+    #  - the event actor is still Dependabot, so a human push onto a
+    #    Dependabot branch takes the update out of the automated path, and
+    #  - the head branch lives in this repository, not in a fork, and
+    #  - it is not a draft.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]'
+      && github.actor == 'dependabot[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.draft == false
+    permissions:
+      # `fetch-metadata` reads the pull request and verifies the commit is
+      # really Dependabot's. Both read-only.
+      contents: read
+      pull-requests: read
+    outputs:
+      eligible: ${{ steps.decide.outputs.eligible }}
+      reason: ${{ steps.decide.outputs.reason }}
+
+    steps:
+      - name: Read Dependabot's own metadata
+        id: metadata
+        # The supported way to learn what an update actually contains. The
+        # alternative — matching the pull request title — reads a sentence
+        # written for humans and gets `update-type` wrong the first time
+        # Dependabot rewords it, which is the wrong direction of error for a
+        # check that decides whether something merges unread.
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Decide
+        id: decide
+        env:
+          # Every value from the event reaches the shell as an environment
+          # variable. Interpolating `${{ }}` into a `run:` body would splice
+          # attacker-influenced text into the script; a variable is data.
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
+          DEPENDENCY_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+          PREVIOUS_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
+        run: |
+          set -euo pipefail
+
+          eligible=true
+          reason=""
+
+          # --- 1. Semver range -------------------------------------------
+          # Patch and minor may land on CI alone; major may not.
+          #
+          # The line is not "majors are risky and minors are safe" — a minor
+          # can break a build just as thoroughly. It is that the two failures
+          # look different to CI. A patch or minor that breaks something
+          # breaks it *compiling or under test*, which is what the required
+          # gate already measures. A major is a deliberate API break: the
+          # interesting cases are the ones where everything still compiles
+          # and behaviour moved underneath, and no green tick can speak to
+          # that. So a major is a reading task, and it keeps a human.
+          #
+          # For a grouped proposal `update-type` is the highest bump in the
+          # group, so one major in a group of twenty holds the whole group.
+          case "$UPDATE_TYPE" in
+            version-update:semver-patch|version-update:semver-minor)
+              ;;
+            version-update:semver-major)
+              eligible=false
+              reason="a major update changes an API on purpose; a green CI run does not show what moved, so this one is read by a person"
+              ;;
+            *)
+              eligible=false
+              reason="the update type is '${UPDATE_TYPE:-unknown}', which this workflow does not recognise; nothing merges on an unrecognised value"
+              ;;
+          esac
+
+          # --- 2. Ecosystem ----------------------------------------------
+          # GitHub Actions bumps are excluded, and the exclusion is the point
+          # of this arc rather than an oversight.
+          #
+          # Every `uses:` here is pinned to a commit SHA precisely so that no
+          # third party can change the code that runs in CI without a commit
+          # in this repository. An actions bump rewrites that SHA. Letting a
+          # bot land a new, unread 40-hex pin would spend the whole guarantee
+          # the pinning discipline exists to buy — a green CI run says the
+          # workflows still work, not that the new commit is one to trust.
+          #
+          # The cost is small and known: one grouped pull request per week,
+          # which stays a human review item. The pins keep moving; a person
+          # reads the diff that moves them.
+          case "$ECOSYSTEM" in
+            github_actions|github-actions)
+              eligible=false
+              reason="an actions bump rewrites a pinned commit SHA, which is the one thing in this repository that exists to be read before it is trusted"
+              ;;
+          esac
+
+          # --- 3. Never a sibling suite module ----------------------------
+          # A `require` on another module of this suite is a floor raised on
+          # purpose by the release train, not a version to keep current, and
+          # .github/dependabot.yml `ignore`s it in every directory that has
+          # one. This check therefore should never fire.
+          #
+          # It is here anyway because "should never fire" is a claim about a
+          # configuration file that a future edit can falsify silently: an
+          # `ignore` list is a denylist, and a new module or a renamed
+          # dependency slips past one without any error. Reviewing the suite
+          # for this arc turned up a directory in a sibling repository whose
+          # ignore list had exactly that hole. Cheap check, quiet failure
+          # mode without it.
+          if printf '%s' "$DEPENDENCY_NAMES" \
+            | tr ',' '\n' \
+            | tr -d '[:blank:]' \
+            | grep -qE '^github\.com/jcsvwinston/(quark|nucleus|orbit)(/.*)?$'; then
+            eligible=false
+            reason="the update touches a sibling suite module, whose version is a floor set by the release train and never by a bot"
+          fi
+
+          # --- Report -----------------------------------------------------
+          {
+            echo "## Dependabot auto-merge"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Ecosystem | \`${ECOSYSTEM:-unknown}\` |"
+            echo "| Update type | \`${UPDATE_TYPE:-unknown}\` |"
+            echo "| Dependencies | \`${DEPENDENCY_NAMES:-unknown}\` |"
+            echo "| Versions | \`${PREVIOUS_VERSION:-?}\` → \`${NEW_VERSION:-?}\` |"
+            echo "| Eligible | \`$eligible\` |"
+            if [ -n "$reason" ]; then
+              echo
+              echo "Not armed — $reason."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$eligible" = "false" ]; then
+            # A notice, not a failure. "This update needs a person" is a
+            # normal outcome, and painting the pull request red for it would
+            # train everyone to ignore the red.
+            echo "::notice title=Auto-merge not armed::$reason"
+          fi
+
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+  arm:
+    name: Arm auto-merge
+    needs: eligibility
+    if: needs.eligibility.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      # The only write scopes in this file, on the only job that merges.
+      contents: write
+      pull-requests: write
+
+    steps:
+      # --- Preconditions -------------------------------------------------
+      # Both of these fail the job rather than skipping it. The job's whole
+      # purpose is to arm auto-merge; if it cannot, that should be visible on
+      # the pull request as a red check naming the setting that is missing,
+      # not as a green tick over a no-op. Neither red blocks anything today:
+      # this check is not part of branch protection.
+
+      - name: Refuse unless the repository allows auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          allowed=$(gh api "repos/$REPO" --jq '.allow_auto_merge')
+          if [ "$allowed" != "true" ]; then
+            echo "::error title=Auto-merge is turned off for this repository::Settings -> General -> Pull Requests -> tick 'Allow auto-merge'. It is a repository setting; no workflow can set it, and every run of this job fails until it is on."
+            exit 1
+          fi
+          echo "Repository allows auto-merge."
+
+      - name: Refuse unless the base branch is protected by the required gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          # This is the load-bearing check in the file.
+          #
+          # "Auto-merge" in GitHub means "merge when the required checks
+          # pass". If the branch requires nothing, that condition is already
+          # satisfied and GitHub merges as soon as it is willing — which is
+          # roughly immediately, before CI has finished starting. Arming
+          # auto-merge on an unprotected branch is not a weaker version of
+          # this feature; it is a different feature, and not one anybody
+          # asked for.
+          #
+          # So: protection must exist AND must require the aggregating check
+          # by name. `refUpdateRule` is the view of the rule that a plain
+          # read token can see — the REST protection endpoints need admin,
+          # which `GITHUB_TOKEN` cannot be granted (there is no
+          # `administration` scope for it). If the query returns nothing the
+          # job refuses; the failure direction is "do not merge".
+          # `$owner`, `$name` and `$qualifiedName` in the single-quoted GraphQL
+          # document are GraphQL variables, bound by the `-f` arguments below.
+          # Shell expansion there would be the bug, not the fix.
+          # shellcheck disable=SC2016
+          contexts=$(gh api graphql \
+            -f owner="${REPO%/*}" \
+            -f name="${REPO#*/}" \
+            -f qualifiedName="refs/heads/$BASE_REF" \
+            -f query='
+              query($owner: String!, $name: String!, $qualifiedName: String!) {
+                repository(owner: $owner, name: $name) {
+                  ref(qualifiedName: $qualifiedName) {
+                    refUpdateRule { requiredStatusCheckContexts }
+                  }
+                }
+              }' \
+            --jq '[.data.repository.ref.refUpdateRule.requiredStatusCheckContexts // []] | flatten | .[]' || true)
+
+          if [ -z "$contexts" ]; then
+            echo "::error title=Base branch is not protected::'$BASE_REF' has no branch protection rule requiring a status check, so enabling auto-merge would merge this pull request immediately rather than after CI. Protect the branch (Settings -> Branches -> Add branch ruleset) and require the '$REQUIRED_CHECK' check."
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$contexts" | grep -qxF "$REQUIRED_CHECK"; then
+            echo "Required checks on '$BASE_REF':"
+            printf '  - %s\n' "$contexts"
+            echo "::error title=The required gate is not required::'$BASE_REF' is protected but does not require '$REQUIRED_CHECK'. That check is red unless every CI lane passed; without it, auto-merge waits on whatever subset is listed above."
+            exit 1
+          fi
+
+          echo "'$BASE_REF' requires '$REQUIRED_CHECK'."
+
+      # --- Arm -------------------------------------------------------------
+      - name: Enable auto-merge with a squash message this repository controls
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # The subject and the body are both given explicitly, and the body
+          # is empty on purpose.
+          #
+          # This repository squash-merges, and its squash body default is
+          # COMMIT_MESSAGES — the commit message Dependabot wrote. That
+          # message ends with a block shaped like
+          #
+          #     updated-dependencies:
+          #     - dependency-name: golang.org/x/sync
+          #       update-type: version-update:semver-minor
+          #     Signed-off-by: dependabot[bot] <support@github.com>
+          #
+          # and `Word: text` at the start of a line is a Conventional Commits
+          # footer. release-please parses the whole commit through that
+          # grammar to build the changelog, and a body it cannot parse costs
+          # a release. The rest of the default body is the pull request
+          # description: tables of release notes, HTML, tens of kilobytes,
+          # truncated mid-tag. None of it belongs in the history of this
+          # repository.
+          #
+          # An empty body leaves the squash commit as exactly one line — the
+          # Conventional Commits subject release-please reads — with the pull
+          # request number appended, matching the rest of the history.
+          gh pr merge \
+            --auto \
+            --squash \
+            --subject "$PR_TITLE (#$PR_NUMBER)" \
+            --body "" \
+            "$PR_URL"
+
+      - name: Read back what was armed, and disarm it if it is wrong
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          # Reading the stored request back turns the paragraph above from an
+          # intention into something the run proves. If the headline or the
+          # body is not what was asked for, that is caught here, before the
+          # merge happens, rather than in a release that will not parse.
+          #
+          # Failing the job would not be enough on its own: the auto-merge
+          # request would still be armed, with the wrong message, waiting for
+          # a green gate. So a mismatch disarms it first and fails second.
+          disarm_and_fail() {
+            echo "::error title=$1::$2"
+            echo "Disarming, so a message this repository did not choose cannot merge."
+            gh pr merge --disable-auto "$PR_URL" \
+              || echo "::warning::Could not disarm; turn auto-merge off on the pull request by hand."
+            exit 1
+          }
+
+          state=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.state')
+
+          # `$owner`, `$name` and `$number` are GraphQL variables, as above.
+          # shellcheck disable=SC2016
+          armed=$(gh api graphql \
+            -f owner="${REPO%/*}" \
+            -f name="${REPO#*/}" \
+            -F number="$PR_NUMBER" \
+            -f query='
+              query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) {
+                  pullRequest(number: $number) {
+                    merged
+                    autoMergeRequest { mergeMethod commitHeadline commitBody }
+                  }
+                }
+              }' \
+            --jq '.data.repository.pullRequest')
+
+          echo "$armed"
+
+          merged=$(printf '%s' "$armed" | jq -r '.merged')
+          if [ "$merged" = "true" ]; then
+            # Every required check had already passed when the job ran, so
+            # GitHub merged instead of queueing. Same decision, taken by the
+            # same rules, with the same squash message.
+            echo "Pull request already merged (its required checks were green when auto-merge was requested)."
+            exit 0
+          fi
+
+          if [ "$(printf '%s' "$armed" | jq -r '.autoMergeRequest')" = "null" ]; then
+            echo "::error title=Auto-merge was not recorded::The request was accepted but the pull request carries no auto-merge request (state: $state)."
+            exit 1
+          fi
+
+          headline=$(printf '%s' "$armed" | jq -r '.autoMergeRequest.commitHeadline')
+          body=$(printf '%s' "$armed" | jq -r '.autoMergeRequest.commitBody // ""')
+          method=$(printf '%s' "$armed" | jq -r '.autoMergeRequest.mergeMethod')
+
+          if [ "$method" != "SQUASH" ]; then
+            disarm_and_fail "Wrong merge method" "auto-merge was armed as '$method', not SQUASH."
+          fi
+          if [ "$headline" != "$PR_TITLE (#$PR_NUMBER)" ]; then
+            disarm_and_fail "Wrong squash subject" "armed with '$headline'."
+          fi
+          if [ -n "$body" ]; then
+            disarm_and_fail "The squash body is not empty" "armed with a body of ${#body} characters; a footer-shaped line in it can stop release-please parsing the commit."
+          fi
+
+          {
+            echo "## Dependabot auto-merge"
+            echo
+            echo "Armed. This pull request merges when \`$REQUIRED_CHECK\` passes."
+            echo
+            echo "Squash commit will be:"
+            echo
+            echo '```'
+            echo "$headline"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
