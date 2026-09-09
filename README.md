@@ -133,17 +133,18 @@ go get github.com/jcsvwinston/quark/drivers/sqlite
 | SQL Server | `github.com/jcsvwinston/quark/drivers/mssql` | `sqlserver` |
 | Oracle | `github.com/jcsvwinston/quark/drivers/oracle` | `oracle` |
 
-What `go.mod` lists is not what a binary links (QK-14, maturity audit
-2026-09-03). The root module still *requires* the five engine drivers and
-the test-container modules: `cmd/quark` is a tool that talks to whatever
-database it is pointed at, so the CLI links every engine, and the engine
-suites run from this module. A program that imports `quark` and one
-`drivers/<x>` links that engine and nothing else — the standalone lane in CI
-measures it — but `go list -m all`, an SBOM or Dependabot see the modules in
-the graph, not the packages in the binary. Reading the driver modules out of
-the root `go.mod` means moving the CLI to a module of its own, which changes
-its install path; that decision is recorded in the suite's plan (A3), not
-taken here.
+**What `go.mod` lists is not what a binary links.** The root module still
+*requires* the five engine drivers and the test-container modules: `cmd/quark`
+is a tool that talks to whatever database it is pointed at, so the CLI links
+every engine, and the engine suites run from this module. A program that
+imports `quark` carries 128 modules in its build list and links 11 of them; the
+117 it never links are not in the binary, and `go build` does not even download
+them. They are in the graph that `go list -m all`, an SBOM or a dependency
+dashboard reads, and `go mod download all` fetches about 910 MiB where the
+build needs 133 MiB. Every figure, with the command behind it, is in
+[`docs/dependency-surface.md`](docs/dependency-surface.md); moving the CLI to a
+module of its own is proposed there — with what it would cost — in
+[ADR-0024](docs/adr/0024-cli-en-modulo-propio.md), and not taken here.
 
 ```go
 package main
