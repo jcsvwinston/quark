@@ -333,10 +333,11 @@ jobs:
             --body "" \
             "$PR_URL"
 
-      - name: Read back what was armed
+      - name: Read back what was armed, and disarm it if it is wrong
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
@@ -346,6 +347,18 @@ jobs:
           # intention into something the run proves. If the headline or the
           # body is not what was asked for, that is caught here, before the
           # merge happens, rather than in a release that will not parse.
+          #
+          # Failing the job would not be enough on its own: the auto-merge
+          # request would still be armed, with the wrong message, waiting for
+          # a green gate. So a mismatch disarms it first and fails second.
+          disarm_and_fail() {
+            echo "::error title=$1::$2"
+            echo "Disarming, so a message this repository did not choose cannot merge."
+            gh pr merge --disable-auto "$PR_URL" \
+              || echo "::warning::Could not disarm; turn auto-merge off on the pull request by hand."
+            exit 1
+          }
+
           state=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.state')
 
           # `$owner`, `$name` and `$number` are GraphQL variables, as above.
@@ -386,16 +399,13 @@ jobs:
           method=$(printf '%s' "$armed" | jq -r '.autoMergeRequest.mergeMethod')
 
           if [ "$method" != "SQUASH" ]; then
-            echo "::error title=Wrong merge method::auto-merge was armed as '$method', not SQUASH."
-            exit 1
+            disarm_and_fail "Wrong merge method" "auto-merge was armed as '$method', not SQUASH."
           fi
           if [ "$headline" != "$PR_TITLE (#$PR_NUMBER)" ]; then
-            echo "::error title=Wrong squash subject::armed with '$headline'."
-            exit 1
+            disarm_and_fail "Wrong squash subject" "armed with '$headline'."
           fi
           if [ -n "$body" ]; then
-            echo "::error title=The squash body is not empty::armed with a body of ${#body} characters; a footer-shaped line in it can stop release-please parsing the commit."
-            exit 1
+            disarm_and_fail "The squash body is not empty" "armed with a body of ${#body} characters; a footer-shaped line in it can stop release-please parsing the commit."
           fi
 
           {
