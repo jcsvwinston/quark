@@ -1,9 +1,9 @@
 {
-  ".": "1.12.0",
-  "cmd/quark": "0.0.0",
-  "drivers/mssql": "0.1.3",
-  "drivers/mysql": "0.1.3",
-  "drivers/oracle": "0.1.3",
-  "drivers/postgres": "0.1.3",
-  "drivers/sqlite": "0.1.3"
+  ".": "1.13.0",
+  "cmd/quark": "1.0.0",
+  "drivers/mssql": "0.2.0",
+  "drivers/mysql": "0.2.0",
+  "drivers/oracle": "0.2.0",
+  "drivers/postgres": "0.2.0",
+  "drivers/sqlite": "0.2.0"
 }

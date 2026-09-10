@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0](https://github.com/jcsvwinston/quark/compare/v1.12.0...v1.13.0) (2026-09-10)
+
+
+### Added
+
+* **packaging:** the CLI, the acceptance harness and the engine suites move to modules of their own ([#377](https://github.com/jcsvwinston/quark/issues/377)) ([86b0c90](https://github.com/jcsvwinston/quark/commit/86b0c903bcc75223e4541c822465f41ec036f6b6))
+
+
+### Fixed
+
+* **deps:** raise the sibling floors, and name in the CLI the root this train cuts ([#382](https://github.com/jcsvwinston/quark/issues/382)) ([834f5b9](https://github.com/jcsvwinston/quark/commit/834f5b935a2e48258c8290e2ea099a9ee1873867))
+* **schema:** read the column name from a db tag the same way on every path ([#365](https://github.com/jcsvwinston/quark/issues/365)) ([39bdc5e](https://github.com/jcsvwinston/quark/commit/39bdc5e2ebd9d32e752b2f4a05f4eab9a2f37cf7))
+
 ## [1.12.0](https://github.com/jcsvwinston/quark/compare/v1.11.0...v1.12.0) (2026-09-07)
 
 
