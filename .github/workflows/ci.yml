@@ -674,6 +674,15 @@ jobs:
         timeout-minutes: 15
         run: |
           set -euo pipefail
+          # The workspace belongs to THIS step: the CLI is its own module now
+          # and needs it to resolve the five drivers from the tree. It is
+          # removed on exit because `go work init` writes go.work in the repo
+          # ROOT, where it outlives the step — the next one runs inside
+          # internal/enginesuite and was resolving against a workspace that
+          # does not list that module, dying with "main module … does not
+          # contain package". Only postgres showed it: it is the only engine
+          # that runs this step.
+          trap 'rm -f "$GITHUB_WORKSPACE/go.work" "$GITHUB_WORKSPACE/go.work.sum"' EXIT
           go work init . cmd/quark drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
           cd cmd/quark
           go test -tags=integration -timeout 14m -count=1 \
@@ -689,19 +698,13 @@ jobs:
       - name: Run ${{ matrix.engine }} all-engines legs
         timeout-minutes: 15
         working-directory: internal/enginesuite
-        # DIAGNÓSTICO temporal: la lane falla con «main module
-        # (github.com/jcsvwinston/quark) does not contain package
-        # .../internal/enginesuite», que es lo que se ve al pedir ese paquete
-        # DESDE la raíz. El paso de arriba, con el mismo working-directory, sí
-        # corre dentro del módulo. Estas tres líneas dicen dónde está de
-        # verdad el shell y qué go.mod ve, en vez de deducirlo del error.
-        run: |
-          set -x
-          pwd
-          ls -la go.mod || echo "NO HAY go.mod AQUI"
-          go env GOMOD GOWORK
-          set +x
-          go test -tags=integration -timeout 14m -count=1 -run '^(TestCacheAllEngines|TestOtelAllEngines|TestBenchmarkEngines)$/^${{ matrix.leg }}$' -v .
+        env:
+          # This module resolves through its own `replace` directives, not
+          # through a workspace, so turning the workspace off makes the step
+          # immune to any go.work another step leaves in the repo root — which
+          # is exactly what broke this lane.
+          GOWORK: "off"
+        run: go test -tags=integration -timeout 14m -count=1 -run '^(TestCacheAllEngines|TestOtelAllEngines|TestBenchmarkEngines)$/^${{ matrix.leg }}$' -v .
 
   # S7-coverage: the superapp acceptance harness exercises Quark's public API
   # surface across all 6 engines in one process and gates on a manifest
