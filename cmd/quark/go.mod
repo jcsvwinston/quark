@@ -20,12 +20,12 @@ go 1.25.7
 
 require (
 	github.com/fatih/color v1.19.0
-	github.com/jcsvwinston/quark v1.12.0
-	github.com/jcsvwinston/quark/drivers/mssql v0.1.3
-	github.com/jcsvwinston/quark/drivers/mysql v0.1.3
-	github.com/jcsvwinston/quark/drivers/oracle v0.1.3
-	github.com/jcsvwinston/quark/drivers/postgres v0.1.3
-	github.com/jcsvwinston/quark/drivers/sqlite v0.1.3
+	github.com/jcsvwinston/quark v1.13.0
+	github.com/jcsvwinston/quark/drivers/mssql v0.2.0
+	github.com/jcsvwinston/quark/drivers/mysql v0.2.0
+	github.com/jcsvwinston/quark/drivers/oracle v0.2.0
+	github.com/jcsvwinston/quark/drivers/postgres v0.2.0
+	github.com/jcsvwinston/quark/drivers/sqlite v0.2.0
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
