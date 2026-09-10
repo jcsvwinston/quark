@@ -71,7 +71,7 @@ jobs:
       # job would check the CLI against the PREVIOUS release of the library.
       - name: Link the CLI module to this tree
         run: >
-          go work init .
+          bash scripts/ci/link_workspace.sh .
           cmd/quark
           drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
 
@@ -158,7 +158,7 @@ jobs:
       # and picks this up.
       - name: Link the CLI module to this tree
         run: >
-          go work init .
+          bash scripts/ci/link_workspace.sh .
           cmd/quark
           drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
 
