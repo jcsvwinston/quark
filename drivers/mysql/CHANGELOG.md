@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/jcsvwinston/quark/compare/drivers/mysql/v0.1.3...drivers/mysql/v0.2.0) (2026-09-10)
+
+
+### Added
+
+* **packaging:** the CLI, the acceptance harness and the engine suites move to modules of their own ([#377](https://github.com/jcsvwinston/quark/issues/377)) ([86b0c90](https://github.com/jcsvwinston/quark/commit/86b0c903bcc75223e4541c822465f41ec036f6b6))
+
+
+### Fixed
+
+* **deps:** raise the sibling floors, and name in the CLI the root this train cuts ([#382](https://github.com/jcsvwinston/quark/issues/382)) ([834f5b9](https://github.com/jcsvwinston/quark/commit/834f5b935a2e48258c8290e2ea099a9ee1873867))
+
 ## [0.1.3](https://github.com/jcsvwinston/quark/compare/drivers/mysql/v0.1.2...drivers/mysql/v0.1.3) (2026-09-07)
 
 
