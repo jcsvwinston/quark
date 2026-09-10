@@ -24,8 +24,9 @@ workspace: ## Escribe el go.work local (ignorado por git) que enlaza el CLI con 
 	@# tenga (ADR-0024). El workspace es lo que lo apunta a este árbol, aquí
 	@# y en CI. Los demás módulos anidados sí llevan replace y no lo
 	@# necesitan; entran igual para que un `go build ./...` desde cualquiera
-	@# vea lo mismo.
-	@test -f go.work || go work init . $(NESTED_MODULES) \
+	@# vea lo mismo. El fichero se DERIVA de los require, así que se
+	@# reescribe en cada invocación en vez de respetar el que hubiera.
+	@bash scripts/ci/link_workspace.sh . $(NESTED_MODULES) \
 		drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
 	@echo "go.work listo (local, gitignored)"
 

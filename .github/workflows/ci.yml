@@ -190,7 +190,7 @@ jobs:
       # cross-compile the PREVIOUS release.
       - name: Link the CLI module to this tree
         run: >
-          go work init .
+          bash scripts/ci/link_workspace.sh .
           cmd/quark
           drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
 
@@ -229,7 +229,7 @@ jobs:
       # itself.
       - name: Link the driver modules to this tree
         run: >
-          go work init .
+          bash scripts/ci/link_workspace.sh .
           drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
 
       - name: Build, vet and test
@@ -357,7 +357,7 @@ jobs:
       # Scanning only the library would leave it unscanned.
       - name: Link the CLI module to this tree
         run: >
-          go work init .
+          bash scripts/ci/link_workspace.sh .
           cmd/quark
           drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
 
@@ -396,7 +396,7 @@ jobs:
       # refuses one. So the workspace does it, here and in the release.
       - name: Link the CLI module to this tree
         run: >
-          go work init .
+          bash scripts/ci/link_workspace.sh .
           cmd/quark
           drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
 
@@ -676,14 +676,14 @@ jobs:
           set -euo pipefail
           # The workspace belongs to THIS step: the CLI is its own module now
           # and needs it to resolve the five drivers from the tree. It is
-          # removed on exit because `go work init` writes go.work in the repo
+          # removed on exit because the linker writes go.work in the repo
           # ROOT, where it outlives the step — the next one runs inside
           # internal/enginesuite and was resolving against a workspace that
           # does not list that module, dying with "main module … does not
           # contain package". Only postgres showed it: it is the only engine
           # that runs this step.
           trap 'rm -f "$GITHUB_WORKSPACE/go.work" "$GITHUB_WORKSPACE/go.work.sum"' EXIT
-          go work init . cmd/quark drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
+          bash scripts/ci/link_workspace.sh . cmd/quark drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
           cd cmd/quark
           go test -tags=integration -timeout 14m -count=1 \
             -run '^TestTenantProvisionSchemaPerTenantPostgres$' -v ./...
