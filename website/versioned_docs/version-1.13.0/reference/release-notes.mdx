@@ -43,6 +43,14 @@ anything. The one driver that stays in the library's own requirements is
 `modernc.org/sqlite`, because the library keeps white-box tests that open a
 real database through unexported methods.
 
+**Upgrading: move the driver modules with the library.** `drivers/mssql`,
+`drivers/mysql`, `drivers/oracle` and `drivers/sqlite` at v0.1.x import a
+package that left the root module in this release, so holding one of them while
+moving the library to v1.13.0 does not build. Move them to v0.2.0 — worth doing
+for its own sake, because those predicates covered all six engines and
+requiring any one driver used to pull the other five into your module graph.
+`drivers/postgres` was never affected.
+
 **Installing the CLI.** `go install github.com/jcsvwinston/quark/cmd/quark@latest`
 keeps working and installs the same program. `@latest` now resolves the
 `.../cmd/quark` module, whose tags are `cmd/quark/vX.Y.Z`, and this release
