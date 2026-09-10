@@ -49,6 +49,24 @@ Docs: <https://jcsvwinston.github.io/quantum/quark/intro/>
   mapped to depended on which path reached the tag. Found by the first seed of
   the new `FuzzColumnNaming` target, whose property is that the two agree.
 
+## Upgrading
+
+**Upgrade the driver modules together with the library.** `drivers/mssql`,
+`drivers/mysql`, `drivers/oracle` and `drivers/sqlite` at v0.1.x import
+`internal/driverclassify`, which left the root module with the CLI in this
+release. Holding one of them while moving the library to v1.13.0 does not
+build:
+
+```
+module github.com/jcsvwinston/quark@v1.13.0 found, but does not contain
+package github.com/jcsvwinston/quark/internal/driverclassify
+```
+
+Moving them to v0.2.0 fixes it, and is worth doing for its own sake: those
+predicates covered all six engines, so requiring any one driver used to pull
+the other five into your module graph. `drivers/postgres` was never affected —
+it classifies through the public `SQLState()` method.
+
 ## Installing the CLI
 
 `go install github.com/jcsvwinston/quark/cmd/quark@latest` keeps working and
