@@ -689,7 +689,19 @@ jobs:
       - name: Run ${{ matrix.engine }} all-engines legs
         timeout-minutes: 15
         working-directory: internal/enginesuite
-        run: go test -tags=integration -timeout 14m -count=1 -run '^(TestCacheAllEngines|TestOtelAllEngines|TestBenchmarkEngines)$/^${{ matrix.leg }}$' -v .
+        # DIAGNÓSTICO temporal: la lane falla con «main module
+        # (github.com/jcsvwinston/quark) does not contain package
+        # .../internal/enginesuite», que es lo que se ve al pedir ese paquete
+        # DESDE la raíz. El paso de arriba, con el mismo working-directory, sí
+        # corre dentro del módulo. Estas tres líneas dicen dónde está de
+        # verdad el shell y qué go.mod ve, en vez de deducirlo del error.
+        run: |
+          set -x
+          pwd
+          ls -la go.mod || echo "NO HAY go.mod AQUI"
+          go env GOMOD GOWORK
+          set +x
+          go test -tags=integration -timeout 14m -count=1 -run '^(TestCacheAllEngines|TestOtelAllEngines|TestBenchmarkEngines)$/^${{ matrix.leg }}$' -v .
 
   # S7-coverage: the superapp acceptance harness exercises Quark's public API
   # surface across all 6 engines in one process and gates on a manifest
