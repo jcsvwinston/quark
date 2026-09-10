@@ -141,3 +141,14 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+    ignore:
+      # cosign v3 changed `sign-blob` to write a Sigstore bundle, and
+      # `--bundle` has no default, so the arguments the release path passes
+      # die on an empty path. The v4 installer is what brings cosign v3, and
+      # the bump reached nucleus and the umbrella inside a group like this
+      # one: nucleus v1.26.0 published with ZERO assets and nothing went red
+      # that a guard reads. Moving to cosign v3 changes what the verification
+      # page tells people to run, so it is a decision, not a bump. Minors and
+      # patches of the v3 line still come through.
+      - dependency-name: sigstore/cosign-installer
+        update-types: [version-update:semver-major]
