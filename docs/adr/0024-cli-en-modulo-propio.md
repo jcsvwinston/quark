@@ -128,9 +128,17 @@ binario que se publica.
 la ruta de import no cambia. Lo que cambia es contra qué se resuelve.
 
 - `@latest` pasa a resolver el módulo `.../cmd/quark`, cuyos tags son
-  `cmd/quark/vX.Y.Z` y **cuya serie de versiones empieza de cero**. La versión
-  del CLI deja de ser la de la biblioteca: quien hoy instala «Quark v1.12.0»
-  mañana instala un `v0.1.0` que es el mismo programa.
+  `cmd/quark/vX.Y.Z` y **cuya serie de versiones es propia**. La versión del
+  CLI deja de ser la de la biblioteca: quien hoy instala «Quark v1.12.0»
+  mañana instala un `v1.0.0` que es el mismo programa.
+
+  > **Decidido el 2026-09-10, sobre lo que este ADR daba por hecho.** El
+  > borrador decía «empieza de cero» y ponía `v0.1.0` de ejemplo. El número lo
+  > propuso release-please solo, y es `v1.0.0`. Se deja así: el programa no es
+  > nuevo ni experimental —es el mismo CLI que la gente lleva meses instalando
+  > dentro de la biblioteca—, y un `v0.x` le diría a las herramientas de Go
+  > «sin promesa de compatibilidad», que sería falso. El `v0.1.0` de este
+  > párrafo era una ilustración de «serie nueva», no un número pensado.
 - Un selector que nombre una versión de la raíz deja de servir para las
   releases posteriores al corte: el directorio de un módulo anidado queda
   **fuera** del módulo padre, así que un tag raíz futuro ya no contiene ese
@@ -225,7 +233,7 @@ De ahí dos consecuencias que ya están en el árbol. La primera: el CLI se
 construye **dentro de un workspace** —en CI, en el job de release y en
 `make check`— porque un `replace` no es una opción (`go install` rechaza un
 módulo publicado que lleve uno). La segunda, y es la que hay que vigilar en el
-tren: el primer tag `cmd/quark/v0.1.0` publica el `go.mod` tal cual esté en el
+tren: el primer tag `cmd/quark/v1.0.0` publica el `go.mod` tal cual esté en el
 árbol, así que **el suelo de `cmd/quark` tiene que apuntar a la raíz que corta
 ese mismo tren** antes de que el PR de release se fusione. Con el suelo viejo,
 ese primer tag se publica irresoluble.
