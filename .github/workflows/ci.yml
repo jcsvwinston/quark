@@ -683,8 +683,9 @@ jobs:
       # pattern splits it into (top-level regex)/(subtest regex), so only
       # the ${{ matrix.leg }} subtest body runs — under -tags=integration
       # its resolver boots this engine's container (or reuses the DSN the
-      # oracle setup step exported). Root package only: all three tests
-      # live there.
+      # oracle setup step exported). The three tests moved with the suites to
+      # the enginesuite module (ADR-0024), which is why this step and the one
+      # above it both run from that directory and not from the repo root.
       - name: Run ${{ matrix.engine }} all-engines legs
         timeout-minutes: 15
         working-directory: internal/enginesuite
