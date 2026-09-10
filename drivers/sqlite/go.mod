@@ -3,7 +3,7 @@ module github.com/jcsvwinston/quark/drivers/sqlite
 go 1.25.7
 
 require (
-	github.com/jcsvwinston/quark v1.11.0
+	github.com/jcsvwinston/quark v1.12.0
 	modernc.org/sqlite v1.58.0
 )
 
