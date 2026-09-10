@@ -82,7 +82,7 @@ Complementa, no sustituye, la suite del repo.
     middleware + observer + logger + redis) ya está probada compatible.
 
 - **Workload de alto volumen + informe ejecutivo — `workload/` + `cmd/workload/`.**
-  `go run ./examples/superapp/cmd/workload [-scale -driver -dsn -out -slow-ms]`
+  `go run ./cmd/workload [-scale -driver -dsn -out -slow-ms]`
   siembra datos relacionados a volumen, ejerce queries/tx/cache, y el recorder
   mide cada statement → `REPORTS/workload-<stamp>/{executive-report.md,metrics.json,quark.log}`.
   SQLite ×10 = 310k filas / 0 errores / 8.1s / cache 100%. `REPORTS/` está
@@ -319,12 +319,12 @@ consumen — antes estaba duplicada literal en `exercise_test.go:28` y
   los tests). El follow-up `map[Engine]int` de S4 sigue pendiente para la matriz
   completa.
 
-Verificado en SQLite: `go run ./examples/superapp -engines=sqlite` → 167/655
+Verificado en SQLite: `go run . -engines=sqlite` → 167/655
 cubiertos, gate `off` exit 0; `-gate=strict` exit 1 (lista los gaps de sqlite);
 motor desconocido / manifiesto ausente → exit 1; `main_test.go` cubre
 `parseEngines`, `buildReport` (partición + filtrado + gate), `perEngine` y la
 fila de salud con fuga. **Para S7:** el `summary.json` ya da el veredicto
-máquina-legible; el job CI corre `go run ./examples/superapp -engines=all
+máquina-legible; el job CI corre `go run . -engines=all
 -gate=strict` con Oracle docker-run (bajar `WithMaxOpenConns` del exerciser
 DEADLOCK a ≤4 por ORA-12516, ver `ha.go`).
 

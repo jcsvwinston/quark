@@ -7,11 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-
-	gomysql "github.com/go-sql-driver/mysql"
-	"github.com/jackc/pgx/v5/pgconn"
-	mssql "github.com/microsoft/go-mssqldb"
-	goora "github.com/sijms/go-ora/v2/network"
 )
 
 // TestIsDeadlock_Detection pins the per-driver mapping documented in
@@ -27,25 +22,19 @@ func TestIsDeadlock_Detection(t *testing.T) {
 		{"nil is not a deadlock", nil, false},
 		{"plain error is not a deadlock", fmt.Errorf("connection refused"), false},
 
-		// PostgreSQL: SQLSTATE 40P01 = deadlock_detected.
-		{"pg 40P01 deadlock", &pgconn.PgError{Code: "40P01"}, true},
-		{"pg 23505 unique violation is NOT a deadlock", &pgconn.PgError{Code: "23505"}, false},
-
-		// MySQL / MariaDB.
-		{"mysql 1213 deadlock", &gomysql.MySQLError{Number: 1213}, true},
-		{"mysql 1062 dup-entry is NOT a deadlock", &gomysql.MySQLError{Number: 1062}, false},
-
-		// MSSQL.
-		{"mssql 1205 deadlock victim", mssql.Error{Number: 1205}, true},
-		{"mssql 2627 unique is NOT a deadlock", mssql.Error{Number: 2627}, false},
-
-		// Oracle: ORA-00060.
-		{"oracle ORA-00060 deadlock", &goora.OracleError{ErrCode: 60}, true},
-		{"oracle ORA-00001 unique is NOT a deadlock", &goora.OracleError{ErrCode: 1}, false},
+		// PostgreSQL: SQLSTATE 40P01 = deadlock_detected. Delivered here
+		// through the lib/pq-shaped stand-in below rather than through pgx:
+		// the classifier reads the SQLSTATE off the `SQLState() string`
+		// method, so the two are the same input to it, and the library
+		// module requires no driver (ADR-0024). The real driver types are
+		// exercised against these same predicates by the engine-suite
+		// module, which links all five.
+		{"pg 40P01 deadlock", &libpqError{Code: "40P01"}, true},
+		{"pg 23505 unique violation is NOT a deadlock", &libpqError{Code: "23505"}, false},
 
 		// Wrapped — errors.As walks the Unwrap chain, so a wrapped
 		// driver error still classifies correctly.
-		{"wrapped pg deadlock", fmt.Errorf("transaction failed: %w", &pgconn.PgError{Code: "40P01"}), true},
+		{"wrapped pg deadlock", fmt.Errorf("transaction failed: %w", &libpqError{Code: "40P01"}), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,8 +50,8 @@ func TestIsDeadlock_Detection(t *testing.T) {
 // violation is not a deadlock and a deadlock is not a unique
 // violation. This is the contract every retry caller relies on.
 func TestIsDeadlock_DoesNotCollideWithUniqueViolation(t *testing.T) {
-	pgUnique := &pgconn.PgError{Code: "23505"}
-	pgDeadlock := &pgconn.PgError{Code: "40P01"}
+	pgUnique := &libpqError{Code: "23505"}
+	pgDeadlock := &libpqError{Code: "40P01"}
 
 	if isDeadlock(pgUnique) {
 		t.Error("PG 23505 (unique) wrongly classified as deadlock")
@@ -75,7 +64,7 @@ func TestIsDeadlock_DoesNotCollideWithUniqueViolation(t *testing.T) {
 // fakeDeadlock returns an error that isDeadlock recognises — useful
 // for exercising the retry loop without a live multi-writer DB.
 func fakeDeadlock() error {
-	return &pgconn.PgError{Code: "40P01"}
+	return &libpqError{Code: "40P01"}
 }
 
 // TestIsDeadlock_FakeWorks sanity-checks the helper above: the
@@ -88,7 +77,7 @@ func TestIsDeadlock_FakeWorks(t *testing.T) {
 	if !errors.Is(fakeDeadlock(), fakeDeadlock()) {
 		// Sanity check only — pg errors aren't comparable via Is by
 		// default. Skip if the assertion is meaningless.
-		t.Log("note: pgconn.PgError instances aren't comparable; tests use isDeadlock directly")
+		t.Log("note: PostgreSQL error values aren't comparable; tests use isDeadlock directly")
 	}
 }
 
@@ -110,9 +99,20 @@ type pqCode string
 // The contract under test is "any error in the chain exposing SQLState()",
 // which is exactly what `isPGLockTimeout` already relies on and what both
 // lib/pq and pgx/v5 satisfy.
-type libpqError struct{ Code pqCode }
+type libpqError struct {
+	Code pqCode
+	// Msg is the server's own message. It carries the locale: the same
+	// rejection is worded in whatever language lc_messages selects, which is
+	// why the classifiers must read Code and never this.
+	Msg string
+}
 
-func (e *libpqError) Error() string    { return "pq: " + string(e.Code) }
+func (e *libpqError) Error() string {
+	if e.Msg != "" {
+		return "pq: " + e.Msg
+	}
+	return "pq: " + string(e.Code)
+}
 func (e *libpqError) SQLState() string { return string(e.Code) }
 
 // TestClassifiers_LibPQShape pins that the three driver-error classifiers
@@ -158,46 +158,22 @@ func TestClassifiers_LibPQShape(t *testing.T) {
 	}
 }
 
-// TestPGSQLState_DoesNotCaptureOtherDrivers pins the assumption that makes the
-// ordering inside the classifiers safe: pgSQLState runs FIRST, so if any other
-// driver's error type ever grew a `SQLState() string` method, its errors would
-// be answered by the PostgreSQL branch and every non-PostgreSQL engine would
-// silently stop classifying.
+// TestPGSQLState_CapturesTheLibPQShape pins the positive half of the rule
+// that makes the ordering inside the classifiers safe: pgSQLState runs FIRST,
+// and it must capture any error exposing `SQLState() string`.
 //
-// Today none of them has it — SQL Server comes closest with SQLErrorState(),
-// which differs in both name and return type. This test fails if a driver
-// upgrade changes that, which is the only warning we would otherwise get.
-func TestPGSQLState_DoesNotCaptureOtherDrivers(t *testing.T) {
-	others := []struct {
-		driver string
-		err    error
-	}{
-		{"mysql", &gomysql.MySQLError{Number: 1062}},
-		{"mssql", mssql.Error{Number: 2627}},
-		{"oracle", &goora.OracleError{ErrCode: 1}},
+// The negative half — that no OTHER driver's error type exposes that method,
+// which would make the PostgreSQL branch shadow its classifier — is asserted
+// by each driver module against its own error type (TestErrorDoesNotExposeSQLState
+// under drivers/), because that is where the driver, and the upgrade that
+// could change it, live. The library module requires none of them (ADR-0024).
+func TestPGSQLState_CapturesTheLibPQShape(t *testing.T) {
+	if state, ok := pgSQLState(&libpqError{Code: "23505"}); !ok || state != "23505" {
+		t.Errorf("pgSQLState(lib/pq shape) = (%q, %v), want (\"23505\", true)", state, ok)
 	}
-	for _, c := range others {
-		t.Run(c.driver, func(t *testing.T) {
-			if state, ok := pgSQLState(c.err); ok {
-				t.Errorf("pgSQLState captured a %s error (state %q); the PostgreSQL branch "+
-					"now shadows %s and its violations classify as false", c.driver, state, c.driver)
-			}
-		})
-	}
-
-	// And the positive: the PostgreSQL shapes must still be captured, or the
-	// test above would pass vacuously on a broken helper.
-	for _, c := range []struct {
-		name string
-		err  error
-	}{
-		{"pgx", &pgconn.PgError{Code: "23505"}},
-		{"lib/pq", &libpqError{Code: "23505"}},
-	} {
-		t.Run("captures/"+c.name, func(t *testing.T) {
-			if state, ok := pgSQLState(c.err); !ok || state != "23505" {
-				t.Errorf("pgSQLState(%s) = (%q, %v), want (\"23505\", true)", c.name, state, ok)
-			}
-		})
+	// An error with no SQLSTATE at all must fall through to the registered
+	// classifier rather than be answered here.
+	if state, ok := pgSQLState(errors.New("connection refused")); ok {
+		t.Errorf("pgSQLState captured a plain error (state %q)", state)
 	}
 }

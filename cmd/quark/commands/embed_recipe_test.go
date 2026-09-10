@@ -37,23 +37,8 @@ func TestEmbedRecipeRunnerPropagatesFailure(t *testing.T) {
 	}
 	mainBody := m[1]
 
-	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	dir := t.TempDir()
-	goMod := fmt.Sprintf("module tmprunner\n\ngo 1.25.7\n\nrequire github.com/jcsvwinston/quark v0.0.0\n\nreplace github.com/jcsvwinston/quark => %s\n", repoRoot)
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	goSum, err := os.ReadFile(filepath.Join(repoRoot, "go.sum"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "go.sum"), goSum, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeConsumerModule(t, dir, "tmprunner")
 
 	// The recipe's import block references the user's own migrations package
 	// (a placeholder that cannot resolve here); the load-bearing part under
@@ -86,7 +71,7 @@ func main() { %s }
 	cmd.Env = append(os.Environ(), "QUARK_TENANT_STRATEGY=schema_per_tenant")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err = cmd.Run()
+	err := cmd.Run()
 
 	if err == nil {
 		t.Errorf("runner built from the documented recipe exited 0 on a failing command\nstdout: %s\nstderr: %s",

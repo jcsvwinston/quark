@@ -1,8 +1,17 @@
 # What `go.mod` lists and what a binary links
 
-Quark's root `go.mod` requires six database driver modules — one per engine,
-and two for SQLite — and five `testcontainers-go` modules that no application
-importing the library ever links. They are there because two things share the module with the library:
+**This page is the measurement that decided [ADR-0024](adr/0024-cli-en-modulo-propio.md),
+taken before it was carried out.** Everything below describes the tree as
+published at `v1.12.0`, in the present tense it was written in; what the split
+actually delivered is at the bottom, under
+[After the split](#after-the-split). The method is the point of keeping it —
+every figure has the command beside it, so the same question can be asked again
+of any tree.
+
+At `v1.12.0`, Quark's root `go.mod` requires six database driver modules — one
+per engine, and two for SQLite — and five `testcontainers-go` modules that no
+application importing the library ever links. They are there because two things
+share the module with the library:
 `cmd/quark`, a CLI that talks to whatever database it is pointed at and
 therefore links every engine, and the engine test suites, which start real
 databases in containers.
@@ -181,3 +190,50 @@ Three things this approximation cannot tell you:
    modules, its own tags, and its own place in the release machinery — none of
    which a local `replace` exercises. That cost, and the decision, are in
    [ADR-0024](adr/0024-cli-en-modulo-propio.md).
+
+## After the split
+
+Measured on 2026-09-09 on the branch that carried out ADR-0024, with the same
+consumer, the same commands and `GOWORK=off` — but resolved through a local
+`replace` to the tree rather than from the proxy, since the change is not
+published yet:
+
+| | `main` before | after the split |
+|---|---:|---:|
+| modules in the build list | 123 | **39** |
+| driver requirements in the build list | 6 | **1** |
+| `testcontainers-go` requirements | 5 | **0** |
+| modules the binary links | 11 | 11 |
+| packages the binary links | 162 | 162 |
+
+The two bottom rows are the ones to read first, and they are the point: **the
+binary is unchanged**. The same 11 modules and the same 162 packages go into
+it. What moved is what the module graph says about a program that never
+contained any of it.
+
+The `123` differs from the `128` at the top of this page because `main` moved
+on between `v1.12.0` and the branch; the comparison above is like for like.
+
+Three modules now hold what left: `cmd/quark` (the CLI, published, with its own
+tag series), `examples/superapp` (the acceptance harness) and
+`internal/enginesuite` (the per-engine suites). Neither of the last two is
+published; both are consumed through a local `replace`, the way `benchmarks`
+and `bugbash` are.
+
+### The one driver that stayed, and why
+
+`modernc.org/sqlite` is still in the root `go.mod`, so the build list is 39 and
+not the 28 the split approximation above predicted. The difference is that
+module and its subtree, exactly — no engine driver of any other database, and
+no container module, remains.
+
+It stays because the library keeps its own white-box tests, and some of them
+open a real database: the read-replica routing tests, for one, pick and retire
+replicas on live `*quark.Client` values through unexported methods, which no
+test outside the package can reach. Deleting those tests takes the build list
+to 31 (measured, same method) and leaves the library module without a single
+test that executes SQL. That is the trade this page can now price rather than
+guess at, and it is the caveat under [what the approximation cannot tell
+you](#the-split-approximation-and-what-it-cannot-tell-you), point 2, made
+concrete: the approximation deleted every `*_test.go`, and this is what that
+overstated.

@@ -24,7 +24,7 @@ A signed release carries:
 
 | Asset | What it is |
 | --- | --- |
-| `quark_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) | The CLI archive, six in total: Linux, macOS and Windows on amd64 and arm64. |
+| `quark_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) | The CLI archive, six in total: Linux, macOS and Windows on amd64 and arm64. `<version>` is the **library** release these assets belong to. |
 | `<archive>.spdx.json` | An SPDX SBOM, one per archive, listing what went into it. |
 | `checksums.txt` | SHA-256 of every archive and every SBOM. |
 | `checksums.txt.sig` / `checksums.txt.pem` | A keyless signature over `checksums.txt`, and the short-lived certificate that made it. |
@@ -38,7 +38,20 @@ records the same thing a second way.
 
 The tags for the five driver modules (`drivers/postgres/vX.Y.Z` and friends)
 publish no assets and nothing to verify here: those are Go modules you add
-with `go get`, and the module proxy verifies them.
+with `go get`, and the module proxy verifies them. The CLI's own tags
+(`cmd/quark/vX.Y.Z`) publish none either, and that is worth knowing before you
+go looking: the CLI is a Go module of its own, but its archives ride on the
+library release, are named after the library tag, and are produced by the run
+at that tag. The binary inside reports both numbers, which is why a downloaded
+`quark_1.13.0_linux_amd64.tar.gz` prints something like:
+
+```text
+quark v0.1.0 linux/amd64 (go1.26.6)
+built against github.com/jcsvwinston/quark v1.13.0
+```
+
+The second line is the one that matches the archive you downloaded and the tag
+you are verifying against.
 
 ## Before you start
 

@@ -17,14 +17,13 @@ package oracle
 import (
 	_ "github.com/sijms/go-ora/v2"
 
-	"github.com/jcsvwinston/quark/internal/driverclassify"
 	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 func init() {
 	quarkdriver.MustRegister("oracle", quarkdriver.Classifier{
-		UniqueViolation: driverclassify.OracleUniqueViolation,
-		Deadlock:        driverclassify.OracleDeadlock,
-		TransientConn:   driverclassify.OracleTransientConn,
+		UniqueViolation: uniqueViolation,
+		Deadlock:        deadlock,
+		TransientConn:   transientConn,
 	})
 }

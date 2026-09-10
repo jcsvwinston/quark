@@ -83,6 +83,13 @@
         }
       ]
     },
+    "cmd/quark": {
+      "package-name": "github.com/jcsvwinston/quark/cmd/quark",
+      "release-type": "go",
+      "component": "cmd/quark",
+      "include-component-in-tag": true,
+      "tag-separator": "/"
+    },
     "drivers/mssql": {
       "package-name": "github.com/jcsvwinston/quark/drivers/mssql",
       "release-type": "go",

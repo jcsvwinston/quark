@@ -87,11 +87,13 @@ setting rather than a workflow file, which is why there is no
 weekly on `main`, and it analyses three languages — Go, the GitHub Actions
 workflows, and the TypeScript under `website/`.
 
-Its Go pass covers **all eighteen modules** of this repository: the library,
-the five drivers, the two local harnesses and the ten runnable examples. The
-extractor discovers every `go.mod` in the tree and says so in the run log
-("extraction succeeded for all 18 discovered projects"), which is more than a
-hand-written workflow analysing the root module would see. Measured on 8
+Its Go pass covers **every module** of this repository: the library, the CLI,
+the five drivers, the three local harnesses and the ten runnable examples —
+twenty-one of them since the CLI, the acceptance harness and the engine suites
+became modules of their own. The extractor discovers every `go.mod` in the
+tree and says so in the run log ("extraction succeeded for all N discovered
+projects"), which is more than a hand-written workflow analysing the root
+module would see. Measured on 8
 September 2026: 3 min 07 s for Go, 1 min 18 s for TypeScript, 41 s for
 Actions, run in parallel.
 
@@ -143,6 +145,12 @@ certificate minted for that run and valid for minutes. For those tags
 the Go module proxy's checksum database is what stands behind it. The release
 page tells you which kind you are looking at: a signed release lists
 `checksums.txt.sig`.
+
+The CLI is its own Go module and has its own tag series (`cmd/quark/vX.Y.Z`),
+so that `@vX.Y.Z` selector only resolves for library tags cut before the
+split; from then on it is `@latest` or a `cmd/quark` version. The archives are
+still named after the library release they ship with, and the binary reports
+both numbers.
 
 There is no long-lived signing key, and none is published: what you verify is
 which workflow, in which repository, at which tag produced the release. The

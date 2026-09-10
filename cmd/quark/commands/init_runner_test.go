@@ -11,7 +11,6 @@ package commands
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,23 +63,8 @@ func TestInitRunnerClosesTheCLICycle(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles and runs the scaffolded runner; skipped with -short")
 	}
-	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	dir := t.TempDir()
-	goMod := fmt.Sprintf("module example.com/shop\n\ngo 1.25.7\n\nrequire github.com/jcsvwinston/quark v0.0.0\n\nreplace github.com/jcsvwinston/quark => %s\n", repoRoot)
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	goSum, err := os.ReadFile(filepath.Join(repoRoot, "go.sum"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "go.sum"), goSum, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeConsumerModule(t, dir, "example.com/shop")
 
 	runInitIn(t, dir)
 

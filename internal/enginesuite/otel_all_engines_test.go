@@ -1,0 +1,206 @@
+package enginesuite
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/jcsvwinston/quark"
+	quarkotel "github.com/jcsvwinston/quark/otel"
+
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+)
+
+type OtelTestUser struct {
+	ID    int64  `db:"id" pk:"true"`
+	Name  string `db:"name"`
+	Email string `db:"email"`
+}
+
+// TestOtelAllEngines prueba OpenTelemetry con todos los engines disponibles.
+//
+// QK6-1: cada pata resuelve su DSN DENTRO del subtest vía resolve<Engine>DSN.
+// Con `-tags=integration` el resolver levanta el contenedor solo para la pata
+// que `-run` selecciona (así cada lane de CI ejecuta la suya); sin el tag, la
+// pata hace Skip explícito con motivo — nunca un `continue` silencioso.
+func TestOtelAllEngines(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping otel engine test in short mode")
+	}
+
+	engines := []struct {
+		name    string
+		env     string
+		resolve func(*testing.T) string
+		drv     string
+		dial    quark.Dialect
+	}{
+		{"SQLite", "", func(*testing.T) string { return ":memory:" }, "sqlite", quark.SQLite()},
+		{"Postgres", "QUARK_TEST_POSTGRES_DSN", resolvePostgresDSN, "pgx", quark.PostgreSQL()},
+		{"MySQL", "QUARK_TEST_MYSQL_DSN", resolveMySQLDSN, "mysql", quark.MySQL()},
+		{"MariaDB", "QUARK_TEST_MARIADB_DSN", resolveMariaDBDSN, "mysql", quark.MariaDB()},
+		{"MSSQL", "QUARK_TEST_MSSQL_DSN", resolveMSSQLDSN, "sqlserver", quark.MSSQL()},
+		{"Oracle", "QUARK_TEST_ORACLE_DSN", resolveOracleDSN, "oracle", quark.Oracle()},
+	}
+
+	for _, eng := range engines {
+		t.Run(eng.name, func(t *testing.T) {
+			dsn := eng.resolve(t)
+			if dsn == "" {
+				t.Skipf("%s not set (rebuild with -tags=integration to spin up a container); %s leg skipped", eng.env, eng.name)
+			}
+
+			exporter, shutdown := setupTestTelemetry()
+			defer shutdown(context.Background())
+
+			ctx := context.Background()
+
+			fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+			fmt.Printf("🔍 OTEL ENGINE: %s\n", eng.name)
+			fmt.Printf("%s\n", strings.Repeat("=", 70))
+
+			// Crear cliente con middleware OTel
+			client, err := quark.New(eng.drv, dsn, quark.WithMiddleware(quarkotel.New()))
+			if err != nil {
+				t.Fatalf("failed to create client for %s: %v", eng.name, err)
+			}
+			defer client.Close()
+
+			// Limpiar tabla si existe
+			client.Exec(ctx, "DROP TABLE IF EXISTS otel_test_users")
+
+			// Migrar
+			if err := client.Migrate(ctx, &OtelTestUser{}); err != nil {
+				t.Fatalf("migrate failed for %s: %v", eng.name, err)
+			}
+
+			// Limpiar spans de migración
+			exporter.Reset()
+
+			// Test 1: INSERT genera spans
+			fmt.Println("\n📊 Test 1: INSERT operation")
+			fmt.Println(strings.Repeat("-", 70))
+			user := &OtelTestUser{Name: "Test User", Email: "test@example.com"}
+			if err := quark.For[OtelTestUser](ctx, client).Create(user); err != nil {
+				t.Fatalf("create failed for %s: %v", eng.name, err)
+			}
+
+			insertSpans := countSpansByType(exporter.GetSpans())
+			fmt.Printf("  ✓ INSERT spans: query=%d, query_row=%d, exec=%d\n",
+				insertSpans["quark.query"], insertSpans["quark.query_row"], insertSpans["quark.exec"])
+			if insertSpans["quark.query"]+insertSpans["quark.query_row"]+insertSpans["quark.exec"] == 0 {
+				t.Errorf("%s: expected spans for INSERT, got none", eng.name)
+			}
+
+			// Limpiar para siguiente test
+			exporter.Reset()
+
+			// Test 2: SELECT genera spans
+			fmt.Println("\n📊 Test 2: SELECT operation")
+			fmt.Println(strings.Repeat("-", 70))
+			users, err := quark.For[OtelTestUser](ctx, client).List()
+			if err != nil {
+				t.Fatalf("list failed for %s: %v", eng.name, err)
+			}
+			if len(users) != 1 {
+				t.Errorf("%s: expected 1 user, got %d", eng.name, len(users))
+			}
+
+			selectSpans := countSpansByType(exporter.GetSpans())
+			fmt.Printf("  ✓ SELECT spans: query=%d, query_row=%d\n",
+				selectSpans["quark.query"], selectSpans["quark.query_row"])
+			if selectSpans["quark.query"]+selectSpans["quark.query_row"] == 0 {
+				t.Errorf("%s: expected spans for SELECT, got none", eng.name)
+			}
+
+			// Limpiar para siguiente test
+			exporter.Reset()
+
+			// Test 3: First() genera spans
+			fmt.Println("\n📊 Test 3: First() operation")
+			fmt.Println(strings.Repeat("-", 70))
+			found, err := quark.For[OtelTestUser](ctx, client).First()
+			if err != nil {
+				t.Fatalf("first failed for %s: %v", eng.name, err)
+			}
+			if found.Name != "Test User" {
+				t.Errorf("%s: expected 'Test User', got %s", eng.name, found.Name)
+			}
+
+			firstSpans := countSpansByType(exporter.GetSpans())
+			fmt.Printf("  ✓ First() spans: query=%d, query_row=%d\n",
+				firstSpans["quark.query"], firstSpans["quark.query_row"])
+			if firstSpans["quark.query"]+firstSpans["quark.query_row"] == 0 {
+				t.Errorf("%s: expected spans for First(), got none", eng.name)
+			}
+
+			// Limpiar para siguiente test
+			exporter.Reset()
+
+			// Test 4: UPDATE genera spans
+			fmt.Println("\n📊 Test 4: UPDATE operation")
+			fmt.Println(strings.Repeat("-", 70))
+			found.Name = "Updated User"
+			_, err = quark.For[OtelTestUser](ctx, client).Update(&found)
+			if err != nil {
+				t.Fatalf("update failed for %s: %v", eng.name, err)
+			}
+
+			updateSpans := countSpansByType(exporter.GetSpans())
+			fmt.Printf("  ✓ UPDATE spans: query=%d, query_row=%d, exec=%d\n",
+				updateSpans["quark.query"], updateSpans["quark.query_row"], updateSpans["quark.exec"])
+			if updateSpans["quark.query"]+updateSpans["quark.query_row"]+updateSpans["quark.exec"] == 0 {
+				t.Errorf("%s: expected spans for UPDATE, got none", eng.name)
+			}
+
+			// Limpiar para siguiente test
+			exporter.Reset()
+
+			// Test 5: Verificar atributos de trazas
+			fmt.Println("\n📊 Test 5: Span attributes verification")
+			fmt.Println(strings.Repeat("-", 70))
+			_, _ = quark.For[OtelTestUser](ctx, client).List()
+
+			spans := exporter.GetSpans()
+			hasValidAttributes := false
+			for _, span := range spans {
+				hasDBStatement := false
+				hasDBOperation := false
+				for _, attr := range span.Attributes {
+					if attr.Key == "db.statement" && attr.Value.AsString() != "" {
+						hasDBStatement = true
+					}
+					if attr.Key == "db.operation" && attr.Value.AsString() != "" {
+						hasDBOperation = true
+					}
+				}
+				if hasDBStatement && hasDBOperation {
+					hasValidAttributes = true
+					fmt.Printf("  ✓ Span '%s' has db.statement and db.operation\n", span.Name)
+				}
+			}
+
+			if !hasValidAttributes {
+				t.Errorf("%s: expected spans with db.statement and db.operation attributes", eng.name)
+			}
+
+			fmt.Printf("\n✅ %s: All OTel tests passed\n", eng.name)
+			fmt.Println(strings.Repeat("=", 70))
+		})
+	}
+}
+
+func countSpansByType(spans []tracetest.SpanStub) map[string]int {
+	counts := map[string]int{
+		"quark.query":     0,
+		"quark.query_row": 0,
+		"quark.exec":      0,
+	}
+	for _, span := range spans {
+		if count, ok := counts[span.Name]; ok {
+			counts[span.Name] = count + 1
+		}
+	}
+	return counts
+}

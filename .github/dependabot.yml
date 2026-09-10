@@ -1,10 +1,10 @@
 # Dependency update proposals, weekly, grouped so a Monday brings one pull
 # request per family of modules rather than one per module and one per
-# dependency. Quark is eighteen Go modules — the library at the root, the five
-# driver modules, two local harnesses and the ten runnable examples — so each
-# family is listed on its own, with the reason for every `ignore` written next
-# to it. Every go.mod in the tree has an entry here, and the lint job fails if
-# one appears without it.
+# dependency. Quark is twenty-one Go modules — the library at the root, the
+# CLI, the five driver modules, three local harnesses and the ten runnable
+# examples — so each family is listed on its own, with the reason for every
+# `ignore` written next to it. Every go.mod in the tree has an entry here, and
+# the lint job fails if one appears without it.
 version: 2
 updates:
   # The library module. This is the go.mod that ships to consumers and the one
@@ -16,6 +16,30 @@ updates:
     groups:
       go-dependencies:
         patterns: ["*"]
+
+  # The CLI. It is published and installed with `go install`, so its
+  # dependencies are the ones a user ends up running (ADR-0024) — it links
+  # every engine, which is exactly the weight that came out of the library
+  # module. Kept apart from the root for the same reason as the drivers: a
+  # bump here ends up in a `cmd/quark` release, on its own version series.
+  - package-ecosystem: gomod
+    # Written as a one-entry list rather than `directory:` on purpose: the
+    # lint job in ci.yml looks for `- /<dir>` for every go.mod outside the
+    # root, so the singular form would read as "not covered".
+    directories:
+      - /cmd/quark
+    schedule:
+      interval: weekly
+    groups:
+      cli-module:
+        patterns: ["*"]
+    ignore:
+      # The library and driver requirements are floors raised on purpose as
+      # the first commit of a release train, the same way the driver modules
+      # raise theirs — and unlike them, this module cannot carry a `replace`
+      # to close the gap: `go install` refuses a module whose go.mod has one.
+      - dependency-name: github.com/jcsvwinston/quark
+      - dependency-name: github.com/jcsvwinston/quark/drivers/*
 
   # The five driver modules. They are released with their own tags and each
   # one requires the library, so they are updated together but kept apart from
@@ -41,13 +65,17 @@ updates:
       # of a driver onto the newest library minor without anyone deciding it.
       - dependency-name: github.com/jcsvwinston/quark
 
-  # The two local harnesses. Neither is published; they exist so their
-  # dependencies (GORM, ent, the per-engine drivers) never reach the library's
-  # go.mod. They are still built in CI, so their dependencies still age.
+  # The three local harnesses. None is published; they exist so their
+  # dependencies (GORM, ent, testcontainers, the per-engine drivers) never
+  # reach the library's go.mod. They are still built in CI, so their
+  # dependencies still age. internal/enginesuite is the newest of the three
+  # and the largest by weight: it holds the per-engine suites, and the eleven
+  # modules they need are what ADR-0024 took out of the library's go.mod.
   - package-ecosystem: gomod
     directories:
       - /benchmarks
       - /bugbash
+      - /internal/enginesuite
     schedule:
       interval: weekly
     groups:
@@ -60,7 +88,8 @@ updates:
       # is noise about a number nothing reads.
       - dependency-name: github.com/jcsvwinston/quark
 
-  # The ten runnable examples. Each is its own module (ADR-0023) and each is
+  # The ten runnable examples and the acceptance harness. Each is its own
+  # module (ADR-0023, and ADR-0024 for the superapp) and each is
   # built and vetted by the "Examples (own modules)" job, which is the same
   # reason the harnesses above are covered: their dependencies age, and a bump
   # that breaks one is caught before it is merged. They are kept apart from
@@ -77,6 +106,7 @@ updates:
       - /examples/postgres
       - /examples/sharding
       - /examples/sqlite
+      - /examples/superapp
       - /examples/tenant-rls-native
     schedule:
       interval: weekly

@@ -9,10 +9,17 @@ package db
 // once and point at whatever database they have, and asking them to rebuild
 // it per engine would be absurd.
 //
-// It cannot import the drivers/ modules: those import Quark, and the CLI
-// lives in the Quark module, so the requirement would be circular. It links
-// the drivers directly and registers the same predicates the modules
-// register, from the same package, so the two cannot drift.
-import "github.com/jcsvwinston/quark/internal/driverclassify"
-
-func init() { driverclassify.RegisterAll() }
+// It imports the driver MODULES, the way any application does. That was not
+// possible while the CLI shared the library's module: the driver modules
+// import Quark, so the requirement would have been circular, and the CLI
+// linked the bare drivers and re-registered the predicates from a package
+// shared with the library instead. Moving the CLI to its own module
+// (ADR-0024) removed the cycle, and with it the shared package — which is
+// what let the library's go.mod stop requiring every engine.
+import (
+	_ "github.com/jcsvwinston/quark/drivers/mssql"
+	_ "github.com/jcsvwinston/quark/drivers/mysql"
+	_ "github.com/jcsvwinston/quark/drivers/oracle"
+	_ "github.com/jcsvwinston/quark/drivers/postgres"
+	_ "github.com/jcsvwinston/quark/drivers/sqlite"
+)

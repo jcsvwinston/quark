@@ -100,6 +100,13 @@ cd quark
 go mod download
 ```
 
+The repository is several Go modules, not one: the library at the root, the
+CLI under `cmd/quark`, the five driver modules under `drivers/`, the engine
+suites under `internal/enginesuite`, and the harnesses and examples. A
+`go test ./...` at the root reaches the first of those only — `make check`
+walks the rest, and the sections below say which directory each command runs
+in.
+
 SQLite tests run with no external dependencies:
 
 ```bash
@@ -113,35 +120,42 @@ go test ./... -run TestSQLite
 ### SQLite (no external dependencies)
 
 ```bash
-go test ./...
+go test ./...                                  # the library's own tests
+cd internal/enginesuite && go test ./...       # the engine suites, on SQLite
 ```
+
+The engine suites live in a module of their own so that the drivers and the
+container modules they need stay out of the library's `go.mod`
+([ADR-0024](docs/adr/0024-cli-en-modulo-propio.md)). The test names did not
+change with the move, so every `-run` filter below still says what it said —
+it is the directory you run it from that moved. `make test` runs both.
 
 ### PostgreSQL
 
 ```bash
 export QUARK_TEST_POSTGRES_DSN="postgres://quark:quark@localhost:5432/quark_test?sslmode=disable"
-go test ./... -tags integration
+cd internal/enginesuite && go test ./... -tags integration
 ```
 
 ### MySQL / MariaDB
 
 ```bash
 export QUARK_TEST_MYSQL_DSN="quark:quark@tcp(localhost:3306)/quark_test?parseTime=true"
-go test ./... -tags integration
+cd internal/enginesuite && go test ./... -tags integration
 ```
 
 ### MSSQL
 
 ```bash
 export QUARK_TEST_MSSQL_DSN="sqlserver://quark:Quark1234!@localhost:1433?database=quark_test"
-go test ./... -tags integration
+cd internal/enginesuite && go test ./... -tags integration
 ```
 
 ### Oracle
 
 ```bash
 export QUARK_TEST_ORACLE_DSN="oracle://quark:quark@localhost:1521/ORCLPDB1"
-go test ./... -tags integration
+cd internal/enginesuite && go test ./... -tags integration
 ```
 
 ### All engines
@@ -210,7 +224,11 @@ on things you could have caught in seconds: vet+gofmt, the five docs
 guards (product voice, internal-docs drift, docs-archive freshness,
 versioned-docs markers, docs lint), version coherence and the two
 self-tests that cover it, action pins, apisurface/allowlist freshness, the
-static builds (`CGO_ENABLED=0` and cross-compile), and the unit tests. The
+static builds (`CGO_ENABLED=0` and cross-compile, for the library and for the
+CLI), and the unit tests of every module it walks. It writes a local `go.work`
+first (gitignored): the CLI module requires the library by version and cannot
+carry a `replace`, because `go install` refuses a published module that has
+one, so a workspace is what points it at the tree you are editing. The
 expensive lanes have their own targets — `make test-race`, `make test-all`
 (engine matrix), `make superapp` — and `make help` lists everything.
 

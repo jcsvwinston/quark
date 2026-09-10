@@ -30,7 +30,7 @@
 | [0021](0021-shard-key-from-entity.md) | Shard key desde la entidad vía interfaz `ShardKeyer` (helper `WithShardKeyOf` caller-side, no un hook del router) | Accepted | v1.2 |
 | [0022](0022-scatter-gather-cross-shard-reads.md) | Scatter-gather cross-shard reads vía funcs explícitas (`ScatterGather`/`ScatterCount`), merge caller-side, agregados no-COUNT diferidos | Accepted | v1.2 |
 | [0023](0023-driver-modules.md) | Los drivers salen a módulos propios; el contrato vive en `quarkdriver` y los tres predicados de clasificación viajan juntos porque ninguno falla al no reconocer — contesta `false` | Accepted | v1.9 |
-| [0024](0024-cli-en-modulo-propio.md) | El CLI a su propio módulo: qué compra (117 módulos de la build list que ningún binario enlaza) y qué cuesta (cuatro altas de registro y la serie de versiones del `go install`) | Proposed | — |
+| [0024](0024-cli-en-modulo-propio.md) | El CLI a su propio módulo, junto al superapp y a las suites por motor: la build list del consumidor baja de 123 a 39 y el binario no cambia; a cambio, cuatro altas de registro y una serie de versiones propia para el `go install` | Accepted | v1.13 |
 
 ## Cómo añadir un ADR nuevo
 

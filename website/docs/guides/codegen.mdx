@@ -33,6 +33,9 @@ forward compatibility, not for a dramatic speedup.**
 go install github.com/jcsvwinston/quark/cmd/quark@latest
 ```
 
+`@latest` is the selector to use: the CLI is its own Go module and its tags are
+`cmd/quark/vX.Y.Z`, so a library version does not name it.
+
 A signed prebuilt archive from the
 [releases page](https://github.com/jcsvwinston/quark/releases) does the same
 job; [Verifying a release](../operations/verifying-releases) says how to check

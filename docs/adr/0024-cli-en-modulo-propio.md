@@ -1,9 +1,9 @@
 ---
 id: 0024
-title: El CLI a su propio módulo — propuesta, con el coste de registro y la ruptura del `go install` medidos
-status: proposed
+title: El CLI a su propio módulo, con el coste de registro y la ruptura del `go install` medidos
+status: accepted
 date: 2026-09-09
-implemented: null
+implemented: v1.13 (cmd/quark, examples/superapp, internal/enginesuite)
 deciders: jcsvwinston
 related: [0023]
 supersedes: null
@@ -180,3 +180,82 @@ respuesta que hoy obliga a subir un suelo para todos. Y si la serie de
 versiones del CLI se vuelve un problema mayor que el grafo —porque la
 instalación es lo primero que hace un lector—, la alternativa barata pasa a ser
 la decisión, no el plan B.
+
+## Notas de ejecución (2026-09-09)
+
+Lo que la implementación encontró y este ADR no había previsto. Se anota aquí
+porque son las tres cosas que habría que volver a descubrir si alguien repite
+el movimiento en otro repo de la suite.
+
+### `internal/driverclassify` no podía acompañar al CLI
+
+La «Decisión propuesta» dice que los predicados salen del módulo raíz **con**
+el CLI. No hay sitio al que llevarlos: los importan los cinco `drivers/*`, que
+son módulos **publicados** y se resuelven desde el proxy. Cualquier casa nueva
+—módulo propio, o un paquete dentro del módulo del CLI— está sin publicar en el
+momento del corte, y un `replace` dentro de un módulo publicado lo ignora quien
+lo consume, así que `drivers/mysql` dejaría de resolver para todo el mundo.
+
+Lo que sí se puede hacer es lo que el propio ADR insinúa dos párrafos más
+abajo: con el CLI fuera del módulo de Quark, **el CLI y el harness pueden
+importar los `drivers/*`**, que ya registran el clasificador en su `init()`. Así
+que `driverclassify` se disuelve: cada predicado se muda al módulo del motor al
+que pertenece —sin exportarse, que es donde ya estaba su test— y
+`RegisterAll()` deja de existir: enlazar los cinco motores es importar los cinco
+módulos. Sigue habiendo una sola copia de cada predicado; ahora vive junto al
+driver cuya versión decide si sigue siendo correcta.
+
+Un trozo suelto: el test que fijaba que **ningún otro driver expone
+`SQLState() string`** (lo que haría que la rama de PostgreSQL tapara su
+clasificador) era whitebox del módulo raíz sobre los cuatro tipos de error. Se
+reparte: cada `drivers/*` lo afirma sobre su propio tipo —que es donde vive la
+actualización que podría cambiarlo— y `drivers/postgres` afirma la mitad
+positiva.
+
+### Un módulo anidado no puede requerir un padre publicado que aún lo contiene
+
+`cmd/quark/go.mod` requiere `github.com/jcsvwinston/quark`. La versión
+publicada más reciente todavía **contiene** `cmd/quark/`, así que el paquete lo
+ofrecen dos módulos de la build list y el go command para con
+`ambiguous import: found package github.com/jcsvwinston/quark/cmd/quark in
+multiple modules`. No es un caso raro: es el estado normal del árbol entre este
+PR y la primera release que lo publique.
+
+De ahí dos consecuencias que ya están en el árbol. La primera: el CLI se
+construye **dentro de un workspace** —en CI, en el job de release y en
+`make check`— porque un `replace` no es una opción (`go install` rechaza un
+módulo publicado que lleve uno). La segunda, y es la que hay que vigilar en el
+tren: el primer tag `cmd/quark/v0.1.0` publica el `go.mod` tal cual esté en el
+árbol, así que **el suelo de `cmd/quark` tiene que apuntar a la raíz que corta
+ese mismo tren** antes de que el PR de release se fusione. Con el suelo viejo,
+ese primer tag se publica irresoluble.
+
+### La tabla se rebate: 39, no 28
+
+Medido en la rama, con el mismo consumidor y `GOWORK=off`:
+
+| árbol | build list | requires de driver | requires de testcontainers |
+| --- | ---: | ---: | ---: |
+| `main` antes del cambio | 123 | 6 | 5 |
+| esta rama | **39** | **1** | **0** |
+| esta rama, borrando además los tests de la raíz que abren una base de datos | 31 | 0 | 0 |
+
+La diferencia entre 39 y 28 es entera y exclusivamente `modernc.org/sqlite` y
+su subárbol. La aproximación de
+[`docs/dependency-surface.md`](../dependency-surface.md) borraba **todos** los
+`*_test.go`, y su propia salvedad 2 avisaba de que eso exagera; aquí está el
+tamaño de la exageración. La biblioteca conserva un driver porque conserva sus
+tests whitebox, y algunos abren una base de datos de verdad: el enrutado a
+réplicas, por ejemplo, elige y descarta réplicas sobre `*Client` reales. Sacar
+esos tests bajaría el número a 31 a cambio de dejar al módulo de la biblioteca
+sin un solo test que ejecute SQL, que no parece un intercambio bueno.
+
+Lo que sí se cumple entero es la otra mitad: **cero** módulos de driver de otro
+motor y **cero** de testcontainers, que son los que traían los 85% de bytes.
+
+### `quark version` imprime dos versiones
+
+Consecuencia directa de la sección «Qué se rompe»: el binario tiene ahora dos
+números que no coinciden —el suyo (`cmd/quark/vX.Y.Z`) y el de la biblioteca
+que lleva dentro— y el archivo de release se llama con el segundo. Imprimir
+sólo uno obliga a elegir a quién mentir, así que imprime los dos.

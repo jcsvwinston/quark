@@ -123,10 +123,14 @@ jobs:
             echo "$platform=$digest" >> "$GITHUB_OUTPUT"
           done
 
-  # `quark version` prints the tag with its `v`, because the release stamps
-  # `v{{ .Version }}` into the binary so a downloaded CLI and a `go install`ed
-  # one report the same string. The archive NAME carries the version without
-  # it, which is why each smoke computes both.
+  # `quark version` prints TWO versions since ADR-0024, and the archive is
+  # named after neither by accident. The first line is the CLI's own version,
+  # from the `cmd/quark/vX.Y.Z` series — the one `go install` resolves, which
+  # is why the release stamps it rather than the library tag. The second names
+  # the library release the archive belongs to, and that is the tag these
+  # smokes were dispatched at and the one in the file name. So each smoke
+  # computes the version without its `v` for the file name, and greps the
+  # second line for the tag with it.
   linux:
     name: Linux Asset Smoke
     needs: provenance
@@ -150,7 +154,7 @@ jobs:
           tar -xzf "dist-test/$PKG" -C dist-test
           chmod +x dist-test/quark
           dist-test/quark version | tee version.txt
-          grep -F "quark $TAG" version.txt
+          grep -F "built against github.com/jcsvwinston/quark $TAG" version.txt
 
   macos:
     name: macOS Asset Smoke
@@ -182,7 +186,7 @@ jobs:
           tar -xzf "dist-test/$PKG" -C dist-test
           chmod +x dist-test/quark
           dist-test/quark version | tee version.txt
-          grep -F "quark $TAG" version.txt
+          grep -F "built against github.com/jcsvwinston/quark $TAG" version.txt
 
   windows:
     name: Windows Asset Smoke
@@ -211,6 +215,7 @@ jobs:
           Expand-Archive -Path "dist-test/$pkg" -DestinationPath dist-test -Force
           $output = & "./dist-test/quark.exe" version
           $output | Tee-Object -FilePath version.txt
-          if (-not ($output -match "quark $env:TAG")) {
+          $expectedLine = "built against github.com/jcsvwinston/quark $env:TAG"
+          if (-not ($output -join "`n").Contains($expectedLine)) {
             throw "unexpected version output: $output"
           }

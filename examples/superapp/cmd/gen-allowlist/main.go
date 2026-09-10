@@ -17,8 +17,8 @@
 // determinista (claves ordenadas, sin timestamp) para que un símbolo público
 // nuevo produzca un diff limpio y CI pueda exigir regenerar.
 //
-//	go run ./examples/superapp/cmd/gen-allowlist            # escribe examples/superapp/allowlist.json
-//	go run ./examples/superapp/cmd/gen-allowlist -out=/tmp/x.json
+//	go run ./cmd/gen-allowlist            # escribe allowlist.json
+//	go run ./cmd/gen-allowlist -out=/tmp/x.json
 //
 //go:generate go run . -out=../../allowlist.json
 package main
@@ -179,8 +179,10 @@ const (
 )
 
 func main() {
-	manifestPath := flag.String("manifest", "examples/superapp/apisurface.json", "ruta al apisurface.json (denominador)")
-	out := flag.String("out", "examples/superapp/allowlist.json", "ruta de salida")
+	// Relativas al directorio del módulo del superapp, que es desde donde se
+	// invoca desde que el harness es módulo propio (ADR-0024).
+	manifestPath := flag.String("manifest", "apisurface.json", "ruta al apisurface.json (denominador)")
+	out := flag.String("out", "allowlist.json", "ruta de salida")
 	flag.Parse()
 
 	m, err := control.LoadManifest(*manifestPath)

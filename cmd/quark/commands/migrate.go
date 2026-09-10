@@ -44,6 +44,8 @@ does not (and cannot) import your project's migrations package.
 
 Build a small runner that does, and drive it from there:
 
+    go get github.com/jcsvwinston/quark/cmd/quark@latest
+
     // cmd/quark/main.go (in YOUR project)
     import (
         _ "github.com/you/yourapp/migrations" // side-effect: registers migrations

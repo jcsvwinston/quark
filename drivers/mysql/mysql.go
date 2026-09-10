@@ -17,14 +17,13 @@ package mysql
 import (
 	_ "github.com/go-sql-driver/mysql"
 
-	"github.com/jcsvwinston/quark/internal/driverclassify"
 	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 func init() {
 	quarkdriver.MustRegister("mysql", quarkdriver.Classifier{
-		UniqueViolation: driverclassify.MySQLUniqueViolation,
-		Deadlock:        driverclassify.MySQLDeadlock,
-		TransientConn:   driverclassify.MySQLTransientConn,
+		UniqueViolation: uniqueViolation,
+		Deadlock:        deadlock,
+		TransientConn:   transientConn,
 	})
 }

@@ -17,14 +17,13 @@ package mssql
 import (
 	_ "github.com/microsoft/go-mssqldb"
 
-	"github.com/jcsvwinston/quark/internal/driverclassify"
 	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 func init() {
 	quarkdriver.MustRegister("sqlserver", quarkdriver.Classifier{
-		UniqueViolation: driverclassify.MSSQLUniqueViolation,
-		Deadlock:        driverclassify.MSSQLDeadlock,
-		TransientConn:   driverclassify.MSSQLTransientConn,
+		UniqueViolation: uniqueViolation,
+		Deadlock:        deadlock,
+		TransientConn:   transientConn,
 	})
 }

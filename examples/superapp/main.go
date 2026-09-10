@@ -6,14 +6,14 @@
 // allowlist.
 //
 //	# un motor (por defecto, gate off → sólo falla con asserts rojos)
-//	go run ./examples/superapp -engines=sqlite
+//	cd examples/superapp && go run . -engines=sqlite
 //
 //	# los 6 con gate estricto (Oracle requiere su contenedor o SUPERAPP_DSN_ORACLE)
-//	go run ./examples/superapp -engines=all -gate=strict
+//	cd examples/superapp && go run . -engines=all -gate=strict
 //
 // SQLite corre in-process; el resto se levanta por `docker run` (o se reusa vía
 // SUPERAPP_DSN_<ENGINE>); ver engine.Up. La matriz va a REPORTS/superapp-<stamp>/
-// (gitignored). Invócalo desde la raíz del repo, o pasa -manifest/-allowlist.
+// (gitignored). Invócalo desde examples/superapp, o pasa -manifest/-allowlist.
 package main
 
 import (
@@ -31,31 +31,28 @@ import (
 	"github.com/jcsvwinston/quark/examples/superapp/engine"
 	"github.com/jcsvwinston/quark/examples/superapp/exercise"
 
-	// Drivers SQL: el binario consumidor los registra (engine.Up sólo entrega
-	// driver+DSN; quien hace sql.Open es quark.New dentro de exercise.Run).
+	// SQL drivers: the consuming binary is what registers them (engine.Up only
+	// hands back a driver name and a DSN; the sql.Open happens inside
+	// quark.New, called from exercise.Run).
 	//
-	// Desde ADR-0023 registrar el driver ya no basta: hay que registrar
-	// también cómo ese driver reporta unicidad, deadlock y pérdida de
-	// conexión, o esos predicados contestan false y el gate lo caza —como hizo
-	// la primera vez que se corrió esto sin ellos, con IsUniqueViolation sin
-	// reconocer una violación REAL de SQLite y WithDeadlockRetry sin recuperar
-	// a la víctima en cuatro motores—.
+	// Since ADR-0023, registering the driver is not enough on its own: how that
+	// driver reports uniqueness, deadlock and connection loss has to be
+	// registered too, or those predicates answer false and the gate catches it
+	// — as it did the first time this ran without them, with IsUniqueViolation
+	// missing a REAL SQLite violation and WithDeadlockRetry never recovering
+	// the victim on four engines.
 	//
-	// Una aplicación de verdad importa `quark/drivers/<motor>`, que hace las
-	// dos cosas de una vez. Esta no puede: vive en el módulo de Quark, y esos
-	// módulos importan Quark, así que el requisito sería circular. Registra
-	// los mismos predicados desde el mismo sitio; el camino real lo cubre la
-	// suite de conformidad de cada módulo.
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/microsoft/go-mssqldb"
-	_ "github.com/sijms/go-ora/v2"
-	_ "modernc.org/sqlite"
-
-	"github.com/jcsvwinston/quark/internal/driverclassify"
+	// This harness imports the driver MODULES, which is what a real application
+	// does and what registers both halves in one import. It could not while it
+	// shared the library's module — those modules import Quark, so the
+	// requirement would have been circular; ADR-0024 moved it out and removed
+	// the cycle.
+	_ "github.com/jcsvwinston/quark/drivers/mssql"
+	_ "github.com/jcsvwinston/quark/drivers/mysql"
+	_ "github.com/jcsvwinston/quark/drivers/oracle"
+	_ "github.com/jcsvwinston/quark/drivers/postgres"
+	_ "github.com/jcsvwinston/quark/drivers/sqlite"
 )
-
-func init() { driverclassify.RegisterAll() }
 
 // healthRow es una fila sintética de la matriz (no es un símbolo): resume, por
 // motor, si su corrida terminó sin error funcional ni fuga. El prefijo "!!"
@@ -83,11 +80,13 @@ func main() {
 // la matriz tras levantar contenedores — si no, quedan huérfanos).
 func run() error {
 	var (
-		enginesFlag  = flag.String("engines", "sqlite", "motores a ejercer: lista por comas (sqlite,postgres,…) o 'all'")
-		gateFlag     = flag.String("gate", "off", "modo gate: 'strict' falla si hay símbolos in-scope sin cubrir; 'off' sólo con asserts rojos")
-		outFlag      = flag.String("out", "", "directorio de salida; vacío usa REPORTS/superapp-<stamp>")
-		manifestFlag = flag.String("manifest", filepath.Join("examples", "superapp", "apisurface.json"), "ruta de apisurface.json (relativa a la cwd)")
-		allowFlag    = flag.String("allowlist", filepath.Join("examples", "superapp", "allowlist.json"), "ruta de allowlist.json (relativa a la cwd)")
+		enginesFlag = flag.String("engines", "sqlite", "motores a ejercer: lista por comas (sqlite,postgres,…) o 'all'")
+		gateFlag    = flag.String("gate", "off", "modo gate: 'strict' falla si hay símbolos in-scope sin cubrir; 'off' sólo con asserts rojos")
+		outFlag     = flag.String("out", "", "directorio de salida; vacío usa REPORTS/superapp-<stamp>")
+		// Relative to THIS module's directory, which is where it is run from
+		// now that the harness is a module of its own (ADR-0024).
+		manifestFlag = flag.String("manifest", "apisurface.json", "ruta de apisurface.json (relativa a la cwd)")
+		allowFlag    = flag.String("allowlist", "allowlist.json", "ruta de allowlist.json (relativa a la cwd)")
 		keep         = flag.Bool("keep", false, "no hacer teardown de los contenedores al salir (para depurar)")
 	)
 	flag.Parse()
@@ -146,7 +145,7 @@ func run() error {
 	stamp := time.Now().Format("20060102-150405")
 	outDir := *outFlag
 	if outDir == "" {
-		outDir = filepath.Join("examples", "superapp", "REPORTS", "superapp-"+stamp)
+		outDir = filepath.Join("REPORTS", "superapp-"+stamp)
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("creando -out: %w", err)

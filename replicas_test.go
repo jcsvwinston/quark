@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	_ "modernc.org/sqlite"
 )
 
@@ -261,8 +260,8 @@ func TestIsTransientConnErr(t *testing.T) {
 		{"wrapped ErrBadConn", fmt.Errorf("query failed: %w", driver.ErrBadConn)},
 		{"ErrConnDone", sql.ErrConnDone},
 		{"net error", &net.OpError{Op: "dial", Err: errors.New("connection refused")}},
-		{"pg class 08", &pgconn.PgError{Code: "08006"}},
-		{"pg admin shutdown", &pgconn.PgError{Code: "57P01"}},
+		{"pg class 08", &libpqError{Code: "08006"}},
+		{"pg admin shutdown", &libpqError{Code: "57P01"}},
 		{"sqlite closed", errors.New("sql: database is closed")},
 	}
 	for _, tc := range transient {
@@ -278,7 +277,7 @@ func TestIsTransientConnErr(t *testing.T) {
 		{"nil", nil},
 		{"ErrNoRows", sql.ErrNoRows},
 		{"plain error", errors.New("syntax error near FROM")},
-		{"pg unique violation", &pgconn.PgError{Code: "23505"}},
+		{"pg unique violation", &libpqError{Code: "23505"}},
 		// context.DeadlineExceeded implements net.Error — must NOT be treated
 		// as a transient connection failure (it is the caller's timeout, not a
 		// downed replica), or a slow query would wrongly evict a healthy replica.
