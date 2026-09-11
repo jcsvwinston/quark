@@ -3,7 +3,7 @@ module github.com/jcsvwinston/quark/drivers/mssql
 go 1.25.7
 
 require (
-	github.com/jcsvwinston/quark v1.12.0
+	github.com/jcsvwinston/quark v1.13.0
 	github.com/microsoft/go-mssqldb v1.11.0
 )
 
