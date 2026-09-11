@@ -1,0 +1,245 @@
+---
+sidebar_position: 7
+title: Roadmap
+description: What Quark ships today, what it deliberately does not do, and what is planned next.
+---
+
+# Roadmap
+
+Quark is on the stable `v1.x` line — the current version is the one at the top
+of the [release notes](./release-notes). This page is here so you can tell,
+at a glance, what you can build on today, where the sharp edges are, and what is
+coming — without having to guess which parts of the documentation are a promise
+and which are a fact.
+
+Everything under "Shipping today" is in `main` and covered by the cross-engine
+test suite. Everything under "Planned" is not built yet.
+
+## Shipping today
+
+### Type-safe builder and composable query AST
+
+- Type-safe `Query[T]` builders with immutable composition (clone per method).
+- Typed expression AST (`Col`/`Lit`/`Func`/`And`/`Or`/`Not`/`In`/`Exists`).
+- Subqueries composable through `AsSubquery`.
+- **CTEs** (`With`, `WithRecursive`).
+- **Window functions** (`OVER (PARTITION BY … ORDER BY …)`, `RowNumber`/`Rank`/`Lag`).
+- **Set operators**: `UNION`, `INTERSECT`, `EXCEPT`.
+- **Pessimistic locking**: `ForUpdate`, `ForShare`, `SkipLocked`, `NoWait`.
+- **Optimistic locking**: `quark:"version"` tag plus `ErrStaleEntity`.
+- `HavingAggregate` for HAVING over aggregates.
+- Nested `Preload` with dotted paths (`"Orders.Items.Product"`).
+- `IN(...)` chunking that respects dialect limits (Oracle 1000, SQL Server 2100).
+- Structured `JoinBuilder` with `ValidateJoinOn`.
+
+### Six dialects and SQLGuard
+
+- SQLite, PostgreSQL, MySQL, MariaDB, SQL Server and Oracle — all six run in the
+  blocking test matrix on every change, so cross-engine support is a tested
+  property rather than a claim.
+- SQLGuard validation for identifiers, operators, raw queries, JSON paths and
+  JOIN-ON clauses.
+- Dialect-specific upserts (`ON CONFLICT` / `ON DUPLICATE KEY` / `MERGE`).
+- Custom dialects via `RegisterDialect`.
+
+### Rich types
+
+- `Nullable[T]` generic.
+- `JSON[T]` typed JSON column wrapper.
+- `Array[T]` typed array wrapper (native on PostgreSQL, JSON-backed elsewhere).
+- `RegisterTypeMapper` for extensible mapping (decimal, UUID and similar, opt-in).
+- `time.Duration` mapped out of the box.
+- **Per-column timezones** via the `quark:"tz=..."` tag or the client-wide
+  `WithDefaultTZ`. The wire contract is always UTC.
+
+### CRUD, dirty tracking and soft delete
+
+- `Create`/`Update`/`UpdateFields`/`Delete`/`HardDelete`/`Upsert`/`UpsertBatch`/
+  `CreateBatch`/`UpdateBatch`/`DeleteBatch`.
+- **Dirty tracking** via `Tracked[T]`: snapshot at load, then `Save()` emits an
+  UPDATE over changed fields only. This is what closes the classic ORM trap where
+  `Update(entity)` silently skips a field you set to `false`, `0` or `""`.
+- **Soft-delete scopes**: `WithTrashed`, `OnlyTrashed`, `Restore`.
+
+### Transactional lifecycle hooks
+
+- Before/After hooks for create, update and delete, plus `BeforeFind`/`AfterFind`.
+- **`After*` hooks fire post-commit** under `Client.Tx`, so work that was rolled
+  back does not fire its side-effects.
+- `Tx.OnCommit` / `Tx.OnRollback` and `quark.TxFromContext` for arbitrary
+  commit/rollback side-effects.
+- Rolling back to a savepoint unwinds the hooks queued in that scope.
+
+### Migrations (schema as code)
+
+- `Migrate`, `Sync`, `CreateIndex`, `AddForeignKey`.
+- **Neutral schema introspection** (`Client.IntrospectSchema`) on all six engines.
+- **Pure-Go schema diff** (`Diff`, `PlanMigration`, `ApplyPlan`) with round-trip
+  identity: after `Migrate(model)`, `PlanMigration(model)` returns an empty plan
+  on all six engines — so a clean database really does report as clean.
+- **Transactional or resumable execution**: PostgreSQL, SQL Server and SQLite run
+  migrations in a transaction; MySQL, MariaDB and Oracle (which cannot roll back
+  DDL) run them resumably with checkpoint bookkeeping.
+- **Distributed migration lock**: PostgreSQL `pg_advisory_lock`, MySQL/MariaDB
+  `GET_LOCK`, SQL Server `sp_getapplock`, Oracle `DBMS_LOCK` (needs `GRANT EXECUTE
+  ON DBMS_LOCK`). SQLite returns `ErrUnsupportedFeature`.
+- **Orchestrated `Backfill`** with primary-key batching and resume tokens.
+- **Per-client model registry** (`Client.RegisterModel` and friends).
+- Versioned Go migrations via `github.com/jcsvwinston/quark/migrate`.
+- `quarkmigrate` plan/verify/apply package, embeddable in your own
+  `migrations/main.go`.
+
+### Multi-tenancy (four strategies)
+
+- `DatabasePerTenant`, with an LRU of clients.
+- `SchemaPerTenant`.
+- **`RowLevelSecurityClient`** — client-side WHERE injection, on all six engines.
+  The tenant predicate composes correctly through `Or()` groups.
+- **`RowLevelSecurityNative`** — PostgreSQL engine-enforced row-level security via
+  `set_config('app.tenant_id', …, true)` and `CREATE POLICY`, so even raw SQL
+  cannot read another tenant's rows. PostgreSQL only; other engines fail fast with
+  `ErrUnsupportedFeature`. The embeddable `quarktenant` library generates the
+  policy DDL. See [Native RLS](../advanced/row-level-native).
+- Tenant context propagates through association loads and saves.
+
+### L2 cache (memory and Redis)
+
+- Pluggable `CacheStore` (memory, Redis).
+- **Stampede protection**: a hot key expiring never sends a thundering herd to the
+  database — singleflight plus probabilistic early refresh, tunable with
+  `WithCacheJitter` and `WithCacheXFetchBeta`. Cross-instance coordination is
+  opt-in with `WithCacheCrossInstance()`.
+- **Per-row invalidation**: a `<table>:<pk>` tag on top of the table tag;
+  mutations register the primary keys they touched.
+- Deterministic, type-tagged, length-prefixed cache keys.
+
+### Observability
+
+- OpenTelemetry **traces** (spans carrying `db.statement` / `db.operation`).
+- OpenTelemetry **metrics**: the `quark.queries.total` counter and the
+  `quark.queries.duration` / `quark.queries.rows` histograms.
+- **`WithSpanRedaction`** keeps bind values out of spans by default. Including
+  them is an explicit opt-in for local debugging.
+- **`WithSlowQueryThreshold`** emits structured slow-query warnings.
+- Query observers and middleware.
+
+### Transactional resilience
+
+- `Client.Tx(...)` callback API, nested savepoint-style callbacks, explicit
+  savepoints, isolation levels.
+- **`WithDeadlockRetry(maxAttempts)`** re-runs the transaction closure when the
+  engine picks it as a deadlock victim (PostgreSQL 40P01, MySQL 1213, SQL Server
+  1205, Oracle ORA-00060), with exponential backoff and jitter. Opt-in and
+  context-aware.
+
+### Audit log and events
+
+- **`Client.EnableAuditLog(ctx, AuditConfig)`** records every create, update and
+  delete into the `quark_audit` table on the same connection and transaction as
+  the write, so the audit row cannot survive a rolled-back change.
+- **`Client.UseEventBus(bus)`** publishes `created` / `updated` / `deleted` events
+  synchronously after commit. Delivery is at-least-once and there is no
+  transactional outbox — see [Events](../advanced/events) for what that means for
+  your subscribers.
+
+### Code generation (opt-in)
+
+- **The `quark` CLI**, with `gen`, `init`, `inspect`, `migrate`, `model`, `seed`,
+  `sync`, `tenant` and `validate` subcommands.
+- **Typed scanners** on the read path (`List`/`First`/`Find`) and a **typed INSERT
+  binder** for single-integer-primary-key models.
+- **Compile-time column accessors** (`<Model>Columns` plus `Query.WhereP`): column
+  typos and wrong-typed values fail at build time instead of at runtime.
+- A versioned generator contract with a model-hash drift check. Files generated
+  against an incompatible version fall back to reflection by design, so stale
+  generated code degrades performance rather than breaking your build.
+
+Code generation is a **type-safety** feature, not a speedup — see
+[Benchmarks](./benchmarks) for the measurements behind that statement.
+
+### Stored routines
+
+- Helpers for calling stored procedures and functions.
+
+### Horizontal scaling
+
+- **Read replicas**: `WithReplicas(...)` routes reads to replicas while writes stay
+  on the primary; `Sticky(ctx)` pins a read to the primary when you need
+  read-your-writes. A read that hits a transient error on a replica fails over to
+  the primary, and that replica leaves the rotation for a cooldown. See
+  [Read replicas](../advanced/read-replicas).
+- **Sharding** (`ShardRouter`): routes each query by shard key. Cross-shard reads
+  (`ScatterGather`/`ScatterCount`) and deriving the shard key from the entity
+  (`ShardKeyer` plus `WithShardKeyOf`) both ship. There is a runnable example
+  under `examples/sharding/`.
+- A stress and load harness (latency percentiles, throughput, pool contention)
+  under `benchmarks/stress/`, and a comparison benchmark harness that includes
+  ent and sqlc. See [Benchmarks](./benchmarks).
+
+## Known limits
+
+These are deliberate boundaries, not bugs. Read them before you design around a
+capability Quark does not have.
+
+- **No cross-shard transactions or joins.** A transaction is bound to one shard's
+  client; there is no two-phase commit. Cross-shard reads are an explicit
+  `ScatterGather`, and only `COUNT` is merged for you.
+- **Events are at-least-once with no transactional outbox.** If the process dies
+  between commit and publish, the write is durable but the event is lost. Make
+  subscribers idempotent, or publish from your own outbox.
+- **`LISTEN/NOTIFY` is PostgreSQL-only**, both inbound and outbound; other engines
+  return `ErrDialectNotSupported`. Delivery is fire-and-forget: notifications
+  emitted while the listener connection is down are lost. It is not a queue.
+- **Bulk and WHERE-based methods do not fire `After*` hooks.** `CreateBatch`,
+  `UpdateBatch`, `DeleteBatch` and `DeleteBy` skip them. `Before*` hooks do run
+  per entity in `CreateBatch`/`UpdateBatch`.
+- **`DeleteBy` and `DeleteBatch` hard-delete**, even on a soft-delete model.
+- **`Select` and `Where` accept simple identifiers**, not arbitrary SQL
+  expressions. Dotted columns and expressions need a view or controlled raw SQL.
+- **The versioned migration registry is still global**, while the model registry
+  has been per-client since v0.6. This is known debt.
+- **Native row-level security requires PostgreSQL policies**, and it is not a
+  drop-in upgrade from the client-side strategy.
+
+## Planned
+
+No dates. These are ordered roughly by how likely they are to happen, and each one
+is here because it solves a problem people actually hit.
+
+### Guardrails against accidental full-table work
+
+An opt-in strict mode that flags an unbounded `Iter()` and detects N+1 query
+patterns at runtime. The failure mode it targets is the classic one: code that is
+fast on a developer's 200-row table and falls over on production's 20 million.
+Design sketched; not built.
+
+### Ready-made event bus implementations
+
+`EventBus` implementations for NATS, Kafka and Redis Streams, so that publishing
+CRUD events to your existing infrastructure does not start with writing an
+adapter. The interface and the logger/OpenTelemetry defaults ship today; these
+would be batteries included.
+
+### Pluggable ID strategies
+
+UUID v7, ULID and Snowflake identifiers as built-ins, rather than something you
+wire yourself through `RegisterTypeMapper`.
+
+### Schema-first workflow
+
+Generating reviewable migrations from a declarative schema, in the style of Atlas
+or Prisma. The pure-Go schema diff that shipped in v0.6 is the foundation; the
+declarative layer on top is the part that does not exist yet. This is demand-led —
+if the Go-structs-as-schema workflow is serving people well, it stays where it is.
+
+### More engine-native features
+
+Additional database-specific capabilities exposed behind dialect extension points,
+driven by what people ask for.
+
+### Not planned: faster code generation
+
+Extending code generation to the UPDATE, partial-update and batch binders is
+**not** on the roadmap. We measured it: the payoff is around 1%, because
+per-operation cost is dominated by the driver round-trip and by allocation, not by
+reflection. It would only be reopened for type-safety reasons, never for speed.

@@ -1,0 +1,1220 @@
+---
+sidebar_position: 8
+title: Release Notes
+description: What changed in each Quark release, and what to check before upgrading.
+---
+
+# Release Notes
+
+Quark is **v1.14.0** {/* x-release-please-version */} on the stable `v1.x` line. `v1.x` keeps API compatibility;
+breaking changes go to `v2.x`.
+
+Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade
+for the **library**: **no breaking changes**. The one thing v1.13.0 does break
+is how the **CLI** is installed by version — it moved to a module of its own,
+with its own tag series; see [v1.13.0](#v1130) below. The last breaking change
+to the library was in v0.9.0, and its
+[migration guide](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md)
+is still the one to follow if you are coming from v0.8 or earlier.
+
+Full commit-level detail lives in the
+[CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
+[GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.14.0
+
+A minor that widens what the typed API can express and fixes the width of the
+column types it generates.
+
+### Added
+
+**Queries that needed `RawQuery`, and no longer do.** The
+[query bench](https://github.com/jcsvwinston/quark/blob/main/docs/query-bench.md)
+measures which of 60 real-world queries the typed API can express; it went from
+44 to 58.
+
+- `CountDistinct`, `Case` for conditional aggregates, `JSONExtract` to put a
+  JSON member in the SELECT list, and the window functions `NTile`,
+  `PercentRank`, `CumeDist`, `FirstValue`, `LastValue` and `NthValue`.
+- `FromCTE` reads from a CTE declared with `With`, for when the derived rows
+  *are* the query; `FromTable` names the source table for a projection struct.
+- `PreloadWhere` filters which related rows eager-load.
+- `Window.Rows` / `Window.Range` set the frame. Without one, a "moving
+  average" is silently a running average.
+- `UpdateMap` accepts an `Expr` value, so `stock = stock - 1` is expressible
+  with `Subtract` and keeps its atomicity.
+- `OnExpr` puts a literal in a `JOIN … ON`. For an outer join that is not
+  cosmetic: moving the predicate to `WHERE` turns a `LEFT JOIN` into an inner
+  one. `FullJoin` and `CrossJoin` complete the set.
+
+**`Plan.Down()`** returns the plan that undoes a migration plan. Operations
+that record a name but not the shape behind it — `DROP TABLE`, `DROP COLUMN` —
+return `ErrIrreversibleOperation` naming what is missing, instead of a partial
+rollback that reports success.
+
+### Changed
+
+A `db` tag whose column name cannot be an identifier is now **refused**. Quark
+and Nucleus's `pkg/model` both read a tag called `db` with different grammars,
+and a model written the other way produced a column called literally
+`column:email;unique;not null` — silently. A name that *is* a legal identifier
+but reads like a directive (`db:"pk"`) warns instead, because a table really
+can have a column called `pk`.
+
+### Fixed
+
+**Integer and float columns were too narrow.** Every Go integer width mapped to
+a single `INTEGER` — four bytes on PostgreSQL, MySQL and SQL Server — so an
+`int64` past 2³¹ was *rejected* by those engines while looking fine on SQLite.
+Auto-increment keys were `SERIAL`/`INT` and ran out at 2,147,483,647 rows, and
+`float64` mapped to single-precision `REAL` on PostgreSQL.
+
+Integers now map by width, floats take the double-precision type per engine,
+and keys are 64-bit everywhere. The [type matrix](../reference/type-matrix.mdx)
+is generated from the mapper, so it cannot drift from the code.
+
+If you have tables from before this release, `PlanMigration` reports the
+widening as an `ALTER COLUMN`. Applying it loses no data, but on a large table
+the engine may rewrite it — run it when a rewrite is acceptable.
+
+## v1.13.0
+
+A packaging release: the library's module graph loses two thirds of its
+entries and the binary it produces does not change. The CLI becomes a module
+of its own, with its own tag series — the one thing here that changes what an
+installed command reports about itself.
+
+**The CLI, the acceptance harness and the engine suites move to modules of
+their own.** What shared a module with the library were the two things that
+need every engine: `cmd/quark`, which points at whatever database it is given,
+and the per-engine suites, which start real databases in containers. Their
+requirements sat in the root `go.mod`, so they sat in the build list of every
+program that imported Quark. Measured on the same consumer, before and after:
+**123 → 39** modules in the build list, **6 → 1** driver requirements,
+**5 → 0** `testcontainers-go` requirements — and the binary links the same 11
+modules and the same 162 packages as before. This is graph hygiene, not a
+faster or smaller program: what changes is what an SBOM, a dependency
+dashboard and `go mod download all` say about code that was never linked into
+anything. The one driver that stays in the library's own requirements is
+`modernc.org/sqlite`, because the library keeps white-box tests that open a
+real database through unexported methods.
+
+**Upgrading: move the driver modules with the library.** `drivers/mssql`,
+`drivers/mysql`, `drivers/oracle` and `drivers/sqlite` at v0.1.x import a
+package that left the root module in this release, so holding one of them while
+moving the library to v1.13.0 does not build. Move them to v0.2.0 — worth doing
+for its own sake, because those predicates covered all six engines and
+requiring any one driver used to pull the other five into your module graph.
+`drivers/postgres` was never affected.
+
+**Installing the CLI.** `go install github.com/jcsvwinston/quark/cmd/quark@latest`
+keeps working and installs the same program. `@latest` now resolves the
+`.../cmd/quark` module, whose tags are `cmd/quark/vX.Y.Z`, and this release
+publishes **`cmd/quark` v1.0.0**: the series is new, the program is not, and
+`quark version` reports that series from here on. What breaks is a selector
+naming a **root** version — a nested module's directory is outside its parent,
+so `go install .../cmd/quark@v1.13.0` fails while the same command against
+`v1.12.0` or earlier still works. Pin `cmd/quark/v1.0.0` instead.
+
+**Six fuzz targets** over the surfaces that read untrusted input — the
+identifier, `ON`-clause and JSON-path guards, the raw-query masker, the `db`
+tag reader and the six dialects' quoting — each asserting a property rather
+than merely not crashing, with a short seeded lane on every pull request. One
+of them found the bug below on the way in.
+
+**A `db` tag's column name is read the same way on every path.**
+`ColumnFromDBTag` trimmed the name only when the tag carried options after a
+comma, while `parseDBTag` trimmed unconditionally, so on a tag with no options
+the two readers of one string gave two answers.
+
+**Modules.** `cmd/quark` v1.0.0 debuts; the five driver modules go to v0.2.0
+with no change to what they register.
+
+## v1.12.0
+
+Quark's part of the suite starter (arc A2): `quark init` can write the
+Nucleus module that mounts the ORM, and the integration examples cover the
+routers people actually use.
+
+**`quark init --with nucleus`** writes `internal/<app>/module.go`, a Nucleus
+module wrapping the `*quark.Client`: an example `Note` model registered and
+migrated on start, `GET`/`POST /api/notes` through `quark.For[Note]`, the
+module's own policy rows and CSRF exemption, and the driver module for the
+chosen dialect blank-imported so a duplicate title answers 409. It also
+writes the `nucleus.yml` the framework needs to boot, naming the same
+database as `.quark.yml`, and never overwrites either file. The module is
+emitted as source: Quark carries no framework dependency, so nothing in this
+repository compiles against Nucleus. The printed next steps name
+`nucleus new <app> --with quark` as the full-application path.
+
+**Framework examples.** `examples/chi`, `examples/echo` and `examples/gin`
+are modules of their own — one shared client, the request context per query,
+`quark.IsUniqueViolation` mapped to 409 — each with a test driving its
+handlers; the new *Frameworks* guide covers `net/http`, chi, Echo, Gin and
+Nucleus.
+
+**`drivers/postgres`** registers its listener through the public
+`quarkdriver.ListenerFactory` contract (the second step of the audit finding
+QK-8) and requires Quark v1.11.0.
+
+## v1.11.0
+
+The minor that pays Quark's share of the maturity audit of 2026-09-03.
+
+**The migrator takes the schema lock by default.** `Migrator.Up` and `Down`
+acquire the engine's cluster-wide migration lock before touching the schema
+— `pg_advisory_lock` on PostgreSQL, `GET_LOCK` on MySQL and MariaDB,
+`sp_getapplock` on SQL Server, `DBMS_LOCK` on Oracle — so two replicas
+running `migrate up` at the same time apply each migration once. SQLite,
+which has no distributed lock and a single writer, proceeds without one.
+`WithoutLock()`, `WithLockTimeout`, `WithLockName` and `WithLogger` tune it;
+progress goes through the client's logger (`Client.Logger()`), and the
+`quark migrate` commands keep printing their plain sentences.
+
+**Transactional migrations.** A migration written as `UpTx` / `DownTx`
+receives a `*sql.Tx`; where the engine rolls DDL back (PostgreSQL, SQLite,
+SQL Server) the migration and its ledger row commit together. Where DDL
+commits itself, only the ledger row is atomic with the last statement, and
+the migrator says so at debug level.
+
+**A public listener contract.** `quarkdriver.ListenerFactory` takes an
+`IdentifierValidator` interface instead of the internal guard type the
+previous constructor named, which no module outside this repository could
+implement. The previous names stay, deprecated and adapted, so
+`drivers/postgres` keeps working and adopts the public contract in its next
+release.
+
+Also: the README explains what `go.mod` lists versus what a binary links,
+commits and pull-request titles are in English (CI checks the title), and
+the five `drivers/*` modules require Quark v1.10.1.
+
+## v1.10.1
+
+A maintenance release for the driver-module seam opened in v1.9.0.
+
+`quark.New("postgres", …)` with `lib/pq` linked, and `quark.New("sqlite3",
+…)` with `mattn/go-sqlite3`, failed in v1.10.0 asking you to import a module
+that was already there: the registration check only looked for the alias
+(`pgx`, `sqlite`). Both names are now accepted, and when a driver for the
+same engine is linked under another name the message says so.
+
+When a driver is registered by a plain import instead of its
+`drivers/<engine>` module, the client now logs a warning: without the
+module, `IsUniqueViolation`, deadlock retry and replica failover answer
+`false` in silence.
+
+The five driver modules require this release line and build on their own;
+CI verifies each one without a workspace. The README, the installation and
+getting-started guides, the deployment and events pages and every example
+import `drivers/<engine>`; the comparison table is dated and corrected
+(GORM ships generics since 1.30; ent runs on `database/sql`). Examples with a
+driver are their own modules (`cd examples/<engine> && go run .`). The
+40 MB test binary that was tracked in the repository is gone.
+
+## v1.10.0
+
+When a driver module is missing, the error now names it.
+
+v1.9.0 moved each engine's driver into its own module, but opening a database
+without one still failed with Go's own message — `sql: unknown driver "sqlite"
+(forgotten import?)` — which names neither the module nor the line to add. It
+now prints the `go get` and the `import _`, and it understands the names people
+type: `postgresql`, `postgres` and `pq` all point at `drivers/postgres`,
+`mariadb` at `drivers/mysql`.
+
+For an engine Quark does not publish a driver for, it stays quiet and lets the
+original error through.
+
+## v1.9.0
+
+The database drivers move out of the library, each into its own module. Quark
+never registered a driver, but it carried the driver **error types** — a MySQL
+deadlock is a `*mysql.MySQLError`, and naming that type imports MySQL — so
+every binary carried all five engines whichever one it talked to. A program
+that links the root package and nothing else goes from 24 MB to 6, and from
+171 modules to 129.
+
+Nothing about your configuration changes. Add one blank import for the engine
+you use:
+
+```go
+import _ "github.com/jcsvwinston/quark/drivers/postgres"
+```
+
+Available: `drivers/postgres`, `drivers/mysql`, `drivers/sqlite`,
+`drivers/mssql`, `drivers/oracle`. A module registers the driver **and** how
+that driver reports a unique violation, a deadlock and a lost connection —
+which matters because none of those checks fails when it cannot recognise an
+error: it answers "no". Without the module, a duplicate key would be reported
+as an internal error and a deadlocked transaction would stop being retried,
+neither of them visibly.
+
+PostgreSQL is the exception and needs no classifier: every PostgreSQL driver
+exposes its SQLSTATE through a method, so the same code covers `lib/pq`, `pq`
+and `pgx` alike.
+
+The LISTEN/NOTIFY listener moves to `drivers/postgres`, since it needs the pgx
+connection underneath `database/sql`. `EventPayload` and `EventListener` are
+now aliases, so code that already uses them does not change.
+
+Full notes: [v1.9.0](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.9.0.md).
+
+## v1.8.0
+
+A minor release that closes the core and CLI findings of an end-to-end audit
+of the library. Most of it is about queries and commands that were accepted
+and then quietly did something other than what they said: a column name the
+engine never had, a sort direction it ignored, a scaffolded project whose
+first command failed. It also adds `NewWithDB`, which mounts Quark on a
+`*sql.DB` the host application already owns.
+
+### Added
+
+- **Qualified column names under a join.** With a join in the query, filtering
+  on a column whose name exists in both tables — the primary key included —
+  could not be expressed: `SQLGuard` rejected the qualified `orders.id` as an
+  invalid identifier, and the engine rejected the bare `id` as ambiguous.
+  `Where`, `OrderBy`, `GroupBy`, `Select` and `Col` now accept the
+  `table.column` form **when the query has joins**, validating each segment
+  with the rules they always applied and quoting the two separately. Without
+  joins nothing changes.
+
+- **`WithStrictColumns()` — column names checked against the model.** The
+  identifier guard is lexical, so `Where("agee", ">", 1)` passed it as
+  well-formed; on SQLite an unknown identifier then degrades to a string
+  literal, and the query returned every row of the table without reporting an
+  error. This option validates each column against the registered model in
+  `Where`, `WhereIn`, `WhereBetween`, `OrderBy`, `GroupBy`, `Select`, `Having`
+  and the aggregates, failing with `ErrInvalidQuery` that names the columns
+  the model does have. Joins, raw and AST fragments, and `SelectExpr` aliases
+  are exempt. It is opt-in: the default stays as it was.
+
+- **`WithoutAssociations()` — write only this entity's row.** `Update` saves
+  the preloaded associations recursively, from the snapshot held in memory, so
+  a change another writer made to one of those child rows between your read
+  and your update is overwritten. There was no way to ask for a single-row
+  update. There is now, on `Update` and on `Create` (`belongs_to` included),
+  and when the recursive save does run `Update` logs a warning naming the
+  associations it is about to rewrite. The default behaviour is unchanged.
+
+- **`WhereInOf` and `DeleteBatchOf`.** `WhereIn` and `DeleteBatch` take
+  `[]any`, so the ordinary case — a slice of ids returned by an earlier query
+  — needed a conversion loop at every call site. These are package-level
+  functions rather than methods because a Go method cannot introduce a second
+  type parameter.
+
+- **`NewWithDB(driver, db, opts…)` — Quark over a pool you already opened.**
+  An application that already holds a `*sql.DB` can hand it to Quark instead
+  of configuring a second DSN and a second pool. A borrowed handle stays the
+  caller's: `Close` does not close it, and `WithOptions` derives clients over
+  the same handle.
+
+### Fixed
+
+- **`OrderBy` ignored any direction it did not recognise.** Anything that was
+  not `DESC` or `desc` — `"Desc"`, `"descending"`, a typo — was treated as
+  ascending, silently. `ASC` and `DESC` now match case-insensitively, `""`
+  still means ascending, and any other value is `ErrInvalidQuery`, the same
+  contract the operator whitelist has always had.
+
+- **`rel:"m2m"` was accepted by half the ORM.** Eager loading understood the
+  short alias; `Migrate` and the recursive save did not, so the join table was
+  never created and the mismatch only surfaced when a query hit the missing
+  table. The schema parser now normalises the alias to `many_to_many` once, so
+  every subsystem reads the same relation.
+
+- **Preload queries were invisible to observability.** The batched `SELECT`s a
+  preload issues went straight to the executor, reaching neither
+  `QueryObserver` nor the slow-query log: the N+1 a preload is there to
+  prevent was measurable, the preload replacing it was not. Those queries now
+  emit a `QueryEvent` with operation `PRELOAD` through the same pipeline as
+  the rest.
+
+- **`quark init` outside a Go module scaffolded a project that could not
+  run.** The generated runner imported a placeholder module path, and the
+  closing message told you to run `go run ./cmd/<app> migrate up`, which
+  failed immediately. `init` now walks up the tree for the module and, when
+  there is none, writes a coherent `go.mod` (`--module` chooses the path); the
+  steps it prints at the end are the ones that work.
+
+- **`quark seed create` generated a seeder that nothing ever ran.** The
+  generated file registered itself nowhere, so `seed run` had no seeders to
+  find, and the function that would have registered it was not documented. The
+  new `seed` package (symmetric to `migrate`) fixes the direction: generated
+  files call `seed.Register` from an `init()`, so a blank import of the
+  `seeders/` package — which `quark init` already wires — is enough.
+  `commands.RegisterSeeder` remains as a shim.
+
+- **CLI identifiers reached introspection SQL unvalidated.** The values of
+  `--table`, `--model` and the positional argument were interpolated into
+  statements such as `PRAGMA table_info(%s)` and `DESCRIBE …` as given. They
+  now pass through `SQLGuard` in `inspect table`, `inspect sql`, `validate`
+  and `model --from-table`, and a rejection wraps `ErrInvalidIdentifier`.
+
+- **`migrate create --from-models` blamed the models for a build failure.** It
+  answered "no model structs" whether the package had no tagged structs, could
+  not be loaded for lack of a `go.mod`, or simply did not compile. The three
+  are now distinct, and a compile error is reported with the compiler's own
+  lines.
+
+- **A missing database configuration did not say what was missing.** The
+  error now names the configuration keys, the environment variables that set
+  them, and `quark init`.
+
+### Changed
+
+- **The CLI stopped printing an INFO line on every command.** Each invocation
+  logged `quark client initialized` before doing its work. The CLI now runs
+  its logger at warning level; `--debug` restores the previous output.
+
+- **Repository documentation.** The supported-versions table in `SECURITY.md`
+  still listed v1.2.x and v1.1.x five minors after the fact; it now states the
+  policy — the two most recent tagged minors — without pinning numbers that go
+  stale, and a release check fails if a superseded version is marked supported
+  again. `docs/ENGLISH_DOCS.md`, a standalone reference from the v0.x era that
+  had long stopped tracking the API, is retired in favour of this site.
+
+## v1.7.1
+
+A patch that closes a cache isolation gap under native row-level security.
+
+Under `RowLevelSecurityNative` the engine enforces tenant isolation with a
+session variable and a `CREATE POLICY`, so the query builder injects no
+`WHERE` predicate and left the tenant out of the L2 cache key. Two tenants
+issuing the same query therefore hashed to the same key over the one cache
+store the client shares, and a `.Cache()` result filled by one tenant was
+served verbatim to the next. The engine's policies protected the database;
+nothing protected the cache. The native path now carries the tenant in the
+cache key only — the query still relies on the policy for filtering, so
+`WHERE` injection, soft-delete scoping and create auto-fill stay inert. The
+regression was reproduced against a real PostgreSQL engine with policies and
+a non-superuser role before the fix.
+
+## v1.7.0
+
+A minor release about telling one database failure from another — and about
+two places where Quark could not, on engines its own documentation
+recommends.
+
+### Added
+
+- **`quark.IsUniqueViolation` and `quark.IsDeadlock`.** A handler that writes
+  to the database needs to know whether a rejected insert was a duplicate it
+  can explain to the user, or something it should not have swallowed. Until
+  now the only exported signal was `ErrConstraintViolation`, which lumps
+  unique, foreign-key, not-null and check violations into one value — enough
+  to know the write was refused, not enough to answer with a `409` and name
+  the field. The alternative was importing your driver and matching its error
+  type by hand, which stops working the moment the application runs on a
+  second engine.
+
+  Both predicates match on the **error code the driver reports**, never on
+  message text, so they are unaffected by the server's language and by
+  wording changes between driver releases. Both walk the wrapping chain. See
+  [Errors](/docs/reference/api/errors) for when to reach for each.
+
+### Fixed
+
+- **PostgreSQL failures went unrecognised under `lib/pq`.** Quark classifies
+  driver errors to decide three things on its own: whether to retry a
+  transaction the engine chose as a deadlock victim, whether a duplicate link
+  row can be ignored, and whether a read should fail over off an unreachable
+  replica. That classification matched only the error type of `pgx`, while
+  the installation guide prescribes `lib/pq` and the dialect accepts its
+  driver names.
+
+  On `lib/pq`, none of the three recognised anything — so `WithDeadlockRetry`
+  never retried, and a downed read replica was never detected as one. Neither
+  reported an error: the options were accepted, appeared active and did
+  nothing. All three now read the code through the method both drivers
+  expose, so either driver behaves the same.
+
+- **On SQL Server, a rejected insert reported the wrong error entirely.**
+  `Create` sends the `INSERT` and the identity lookup as a single batch, and
+  when the server rejects the insert it still answers the lookup — with
+  `NULL`. Reading that into a plain integer failed, and that conversion error
+  was returned in place of the driver's, so a duplicate key arrived as a scan
+  error naming no constraint, no table and no column. No rejected insert on
+  SQL Server was diagnosable, by a person or by a program. The engine's own
+  error now reaches the caller, and `ErrConstraintViolation` wraps it as it
+  already did on the other engines.
+
+## v1.6.1
+
+A patch release about the preflight that shipped in v1.6.0 believing more
+about your database than it had actually checked.
+
+### Fixed
+
+- **The row-level security preflight now reads the policy, not just its
+  name**. `VerifyRLSPolicies` asked PostgreSQL whether a policy
+  called `<table>_tenant_isolation` existed and stopped there. A policy
+  carrying that name with `USING (true)` — right name, no predicate —
+  earned a green light while every tenant read every row. That is worse
+  than no check at all: a green check is what stops an operator from
+  looking.
+
+  It now reads the policy's `USING` and `WITH CHECK` expressions and
+  demands the two things that make them isolate: a reference to your tenant
+  column, and a read of the session variable the router sets. It also
+  catches a policy narrowed to one command by a later `ALTER POLICY`, and
+  one that leaves the write path open. The error says which of those is
+  wrong, not merely that something is.
+
+  Scope, so the guarantee is not overread: it verifies the policy this
+  package installs. A deployment that isolates through several hand-written
+  policies is reported as a deviation rather than guessed at.
+
+- **The preflight runs with the client the documentation prescribes**
+ . It used `RawQuery`, which is off by default, so
+  `quark.New("pgx", dsn)` — the exact client `quarktenant`'s own docs show
+  — could not run it, and a boot guardrail failed indistinguishably from a
+  real outage. It now reads the catalog directly, the way the install path
+  already did. The doubled `quarktenant: quarktenant:` prefix is gone too.
+
+- **`verify-rls-policies` stops accepting flags it ignores**.
+  `--tenant-col` and `--native-rls-var` now genuinely change the verdict,
+  because the predicate check needs them: verifying with the default column
+  against an installation made with another one used to return OK without
+  having checked what you believed. Flags that cannot change a read-only
+  verdict (`--dry-run`, `--cast`, `--lock-name`, `--lock-timeout`) are
+  refused for this action instead of being silently dropped.
+
+## v1.6.0
+
+A minor release about the sharpest edge in multi-tenancy, plus the test kit
+the ORM never shipped.
+
+### Added
+
+- **`quarktenant.VerifyRLSPolicies` — a preflight for native row-level
+  security.** Configure `RowLevelSecurityNative` and forget the policy DDL,
+  and Quark emits no tenant predicate at all: every tenant reads every row,
+  with no error anywhere. Nothing checked for it. The new call verifies, per
+  registered model, that row security is enabled, that `FORCE` is set (unless
+  you opted out — without it the table owner bypasses the policy, and the
+  application role usually *is* the owner), and that the policy exists. Call
+  it at startup and fail the boot, or gate a deploy with the
+  `verify-rls-policies` action of your tenant runner, which exits `1` when a
+  table is unenforced — distinct from `2` for operational errors.
+- **`quarktest` — the test kit.** `SQLite(tb)` opens a client on a temporary
+  file (not `:memory:`, where every pooled connection would get its own empty
+  database), `Migrate(tb, client, models…)` brings the schema up in one line
+  and surfaces tag typos immediately, and `Tx(tb, client, fn)` runs a test
+  inside a transaction that always rolls back. A new testing guide walks
+  through it, including when a real engine is still required.
+
+### Fixed
+
+- **`quark migrate up` applied only the first pending migration.** Without
+  `--steps`, `up` and `down` shared one flag variable, so `up` inherited
+  `down`'s default of 1: three pending migrations in a pipeline, one applied,
+  exit code 0. `--dry-run` previewed a single migration for the same reason.
+- **The documentation site did not build.** The version marker was written as
+  an HTML comment in an MDX page, which aborts compilation. It now uses MDX
+  comment syntax, and a lint rule rejects HTML comments in `.mdx`.
+
+### Changed
+
+- **The documentation archive resumes.** The site keeps a snapshot per
+  published minor so readers pinned to an older release get the matching
+  docs; that archive had frozen at 1.2.2. It resumes with this release, and a
+  check now fails when a minor ships without its snapshot.
+- **Editorial pass over the published documentation** — shorter sentences,
+  the conclusion first, and no wording that assumes knowledge of the
+  project's internal history.
+
+## v1.5.2
+
+A CLI correctness patch.
+
+### Fixed
+
+- **A bare `quark migrate up` applies every pending migration again.** The
+  `--steps` flags of `migrate up` (default 0 = all pending) and
+  `migrate down` (default 1) were registered on the same package variable,
+  and pflag writes each default into the bound variable at registration
+  time — so after startup the shared variable held `1`, and `migrate up`
+  without `--steps` applied only the FIRST pending migration and exited 0.
+  With three pending migrations in a CI pipeline, one was applied and the
+  job went green. The flags now use separate variables, and a regression
+  test drives the real command line with two pending migrations (every
+  earlier test used exactly one, where the truncation is invisible).
+  `--dry-run` was affected the same way and is covered by the same fix.
+
+## v1.5.1
+
+A durability patch under native row-level security.
+
+### Fixed
+
+- **A write under `RowLevelSecurityNative` is durable when the call
+  returns.** `Create` (and every single-row operation) runs
+  `INSERT … RETURNING` inside an implicit transaction whose commit used to
+  run in a background goroutine when the operation's context ended — with
+  no ordering guarantee against the call returning. A handler could answer
+  2xx while the row was not yet committed, and an immediate reader on
+  another connection missed it (surfaced as a rare flake by an external
+  end-to-end suite; v1.3.1 fixed a first variant of the same class). The
+  executor now materializes the returned row, commits synchronously, and
+  only then returns: writes are durable on return, commit failures surface
+  as the call's own error, and single-row reads release their pooled
+  connection immediately. The deferred commit remains only on the multi-row
+  read path, where it affects connection release, never durability — the
+  `DeferredCommitFailures` counter now covers exactly that path. The
+  native-RLS guide's write-semantics section is rewritten accordingly.
+
+## v1.5.0
+
+The DX minor: everything the 2026-08-16 DX audit demanded from quark. No API
+breaks; every change is additive or turns a silent failure into a loud one.
+
+### Added
+
+- **`quark migrate create <name> --from-models <dir> --dialect <d>`** renders
+  domain DDL from your model structs through the SAME type mapping the runtime
+  migrator uses: dialect-correct column types, topological table order,
+  foreign keys, indexes, and a Down that drops in reverse dependency order.
+- **Rich field vocabulary in `model generate`**: `nullable<T>`, `array<T>`,
+  `json<T>`, and `belongs_to<Model>` (emits the FK column plus the
+  `rel:`/`join:` pair).
+- **Automatic timestamps**: `Create` fills zero `created_at`/`updated_at` and
+  `Update` refreshes `updated_at` — the 18 hand-written timestamp hooks the
+  audit counted are no longer needed.
+- **`quark init` writes the embedded runner** (`cmd/<app>/main.go` with the
+  blank imports and `commands.Main()`) instead of only prescribing it.
+- **`Example:` blocks on 19 subcommands.**
+
+### Fixed
+
+- **Struct-tag typos fail fast.** `quark:"notnull"`, `db:"price,lenght=10"`,
+  `column:"..."` and friends die in `RegisterModel`/`Migrate` with a hint
+  (`ErrInvalidTag`) instead of silently dropping constraints; `pk:"True"` is
+  accepted case-insensitively.
+- **Models without a primary key get an actionable error** naming the model
+  and the fix, instead of `sql: no rows in result set` downstream.
+- **`quark.New` rejects invalid options** (a string, a number, an uncalled
+  constructor) naming each one, and an **unknown driver without
+  `WithDialect` is now an error** instead of a WARN plus a silent PostgreSQL
+  fallback.
+- **Static builds**: the mattn/go-sqlite3 error classifier sits behind a
+  `cgo` build tag, so `CGO_ENABLED=0` and cross-compiles build again (new
+  static-build CI lane).
+- The CLI builds its `Limits` from `DefaultLimits()`, killing the
+  partial-literal `SafeMigrations` WARN on every invocation.
+
+## v1.4.1
+
+A patch release: the CLI keeps its promises. Three defects surfaced by an
+external coverage exercise over the public module surface, plus a round of
+CLI papercuts. Two deliberate behaviour changes, no API breaks.
+
+### Fixed
+
+- **`model generate --fields` output compiles and declares its primary key.**
+  A `time.Time` or `json.RawMessage` field now emits its import block, `id`
+  gets `pk:"true"` (the tag the ORM parses), and the template renders the
+  computed `quark:"..."` tag — only with vocabulary the ORM understands
+  (`not_null` on the from-table path).
+- **The embed recipe no longer swallows errors.** New entry point
+  `commands.Main()` (execute, print to stderr, exit non-zero) is what every
+  recipe now prescribes; a runner built from the old printed recipe
+  (`func main() { commands.Execute() }`) exited 0 in silence on any failure.
+  `commands.Execute()` keeps its signature and behaviour.
+- **`tenant provision` completes under `schema_per_tenant`.** It creates the
+  schema and the `quark_tenants` row and explicitly skips the migration step
+  (which needs a `TenantRouter` in your own binary); an id already registered
+  is rejected with a clear "already provisioned" error before any DDL runs,
+  so retries never crash on duplicate `CREATE SCHEMA`.
+- **Papercuts.** `migrate status`/`version` work on a fresh database (zero
+  applied, no missing-table error) and `status` lists pending migrations;
+  `seed run`/`seed list` honour registration order; `quark init` fills
+  `project.module`/`project.name` from the directory's `go.mod`; the `With`
+  docs example uses the real `Join(table).On(...)` signature.
+
+### Changed
+
+- **`quarktenant.InstallRLSPolicies` is now re-runnable:** the rendered DDL
+  drops the deterministic policy (`DROP POLICY IF EXISTS`) before recreating
+  it, in the same transaction — re-running converges instead of failing with
+  SQLSTATE 42710. Gate the call yourself if you relied on that failure.
+- Go toolchain to **go1.26.6** (closes GO-2026-6090, GO-2026-6088,
+  GO-2026-5972 in the standard library).
+
+Narrative notes:
+[`docs/RELEASE_NOTES_v1.4.1.md`](https://github.com/jcsvwinston/quark/blob/main/docs/RELEASE_NOTES_v1.4.1.md).
+
+## v1.4.0
+
+A feature minor for safer reads and clearer limits. Nothing is a breaking
+change; every new behaviour is opt-in or a strictly-more-honest default.
+
+### Added
+
+- **Strict reads.** `WithStrictReads(mode)` flags unbounded `Iter()`/`Cursor()`
+  calls — `StrictReadsWarn` logs them, `StrictReadsReject` returns
+  `ErrInvalidQuery` — and, when tracking is enabled on a context, detects the
+  N+1 access pattern and points at the missing `Preload`. `AllowUnbounded()`
+  on the builder is the explicit escape hatch for exports and back-fills.
+- **Blocked-cleanup visibility.** `Client.BlockedPanicCleanups()` counts
+  native-RLS panic-path cleanups that a stuck `database/sql` never let
+  finish, so a leaked transaction/connection pair is observable instead of
+  only inferable from pool exhaustion — the counterpart to
+  `DeferredCommitFailures()`.
+
+### Fixed
+
+- **`WithLimits` fills zero numeric fields from `DefaultLimits()`.** A partial
+  literal like `Limits{MaxResults: 500}` no longer leaves `QueryTimeout` at
+  zero (which made every query fail with an already-expired context). Booleans
+  are not normalized — a partial literal that leaves `SafeMigrations` false
+  now emits one structured WARN pointing at `DefaultLimits()`.
+- **Security:** `golang.org/x/text` bumped to v0.39.0 (GO-2026-5970,
+  reachable through `database/sql`).
+
+### Upgrade notes
+
+Drop-in. If you built a `Limits` literal by hand and relied on the old
+all-zero behaviour, start from `DefaultLimits()` and override — the WARN will
+tell you if you didn't.
+
+## v1.3.3
+
+A correctness patch for the native row-level-security strategy. Upgrade if
+you use `RowLevelSecurityNative` — especially if you call `Create` or
+`Update` from long-lived contexts (batch jobs, CLIs, workers).
+
+### Fixed
+
+- **`Create` and `Update` no longer hold their implicit transaction until
+  your context ends.** Both now scope the transaction to the operation, like
+  every other native-RLS entry point already did. Previously, each write
+  from a long-lived context kept one pooled connection idle in transaction
+  (with its locks) until that context finished — enough writes could exhaust
+  the pool, and any later DDL on the touched table (a migration, a
+  `DROP TABLE` in tests) blocked behind those locks. As part of the same
+  fix, a row you just wrote is visible to reads on the same context
+  (read-your-writes), which previously only held across contexts.
+- **The executor no longer leaks its pooled connection if the driver
+  panics.** A panic inside a query or transaction begin used to abandon the
+  connection; the pool now gets it back on every path, including panics the
+  standard library survives.
+- **Driver and transaction errors are no longer masked as `ErrNoRows`.**
+  On the `QueryRow` path, a failure to begin the transaction or set the
+  tenant context used to surface as a generic "no rows" result; the real
+  error now reaches your `Scan` call intact, wrapped with the stage that
+  failed, so `errors.Is`/`errors.As` work.
+
+### Upgrade notes
+
+Nothing to do. If you had sized pools defensively or added per-operation
+contexts to work around hangs during migrations, those workarounds are no
+longer needed — see the troubleshooting entry in the native row-level
+security guide if a DDL statement still hangs on releases before this one.
+
+## v1.3.2
+
+A robustness patch for the native row-level-security strategy. Upgrade if you
+use `RowLevelSecurityNative`, especially with connection pools sized close to
+your concurrency.
+
+### Fixed
+
+- **Connection acquisition under native RLS honours your context.** Waiting
+  for a pooled connection used to be uncancellable: with a saturated pool, a
+  request could keep waiting past its own deadline. Acquisition now aborts
+  with the caller's `ctx.Err()`; only the transaction's lifecycle stays
+  detached from cancellation (the v1.3.1 write-durability behaviour is
+  unchanged, and its semantics are now spelled out in the
+  native row-level security guide's Limitations section).
+- **A failed deferred commit is loud.** If the deferred commit behind a
+  native-RLS write fails, the failure is logged at error level even without a
+  configured logger, and counted — `Client.DeferredCommitFailures()` exposes
+  the count so operators can alert on it. Batch inserts are covered by the
+  same regression tests as row-by-row writes.
+
+### Upgrade notes
+
+Nothing to do. Behaviour changes only affect failure paths that previously
+hung or went silent.
+
+## v1.3.1
+
+A correctness patch. Upgrade if you chain different set operators in one
+query, or if you use the native row-level-security strategy with writes.
+
+### Fixed
+
+- **Mixed set-operator chains are rejected honestly.** `A.Union(B).Intersect(C)`
+  used to emit flat SQL whose meaning depends on the engine (SQLite and Oracle
+  evaluate left-to-right; PostgreSQL, SQL Server, MySQL and MariaDB give
+  `INTERSECT` precedence) — the same query silently returned different rows on
+  different engines. Chains that mix operators now return
+  `ErrUnsupportedFeature`; materialize intermediate results in steps instead.
+  Chaining the same operator, `UNION` with `UNION ALL` included, keeps working.
+- **Native row-level security no longer loses writes.** Under the
+  `RowLevelSecurityNative` strategy, an `INSERT … RETURNING` ran inside an
+  implicit transaction whose lifecycle was tied to the caller's context — and
+  cancelling that context (which is how every request context ends) made the
+  database roll the insert back instead of committing it. The transaction's
+  lifecycle is now detached from the request context, so the deferred commit
+  is deterministic. **This changes cancellation semantics on the query paths**:
+  each statement still honours the context while it runs, but once a statement
+  has executed, cancelling the request no longer reverts the write — the
+  implicit transaction commits when the context ends, after control has
+  returned to the caller (the exec path is unchanged: it commits synchronously
+  before returning). See
+  [PostgreSQL Native RLS → Limitations](../advanced/row-level-native#limitations)
+  for the full write-semantics contract.
+
+### Upgrade notes
+
+If you relied on mixed set-operator chains, split them into explicit steps —
+the previous behaviour differed per engine, so results were only ever
+trustworthy on one of them.
+
+## v1.3.0
+
+A drop-in minor. It rounds out the set-operator surface and makes its
+per-engine behaviour honest.
+
+### New
+
+- **`INTERSECT ALL` and `EXCEPT ALL`.** `IntersectAll` and `ExceptAll` are the
+  multiset variants of the existing `Intersect` / `Except`: they keep duplicate
+  rows instead of collapsing them. Available on PostgreSQL and MariaDB.
+
+### Fixed
+
+- **Set operators now report unsupported engines cleanly.** SQL Server and
+  SQLite have `INTERSECT` / `EXCEPT` but no `ALL` variants, and Oracle only
+  gained `INTERSECT ALL` / `MINUS ALL` in 21c — a version Quark does not
+  assume without a runtime probe; asking for an `ALL` variant on any of them
+  now returns `ErrUnsupportedFeature` instead of emitting SQL the engine
+  rejects with a confusing parser error. The documentation for `Intersect` /
+  `Except` also no longer claims MariaDB is unsupported — it has been
+  supported since 10.3.
+
+### Upgrade notes
+
+Nothing to do. Everything above is additive; existing code behaves exactly as
+before.
+
+## v1.2.2
+
+A correctness and security patch. Upgrade if you provision tenants from the CLI,
+paginate compound selects, or batch upserts.
+
+### Security
+
+- **`quark tenant provision` built SQL by string concatenation.** The tenant id
+  and strategy were interpolated straight into `CREATE DATABASE` / `CREATE
+  SCHEMA` / `INSERT`. The id is now validated against the TenantRouter contract
+  before any SQL runs, DDL identifiers are dialect-quoted, and the registry
+  `INSERT` is parameterised. If you provision tenants from names you do not
+  fully control, upgrade.
+
+### Fixed
+
+- **`Count()` and `Paginate` were wrong on compound selects.** They counted only
+  the first operand of a `UNION`/`INTERSECT`/`EXCEPT` — a query whose `List()`
+  returned 4 rows could report `Count() == 2`. The count is now wrapped as
+  `SELECT COUNT(*) FROM (<compound>)`.
+- **`Upsert`/`UpsertBatch` with no conflict columns** now return
+  `ErrInvalidQuery` on every engine, instead of panicking on MySQL/MariaDB and
+  behaving differently elsewhere.
+- **`Offset` without `Limit`** now renders the correct per-engine form, instead
+  of being silently dropped (MySQL) or producing invalid SQL (SQLite, MariaDB).
+- **SQL Server reads generated keys back from an upsert** via `MERGE … OUTPUT
+  INSERTED.<pk>` on both branches. Oracle's `MERGE` has no `RETURNING`, so the
+  primary key stays zero there — a documented limitation, not a bug.
+- **CLI commands now report reality.** `migrate up`/`down` and `seed run` exit
+  non-zero on an empty registry and print how to embed your models; `validate`
+  loads your Go structs and compares columns in both directions; `tenant
+  migrate` resolves the tenant's own DSN from `tenant.dsn_template` instead of
+  migrating the default database; `inspect table` and `model generate` exit
+  non-zero when the table does not exist; `init --dialect bogus` fails before
+  writing any files. Flags that never did anything (`--skip-seed`,
+  `--tenant-id`, `--env`) were removed.
+
+### New
+
+- **`UpsertBatch` chunks like `CreateBatch`**, and both now size their chunks
+  against per-dialect bind-parameter ceilings (~65k on PostgreSQL/MySQL/MariaDB,
+  ~32k on SQLite, ~2100 on SQL Server) instead of a single universal limit of
+  2000.
+- **`INTERSECT` and `EXCEPT` on MariaDB** (10.3+). MySQL still returns
+  `ErrUnsupportedFeature`: it gained them in 8.0.31, and Quark cannot assume
+  that version without probing.
+
+### Upgrade notes
+
+No breaking changes. The `--skip-seed`, `--tenant-id` and `--env` CLI flags were
+removed; they were accepted and ignored, so any script passing them was already
+not getting the behaviour it asked for, but a script that passes them will now
+fail rather than silently do nothing.
+
+## v1.2.1
+
+A CLI, docs and raw-query-guard patch. No query-builder or CRUD changes.
+
+### Fixed
+
+- **The CLI could not connect to PostgreSQL at all.** `quark init` wrote
+  `driver: postgresql`, but the registered driver is `pgx`, so every database
+  command failed with `unknown driver`; the Oracle driver was not even linked
+  into the binary. The CLI now maps dialect names to registered drivers and
+  links go-ora.
+- **Failures exit non-zero.** `migrate`, `inspect`, `tenant`, `seed` and `init`
+  printed their error and exited 0 — which meant a failing migration passed a CI
+  step. If you were relying on the exit code, this release is the one that makes
+  it trustworthy.
+- **`sync` no longer pretends.** Its `--dry-run`, `--safe`, `--no-transaction`
+  and `--models` flags did nothing and are gone. The command now checks the
+  connection and prints how to wire `client.Sync(...)`, which is what actually
+  performs a schema sync (it needs your compiled model types).
+- **The raw-query guard stopped rejecting valid SQL**: `--` inside a
+  single-quoted string literal (`'range--max'`) is allowed again, while `--`
+  outside one is still rejected.
+
+### New
+
+- `inspect --format json|yaml`, and `quark version` / `--version`.
+
+### Security
+
+- Dialect `Quote()` now doubles embedded closing quotes — defence in depth
+  underneath the existing identifier allowlist.
+
+### Upgrade notes
+
+No breaking changes. Expect previously-green CI steps to start failing honestly
+if they were running migrations that did not actually apply.
+
+## v1.2.0
+
+Scaling features that were deferred at v1.1.
+
+### New
+
+- **Cross-instance cache-stampede protection.** Opt in with
+  `WithCacheCrossInstance()`, backed by the optional `CacheLocker` capability
+  (implemented by the `memory` and `redis` stores). One instance wins the lock
+  and recomputes; the others wait and re-read, so a hot key expiring does not
+  send every process in your fleet to the database at once. If the lock backend
+  fails, it degrades to the previous in-process behaviour rather than erroring.
+- **Shard key from the entity.** Entities that implement `ShardKeyer` can route
+  writes with `WithShardKeyOf(ctx, entity)` instead of restating the key at the
+  call site.
+- **Cross-shard reads.** `ScatterGather` and `ScatterCount` run a query on every
+  shard concurrently and merge the results, with an explicit `ScatterMerge` you
+  supply. `COUNT` is the only aggregate merged for you.
+
+### Fixed
+
+- The `Update` zero-value warning no longer fires on nil pointers.
+- Faster reads: the scan plan is memoised and result slices are pre-sized.
+
+### Security
+
+- Toolchain pinned to go1.26.5 and pgx to v5.9.2, picking up the upstream
+  security fixes released since the v1.1.5 pins.
+
+### Upgrade notes
+
+No breaking changes. Everything above is opt-in.
+
+## v1.1.5
+
+### Fixed
+
+- **`SQLGuard` errors are now matchable.** A rejected `Where` operator, a raw
+  query missing placeholders, or a raw query matching a suspicious pattern now
+  wrap `quark.ErrInvalidQuery`, so `errors.Is(err, quark.ErrInvalidQuery)`
+  catches them. Previously they returned a message the sentinel did not wrap, so
+  error handling written against the sentinel silently missed them. No SQL or
+  behaviour change beyond the error value.
+
+This release also lands a documentation-versus-code audit: the published docs
+for query-builder joins, the `Dialect` interface, SQLGuard's lexical validation,
+the CLI subcommands, PostgreSQL's `CreateListener`, batch hooks and the
+composite-primary-key cache tag were corrected to match the shipped API.
+
+### Upgrade notes
+
+No breaking changes.
+
+## v1.1.4
+
+Five cross-engine correctness fixes.
+
+### Fixed
+
+- **`CreateBatch` back-fills generated primary keys on MySQL and SQL Server.**
+  Those engines cannot read keys back from a multi-row insert, so when the
+  primary key is auto-generated Quark now inserts per row and recovers each key
+  via `LastInsertId`/`SCOPE_IDENTITY`. `entity.ID` is populated on every engine
+  instead of being silently left at 0.
+- **Recursive CTEs work on Oracle and SQL Server.** `WithRecursive` no longer
+  emits the `RECURSIVE` keyword there (both engines infer recursion structurally
+  and reject the keyword), which previously failed with ORA-02000 or a T-SQL
+  syntax error.
+- **Paginated set operations work on Oracle and SQL Server.** A
+  `Union`/`Intersect`/`Except` with `Limit`/`Offset` and no explicit `OrderBy`
+  now emits a positional `ORDER BY 1` instead of ordering by the primary key,
+  which those engines rejected under a compound select.
+- **Batch and upsert lifecycle hooks fire.** `CreateBatch`/`UpdateBatch` run
+  `BeforeCreate`/`BeforeUpdate` per entity, and `Upsert`/`UpsertBatch` run
+  `BeforeCreate`, so timestamp, default and derived-field hooks apply to batched
+  and upserted rows. `After*` hooks remain single-write only.
+
+### Upgrade notes
+
+No breaking changes. If you relied on `Before*` hooks *not* running on batch
+paths, note that they now do.
+
+## v1.1.3
+
+### Fixed
+
+- **`CreateBatch` back-fills the generated primary key on Oracle**, via
+  `RETURNING … INTO`, instead of leaving `entity.ID` at 0.
+- **MariaDB JSON columns no longer drift in the schema diff.** The introspector
+  recognises a `longtext` carrying MariaDB's auto-added `json_valid(col)` check
+  as `json`, so the diff stops proposing a cosmetic `longtext → JSON` alter.
+- **Cache invalidation after a batch insert.** `CreateBatch` now invalidates the
+  table tag on PostgreSQL, SQLite and MariaDB, so a cached table-level read no
+  longer serves stale rows after a batch insert.
+
+### Upgrade notes
+
+No breaking changes.
+
+## v1.1.2
+
+### Fixed
+
+- **`ApplyPlan` creates a real primary key.** Creating a table from a plan now
+  renders the primary key — auto-increment for a single integer key, a
+  table-level constraint for composite keys — so a plan-created table is
+  interchangeable with one created by `Migrate`. `Column` gains a `PrimaryKey`
+  field, populated by introspection on all six engines and compared by the diff.
+  A primary-key change is reported but refused by the executor: applying it needs
+  a table rebuild.
+- **`PlanMigration` returns an empty plan on a freshly migrated database**, as
+  documented. Many-to-many join tables are now part of the desired schema, so the
+  diff no longer proposes a destructive `DROP` of a table Quark itself created;
+  and catalog-decorated defaults (`'x'::text`, `((1))`, unquoted MySQL strings,
+  bool-literal case) and type aliases (`timestamp without time zone`,
+  `tinyint(1)`, Oracle `TIMESTAMP(6)`) no longer produce cosmetic alter
+  operations.
+
+### Upgrade notes
+
+No breaking changes.
+
+## v1.1.1
+
+### Fixed
+
+- **Cache invalidation after an insert.** `Create` now invalidates the model's
+  table tag on every insert path — PostgreSQL/SQLite/MariaDB (`RETURNING`) and
+  SQL Server (`OUTPUT`/`SCOPE_IDENTITY`) — so a cached table-level read no longer
+  serves stale results after an insert.
+- **Boolean column defaults migrate everywhere.** `default:"1"` on a `bool` field
+  now migrates on all six engines (PostgreSQL gets `TRUE`/`FALSE`).
+- `ErrInvalidIdentifier` is reachable via `errors.Is` on every validation path.
+- `quark model generate --fields` creates its `--out` directory and reports
+  failures with a non-zero exit code.
+
+### Upgrade notes
+
+No breaking changes.
+
+## v1.1.0
+
+A hardening release: a systematic cross-engine pass over the whole public
+surface, plus the correctness fixes it surfaced — versioned migrations on SQL
+Server, a MariaDB schema-diff false positive, `CreateBatch` bind-parameter
+chunking, dialect-aware savepoints, multi-tenant write routing, and three
+eager-loading fixes. No new public API.
+
+### Upgrade notes
+
+No breaking changes.
+
+## v1.0.0
+
+The first stable release, and the commitment to keep the v0.13 public surface
+compatible for the whole `v1.x` line. Oracle joined the blocking CI matrix, which
+means all six dialects — PostgreSQL, MySQL, MariaDB, SQLite, SQL Server and
+Oracle — are now covered by tests that must pass before anything ships.
+
+The benchmark suite gained a code-generation tier (ent and sqlc), which
+confirmed that Quark's own code generation is a **type-safety** feature and not a
+speedup. We had originally aimed for a multiple-times speedup from codegen; the
+measurements did not support it, so we stopped claiming it. See
+[Benchmarks](./benchmarks).
+
+### Upgrade notes
+
+No new public API beyond v0.13, and no breaking changes since v0.9.0.
+
+## v0.13.0
+
+### New
+
+- **Read replicas.** `WithReplicas(dsns...)` opens read-only pools and spreads
+  reads across them while writes stay on the primary. `Sticky(ctx)` pins a read
+  to the primary when you need read-your-writes. A read that hits a transient
+  connection error on a replica **fails over to the primary**, and that replica
+  drops out of rotation for a cooldown (`WithReplicaDownCooldown`, default 5s).
+  Reads inside `Client.Tx` and under `RowLevelSecurityNative` always use the
+  primary.
+- A runnable stress and load harness (latency percentiles, throughput, pool
+  contention) under `benchmarks/stress`.
+
+### Fixed
+
+- Lower per-query allocation: the copy-on-write query-builder clone now shares
+  slices and appends within bounded capacity.
+
+### Upgrade notes
+
+No breaking changes. Replicas are opt-in.
+
+## v0.12.0
+
+### New
+
+- **Compile-time column type-safety**, on top of the code generator. `quark gen`
+  emits a `<Model>Columns` value of typed column handles per model, and the query
+  builder gains `Query.WhereP` — `WHERE` conditions with no magic column strings,
+  where both the column and the bound value are checked at compile time. It is
+  pure compile-time sugar: the string `Where(...)` API stays valid and the two are
+  interchangeable.
+
+### Fixed
+
+- The audit row diff is only built when an audit sink is configured (~9% fewer
+  allocations on insert).
+
+### Upgrade notes
+
+No breaking changes.
+
+## v0.11.0
+
+### New
+
+- **Opt-in code generation.** `quark gen` parses your model package and emits a
+  `quark_gen.go` per package, registering typed scanners on the read path and a
+  typed `INSERT` binder for single-integer-primary-key models. Reflection remains
+  the permanent default; codegen is fully opt-in and falls back to reflection for
+  anything it does not cover.
+- A reproducible benchmark module (Quark vs hand-written `database/sql` vs GORM).
+
+Profiling against that baseline measured what codegen actually buys: **~2–5% on
+scan and ~1% on insert**. Quark's per-operation CPU is dominated by
+`database/sql` and the database engine, not by reflection. Generate for
+correctness and forward compatibility, not for speed.
+
+### Upgrade notes
+
+No breaking changes.
+
+## v0.10.0
+
+### Fixed
+
+- **`JSON[T]` and `Array[T]` round-trip on SQL Server.** A
+  `[]byte`→VARBINARY→NVARCHAR conversion was corrupting them.
+- **Rolling back to a savepoint discards the hooks queued in that scope.**
+  `After*`, `OnCommit` and `OnRollback` callbacks registered inside a rolled-back
+  savepoint no longer fire their side-effects on the outer commit.
+- Raw SQL under `RowLevelSecurityNative` emits a
+  `quark.tenant.raw_under_native_rls` warning.
+
+### Upgrade notes
+
+No breaking changes. `WithDeadlockRetry` is now backed by a real cross-engine
+deadlock-retry integration test (PostgreSQL, MySQL, MariaDB).
+
+## v0.9.0
+
+### New
+
+- PostgreSQL engine-enforced multi-tenancy (`RowLevelSecurityNative` plus the
+  `quarktenant` policy CLI).
+- Transactional `After*` hooks that fire post-commit, plus `BeforeFind` and
+  `AfterFind`.
+- `Tx.OnCommit` / `Tx.OnRollback` and `quark.TxFromContext`.
+- An `EventBus` (`Client.UseEventBus`) and an optional audit log
+  (`Client.EnableAuditLog`) written atomically with each write.
+
+### Upgrade notes
+
+**Two breaking changes.** Follow the
+[v0.9.0 migration guide](https://github.com/jcsvwinston/quark/blob/main/docs/MIGRATION_v0.9.0.md).
+
+## v0.4.0 – v0.8.0
+
+Composable query builder (typed AST, subqueries, CTEs, window functions, set
+operators, pessimistic locking); schema-as-code migrations (introspection,
+pure-Go diff, transactional and resumable apply, the `quarkmigrate` CLI,
+backfill); observability and L2 cache (OpenTelemetry metrics, span redaction,
+slow-query log, stampede protection, deadlock retry); per-column timezones and
+`Array[T]`.
+
+## v0.3.0
+
+The first proper tag since v0.1.1. Bundles the early security and correctness
+fixes with rich types, dirty tracking, optimistic locking and soft-delete scopes.
+
+## v0.1.0
+
+Public release baseline.
+
+### Core
+
+- Generic `Query[T]` entry point through `quark.For[T](ctx, provider)`.
+- Immutable builder methods for predictable query composition.
+- CRUD helpers for create, update, delete, hard delete, upsert, and map updates.
+- Read helpers for `Find`, `First`, `List`, `Count`, aggregates, pagination, streaming, and cursors.
+- Validation through `validate` tags and model-level `Validate(context.Context) error`.
+- Lifecycle hooks for create, update, and delete paths.
+
+### Dialects
+
+- SQLite, PostgreSQL, MySQL, MariaDB, SQL Server, and Oracle dialects.
+- Dialect-specific placeholders, identifier quoting, pagination, upsert SQL, generated-ID handling, JSON extraction, and DDL helpers.
+- Custom dialect registration through `RegisterDialect`.
+
+### Schema
+
+- `Migrate` for table and many-to-many join-table creation.
+- `Sync` for additive changes, renames, and controlled destructive drops.
+- `CreateIndex` and `AddForeignKey` helpers.
+- Versioned Go migrations through `github.com/jcsvwinston/quark/migrate`.
+
+### Relations
+
+- `Preload` for `has_one`, `has_many`, `belongs_to`, many-to-many, and polymorphic relations.
+- Recursive association persistence for common aggregate saves.
+- Tenant context propagation through association loads and saves where tenant columns are present.
+
+### Production Features
+
+- Transactions, manual transactions, savepoints, and nested savepoint-style callbacks.
+- `TenantRouter` with database-per-tenant, schema-per-tenant, and row-level strategies.
+- Cache abstraction with memory and Redis stores.
+- Query observers, middleware, and OpenTelemetry middleware.
+- SQLGuard validation for identifiers, operators, and raw-query escape hatches.
+
+## Compatibility Notes
+
+- The `cmd/quark` CLI ships and is installable via `go install` — it provides migration, tenant, and `quark gen` codegen subcommands ([Operational Workflows](../guides/cli)).
+- `DeleteBy` and `DeleteBatch` perform hard deletes.
+- `Select` accepts simple identifiers rather than arbitrary SQL expressions.
+- Raw SQL APIs require `AllowRawQueries: true`.
+- Migration commands that use `migrate.Migrator` should use a client configured with `AllowRawQueries: true`.

@@ -1,0 +1,64 @@
+---
+title: Type matrix
+description: The SQL type Quark generates for each Go type, per engine.
+---
+
+# Type matrix
+
+What `Migrate` and `PlanMigration` generate for each Go type, on each engine.
+
+**This page is generated from the type mapper itself**, so it cannot drift
+from what the code does. A hand-written version was wrong about integer
+widths for as long as it existed.
+
+| Go type | PostgreSQL | MySQL | MariaDB | SQLite | SQL Server | Oracle |
+| --- | --- | --- | --- | --- | --- | --- |
+| `string` | `TEXT` | `VARCHAR(255)` | `VARCHAR(255)` | `TEXT` | `NVARCHAR(255)` | `VARCHAR2(255)` |
+| `string` with `size=255` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` | `NVARCHAR(255)` | `VARCHAR2(255)` |
+| `bool` | `BOOLEAN` | `BOOLEAN` | `BOOLEAN` | `BOOLEAN` | `BIT` | `NUMBER(1)` |
+| `int8` / `int16` | `SMALLINT` | `SMALLINT` | `SMALLINT` | `SMALLINT` | `SMALLINT` | `NUMBER(5)` |
+| `int32` | `INTEGER` | `INTEGER` | `INTEGER` | `INTEGER` | `INTEGER` | `NUMBER(10)` |
+| `int` / `int64` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `NUMBER(19)` |
+| `uint64` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `NUMBER(19)` |
+| `float32` | `REAL` | `REAL` | `REAL` | `REAL` | `REAL` | `BINARY_FLOAT` |
+| `float64` | `DOUBLE PRECISION` | `DOUBLE` | `DOUBLE` | `REAL` | `FLOAT(53)` | `BINARY_DOUBLE` |
+| `float64` with `precision=18,scale=4` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` |
+| `time.Time` | `TIMESTAMP` | `DATETIME` | `DATETIME` | `DATETIME` | `DATETIME2` | `TIMESTAMP` |
+| `[]byte` | `BYTEA` | `BLOB` | `BLOB` | `BLOB` | `VARBINARY(MAX)` | `BLOB` |
+| `time.Duration` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `NUMBER(19)` |
+| integer primary key | `BIGSERIAL PRIMARY KEY` | `BIGINT AUTO_INCREMENT PRIMARY KEY` | `BIGINT AUTO_INCREMENT PRIMARY KEY` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `BIGINT IDENTITY(1,1) PRIMARY KEY` | `NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY` |
+| `string` primary key | `VARCHAR(36) PRIMARY KEY` | `VARCHAR(36) PRIMARY KEY` | `VARCHAR(36) PRIMARY KEY` | `VARCHAR(36) PRIMARY KEY` | `NVARCHAR(36) PRIMARY KEY` | `VARCHAR2(36) PRIMARY KEY` |
+| `[]string`, `[]int64`, `map[string]any` | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` |
+
+## Notes
+
+- **int / int64** — Go's `int` is 64-bit on every supported platform.
+- **uint64** — Stored signed; values above 2⁶³−1 do not fit.
+- **float64 with precision=18,scale=4** — Use this for money: binary floats cannot represent every decimal.
+- **time.Duration** — Stored as an integer count of nanoseconds.
+- **integer primary key** — Auto-increment.
+- **string primary key** — For UUID/ULID keys the caller supplies.
+- **[]string, []int64, map[string]any** — Serialised as text; no native array or JSONB column yet.
+
+## Integer width
+
+Integers map by the width of the Go type. They used to collapse onto a
+single `INTEGER`, which is four bytes on PostgreSQL, MySQL and SQL
+Server: an `int64` past 2³¹ was rejected by those engines while
+looking fine on SQLite, whose `INTEGER` is dynamically sized.
+Auto-increment keys were narrow for the same reason and ran out at
+2,147,483,647 rows.
+
+If you have tables created before this changed, `PlanMigration`
+reports the widening as an `ALTER COLUMN`. Applying it is safe —
+widening loses no data — but on a large table the engine may rewrite it, so
+run it when a rewrite is acceptable rather than at deploy time.
+
+## Floating point
+
+`REAL` is single precision on PostgreSQL: about seven significant
+digits, where a `float64` carries fifteen. SQLite's `REAL` is an
+8-byte IEEE double and was never affected.
+
+For money, use `precision` and `scale` and get a `DECIMAL`:
+no binary float represents every decimal fraction exactly.
