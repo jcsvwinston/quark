@@ -323,6 +323,47 @@ go run ./migrations apply     # apply the plan
 
 A runnable example lives at `examples/migrations/` (SQLite by default).
 
+### Rolling a plan back
+
+`Plan.Down()` returns the plan that undoes one: every operation inverted, in
+reverse order.
+
+```go
+plan, _ := client.PlanMigration(ctx, &User{})
+
+down, err := plan.Down()   // capture it BEFORE applying
+if err != nil {
+    return err
+}
+if err := client.ApplyPlan(ctx, plan); err != nil {
+    return err
+}
+
+// …later, to roll back:
+err = client.ApplyPlan(ctx, down)
+```
+
+Reverse order matters as much as the inversion: a plan that creates a table
+and then indexes it has to drop the index first, or the drop refers to
+something that is already gone.
+
+**Capture `Down` before you apply the plan.** Nothing stops you calling it
+afterwards — a `Plan` is a value — but a plan built from a schema you have
+already changed describes a different starting point.
+
+:::caution Some operations cannot be reversed from a plan
+`DROP TABLE` records the table's **name**, not its columns, keys and indexes.
+`DROP COLUMN` records a name, not a type, nullability or default. There is
+nothing in the plan to rebuild them from, so `Down` returns
+`ErrIrreversibleOperation` naming the operation instead of emitting a partial
+rollback.
+
+That refusal is the point: a rollback that silently restores a table without
+its indexes reports success and leaves the schema subtly different. When you
+need to reverse a drop, write the `up`/`down` pair as a versioned migration,
+where both directions are yours to state.
+:::
+
 ## Backfilling data
 
 When a migration adds a column you then have to populate, `Backfill` handles the

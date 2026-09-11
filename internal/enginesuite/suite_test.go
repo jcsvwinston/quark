@@ -181,6 +181,14 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testWindow(ctx, t, client)
 	})
 
+	t.Run("MigrationIsReversible", func(t *testing.T) {
+		testMigrationIsReversible(ctx, t, client)
+	})
+
+	t.Run("DownRefusesWhatItCannotRebuild", func(t *testing.T) {
+		testDownRefusesWhatItCannotRebuild(ctx, t, client)
+	})
+
 	t.Run("TypeWidths", func(t *testing.T) {
 		testTypeWidths(ctx, t, client)
 	})

@@ -1767,6 +1767,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(Plan).Down",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(Plan).Hash",
       "kind": "method"
     },
@@ -2208,6 +2213,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrInvalidTimezone",
+      "kind": "var"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "ErrIrreversibleOperation",
       "kind": "var"
     },
     {
