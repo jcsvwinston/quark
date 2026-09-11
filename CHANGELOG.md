@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0](https://github.com/jcsvwinston/quark/compare/v1.13.0...v1.14.0) (2026-09-11)
+
+
+### Added
+
+* add FromCTE, and correct two bench cases S0 measured wrong ([#391](https://github.com/jcsvwinston/quark/issues/391)) ([e87d003](https://github.com/jcsvwinston/quark/commit/e87d003e30b476a60e4a05edf72968b850a1a08c))
+* add Plan.Down, the inverse of a migration plan ([#394](https://github.com/jcsvwinston/quark/issues/394)) ([e2988bf](https://github.com/jcsvwinston/quark/commit/e2988bfe4524adb713ee72dfc30f0e206725cbc0))
+* close the last six query-bench gaps ([#392](https://github.com/jcsvwinston/quark/issues/392)) ([5338644](https://github.com/jcsvwinston/quark/commit/5338644caaffcf97e441a13b5643c3a760d284a6))
+* express COUNT(DISTINCT), CASE, JSON projection and the rest of the window functions ([#389](https://github.com/jcsvwinston/quark/issues/389)) ([cf6afdc](https://github.com/jcsvwinston/quark/commit/cf6afdc626feab03f2792de603a07b8bfaf48478))
+* refuse a db tag written in the Nucleus pkg/model grammar ([#395](https://github.com/jcsvwinston/quark/issues/395)) ([5be7c42](https://github.com/jcsvwinston/quark/commit/5be7c425e6d2c1fffcb57f63060767266e8bcccf))
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.13.0 ([#396](https://github.com/jcsvwinston/quark/issues/396)) ([7de0e34](https://github.com/jcsvwinston/quark/commit/7de0e344507445356dad62c540d4553702c76563))
+* map integers and floats by width (QK-21) ([#393](https://github.com/jcsvwinston/quark/issues/393)) ([a7c1a7a](https://github.com/jcsvwinston/quark/commit/a7c1a7af01ba45cf373e77d39230ea3a9efee4f9))
+
 ## [1.13.0](https://github.com/jcsvwinston/quark/compare/v1.12.0...v1.13.0) (2026-09-10)
 
 

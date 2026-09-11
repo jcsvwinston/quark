@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/jcsvwinston/quark/compare/cmd/quark/v1.0.0...cmd/quark/v1.0.1) (2026-09-11)
+
+
+### Fixed
+
+* map integers and floats by width (QK-21) ([#393](https://github.com/jcsvwinston/quark/issues/393)) ([a7c1a7a](https://github.com/jcsvwinston/quark/commit/a7c1a7af01ba45cf373e77d39230ea3a9efee4f9))
+
 ## 1.0.0 (2026-09-10)
 
 
