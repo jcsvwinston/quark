@@ -33,15 +33,21 @@ func testMigrationIsReversible(ctx context.Context, t *testing.T, client *quark.
 	dropTable(client, table)
 	defer dropTable(client, table)
 
-	before, err := schemaFingerprint(ctx, client)
+	before, err := schemaFingerprint(ctx, client, table)
 	if err != nil {
 		t.Fatalf("fingerprint before: %v", err)
 	}
 
-	plan, err := client.PlanMigration(ctx, &revArticle{})
+	full, err := client.PlanMigration(ctx, &revArticle{})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
+	// PlanMigration compares the models it is given against the WHOLE
+	// catalog, so in a shared suite database it also proposes dropping the
+	// tables the other tests left behind. Those drops are not reversible —
+	// nothing records their shape — and they are not what this measures, so
+	// the plan is narrowed to the table under test.
+	plan := onlyTable(full, table)
 	if plan.IsEmpty() {
 		t.Fatal("plan is empty; the table should not exist yet")
 	}
@@ -56,7 +62,7 @@ func testMigrationIsReversible(ctx context.Context, t *testing.T, client *quark.
 	if err := client.ApplyPlan(ctx, plan); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	applied, err := schemaFingerprint(ctx, client)
+	applied, err := schemaFingerprint(ctx, client, table)
 	if err != nil {
 		t.Fatalf("fingerprint after apply: %v", err)
 	}
@@ -67,7 +73,7 @@ func testMigrationIsReversible(ctx context.Context, t *testing.T, client *quark.
 	if err := client.ApplyPlan(ctx, down); err != nil {
 		t.Fatalf("apply down: %v", err)
 	}
-	after, err := schemaFingerprint(ctx, client)
+	after, err := schemaFingerprint(ctx, client, table)
 	if err != nil {
 		t.Fatalf("fingerprint after down: %v", err)
 	}
@@ -96,19 +102,47 @@ func testDownRefusesWhatItCannotRebuild(ctx context.Context, t *testing.T, clien
 	}
 }
 
+// onlyTable keeps the operations that touch one table. See the call site.
+func onlyTable(p quark.Plan, table string) quark.Plan {
+	var ops []quark.Operation
+	for _, op := range p.Ops {
+		switch o := op.(type) {
+		case quark.OpCreateTable:
+			if strings.EqualFold(o.Table.Name, table) {
+				ops = append(ops, op)
+			}
+		case quark.OpCreateIndex:
+			if strings.EqualFold(o.Table, table) {
+				ops = append(ops, op)
+			}
+		case quark.OpAddColumn:
+			if strings.EqualFold(o.Table, table) {
+				ops = append(ops, op)
+			}
+		case quark.OpAddForeignKey:
+			if strings.EqualFold(o.Table, table) {
+				ops = append(ops, op)
+			}
+		}
+	}
+	return quark.Plan{Ops: ops}
+}
+
 // schemaFingerprint renders the catalog as a stable string: table and column
 // names with their types and nullability, sorted. Comparing fingerprints
 // catches a rollback that leaves a column or an index behind, which comparing
 // table names alone would not.
-func schemaFingerprint(ctx context.Context, client *quark.Client) (string, error) {
+func schemaFingerprint(ctx context.Context, client *quark.Client, only string) (string, error) {
 	s, err := client.IntrospectSchema(ctx)
 	if err != nil {
 		return "", err
 	}
 	var lines []string
 	for _, tb := range s.Tables {
-		// Quark's own bookkeeping tables move independently of the models.
-		if strings.HasPrefix(strings.ToLower(tb.Name), "quark_") {
+		// Only the table under test: the suite shares a database, so other
+		// tests' tables come and go for reasons that have nothing to do with
+		// this one.
+		if !strings.EqualFold(tb.Name, only) {
 			continue
 		}
 		for _, c := range tb.Columns {
