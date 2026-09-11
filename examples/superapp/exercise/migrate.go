@@ -110,6 +110,23 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 		return fmt.Errorf("plan round-trip: %w", err)
 	}
 	rec.Note(QF("(Plan).IsEmpty"), QF("(Plan).String"), QF("Plan"))
+
+	// Plan.Down sobre un plan vacío es vacío, y sobre uno irreversible da
+	// error en vez de un rollback que dice que fue bien y deja el esquema
+	// distinto. El ida y vuelta completo contra cada motor lo cubre
+	// internal/enginesuite/migrate_reversible_test.go.
+	emptyDown, derr := p1.Down()
+	if derr != nil {
+		return fmt.Errorf("Plan.Down de un plan vacío: %w", derr)
+	}
+	if !emptyDown.IsEmpty() {
+		return fmt.Errorf("Plan.Down de un plan vacío devolvió %d operaciones", len(emptyDown.Ops))
+	}
+	irreversible := quark.Plan{Ops: []quark.Operation{quark.OpDropTable{Table: "superapp_probe"}}}
+	if _, err := irreversible.Down(); !errors.Is(err, quark.ErrIrreversibleOperation) {
+		return fmt.Errorf("Plan.Down de un DROP TABLE: esperaba ErrIrreversibleOperation, got %v", err)
+	}
+	rec.Note(QF("(Plan).Down"), QF("ErrIrreversibleOperation"))
 	if !p1.IsEmpty() {
 		return fmt.Errorf("round-trip roto: el plan post-Migrate no es vacío:\n%s", p1.String())
 	}
