@@ -89,11 +89,13 @@ func TestMigrateCreateFromModelsPostgres(t *testing.T) {
 
 	for _, want := range []string{
 		`CREATE TABLE IF NOT EXISTS users`,
-		`SERIAL PRIMARY KEY`,
+		// 64-bit key and 64-bit float (QK-21): SERIAL is four bytes, and
+		// PostgreSQL's REAL is single precision.
+		`BIGSERIAL PRIMARY KEY`,
 		`VARCHAR(190) UNIQUE`,
 		`NOT NULL`,
 		`CREATE TABLE IF NOT EXISTS articles`,
-		`score REAL`,
+		`score DOUBLE PRECISION`,
 		`BOOLEAN`,
 		`REFERENCES users(id)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_author_id`,

@@ -34,11 +34,11 @@ type twWide struct {
 // testTypeWidths runs inside the shared per-engine suite.
 func testTypeWidths(ctx context.Context, t *testing.T, client *quark.Client) {
 	t.Helper()
-	dropTable(client, "tw_wides")
+	dropTable(client, quark.GetModelMeta[twWide]().Table)
 	if err := client.Migrate(ctx, &twWide{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	defer dropTable(client, "tw_wides")
+	defer dropTable(client, quark.GetModelMeta[twWide]().Table)
 
 	// Values chosen to fail on the narrow types and survive the wide ones.
 	const bigVal = int64(9_007_199_254_740_993) // > 2^53, and far past 2^31
@@ -87,11 +87,11 @@ type twAutoPK struct {
 
 func testAutoPKWidth(ctx context.Context, t *testing.T, client *quark.Client) {
 	t.Helper()
-	dropTable(client, "tw_auto_pks")
+	dropTable(client, quark.GetModelMeta[twAutoPK]().Table)
 	if err := client.Migrate(ctx, &twAutoPK{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	defer dropTable(client, "tw_auto_pks")
+	defer dropTable(client, quark.GetModelMeta[twAutoPK]().Table)
 
 	// Assigning a key past the 32-bit range proves the column reaches it,
 	// without inserting two billion rows. Identity columns refuse a
@@ -119,9 +119,12 @@ func testAutoPKWidth(ctx context.Context, t *testing.T, client *quark.Client) {
 	if serr != nil {
 		t.Fatalf("introspect: %v", serr)
 	}
-	col, ok := findColumn(schema, "tw_auto_pks", "id")
+	// Ask the metadata for the table name rather than guessing it: the
+	// pluraliser turns twAutoPK into tw_auto_p_ks, not tw_auto_pks.
+	table := quark.GetModelMeta[twAutoPK]().Table
+	col, ok := findColumn(schema, table, "id")
 	if !ok {
-		t.Fatalf("column tw_auto_pks.id not found in the catalog")
+		t.Fatalf("column %s.id not found in the catalog", table)
 	}
 	if !isWideIntegerType(col.Type) {
 		t.Errorf("the identity key column is %q, want a 64-bit type\n"+
