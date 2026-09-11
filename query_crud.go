@@ -1190,6 +1190,31 @@ func (q *BaseQuery) buildUpdateMap(data map[string]any) (string, []any, error) {
 			return "", nil, err
 		}
 
+		// An Expr value is SQL, not data: `stock = stock - 1` has to reach
+		// the statement as an expression over the column's current value.
+		// Before this it was handed to database/sql as a driver argument,
+		// which failed with "unsupported type quark.colExpr, a struct" —
+		// and the read-modify-write alternative is not equivalent, because
+		// it loses the atomicity that is the reason to write it in SQL.
+		if e, ok := val.(Expr); ok {
+			rendered, eargs, err := e.ToSQL(qmarkDialect{Dialect: q.dialect}, q.guard)
+			if err != nil {
+				return "", nil, err
+			}
+			sub, n, err := substitutePathMarkers(rendered, len(eargs), q.dialect, argIndex)
+			if err != nil {
+				return "", nil, err
+			}
+			if n != len(eargs) {
+				return "", nil, fmt.Errorf("%w: UpdateMap expression for %q expected %d markers, substituted %d",
+					ErrInvalidQuery, col, len(eargs), n)
+			}
+			setClauses = append(setClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(col), sub))
+			args = append(args, eargs...)
+			argIndex += len(eargs)
+			continue
+		}
+
 		setClauses = append(setClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(col), q.dialect.Placeholder(argIndex)))
 		args = append(args, q.bindColumnArg(col, val))
 		argIndex++

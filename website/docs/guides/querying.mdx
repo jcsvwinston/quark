@@ -262,6 +262,23 @@ Oracle also rejects a bare aggregate in a query that does not group
 (`ORA-00937`), so pair `CountDistinct` with `GroupBy` there.
 :::
 
+### Updating a column from its own value
+
+`UpdateMap` treats an `Expr` value as SQL rather than data, so an update can
+read the column it writes:
+
+```go
+quark.For[Product](ctx, client).Where("id", "=", id).
+    UpdateMap(map[string]any{
+        "stock": quark.Subtract(quark.Col("stock"), quark.Lit(1)),
+    })
+```
+
+`Add`, `Subtract`, `Multiply` and `Divide` render parenthesised arithmetic.
+This is **not** the same as loading the row, subtracting in Go and writing it
+back: that version loses the atomicity, and two concurrent decrements can
+leave one of them unapplied.
+
 ## JSON predicates
 
 `WhereJSON` asks the dialect to build a JSON-extraction comparison:
@@ -362,6 +379,60 @@ Each segment is validated with the same identifier rules as everything else and
 quoted separately (`"users"."id"`), so the dotted form adds no injection
 surface. Without a join the historical rule stands: dotted names are rejected.
 
+### Full, cross, and literals in the ON clause
+
+`FullJoin` and `CrossJoin` complete the set. `CrossJoin` returns the query
+directly — a cartesian product has no `ON` clause to attach:
+
+```go
+quark.For[Order](ctx, client).CrossJoin("calendar").List()
+```
+
+`On` and `OnRaw` take caller strings, so they are held to an identifier-only
+grammar and reject literals: the `ON` clause is one of the few places a string
+would reach SQL without a bind marker. `OnExpr` takes an expression instead,
+whose literals bind:
+
+```go
+quark.For[Order](ctx, client).
+    LeftJoin("order_items").
+    OnExpr(quark.And(
+        quark.Eq(quark.Col("orders.id"), quark.Col("order_items.order_id")),
+        quark.Gt(quark.Col("order_items.qty"), quark.Lit(1)),
+    )).
+    List()
+```
+
+That difference matters for an outer join. Moving the same predicate to
+`WHERE` turns a `LEFT JOIN` into an inner one: the unmatched rows it was meant
+to preserve arrive with NULLs, and the `WHERE` drops them.
+
+:::caution `FULL OUTER JOIN` on MySQL and MariaDB
+Neither implements it. Quark does not rewrite it into the LEFT-UNION-RIGHT
+form they need — the rewrite changes how the query plans and how duplicates
+behave, and doing it silently would hide that.
+:::
+
+### Projecting onto a DTO
+
+`For[T]` takes both the row shape **and** the source table from `T`, so a
+struct that is a result shape rather than a model sends the query at a table
+named after the DTO. `FromTable` names the source:
+
+```go
+type OrderEmail struct {
+    OrderID int64  `db:"order_id"`
+    Email   string `db:"email"`
+}
+
+rows, err := quark.For[OrderEmail](ctx, client).
+    FromTable("orders").
+    Join("users").On("orders.user_id", "=", "users.id").
+    SelectExpr("order_id", quark.Col("orders.id")).
+    SelectExpr("email", quark.Col("users.email")).
+    List()
+```
+
 ## Reusable scopes
 
 A scope is a plain function — handy for authorization boundaries, business
@@ -382,6 +453,23 @@ users, err := quark.For[User](ctx, client).
     Apply(ActiveUsers, CreatedAfter(time.Now().AddDate(0, -1, 0))).
     List()
 ```
+
+### Filtering what a relation loads
+
+`Preload` is variadic over relation **names**, so a condition cannot ride in
+it. `PreloadWhere` takes one:
+
+```go
+// users, each carrying only their paid orders
+quark.For[User](ctx, client).
+    PreloadWhere("Orders", "status", "=", "paid").
+    List()
+```
+
+The condition applies to the relation's own query: it narrows which children
+load, and does not drop parents that end up with none. Repeated calls on the
+same relation AND together, and the relation is registered for preloading, so
+`PreloadWhere` alone is enough.
 
 ## Streaming large result sets
 
@@ -653,6 +741,28 @@ emulate it — an emulation would differ on NULLs and frames — so a query usin
 **`LastValue` rarely means what it reads like.** With the default frame the
 "last" row of the window is the current one, so it returns the current row's
 value. Windows do not expose a frame clause yet.
+
+### Frames
+
+`Rows` and `Range` set which rows of the partition the function actually sees:
+
+```go
+// three-row moving average
+w := quark.NewWindow().
+    OrderBy(quark.Col("day"), false).
+    Rows(quark.Preceding(2), quark.CurrentRow())
+```
+
+Bounds come from `Preceding`, `Following`, `CurrentRow`, `UnboundedPreceding`
+and `UnboundedFollowing`. `Rows` counts physical rows; `Range` counts values of
+the `ORDER BY` expression, so rows comparing equal enter and leave together.
+
+:::caution A window without a frame is not a smaller query
+With an `ORDER BY` and no frame, the default runs from the start of the
+partition through the current row. That default is what makes
+`SUM() OVER (ORDER BY …)` a running total — and it is also why a "moving
+average" written without a frame is silently a running average instead.
+:::
 
 The emitted shapes are standard SQL, and run on PostgreSQL, MySQL 8+,
 MariaDB 10.2+, SQL Server, Oracle, and SQLite 3.25+.

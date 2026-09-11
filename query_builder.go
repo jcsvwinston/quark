@@ -36,10 +36,16 @@ type order struct {
 
 // join represents a JOIN clause.
 type join struct {
-	joinType string // "INNER JOIN", "LEFT JOIN", "RIGHT JOIN"
+	joinType string // "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL OUTER JOIN", "CROSS JOIN"
 	table    string
-	onClause string
+	onClause string // empty for CROSS JOIN, which has no ON
 	args     []any
+	// astON marks an ON clause rendered by the expression AST rather than
+	// typed as a string. It carries '?' markers for args and is NOT run
+	// through guard.ValidateJoinOn: that grammar exists to police a caller
+	// string, and an AST clause never was one — its literals are bound, not
+	// interpolated.
+	astON bool
 }
 
 // BaseQuery holds the non-generic state of a database query.
@@ -73,9 +79,12 @@ type BaseQuery struct {
 	orderBy    []order
 	joins      []join
 	preloads   []string
-	limit      int
-	offset     int
-	hasLimit   bool // tracks if Limit() was explicitly called
+	// preloadConds carries per-relation filters set by PreloadWhere, keyed
+	// by the relation path exactly as Preload names it.
+	preloadConds map[string][]condition
+	limit        int
+	offset       int
+	hasLimit     bool // tracks if Limit() was explicitly called
 	// allowUnbounded marks the read as intentionally unbounded (set by
 	// AllowUnbounded): the strict-reads gate (#247) skips the query even
 	// when no explicit Limit() is present. No effect without
@@ -184,6 +193,54 @@ func ownedAppend[E any](s []E, v ...E) []E {
 func (q *Query[T]) Preload(relations ...string) *Query[T] {
 	c := q.clone()
 	c.preloads = ownedAppend(c.preloads, relations...)
+	return c
+}
+
+// PreloadWhere eager-loads a relation and filters the related rows.
+//
+// Preload is variadic over relation NAMES, which makes a filter impossible to
+// express and easy to get wrong: Preload("Orders", "status = ?") compiles,
+// reads the second argument as another relation, and fails with "relation not
+// found" — but only once the parent query returns rows, so an empty table
+// hides the mistake entirely.
+//
+//	// users, each carrying only their paid orders
+//	quark.For[User](ctx, client).
+//	    PreloadWhere("Orders", "status", "=", "paid").
+//	    List()
+//
+// The condition applies to the relation's own query, so it narrows which
+// children load — it does not drop parents that end up with none. Repeated
+// calls on the same relation AND together. The relation is registered for
+// preloading, so PreloadWhere alone is enough; there is no need to also call
+// Preload for it.
+//
+// column and operator go through the same identifier and operator barriers as
+// Where.
+func (q *Query[T]) PreloadWhere(relation, column, operator string, value any) *Query[T] {
+	c := q.clone()
+	already := false
+	for _, p := range c.preloads {
+		if p == relation {
+			already = true
+			break
+		}
+	}
+	if !already {
+		c.preloads = ownedAppend(c.preloads, relation)
+	}
+	// Copy on write: clone() shares the map with the receiver.
+	conds := make(map[string][]condition, len(c.preloadConds)+1)
+	for k, v := range c.preloadConds {
+		conds[k] = append([]condition(nil), v...)
+	}
+	conds[relation] = append(conds[relation], condition{
+		column:   column,
+		operator: operator,
+		value:    value,
+		logic:    "AND",
+	})
+	c.preloadConds = conds
 	return c
 }
 
@@ -481,6 +538,46 @@ type JoinBuilder[T any] struct {
 //	quark.For[Order](ctx, client).
 //	    Join("users").On("users.id", "=", "orders.user_id").
 //	    List()
+//
+// OnExpr closes the JOIN with a condition built from the expression AST,
+// which is what makes a literal in the ON clause possible:
+//
+//	q.LeftJoin("order_items").OnExpr(quark.And(
+//	    quark.Eq(quark.Col("orders.id"), quark.Col("order_items.order_id")),
+//	    quark.Gt(quark.Col("order_items.qty"), quark.Lit(1)),
+//	))
+//
+// On and OnRaw take caller strings, so they are held to an identifier-only
+// grammar and reject literals — the ON clause is one of the few places where
+// a string goes into SQL without a bind marker. An AST clause is not a
+// string: its literals bind as parameters, so the restriction does not apply.
+//
+// The difference is not cosmetic for an outer join. Moving the same predicate
+// to WHERE turns a LEFT JOIN into an inner one, because the unmatched rows it
+// was meant to preserve arrive with NULLs and the WHERE drops them.
+func (b *JoinBuilder[T]) OnExpr(e Expr) *Query[T] {
+	c := b.q.clone()
+	if e == nil {
+		c.err = fmt.Errorf("%w: OnExpr requires a non-nil expression", ErrInvalidQuery)
+		return c
+	}
+	// Render with '?' markers; buildSelect renumbers them for the dialect at
+	// the position the JOIN occupies, the same way SelectExpr does.
+	sql, args, err := e.ToSQL(qmarkDialect{Dialect: c.dialect}, c.guard)
+	if err != nil {
+		c.err = err
+		return c
+	}
+	c.joins = ownedAppend(c.joins, join{
+		joinType: b.joinType,
+		table:    b.table,
+		onClause: sql,
+		args:     args,
+		astON:    true,
+	})
+	return c
+}
+
 func (b *JoinBuilder[T]) On(left, op, right string) *Query[T] {
 	c := b.q.clone()
 	onClause := left + " " + op + " " + right
@@ -532,6 +629,25 @@ func (q *Query[T]) LeftJoin(table string) *JoinBuilder[T] {
 // RightJoin opens a RIGHT JOIN. See Join for ON-clause grammar.
 func (q *Query[T]) RightJoin(table string) *JoinBuilder[T] {
 	return &JoinBuilder[T]{q: q, joinType: "RIGHT JOIN", table: table}
+}
+
+// FullJoin opens a FULL OUTER JOIN. See Join for ON-clause grammar.
+//
+// MySQL and MariaDB do not implement it. Quark does not rewrite it into the
+// LEFT-UNION-RIGHT form those engines need — the rewrite changes how the
+// query plans and how duplicates behave, and doing it silently would hide
+// that. Write the union yourself there, or use an engine that has it.
+func (q *Query[T]) FullJoin(table string) *JoinBuilder[T] {
+	return &JoinBuilder[T]{q: q, joinType: "FULL OUTER JOIN", table: table}
+}
+
+// CrossJoin appends a CROSS JOIN — the cartesian product, which takes no ON
+// clause. It returns the Query directly rather than a JoinBuilder, because
+// there is no condition to attach.
+func (q *Query[T]) CrossJoin(table string) *Query[T] {
+	c := q.clone()
+	c.joins = ownedAppend(c.joins, join{joinType: "CROSS JOIN", table: table})
+	return c
 }
 
 // Cache enables caching for this query results with the given TTL.

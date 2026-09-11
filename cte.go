@@ -138,3 +138,36 @@ func (q *Query[T]) FromCTE(name string) *Query[T] {
 	c.fromCTE = name
 	return c
 }
+
+// FromTable reads from a named table instead of the one derived from T.
+//
+// It exists for projections. For[T] takes both the row shape and the source
+// table from T, so a struct that is a result shape rather than a model — the
+// columns of a join, an aggregate roll-up — sends the query at a table named
+// after the DTO, which does not exist:
+//
+//	type OrderEmail struct {
+//	    OrderID int64  `db:"order_id"`
+//	    Email   string `db:"email"`
+//	}
+//
+//	rows, err := quark.For[OrderEmail](ctx, client).
+//	    FromTable("orders").
+//	    Join("users").On("orders.user_id", "=", "users.id").
+//	    SelectExpr("order_id", quark.Col("orders.id")).
+//	    SelectExpr("email", quark.Col("users.email")).
+//	    List()
+//
+// Like FromCTE it changes reads only, and for the same reason: a projection
+// is not a write target. The soft-delete and tenant scopes follow the same
+// rules as FromCTE — see its documentation, and note that a DTO has no model
+// metadata to derive them from in the first place.
+func (q *Query[T]) FromTable(name string) *Query[T] {
+	c := q.clone()
+	if err := c.guard.ValidateIdentifier(name); err != nil {
+		c.err = err
+		return c
+	}
+	c.fromCTE = name
+	return c
+}
