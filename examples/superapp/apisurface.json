@@ -7,6 +7,21 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*CaseBuilder).Else",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*CaseBuilder).ToSQL",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*CaseBuilder).When",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).AcquireMigrationLock",
       "kind": "method"
     },
@@ -1952,6 +1967,16 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "Case",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "CaseBuilder",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "Check",
       "kind": "type"
     },
@@ -1989,6 +2014,16 @@
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ColumnTypeMapper",
       "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "CountDistinct",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "CumeDist",
+      "kind": "func"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2202,6 +2237,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "FirstValue",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "For",
       "kind": "func"
     },
@@ -2302,12 +2342,22 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "JSONExtract",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "JoinBuilder",
       "kind": "type"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Lag",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "LastValue",
       "kind": "func"
     },
     {
@@ -2432,6 +2482,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "NTile",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "Ne",
       "kind": "func"
     },
@@ -2518,6 +2573,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Notify",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "NthValue",
       "kind": "func"
     },
     {
@@ -2624,6 +2684,11 @@
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Page",
       "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "PercentRank",
+      "kind": "func"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
