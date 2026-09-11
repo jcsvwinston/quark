@@ -201,18 +201,20 @@ func qbFamilyC() []qbCase {
 					HavingExpr(quark.Gt(quark.Func("SUM", quark.Col("total")), quark.Lit(1000))).Limit(10).List()
 				return err
 			}},
-		{"Q24", "aggregation", "COUNT(DISTINCT col)", qbNoAPI,
-			`DISTINCT is not in the AST function whitelist and Col("DISTINCT user_id") is rejected as an identifier`,
+		{"Q24", "aggregation", "COUNT(DISTINCT col)", qbTyped,
+			`CountDistinct, added by S1. DISTINCT is a modifier on the argument, not a function, so it got a constructor rather than a whitelist entry`,
 			func(ctx context.Context, c *quark.Client) error {
 				_, err := quark.For[qbOrder](ctx, c).
-					SelectExpr("n", quark.Func("COUNT", quark.Func("DISTINCT", quark.Col("user_id")))).Limit(10).List()
+					SelectExpr("n", quark.CountDistinct(quark.Col("user_id"))).Limit(10).List()
 				return err
 			}},
-		{"Q25", "aggregation", "conditional aggregate: SUM(CASE WHEN ... THEN 1 ELSE 0 END)", qbNoAPI,
-			`there is no CASE expression, and the AST whitelist is the ten functions COUNT, SUM, AVG, MIN, MAX, LOWER, UPPER, LENGTH, COALESCE, ABS`,
+		{"Q25", "aggregation", "conditional aggregate: SUM(CASE WHEN ... THEN 1 ELSE 0 END)", qbTyped,
+			`Case(), added by S1. CASE is an expression form with its own grammar, so no arity of Func(name, args...) could render it`,
 			func(ctx context.Context, c *quark.Client) error {
 				_, err := quark.For[qbOrder](ctx, c).GroupBy("user_id").SelectExpr("paid",
-					quark.Func("SUM", quark.Func("CASE WHEN status = 'paid' THEN 1 ELSE 0 END"))).Limit(10).List()
+					quark.Func("SUM", quark.Case().
+						When(quark.Eq(quark.Col("status"), quark.Lit("paid")), quark.Lit(1)).
+						Else(quark.Lit(0)))).Limit(10).List()
 				return err
 			}},
 		{"Q26", "aggregation", "GROUP BY two columns, ordered by the aggregate", qbTyped, "", func(ctx context.Context, c *quark.Client) error {
@@ -383,12 +385,13 @@ func qbFamilyF() []qbCase {
 					WhereExpr(quark.Lte(quark.Col("ranked.rn"), quark.Lit(3))).Limit(10).List()
 				return err
 			}},
-		{"Q45", "window", "NTILE / PERCENT_RANK", qbNoAPI,
-			`not in the AST function whitelist`,
+		{"Q45", "window", "NTILE / PERCENT_RANK", qbTyped,
+			`NTile and PercentRank, added by S1 as window-function leaves with constant names — the same contract RowNumber and Rank already kept`,
 			func(ctx context.Context, c *quark.Client) error {
 				w := quark.NewWindow().OrderBy(quark.Col("total"), false)
 				_, err := quark.For[qbOrder](ctx, c).
-					SelectExpr("q", quark.Over(quark.Func("NTILE", quark.Lit(4)), w)).Limit(10).List()
+					SelectExpr("q", quark.Over(quark.NTile(4), w)).
+					SelectExpr("pr", quark.Over(quark.PercentRank(), w)).Limit(10).List()
 				return err
 			}},
 	}
@@ -431,11 +434,11 @@ func qbFamilyH() []qbCase {
 			_, err := quark.For[qbProduct](ctx, c).WhereJSON("attrs", "dims.width", ">", 10).Limit(10).List()
 			return err
 		}},
-		{"Q52", "json", "project a JSON member as a column", qbNoAPI,
-			`WhereJSON is filter-only; JSON_EXTRACT is not in the AST function whitelist, so the member cannot reach the projection`,
+		{"Q52", "json", "project a JSON member as a column", qbTyped,
+			`JSONExtract, added by S1. The accessor is named differently by every engine, so the dialect renders it — a literal name in the whitelist would have been portable on one engine only`,
 			func(ctx context.Context, c *quark.Client) error {
 				_, err := quark.For[qbUser](ctx, c).
-					SelectExpr("tier", quark.Func("JSON_EXTRACT", quark.Col("profile"), quark.Lit("$.tier"))).Limit(10).List()
+					SelectExpr("tier", quark.JSONExtract("profile", "tier")).Limit(10).List()
 				return err
 			}},
 	}
