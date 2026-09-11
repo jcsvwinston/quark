@@ -257,3 +257,154 @@ func (f funcExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	b.WriteByte(')')
 	return b.String(), args, nil
 }
+
+// --- Aggregate modifiers, CASE and JSON projection ---
+//
+// These three are the reason the AST grew constructors instead of a longer
+// `astFunctionWhitelist`. None of them is a function call with a portable
+// name:
+//
+//   - DISTINCT is a modifier on COUNT's argument, not a function. Spelling
+//     it Func("DISTINCT", …) put a keyword where an identifier goes.
+//   - CASE is an expression form with its own grammar; no arity of
+//     Func(name, args...) renders it.
+//   - the JSON accessor is named differently by every engine, so a literal
+//     name in the whitelist would be portable on exactly one of them.
+//
+// Each emits a constant name (or asks the dialect for one), so no caller
+// string reaches the SQL surface — the same contract the window-function
+// leaves keep in window.go.
+
+// CountDistinct renders `COUNT(DISTINCT <expr>)`.
+//
+// Oracle rejects a bare aggregate in the SELECT list of a query that does not
+// group (ORA-00937, "not a single-group group function"), so pair it with
+// GroupBy when the query has to run there.
+func CountDistinct(e Expr) Expr { return countDistinctExpr{inner: e} }
+
+type countDistinctExpr struct{ inner Expr }
+
+func (c countDistinctExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
+	if c.inner == nil {
+		return "", nil, fmt.Errorf("%w: CountDistinct requires a non-nil expression", ErrInvalidQuery)
+	}
+	s, args, err := c.inner.ToSQL(d, g)
+	if err != nil {
+		return "", nil, err
+	}
+	return "COUNT(DISTINCT " + s + ")", args, nil
+}
+
+// Case builds a searched `CASE WHEN … THEN … [ELSE …] END` expression:
+//
+//	quark.Case().
+//	    When(quark.Eq(quark.Col("status"), quark.Lit("paid")), quark.Lit(1)).
+//	    Else(quark.Lit(0))
+//
+// It is what makes a conditional aggregate expressible —
+// `SUM(CASE WHEN … THEN 1 ELSE 0 END)` — by wrapping it in Func("SUM", …).
+// A CASE with no WHEN branch is rejected: it is always a mistake, and
+// engines disagree on whether to reject it themselves.
+//
+// One portability note worth knowing before it costs an afternoon: every
+// Lit() binds as a parameter, so a CASE whose branches are ALL literals has
+// no branch with a known type. PostgreSQL then infers `text` for the whole
+// expression, and wrapping it in SUM fails with "function sum(text) does not
+// exist". Give at least one branch a typed expression — a Col(), typically —
+// and the CASE takes its type. The other five engines are more forgiving,
+// which is what makes this one easy to miss.
+func Case() *CaseBuilder { return &CaseBuilder{} }
+
+// CaseBuilder accumulates the branches of a CASE expression. It is an Expr
+// once it has at least one WHEN, so it can be used anywhere an Expr goes;
+// Else is optional and returns the builder so the call can end there.
+type CaseBuilder struct {
+	whens []caseBranch
+	els   Expr
+}
+
+type caseBranch struct {
+	cond   Expr
+	result Expr
+}
+
+// When adds a `WHEN <cond> THEN <result>` branch. Branches render in the
+// order they are added, which is the order the engine evaluates them.
+func (c *CaseBuilder) When(cond, result Expr) *CaseBuilder {
+	c.whens = append(c.whens, caseBranch{cond: cond, result: result})
+	return c
+}
+
+// Else sets the `ELSE <result>` arm. Without it a CASE that matches no
+// branch yields NULL, which is the SQL default and rarely what an
+// aggregate wants.
+func (c *CaseBuilder) Else(result Expr) *CaseBuilder {
+	c.els = result
+	return c
+}
+
+func (c *CaseBuilder) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
+	if len(c.whens) == 0 {
+		return "", nil, fmt.Errorf("%w: Case requires at least one When branch", ErrInvalidQuery)
+	}
+	var b strings.Builder
+	var args []any
+	b.WriteString("CASE")
+	for _, w := range c.whens {
+		if w.cond == nil || w.result == nil {
+			return "", nil, fmt.Errorf("%w: Case.When requires a non-nil condition and result", ErrInvalidQuery)
+		}
+		csql, cargs, err := w.cond.ToSQL(d, g)
+		if err != nil {
+			return "", nil, err
+		}
+		rsql, rargs, err := w.result.ToSQL(d, g)
+		if err != nil {
+			return "", nil, err
+		}
+		b.WriteString(" WHEN ")
+		b.WriteString(csql)
+		b.WriteString(" THEN ")
+		b.WriteString(rsql)
+		args = append(args, cargs...)
+		args = append(args, rargs...)
+	}
+	if c.els != nil {
+		esql, eargs, err := c.els.ToSQL(d, g)
+		if err != nil {
+			return "", nil, err
+		}
+		b.WriteString(" ELSE ")
+		b.WriteString(esql)
+		args = append(args, eargs...)
+	}
+	b.WriteString(" END")
+	return b.String(), args, nil
+}
+
+// JSONExtract projects a member of a JSON column, so a JSON value can
+// reach the SELECT list the same way WhereJSON already reaches the WHERE
+// clause. The dialect renders it — `jsonb_extract_path_text` on
+// PostgreSQL, `JSON_EXTRACT` on MySQL and SQLite, `JSON_VALUE` on SQL
+// Server and Oracle — and validates the path, which is a dotted
+// identifier chain ("user.name"), not JSONPath ("$.user.name").
+func JSONExtract(column, path string) Expr {
+	return jsonExtractExpr{column: column, path: path}
+}
+
+type jsonExtractExpr struct {
+	column string
+	path   string
+}
+
+func (j jsonExtractExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
+	if d == nil {
+		return "", nil, fmt.Errorf("%w: JSONExtract requires a dialect", ErrInvalidQuery)
+	}
+	if g != nil {
+		if err := g.ValidateIdentifier(j.column); err != nil {
+			return "", nil, err
+		}
+	}
+	return d.JSONExtract(j.column, j.path)
+}

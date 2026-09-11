@@ -175,3 +175,42 @@ func Lag(col Expr, offset int) Expr {
 func Lead(col Expr, offset int) Expr {
 	return windowFuncExpr{name: "LEAD", args: []Expr{col, Lit(offset)}}
 }
+
+// NTile renders `NTILE(<buckets>)`: the bucket a row falls in when the
+// partition is split into n roughly equal groups. The bucket count is
+// bound as a parameter, same as Lag/Lead's offset.
+func NTile(buckets int) Expr {
+	return windowFuncExpr{name: "NTILE", args: []Expr{Lit(buckets)}}
+}
+
+// PercentRank renders `PERCENT_RANK()`: the row's rank as a fraction of
+// the partition, from 0 to 1.
+func PercentRank() Expr { return windowFuncExpr{name: "PERCENT_RANK"} }
+
+// CumeDist renders `CUME_DIST()`: the cumulative distribution — the
+// fraction of partition rows at or before this one.
+func CumeDist() Expr { return windowFuncExpr{name: "CUME_DIST"} }
+
+// FirstValue renders `FIRST_VALUE(<col>)`, the column's value in the
+// first row of the window frame.
+func FirstValue(col Expr) Expr {
+	return windowFuncExpr{name: "FIRST_VALUE", args: []Expr{col}}
+}
+
+// LastValue renders `LAST_VALUE(<col>)`. Read the frame note on Window
+// before reaching for it: with the default frame the "last" row is the
+// current one, which is rarely what the caller means.
+func LastValue(col Expr) Expr {
+	return windowFuncExpr{name: "LAST_VALUE", args: []Expr{col}}
+}
+
+// NthValue renders `NTH_VALUE(<col>, <n>)`, 1-based.
+//
+// Five of the six engines have it. SQL Server does NOT: it fails with
+// "'NTH_VALUE' is not a recognized built-in function name". Quark does not
+// emulate it there — an emulation would have different NULL and frame
+// behaviour — so a query using it is not portable to SQL Server. Reach for
+// Lag/Lead or a ranked subquery if you need that engine.
+func NthValue(col Expr, n int) Expr {
+	return windowFuncExpr{name: "NTH_VALUE", args: []Expr{col, Lit(n)}}
+}

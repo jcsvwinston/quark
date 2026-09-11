@@ -4,7 +4,7 @@ This is the numerator of the A4 gate ("the bench of 60 queries is expressed
 typed, without `RawQuery`"). It exists because that gate needs a number, and a
 number needs something that produces it.
 
-**Measured on 2026-09-11 against quark v1.13.0.** Regenerate with:
+**Measured on 2026-09-11 against quark v1.13.0; updated as A4 closes gaps.** Regenerate with:
 
 ```bash
 cd internal/enginesuite && go test -run TestQueryBench -v .
@@ -31,47 +31,80 @@ whether the call returned an error.
 
 ## The result
 
-**44 of 60 typed. 4 emit the wrong SQL. 12 have no API.**
+**48 of 60 typed. 4 emit the wrong SQL. 8 have no API.**
 
 | family | typed | wrong-sql | no-api |
 |---|---|---|---|
 | filtering | 10 | 0 | 0 |
 | joins | 4 | 0 | 4 |
-| aggregation | 4 | 2 | 2 |
+| aggregation | 6 | 2 | 0 |
 | subquery | 6 | 1 | 0 |
 | cte | 3 | 1 | 1 |
-| window | 4 | 0 | 3 |
+| window | 5 | 0 | 2 |
 | setop | 4 | 0 | 0 |
-| json | 2 | 0 | 1 |
+| json | 3 | 0 | 0 |
 | locking | 4 | 0 | 0 |
 | writes | 3 | 0 | 1 |
 
-Filtering, set operations and locking are complete. The gaps cluster in
-joins, windows and aggregation — and, as the next section shows, they cluster
-around far fewer causes than there are cases.
+Filtering, aggregation, set operations, JSON and locking are complete. The
+gaps that remain cluster in joins, CTEs and windows.
 
-## The sixteen gaps, grouped by cause
+### Progress
 
-Sixteen failing cases come from **seven** causes. Fixing them one case at a
-time would be seven times more work than fixing them one cause at a time.
+| session | typed | what it closed |
+|---|---|---|
+| S0 (measurement) | 44 | — |
+| **S1** | **48** | the four cases that needed a function the AST would not render |
 
-### 1. The AST function whitelist has ten entries — 4 cases
+## The gaps, grouped by cause
+
+Twelve failing cases come from **six** causes. Fixing them one case at a time
+would be six times more work than fixing them one cause at a time.
+
+### CLOSED by S1 — the four cases the AST would not render
 
 `Func` accepts only `COUNT, SUM, AVG, MIN, MAX, LOWER, UPPER, LENGTH,
-COALESCE, ABS`. Everything else is rejected with "is not in the AST
-whitelist".
+COALESCE, ABS`, and that cost Q24 (`COUNT(DISTINCT col)`), Q25 (conditional
+aggregate), Q45 (`NTILE`/`PERCENT_RANK`) and Q52 (projecting a JSON member).
 
-That costs Q24 (`COUNT(DISTINCT col)`), Q25 (conditional aggregate — there is
-no `CASE` expression either), Q45 (`NTILE`/`PERCENT_RANK`) and Q52
-(projecting a JSON member, which needs `JSON_EXTRACT`).
+**The whitelist was not widened, and that was the decision.** It is a security
+barrier — `Func` renders its name straight into SQL — and none of the four
+cases was really asking for a longer list of names:
 
-The whitelist is a security barrier, not an oversight: `Func` renders its name
-straight into SQL. Widening it is a decision about that barrier — an
-allow-list of more functions, or a typed constructor per function that cannot
-carry an arbitrary string. It is not a one-line change, and it is the single
-highest-yield one in the bench.
+- `DISTINCT` is a **modifier on COUNT's argument**, not a function.
+  `Func("DISTINCT", …)` put a keyword where an identifier goes. → `CountDistinct(expr)`.
+- `CASE` is an **expression form with its own grammar**; no arity of
+  `Func(name, args...)` renders it. → `Case().When(cond, result).Else(result)`.
+- The JSON accessor is **named differently by every engine**
+  (`jsonb_extract_path_text`, `JSON_EXTRACT`, `JSON_VALUE`), so a literal name
+  in the whitelist would have been portable on exactly one of them. → `JSONExtract(column, path)`,
+  which the dialect renders.
+- The window functions are syntactically restricted to `OVER (…)` contexts the
+  whitelist does not model — which is why `RowNumber` and `Rank` were already
+  constructors. → `NTile`, `PercentRank`, `CumeDist`, `FirstValue`, `LastValue`, `NthValue`.
 
-### 2. `With()` declares a CTE but never changes the `FROM` — 2 cases
+Every one emits a **constant** name, so no caller string reaches the SQL
+surface: the same contract the existing window-function leaves keep.
+`TestFuncWhitelistIsUnchanged` pins the ten entries, so widening the list
+later is a decision someone re-takes rather than one that drifts.
+
+**Three engine limits the bench could not see**, because it runs on SQLite.
+The superapp acceptance gate exercises the same constructors against all six
+engines, and that is where they surfaced — each is documented on the
+constructor itself:
+
+- **`NthValue` is not portable to SQL Server.** Five engines have
+  `NTH_VALUE`; SQL Server does not, and Quark does not emulate it (an
+  emulation would differ on NULLs and frames).
+- **A `CASE` whose branches are all literals has no type in PostgreSQL.**
+  Every `Lit()` binds as a parameter, so PostgreSQL infers `text` and
+  `SUM(...)` over it fails with "function sum(text) does not exist". Give one
+  branch a typed expression. The other five engines are more forgiving, which
+  is what makes it easy to miss.
+- **Oracle rejects a bare aggregate without `GROUP BY`** (ORA-00937), so
+  `CountDistinct` needs a `GroupBy` to run there.
+
+### 1. `With()` declares a CTE but never changes the `FROM` — 2 cases
 
 `With("t", sub)` emits `WITH "t" AS (…) SELECT * FROM base_table`. The CTE is
 declared and then ignored, unless the caller explicitly joins it (Q38, which
@@ -82,7 +115,7 @@ to select from the windowed subquery). Q44 is the sharper illustration: the
 statement runs, the CTE is there, and the engine reports "no such column:
 ranked.rn" because the `SELECT` never left the base table.
 
-### 3. `WITH RECURSIVE` emits the keyword without the recursion — 2 cases
+### 2. `WITH RECURSIVE` emits the keyword without the recursion — 2 cases
 
 `WithRecursive(name, sub)` takes a single subquery, and nothing can reference
 the CTE being defined from inside its own body. The result is a statement that
@@ -93,14 +126,14 @@ This is the most misleading gap in the bench: the API name says the capability
 is there. Walking a category tree — the canonical reason to reach for a
 recursive CTE — cannot be done.
 
-### 4. `For[T]` derives the `FROM` table from `T` — 1 case
+### 3. `For[T]` derives the `FROM` table from `T` — 1 case
 
 A join cannot be projected onto a DTO (Q17): `For[OrderEmail]` selects `FROM
 order_emails`, a table that does not exist. There is no way to say "read from
 `orders`, scan into this struct". Any query whose result shape is not exactly
 one registered model has to drop to `RawQuery`.
 
-### 5. `Preload` has no per-relation condition — 1 case
+### 4. `Preload` has no per-relation condition — 1 case
 
 `Preload(relations ...string)` is variadic over relation *names*. Q16 shows
 the trap: `Preload("Orders", "status = ?")` compiles, and the extra argument
@@ -108,14 +141,14 @@ is read as a second relation name. It then fails with "relation not found" —
 but **only once the parent query returns rows**, so against an empty table the
 mistake is silent.
 
-### 6. Windows have no frame clause — 1 case
+### 5. Windows have no frame clause — 1 case
 
 `Window` exposes `PartitionBy` and `OrderBy` only (Q43). Omitting the frame is
 not a smaller version of the query: the default frame runs from the start of
 the partition to the current row, so a moving average silently becomes a
 running one.
 
-### 7. Four one-offs
+### 6. Four one-offs
 
 - **Q14** — a literal cannot ride in a `JOIN … ON` clause; `OnRaw` accepts
   identifier-to-identifier conditions only. Moving the literal to `WHERE` is
