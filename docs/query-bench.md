@@ -88,6 +88,22 @@ surface: the same contract the existing window-function leaves keep.
 `TestFuncWhitelistIsUnchanged` pins the ten entries, so widening the list
 later is a decision someone re-takes rather than one that drifts.
 
+**Three engine limits the bench could not see**, because it runs on SQLite.
+The superapp acceptance gate exercises the same constructors against all six
+engines, and that is where they surfaced — each is documented on the
+constructor itself:
+
+- **`NthValue` is not portable to SQL Server.** Five engines have
+  `NTH_VALUE`; SQL Server does not, and Quark does not emulate it (an
+  emulation would differ on NULLs and frames).
+- **A `CASE` whose branches are all literals has no type in PostgreSQL.**
+  Every `Lit()` binds as a parameter, so PostgreSQL infers `text` and
+  `SUM(...)` over it fails with "function sum(text) does not exist". Give one
+  branch a typed expression. The other five engines are more forgiving, which
+  is what makes it easy to miss.
+- **Oracle rejects a bare aggregate without `GROUP BY`** (ORA-00937), so
+  `CountDistinct` needs a `GroupBy` to run there.
+
 ### 1. `With()` declares a CTE but never changes the `FROM` — 2 cases
 
 `With("t", sub)` emits `WITH "t" AS (…) SELECT * FROM base_table`. The CTE is

@@ -113,14 +113,21 @@ func surfaceWindow(ctx context.Context, client *quark.Client, rec *recorder.Reco
 	// motor: son las que el banco de consultas sólo mide sobre SQLite, así
 	// que aquí es donde se comprueba que los seis las rinden igual.
 	w2 := quark.NewWindow().PartitionBy(quark.Col("id")).OrderBy(quark.Col("id"), false)
-	if _, err := quark.For[domain.Account](ctx, client).
+	q := quark.For[domain.Account](ctx, client).
 		SelectExpr("nt", quark.Over(quark.NTile(4), w2)).
 		SelectExpr("pr", quark.Over(quark.PercentRank(), w2)).
 		SelectExpr("cd", quark.Over(quark.CumeDist(), w2)).
 		SelectExpr("fv", quark.Over(quark.FirstValue(quark.Col("id")), w2)).
-		SelectExpr("lv", quark.Over(quark.LastValue(quark.Col("id")), w2)).
-		SelectExpr("nv", quark.Over(quark.NthValue(quark.Col("id"), 2), w2)).
-		Limit(5).List(); err != nil {
+		SelectExpr("lv", quark.Over(quark.LastValue(quark.Col("id")), w2))
+	// NTH_VALUE es SQL estándar y lo tienen cinco de los seis motores: SQL
+	// Server no lo implementa («'NTH_VALUE' is not a recognized built-in
+	// function name»). Se salta ahí en vez de emularlo en silencio, y la
+	// limitación está escrita en el doc del constructor.
+	isMSSQL := client.Dialect() != nil && client.Dialect().Name() == "mssql"
+	if !isMSSQL {
+		q = q.SelectExpr("nv", quark.Over(quark.NthValue(quark.Col("id"), 2), w2))
+	}
+	if _, err := q.Limit(5).List(); err != nil {
 		return fmt.Errorf("surface window (S1): %w", err)
 	}
 	rec.Note(QF("NTile"), QF("PercentRank"), QF("CumeDist"),
@@ -133,19 +140,28 @@ func surfaceWindow(ctx context.Context, client *quark.Client, rec *recorder.Reco
 // de funciones del AST. Se ejecutan contra el motor porque su razón de ser es
 // justamente la portabilidad — el accesor JSON se llama distinto en cada uno.
 func surfaceAggregateConstructors(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error {
+	// Con GROUP BY explícito: Oracle rechaza un agregado suelto en el SELECT
+	// de una consulta sin agrupar (ORA-00937), y los seis motores aceptan
+	// esta forma.
 	if _, err := quark.For[domain.Account](ctx, client).
+		GroupBy("role").
 		SelectExpr("n", quark.CountDistinct(quark.Col("id"))).
-		Limit(1).List(); err != nil {
+		Limit(5).List(); err != nil {
 		return fmt.Errorf("surface CountDistinct: %w", err)
 	}
 	rec.Note(QF("CountDistinct"))
 
 	// SUM(CASE WHEN … THEN 1 ELSE 0 END): el agregado condicional.
+	// El THEN es una COLUMNA, no un literal, y eso no es cosmético: si todas
+	// las ramas del CASE son parámetros, PostgreSQL no puede inferir su tipo,
+	// las toma por `text` y falla con «function sum(text) does not exist».
+	// Una rama con tipo conocido fija el del CASE entero.
 	if _, err := quark.For[domain.Account](ctx, client).
+		GroupBy("role").
 		SelectExpr("flagged", quark.Func("SUM", quark.Case().
-			When(quark.Gt(quark.Col("id"), quark.Lit(0)), quark.Lit(1)).
-			Else(quark.Lit(0)))).
-		Limit(1).List(); err != nil {
+			When(quark.Gt(quark.Col("id"), quark.Lit(0)), quark.Col("id")).
+			Else(quark.Col("id")))).
+		Limit(5).List(); err != nil {
 		return fmt.Errorf("surface Case: %w", err)
 	}
 	rec.Note(QF("Case"), QF("(*CaseBuilder).When"), QF("(*CaseBuilder).Else"),

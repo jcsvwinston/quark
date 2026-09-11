@@ -276,6 +276,10 @@ func (f funcExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 // leaves keep in window.go.
 
 // CountDistinct renders `COUNT(DISTINCT <expr>)`.
+//
+// Oracle rejects a bare aggregate in the SELECT list of a query that does not
+// group (ORA-00937, "not a single-group group function"), so pair it with
+// GroupBy when the query has to run there.
 func CountDistinct(e Expr) Expr { return countDistinctExpr{inner: e} }
 
 type countDistinctExpr struct{ inner Expr }
@@ -301,6 +305,14 @@ func (c countDistinctExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) 
 // `SUM(CASE WHEN … THEN 1 ELSE 0 END)` — by wrapping it in Func("SUM", …).
 // A CASE with no WHEN branch is rejected: it is always a mistake, and
 // engines disagree on whether to reject it themselves.
+//
+// One portability note worth knowing before it costs an afternoon: every
+// Lit() binds as a parameter, so a CASE whose branches are ALL literals has
+// no branch with a known type. PostgreSQL then infers `text` for the whole
+// expression, and wrapping it in SUM fails with "function sum(text) does not
+// exist". Give at least one branch a typed expression — a Col(), typically —
+// and the CASE takes its type. The other five engines are more forgiving,
+// which is what makes this one easy to miss.
 func Case() *CaseBuilder { return &CaseBuilder{} }
 
 // CaseBuilder accumulates the branches of a CASE expression. It is an Expr

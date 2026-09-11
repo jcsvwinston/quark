@@ -205,6 +205,12 @@ func LastValue(col Expr) Expr {
 }
 
 // NthValue renders `NTH_VALUE(<col>, <n>)`, 1-based.
+//
+// Five of the six engines have it. SQL Server does NOT: it fails with
+// "'NTH_VALUE' is not a recognized built-in function name". Quark does not
+// emulate it there — an emulation would have different NULL and frame
+// behaviour — so a query using it is not portable to SQL Server. Reach for
+// Lag/Lead or a ranked subquery if you need that engine.
 func NthValue(col Expr, n int) Expr {
 	return windowFuncExpr{name: "NTH_VALUE", args: []Expr{col, Lit(n)}}
 }
