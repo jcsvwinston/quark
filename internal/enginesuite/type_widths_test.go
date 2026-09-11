@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -89,8 +90,12 @@ func testAutoPKWidth(ctx context.Context, t *testing.T, client *quark.Client) {
 	// enough to reach it, without having to insert two billion rows.
 	beyond32 := int64(math.MaxInt32) + 1000
 	if err := quark.For[twAutoPK](ctx, client).Create(&twAutoPK{ID: beyond32, Name: "far"}); err != nil {
-		if errors.Is(err, quark.ErrUnsupportedFeature) {
-			t.Skipf("engine does not accept a caller-assigned key here: %v", err)
+		// Oracle's identity columns are GENERATED ALWAYS, so the engine
+		// refuses any caller-supplied key (ORA-32795). That is not a width
+		// problem — NUMBER has no 32-bit ceiling — so the case does not
+		// apply there.
+		if errors.Is(err, quark.ErrUnsupportedFeature) || strings.Contains(err.Error(), "ORA-32795") {
+			t.Skipf("engine does not accept a caller-assigned identity key: %v", err)
 		}
 		t.Fatalf("a primary key past 2^31 was rejected: %v\n"+
 			"this is QK-21: the auto-increment key column is 32-bit", err)

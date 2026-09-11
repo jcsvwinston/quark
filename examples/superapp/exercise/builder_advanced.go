@@ -274,7 +274,7 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 	}
 
 	// Aritmética y expresión en el SET: `x = x + 1` atómico.
-	if _, err := quark.For[domain.Account](rec.Mark(ctx, QM("Add")), client).
+	if _, err := quark.For[domain.Account](ctx, client).
 		Where("id", "=", 1).
 		UpdateMap(map[string]any{"version": quark.Add(quark.Col("version"), quark.Lit(0))}); err != nil {
 		return fmt.Errorf("UpdateMap con Expr: %w", err)
