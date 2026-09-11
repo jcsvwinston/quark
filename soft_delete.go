@@ -25,6 +25,16 @@ func (q *BaseQuery) softDeletePredicate() *condition {
 	if q.meta == nil {
 		return nil
 	}
+	// FromCTE moved the FROM off the model's table, and the soft-delete
+	// filter is a property of that table — a CTE need not carry the column
+	// at all. Emitting it anyway produced `SELECT * FROM "ids" WHERE
+	// "deleted_at" IS NULL` against a one-column CTE: SQLite returned zero
+	// rows and no error, which is the worst of both. The CTE's own body is
+	// where the filter belongs, and it is applied there by whatever query
+	// built the subquery.
+	if q.fromCTE != "" {
+		return nil
+	}
 	if _, hasDeletedAt := q.meta.FieldByCol["deleted_at"]; !hasDeletedAt {
 		return nil
 	}

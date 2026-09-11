@@ -63,17 +63,78 @@ func (q *Query[T]) With(name string, sub *Subquery) *Query[T] {
 // and reject the keyword, so Quark emits a plain `WITH` there. The inner
 // Subquery is responsible for shaping the recursive body — typically a
 // `UNION ALL` between a base case and a step that references the CTE name.
-// quark's typed Subquery surface doesn't yet model UNION (F2-set), so practical
-// recursive use today is limited to engines/cases where the Subquery body can
-// be constructed from a single SELECT — full recursive support is the
-// motivating use case for F2-set. (Oracle also requires a column-alias list on
-// the CTE name for a genuinely recursive body; that must live in the
-// Subquery's own SQL.)
+// Composing that body is [Query.UnionAll] plus [Query.AsSubquery]:
+//
+//	anchor := quark.For[Category](ctx, client).Where("id", "=", rootID)
+//	step := quark.For[Category](ctx, client).
+//	    Join("tree").On("categories.parent_id", "=", "tree.id")
+//	body, _ := anchor.UnionAll(step).AsSubquery()
+//
+//	rows, err := quark.For[Category](ctx, client).
+//	    WithRecursive("tree", body).FromCTE("tree").List()
+//
+// This comment used to say the typed Subquery surface could not model UNION,
+// so recursive use was limited to single-SELECT bodies. That stopped being
+// true when set operators landed, and the stale note outlived it — long
+// enough that A4's own measurement session read it, wrote the case the way
+// the comment implied, and recorded the capability as missing. It is not.
+//
+// (Oracle also requires a column-alias list on the CTE name for a genuinely
+// recursive body; that must live in the Subquery's own SQL.)
 func (q *Query[T]) WithRecursive(name string, sub *Subquery) *Query[T] {
 	c := q.With(name, sub)
 	if c.err != nil {
 		return c
 	}
 	c.ctes[len(c.ctes)-1].recursive = true
+	return c
+}
+
+// FromCTE makes the SELECT read from a CTE declared with [Query.With] or
+// [Query.WithRecursive] instead of the model's own table.
+//
+// Without it, With() declares the CTE and the outer SELECT still reads the
+// base table, so the only way to reach a CTE was to JOIN it — which works,
+// and is the right shape when you want both. It is not the right shape when
+// the derived rows ARE the query:
+//
+//	// average orders per user: the aggregate is over the derived rows, and
+//	// the base table must not be in the FROM at all.
+//	per, _ := quark.For[Order](ctx, client).
+//	    GroupBy("user_id").
+//	    SelectExpr("n", quark.Func("COUNT", quark.Col("*"))).
+//	    AsSubquery()
+//
+//	avg, err := quark.For[Order](ctx, client).
+//	    With("per_user", per).
+//	    FromCTE("per_user").
+//	    Avg("n")
+//
+// It changes the SELECT path only. UPDATE, DELETE and INSERT keep writing to
+// the model's table: a CTE is not a write target, and silently redirecting a
+// write would be the worst possible reading of this call.
+//
+// The scanned type is still T, so the CTE's projection has to carry the
+// columns T expects — the same contract a JOIN already has.
+//
+// Two implicit scopes behave differently under FromCTE, and the difference is
+// deliberate:
+//
+//   - The soft-delete filter is DROPPED. It is a property of the model's
+//     table, and a CTE need not carry deleted_at at all; emitting it anyway
+//     produced `SELECT * FROM "ids" WHERE "deleted_at" IS NULL` against a
+//     one-column CTE, which SQLite answered with zero rows and no error.
+//     Apply it in the subquery that builds the CTE, where it means something.
+//   - The tenant filter is KEPT. Dropping it would turn a missing column into
+//     cross-tenant reads, so the CTE must project the tenant column. If it
+//     does not, the query fails or returns nothing — which is the safe
+//     direction to be wrong in.
+func (q *Query[T]) FromCTE(name string) *Query[T] {
+	c := q.clone()
+	if err := c.guard.ValidateIdentifier(name); err != nil {
+		c.err = err
+		return c
+	}
+	c.fromCTE = name
 	return c
 }

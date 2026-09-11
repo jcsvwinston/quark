@@ -882,6 +882,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).FromCTE",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).GroupBy",
       "kind": "method"
     },

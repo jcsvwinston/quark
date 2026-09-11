@@ -202,6 +202,26 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 		Limit(10).List(); err != nil {
 		return fmt.Errorf("WithRecursive: %w", err)
 	}
+	// FromCTE: leer DE la CTE en vez de unirla. Aquí se comprueba lo que la
+	// forma con Join no puede afirmar — que la tabla base sale del FROM: la
+	// CTE tiene 4 filas y la tabla tiene más, así que un FROM sin cambiar
+	// devolvería otro número.
+	fullSub, err := quark.For[domain.Account](ctx, client).
+		Where("email", "LIKE", "badv-%").AsSubquery()
+	if err != nil {
+		return fmt.Errorf("FromCTE sub: %w", err)
+	}
+	fromCTE, err := quark.For[domain.Account](rec.Mark(ctx, QM("FromCTE")), client).
+		With("badv_only", fullSub).
+		FromCTE("badv_only").
+		Limit(10).List()
+	if err != nil {
+		return fmt.Errorf("FromCTE: %w", err)
+	}
+	if len(fromCTE) != 4 {
+		return fmt.Errorf("FromCTE: %d filas, esperaba las 4 de la CTE", len(fromCTE))
+	}
+
 	// WhereSubquery está gateado por AllowRawQueries: el client del harness lo
 	// RECHAZA (postura de seguridad por defecto)…
 	if _, err := scopedAcc(rec.Mark(ctx, QM("WhereSubquery"))).

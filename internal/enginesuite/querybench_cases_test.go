@@ -5,6 +5,7 @@ package enginesuite
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jcsvwinston/quark"
@@ -280,14 +281,14 @@ func qbFamilyD() []qbCase {
 			_, err = quark.For[qbOrder](ctx, c).WhereExpr(quark.Gt(quark.Col("total"), quark.Sub(sub))).Limit(10).List()
 			return err
 		}},
-		{"Q33", "subquery", "derived table in FROM: SELECT ... FROM (SELECT ...) t", qbWrong,
-			`With() declares the CTE but never changes the FROM, so the statement is "WITH t AS (...) SELECT * FROM qb_orders" — the derived table is declared and ignored. Joining it explicitly (Q38) is the only way to reach it`,
+		{"Q33", "subquery", "derived table in FROM: SELECT ... FROM (SELECT ...) t", qbTyped,
+			`FromCTE, added by S2. With() alone declares the CTE and leaves the FROM on the base table — reachable by joining it, but not usable as the only source until FromCTE`,
 			func(ctx context.Context, c *quark.Client) error {
 				sub, err := quark.For[qbOrder](ctx, c).Where("status", "=", "paid").AsSubquery()
 				if err != nil {
 					return err
 				}
-				_, err = quark.For[qbOrder](ctx, c).With("paid", sub).Limit(10).List()
+				_, err = quark.For[qbOrder](ctx, c).With("paid", sub).FromCTE("paid").Limit(10).List()
 				return err
 			}},
 	}
@@ -318,19 +319,40 @@ func qbFamilyE() []qbCase {
 			_, err = quark.For[qbOrder](ctx, c).With("paid", a).With("shipped", b).Limit(10).List()
 			return err
 		}},
-		{"Q36", "cte", "WITH RECURSIVE — walk a category tree", qbWrong,
-			`WithRecursive emits the RECURSIVE keyword but takes a single subquery, and there is no way to bind an anchor term UNION ALL a self-referencing term into one CTE body. The statement is syntactically a recursive CTE that never recurses`,
+		{"Q36", "cte", "WITH RECURSIVE — walk a category tree", qbTyped,
+			`the body is anchor UNION ALL step, composed with UnionAll and captured by AsSubquery. S0 recorded this as impossible by writing the case wrong — with a single-SELECT body — and the comment in cte.go said the same; both were stale`,
 			func(ctx context.Context, c *quark.Client) error {
-				sub, err := quark.For[qbCategory](ctx, c).Where("parent_id", "IS NULL", nil).AsSubquery()
+				anchor := quark.For[qbCategory](ctx, c).Where("parent_id", "IS NULL", nil)
+				step := quark.For[qbCategory](ctx, c).
+					Join("tree").On("qb_categories.parent_id", "=", "tree.id")
+				body, err := anchor.UnionAll(step).AsSubquery()
 				if err != nil {
 					return err
 				}
-				_, err = quark.For[qbCategory](ctx, c).WithRecursive("tree", sub).Limit(10).List()
+				_, err = quark.For[qbCategory](ctx, c).WithRecursive("tree", body).
+					FromCTE("tree").Limit(10).List()
 				return err
 			}},
-		{"Q37", "cte", "recursive CTE with an explicit UNION ALL body", qbNoAPI,
-			`Union composes two Query[T] into one statement, not into a CTE body: there is no With(name, anchor, recursive) and no way to reference the CTE being defined from inside its own body`,
-			nil},
+		{"Q37", "cte", "recursive CTE with an explicit UNION ALL body", qbTyped,
+			`same composition as Q36, verified to actually recurse: a four-level tree comes back with all four rows`,
+			func(ctx context.Context, c *quark.Client) error {
+				anchor := quark.For[qbCategory](ctx, c).Where("id", "=", 1)
+				step := quark.For[qbCategory](ctx, c).
+					Join("tree").On("qb_categories.parent_id", "=", "tree.id")
+				body, err := anchor.UnionAll(step).AsSubquery()
+				if err != nil {
+					return err
+				}
+				rows, err := quark.For[qbCategory](ctx, c).WithRecursive("tree", body).
+					FromCTE("tree").Limit(50).List()
+				if err != nil {
+					return err
+				}
+				if len(rows) < 4 {
+					return fmt.Errorf("recursive CTE walked %d rows, want the whole 4-level tree", len(rows))
+				}
+				return nil
+			}},
 		{"Q38", "cte", "CTE referenced from a JOIN", qbTyped, "", func(ctx context.Context, c *quark.Client) error {
 			sub, err := quark.For[qbOrder](ctx, c).Where("status", "=", "paid").AsSubquery()
 			if err != nil {
@@ -373,16 +395,18 @@ func qbFamilyF() []qbCase {
 		{"Q43", "window", "windowed aggregate with an explicit frame (ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)", qbNoAPI,
 			`Window exposes PartitionBy and OrderBy only. Omitting the frame is not a smaller version of the query: the default frame is the whole partition up to the current row, so a moving average silently becomes a running one`,
 			nil},
-		{"Q44", "window", "top-N per group (filter on the window result)", qbNoAPI,
-			`needs the windowed subquery in the FROM, which Q33 shows With() cannot do: the emitted statement declares the CTE and selects from the base table, so the window column does not exist`,
+		{"Q44", "window", "top-N per group (filter on the window result)", qbTyped,
+			`joining the ranked CTE already worked; FromCTE makes the shorter form available too`,
 			func(ctx context.Context, c *quark.Client) error {
 				w := quark.NewWindow().PartitionBy(quark.Col("user_id")).OrderBy(quark.Col("total"), true)
-				sub, err := quark.For[qbOrder](ctx, c).SelectExpr("rn", quark.Over(quark.RowNumber(), w)).AsSubquery()
+				sub, err := quark.For[qbOrder](ctx, c).
+					Select("id").SelectExpr("rn", quark.Over(quark.RowNumber(), w)).AsSubquery()
 				if err != nil {
 					return err
 				}
 				_, err = quark.For[qbOrder](ctx, c).With("ranked", sub).
-					WhereExpr(quark.Lte(quark.Col("ranked.rn"), quark.Lit(3))).Limit(10).List()
+					Join("ranked").On("qb_orders.id", "=", "ranked.id").
+					WhereExpr(quark.Lte(quark.Col("ranked.rn"), quark.Lit(1))).Limit(10).List()
 				return err
 			}},
 		{"Q45", "window", "NTILE / PERCENT_RANK", qbTyped,

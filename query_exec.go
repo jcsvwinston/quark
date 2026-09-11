@@ -701,7 +701,14 @@ func (q *Query[T]) Count() (int64, error) {
 	}
 
 	sqlBuf.WriteString("SELECT COUNT(*) FROM ")
-	sqlBuf.WriteString(q.fullTableName())
+	if q.fromCTE != "" {
+		if err := q.guard.ValidateIdentifier(q.fromCTE); err != nil {
+			return 0, err
+		}
+		sqlBuf.WriteString(q.dialect.Quote(q.fromCTE))
+	} else {
+		sqlBuf.WriteString(q.fullTableName())
+	}
 
 	// JOIN clauses
 	for _, j := range q.joins {
@@ -935,12 +942,20 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 		}
 	}
 
-	// FROM clause
+	// FROM clause. FromCTE swaps the model's table for a CTE name — the
+	// CTE has no schema and is not a real table, so it is quoted bare.
 	sqlBuf.WriteString(" FROM ")
-	if err := q.guard.ValidateIdentifier(q.table); err != nil {
-		return "", nil, err
+	if q.fromCTE != "" {
+		if err := q.guard.ValidateIdentifier(q.fromCTE); err != nil {
+			return "", nil, err
+		}
+		sqlBuf.WriteString(q.dialect.Quote(q.fromCTE))
+	} else {
+		if err := q.guard.ValidateIdentifier(q.table); err != nil {
+			return "", nil, err
+		}
+		sqlBuf.WriteString(q.fullTableName())
 	}
-	sqlBuf.WriteString(q.fullTableName())
 
 	// Pessimistic locking: MSSQL emits its hint right after the table name
 	// (`FROM users WITH (UPDLOCK, ROWLOCK)`); the row-level dialects emit a

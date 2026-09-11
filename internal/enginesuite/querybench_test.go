@@ -92,9 +92,14 @@ func qbSeed(ctx context.Context, c *quark.Client) error {
 	}); err != nil {
 		return err
 	}
-	parent := int64(1)
+	// Four levels deep on purpose: a two-level tree cannot tell a recursive
+	// CTE from a single join, so Q37 would pass without recursing.
+	l1, l2, l3 := int64(1), int64(2), int64(3)
 	if err := quark.For[qbCategory](ctx, c).CreateBatch([]*qbCategory{
-		{ID: 1, Name: "root"}, {ID: 2, Name: "child", ParentID: &parent},
+		{ID: 1, Name: "root"},
+		{ID: 2, Name: "child", ParentID: &l1},
+		{ID: 3, Name: "grandchild", ParentID: &l2},
+		{ID: 4, Name: "great-grandchild", ParentID: &l3},
 	}); err != nil {
 		return err
 	}
