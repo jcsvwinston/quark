@@ -5,6 +5,7 @@ package quark
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -15,6 +16,7 @@ import (
 type Window struct {
 	partitionBy []Expr
 	orderBy     []windowOrder
+	frame       string // rendered frame clause, empty when the caller set none
 }
 
 type windowOrder struct {
@@ -43,6 +45,64 @@ func (w *Window) OrderBy(col Expr, desc bool) *Window {
 	cp := *w
 	cp.orderBy = append(append([]windowOrder(nil), cp.orderBy...), windowOrder{expr: col, desc: desc})
 	return &cp
+}
+
+// Rows sets a ROWS frame: which rows of the partition the window function
+// actually sees, counted in physical rows.
+//
+// Without a frame, a window with an ORDER BY defaults to every row from the
+// start of the partition through the current one. That default is what makes
+// SUM() OVER (ORDER BY …) a running total — and it is also why a "moving
+// average" written without a frame is silently a running average instead.
+//
+//	// three-row moving average
+//	quark.NewWindow().OrderBy(quark.Col("day"), false).Rows(quark.Preceding(2), quark.CurrentRow())
+//
+// Bounds come from [Preceding], [Following], [CurrentRow], [UnboundedPreceding]
+// and [UnboundedFollowing]. The offsets render as literals, not bind
+// parameters: every engine requires a constant there.
+func (w *Window) Rows(start, end FrameBound) *Window {
+	cp := *w
+	cp.frame = "ROWS BETWEEN " + string(start) + " AND " + string(end)
+	return &cp
+}
+
+// Range sets a RANGE frame. It counts in VALUES of the ORDER BY expression
+// rather than in rows, so peer rows — those comparing equal — enter or leave
+// the frame together.
+func (w *Window) Range(start, end FrameBound) *Window {
+	cp := *w
+	cp.frame = "RANGE BETWEEN " + string(start) + " AND " + string(end)
+	return &cp
+}
+
+// FrameBound is one edge of a window frame. The constructors below are the
+// only way to make one, so no caller string reaches the frame clause.
+type FrameBound string
+
+// UnboundedPreceding is the start of the partition.
+func UnboundedPreceding() FrameBound { return "UNBOUNDED PRECEDING" }
+
+// UnboundedFollowing is the end of the partition.
+func UnboundedFollowing() FrameBound { return "UNBOUNDED FOLLOWING" }
+
+// CurrentRow is the row being computed.
+func CurrentRow() FrameBound { return "CURRENT ROW" }
+
+// Preceding is n rows (ROWS) or n units of the order value (RANGE) back.
+func Preceding(n int) FrameBound { return FrameBound(itoaFrame(n) + " PRECEDING") }
+
+// Following is n rows or units forward.
+func Following(n int) FrameBound { return FrameBound(itoaFrame(n) + " FOLLOWING") }
+
+// itoaFrame renders a non-negative bound offset. A negative offset is
+// clamped to 0: every engine rejects it, and "0 PRECEDING" fails loudly at
+// the engine instead of emitting malformed SQL here.
+func itoaFrame(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	return strconv.Itoa(n)
 }
 
 // toSQL renders the body of the OVER clause: `PARTITION BY ... ORDER BY ...`
@@ -84,6 +144,12 @@ func (w *Window) toSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 			}
 			args = append(args, oargs...)
 		}
+	}
+	if w.frame != "" {
+		if b.Len() > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString(w.frame)
 	}
 	return b.String(), args, nil
 }

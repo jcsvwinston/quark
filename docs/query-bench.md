@@ -31,22 +31,24 @@ whether the call returned an error.
 
 ## The result
 
-**52 of 60 typed. 2 emit the wrong SQL. 6 have no API.**
+**58 of 60 typed. 2 emit the wrong SQL. 0 have no API.**
 
 | family | typed | wrong-sql | no-api |
 |---|---|---|---|
 | filtering | 10 | 0 | 0 |
-| joins | 4 | 0 | 4 |
+| joins | 8 | 0 | 0 |
 | aggregation | 6 | 2 | 0 |
 | subquery | 7 | 0 | 0 |
 | cte | 5 | 0 | 0 |
-| window | 6 | 0 | 1 |
+| window | 7 | 0 | 0 |
 | setop | 4 | 0 | 0 |
 | json | 3 | 0 | 0 |
 | locking | 4 | 0 | 0 |
-| writes | 3 | 0 | 1 |
+| writes | 4 | 0 | 0 |
 
-Everything except joins, one window case and one write case is complete.
+**Every query in the bench can now be written with the typed API.** The two
+that remain are not a missing capability — they run, and emit SQL that is
+portable only to SQLite.
 
 ### Progress
 
@@ -54,12 +56,12 @@ Everything except joins, one window case and one write case is complete.
 |---|---|---|
 | S0 (measurement) | 44 | — |
 | S1 | 48 | the four cases that needed a function the AST would not render |
-| **S2** | **52** | `FromCTE`, plus two cases S0 had measured wrong |
+| S2 | 52 | `FromCTE`, plus two cases S0 had measured wrong |
+| **S3** | **58** | the six one-offs: DTO projection, filtered preload, window frames, arithmetic in `SET`, `OnExpr`, `FullJoin`/`CrossJoin` |
 
-## The gaps, grouped by cause
+## What remains
 
-Eight failing cases come from **four** causes. Fixing them one case at a time
-would be twice the work of fixing them one cause at a time.
+Two cases, one cause, and it is not a missing capability.
 
 ### CLOSED by S1 — the four cases the AST would not render
 
@@ -130,44 +132,29 @@ The lesson generalises past this bench: a measurement that trusts a comment
 measures the comment. Both cases now run against a real database and assert
 their result, not just their SQL.
 
-### 1. `For[T]` derives the `FROM` table from `T` — 1 case
+### `GROUP BY` without a projection — 2 cases
 
-A join cannot be projected onto a DTO (Q17): `For[OrderEmail]` selects `FROM
-order_emails`, a table that does not exist. There is no way to say "read from
-`orders`, scan into this struct". Any query whose result shape is not exactly
-one registered model has to drop to `RawQuery`.
+`GroupBy` with no `Select` or `SelectExpr` leaves the projection as
+`SELECT *`. That is invalid with `GROUP BY` on every engine except SQLite and
+MySQL in its permissive mode: the non-aggregated columns are not functionally
+dependent on the grouping key.
 
-### 2. `Preload` has no per-relation condition — 1 case
+It passes in development and fails on deploy, which is the worst shape a
+defect can take, so **S3 made it WARN**, naming the fix. Making it an *error*
+is the right end state and breaks callers relying on the permissive engines,
+so it waits for the major that QADR-0010 collects breaking changes into.
+Adding `Select(...)` makes the query correct today.
 
-`Preload(relations ...string)` is variadic over relation *names*. Q16 shows
-the trap: `Preload("Orders", "status = ?")` compiles, and the extra argument
-is read as a second relation name. It then fails with "relation not found" —
-but **only once the parent query returns rows**, so against an empty table the
-mistake is silent.
+### CLOSED by S3 — the six one-offs
 
-### 3. Windows have no frame clause — 1 case
-
-`Window` exposes `PartitionBy` and `OrderBy` only (Q43). Omitting the frame is
-not a smaller version of the query: the default frame runs from the start of
-the partition to the current row, so a moving average silently becomes a
-running one.
-
-### 4. Four one-offs
-
-- **Q14** — a literal cannot ride in a `JOIN … ON` clause; `OnRaw` accepts
-  identifier-to-identifier conditions only. Moving the literal to `WHERE` is
-  equivalent for an `INNER JOIN` and changes the result set for a `LEFT JOIN`.
-- **Q18** — `Join`, `LeftJoin` and `RightJoin` are the whole set: no
-  `FullJoin`, no `CrossJoin`.
-- **Q60** — `UpdateMap` binds its values as driver arguments, so `stock =
-  stock - 1` cannot be written; an `Expr` reaches `database/sql` as a struct.
-  Read-modify-write is not equivalent — it loses the atomicity that is the
-  reason to write the SQL form.
-- **Q22 / Q23** — `GROUP BY` without a `Select()` leaves the projection as
-  `SELECT *`, which is invalid with `GROUP BY` on every engine except SQLite
-  and MySQL in its permissive mode. These two are the reason the `wrong-sql`
-  verdict exists: they pass on the engine the bench runs on and would fail in
-  production on PostgreSQL.
+| case | what it needed |
+|---|---|
+| Q17, projecting a join onto a DTO | `FromTable` — `For[T]` takes the source table from `T`, so a result-shape struct has to name its own |
+| Q16, filtered eager load | `PreloadWhere` — `Preload` is variadic over names, so a condition could not ride in it |
+| Q43, window frame | `Window.Rows` / `Range` with typed bounds |
+| Q60, `stock = stock - 1` | `UpdateMap` reading an `Expr` value as SQL, plus `Add`/`Subtract`/`Multiply`/`Divide` |
+| Q14, literal in `ON` | `OnExpr` — an AST clause binds its literals, so the identifier-only grammar that polices caller strings does not apply |
+| Q18, full and cross joins | `FullJoin`, `CrossJoin` |
 
 ## Three things the bench found that are not gaps
 

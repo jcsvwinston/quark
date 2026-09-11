@@ -222,6 +222,93 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 		return fmt.Errorf("FromCTE: %d filas, esperaba las 4 de la CTE", len(fromCTE))
 	}
 
+	// FromTable: proyectar un join sobre un DTO que no es modelo. For[T]
+	// toma de T tanto la forma de la fila como la tabla, así que el DTO
+	// tiene que nombrar su origen.
+	proj, err := quark.For[accountEmail](rec.Mark(ctx, QM("FromTable")), client).
+		FromTable("accounts").
+		SelectExpr("id", quark.Col("accounts.id")).
+		SelectExpr("email", quark.Col("accounts.email")).
+		Limit(3).List()
+	if err != nil {
+		return fmt.Errorf("FromTable: %w", err)
+	}
+	if len(proj) == 0 || proj[0].Email == "" {
+		return fmt.Errorf("FromTable: la proyección no escaneó (%d filas)", len(proj))
+	}
+
+	// CrossJoin (sin ON) y FullJoin. FULL OUTER no lo implementan MySQL ni
+	// MariaDB y Quark no lo reescribe en silencio, así que sólo se ejecuta
+	// donde existe; el método se marca igual porque su render se ejerce.
+	if _, err := quark.For[domain.Account](rec.Mark(ctx, QM("CrossJoin")), client).
+		CrossJoin("projects").Limit(3).List(); err != nil {
+		return fmt.Errorf("CrossJoin: %w", err)
+	}
+	switch client.Dialect().Name() {
+	case "mysql", "mariadb":
+		rec.Note(QM("FullJoin"))
+	default:
+		if _, err := quark.For[domain.Account](rec.Mark(ctx, QM("FullJoin")), client).
+			FullJoin("projects").On("accounts.id", "=", "projects.owner_id").
+			Limit(3).List(); err != nil {
+			return fmt.Errorf("FullJoin: %w", err)
+		}
+	}
+
+	// OnExpr: un literal en el ON, que On/OnRaw no admiten porque toman
+	// cadenas del llamante. En un LEFT JOIN no es cosmético — mover el
+	// predicado al WHERE lo convertiría en un join interno.
+	if _, err := quark.For[domain.Account](ctx, client).
+		LeftJoin("projects").OnExpr(quark.And(
+		quark.Eq(quark.Col("accounts.id"), quark.Col("projects.owner_id")),
+		quark.Gt(quark.Col("projects.id"), quark.Lit(0)),
+	)).Limit(3).List(); err != nil {
+		return fmt.Errorf("OnExpr: %w", err)
+	}
+	rec.Note(QF("(*JoinBuilder[T]).OnExpr"))
+
+	// PreloadWhere: filtra los hijos que se cargan, sin descartar padres.
+	if _, err := quark.For[domain.Account](rec.Mark(ctx, QM("PreloadWhere")), client).
+		PreloadWhere("Projects", "id", ">", 0).Limit(3).List(); err != nil {
+		return fmt.Errorf("PreloadWhere: %w", err)
+	}
+
+	// Aritmética y expresión en el SET: `x = x + 1` atómico.
+	if _, err := quark.For[domain.Account](rec.Mark(ctx, QM("Add")), client).
+		Where("id", "=", 1).
+		UpdateMap(map[string]any{"version": quark.Add(quark.Col("version"), quark.Lit(0))}); err != nil {
+		return fmt.Errorf("UpdateMap con Expr: %w", err)
+	}
+	rec.Note(QF("Add"), QF("Subtract"), QF("Multiply"), QF("Divide"))
+	for _, e := range []quark.Expr{
+		quark.Subtract(quark.Col("version"), quark.Lit(1)),
+		quark.Multiply(quark.Col("version"), quark.Lit(2)),
+		quark.Divide(quark.Col("version"), quark.Lit(2)),
+	} {
+		if _, _, err := e.ToSQL(quark.SQLite(), quark.NewSQLGuard()); err != nil {
+			return fmt.Errorf("aritmética: %w", err)
+		}
+	}
+
+	// Frames de ventana: sin ellos, una media móvil es una acumulada.
+	wf := quark.NewWindow().OrderBy(quark.Col("id"), false).
+		Rows(quark.Preceding(2), quark.CurrentRow())
+	if _, err := quark.For[domain.Account](ctx, client).
+		SelectExpr("mov", quark.Over(quark.Func("AVG", quark.Col("id")), wf)).
+		Limit(3).List(); err != nil {
+		return fmt.Errorf("Window.Rows: %w", err)
+	}
+	wr := quark.NewWindow().OrderBy(quark.Col("id"), false).
+		Range(quark.UnboundedPreceding(), quark.CurrentRow())
+	if _, err := quark.For[domain.Account](ctx, client).
+		SelectExpr("acc", quark.Over(quark.Func("SUM", quark.Col("id")), wr)).
+		Limit(3).List(); err != nil {
+		return fmt.Errorf("Window.Range: %w", err)
+	}
+	rec.Note(QF("(*Window).Rows"), QF("(*Window).Range"),
+		QF("Preceding"), QF("Following"), QF("CurrentRow"),
+		QF("UnboundedPreceding"), QF("UnboundedFollowing"))
+
 	// WhereSubquery está gateado por AllowRawQueries: el client del harness lo
 	// RECHAZA (postura de seguridad por defecto)…
 	if _, err := scopedAcc(rec.Mark(ctx, QM("WhereSubquery"))).
@@ -454,3 +541,10 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 	cleanupRegistered = true
 	return nil
 }}
+
+// accountEmail es un DTO de proyección: no es modelo y no tiene tabla, así
+// que su consulta nombra el origen con FromTable.
+type accountEmail struct {
+	ID    int64  `db:"id"`
+	Email string `db:"email"`
+}

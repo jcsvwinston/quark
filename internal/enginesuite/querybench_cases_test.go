@@ -137,33 +137,59 @@ func qbFamilyB() []qbCase {
 				Where("qb_products.active", "=", true).Limit(10).List()
 			return err
 		}},
-		{"Q14", "joins", "JOIN ... ON a = b AND c > 1 (literal in the ON clause)", qbNoAPI,
-			`ErrInvalidJoin: OnRaw accepts identifier-to-identifier conditions only, so a literal cannot ride in the ON clause. Moving it to WHERE is equivalent for INNER JOIN and changes the result set for LEFT JOIN`,
+		{"Q14", "joins", "JOIN ... ON a = b AND c > 1 (literal in the ON clause)", qbTyped,
+			`OnExpr, added by S3. On and OnRaw take caller strings, so they are held to an identifier-only grammar; an AST clause binds its literals and is not subject to it`,
 			func(ctx context.Context, c *quark.Client) error {
-				_, err := quark.For[qbOrder](ctx, c).Join("qb_order_items").
-					OnRaw("qb_orders.id = qb_order_items.order_id AND qb_order_items.qty > 1").Limit(10).List()
+				_, err := quark.For[qbOrder](ctx, c).LeftJoin("qb_order_items").
+					OnExpr(quark.And(
+						quark.Eq(quark.Col("qb_orders.id"), quark.Col("qb_order_items.order_id")),
+						quark.Gt(quark.Col("qb_order_items.qty"), quark.Lit(1)),
+					)).Limit(10).List()
 				return err
 			}},
 		{"Q15", "joins", "eager-load a has_many relation", qbTyped, "", func(ctx context.Context, c *quark.Client) error {
 			_, err := quark.For[qbUser](ctx, c).Preload("Orders").Limit(10).List()
 			return err
 		}},
-		{"Q16", "joins", "eager-load a relation FILTERED (only paid orders)", qbNoAPI,
-			`Preload is variadic over relation NAMES; there is no per-relation condition. The extra argument is read as another relation name and fails with "relation ... not found" — but only once the parent query returns rows, so an empty table hides it`,
+		{"Q16", "joins", "eager-load a relation FILTERED (only paid orders)", qbTyped,
+			`PreloadWhere, added by S3. It narrows which children load without dropping parents that end up with none`,
 			func(ctx context.Context, c *quark.Client) error {
-				_, err := quark.For[qbUser](ctx, c).Preload("Orders", "status = ?").Limit(10).List()
+				users, err := quark.For[qbUser](ctx, c).
+					PreloadWhere("Orders", "status", "=", "paid").Limit(10).List()
+				if err != nil {
+					return err
+				}
+				for _, u := range users {
+					for _, o := range u.Orders {
+						if o.Status != "paid" {
+							return fmt.Errorf("preload filter ignored: loaded order %d with status %q", o.ID, o.Status)
+						}
+					}
+				}
+				return nil
+			}},
+		{"Q17", "joins", "project a join onto a DTO that is not a model", qbTyped,
+			`FromTable, added by S3: For[T] takes both the row shape and the source table from T, so a DTO needs to name its source`,
+			func(ctx context.Context, c *quark.Client) error {
+				rows, err := quark.For[qbOrderEmail](ctx, c).
+					FromTable("qb_orders").
+					Join("qb_users").On("qb_orders.user_id", "=", "qb_users.id").
+					SelectExpr("order_id", quark.Col("qb_orders.id")).
+					SelectExpr("email", quark.Col("qb_users.email")).Limit(10).List()
+				if err != nil {
+					return err
+				}
+				if len(rows) == 0 || rows[0].Email == "" {
+					return fmt.Errorf("projection returned %d rows with empty email — the DTO did not scan", len(rows))
+				}
+				return nil
+			}},
+		{"Q18", "joins", "FULL OUTER JOIN / CROSS JOIN", qbTyped,
+			`FullJoin and CrossJoin, added by S3. FULL OUTER is not implemented by MySQL or MariaDB and Quark does not rewrite it silently, so the bench exercises CrossJoin, which all six have`,
+			func(ctx context.Context, c *quark.Client) error {
+				_, err := quark.For[qbOrder](ctx, c).CrossJoin("qb_users").Limit(10).List()
 				return err
 			}},
-		{"Q17", "joins", "project a join onto a DTO that is not a model", qbNoAPI,
-			`For[T] derives the FROM table from T, so a DTO becomes "FROM qb_order_emails". There is no way to say "FROM qb_orders, scanning into this DTO"`,
-			func(ctx context.Context, c *quark.Client) error {
-				_, err := quark.For[qbOrderEmail](ctx, c).Join("qb_users").On("qb_orders.user_id", "=", "qb_users.id").
-					SelectExpr("order_id", quark.Col("qb_orders.id")).SelectExpr("email", quark.Col("qb_users.email")).Limit(10).List()
-				return err
-			}},
-		{"Q18", "joins", "FULL OUTER JOIN / CROSS JOIN", qbNoAPI,
-			`Join, LeftJoin and RightJoin are the whole set: there is no FullJoin and no CrossJoin, so this case has no spelling to run`,
-			nil},
 	}
 }
 
@@ -189,14 +215,14 @@ func qbFamilyC() []qbCase {
 			return err
 		}},
 		{"Q22", "aggregation", "GROUP BY ... HAVING COUNT(*) > ?", qbWrong,
-			`the HAVING is right, but no Select() means the projection stays "SELECT *", which is invalid with GROUP BY on every engine except SQLite and MySQL in its permissive mode`,
+			`the HAVING is right, but no Select() means the projection stays "SELECT *", which is invalid with GROUP BY on every engine except SQLite and MySQL in its permissive mode. S3 made it WARN; making it an ERROR breaks callers on the permissive engines, so it waits for the major QADR-0010 collects breaking changes into. Adding Select() makes the query correct today`,
 			func(ctx context.Context, c *quark.Client) error {
 				_, err := quark.For[qbOrder](ctx, c).GroupBy("user_id").
 					HavingAggregate("COUNT", "*", ">", 3).Limit(10).List()
 				return err
 			}},
 		{"Q23", "aggregation", "GROUP BY ... HAVING SUM(col) > ?", qbWrong,
-			`same "SELECT *" with GROUP BY as Q22`,
+			`same "SELECT *" with GROUP BY as Q22, and the same WARN`,
 			func(ctx context.Context, c *quark.Client) error {
 				_, err := quark.For[qbOrder](ctx, c).GroupBy("user_id").
 					HavingExpr(quark.Gt(quark.Func("SUM", quark.Col("total")), quark.Lit(1000))).Limit(10).List()
@@ -392,9 +418,15 @@ func qbFamilyF() []qbCase {
 				SelectExpr("running", quark.Over(quark.Func("SUM", quark.Col("total")), w)).Limit(10).List()
 			return err
 		}},
-		{"Q43", "window", "windowed aggregate with an explicit frame (ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)", qbNoAPI,
-			`Window exposes PartitionBy and OrderBy only. Omitting the frame is not a smaller version of the query: the default frame is the whole partition up to the current row, so a moving average silently becomes a running one`,
-			nil},
+		{"Q43", "window", "windowed aggregate with an explicit frame (ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)", qbTyped,
+			`Window.Rows/Range with typed frame bounds, added by S3. Omitting the frame was never a smaller version of the query: the default runs from the start of the partition, so a moving average was silently a running one`,
+			func(ctx context.Context, c *quark.Client) error {
+				w := quark.NewWindow().OrderBy(quark.Col("placed_at"), false).
+					Rows(quark.Preceding(2), quark.CurrentRow())
+				_, err := quark.For[qbOrder](ctx, c).
+					SelectExpr("avg3", quark.Over(quark.Func("AVG", quark.Col("total")), w)).Limit(10).List()
+				return err
+			}},
 		{"Q44", "window", "top-N per group (filter on the window result)", qbTyped,
 			`joining the ranked CTE already worked; FromCTE makes the shorter form available too`,
 			func(ctx context.Context, c *quark.Client) error {
@@ -500,12 +532,27 @@ func qbFamilyJ() []qbCase {
 				UpdateMap(map[string]any{"active": false})
 			return err
 		}},
-		{"Q60", "writes", "UPDATE with an expression over the column (stock = stock - 1)", qbNoAPI,
-			`UpdateMap values are bound as driver arguments, so an Expr reaches database/sql as a struct and the update fails with "unsupported type". Read-modify-write is not equivalent: it loses the atomicity that makes the SQL form worth writing`,
+		{"Q60", "writes", "UPDATE with an expression over the column (stock = stock - 1)", qbTyped,
+			`UpdateMap recognises an Expr value as SQL rather than data, and Subtract gives it something to say. Read-modify-write is not equivalent: it loses the atomicity that is the reason to write it in SQL`,
 			func(ctx context.Context, c *quark.Client) error {
-				_, err := quark.For[qbProduct](ctx, c).Where("id", "=", 1).
-					UpdateMap(map[string]any{"stock": quark.Func("ABS", quark.Col("stock"))})
-				return err
+				before, err := quark.For[qbProduct](ctx, c).Find(int64(1))
+				if err != nil {
+					return err
+				}
+				if _, err := quark.For[qbProduct](ctx, c).Where("id", "=", 1).
+					UpdateMap(map[string]any{
+						"stock": quark.Subtract(quark.Col("stock"), quark.Lit(1)),
+					}); err != nil {
+					return err
+				}
+				after, err := quark.For[qbProduct](ctx, c).Find(int64(1))
+				if err != nil {
+					return err
+				}
+				if after.Stock != before.Stock-1 {
+					return fmt.Errorf("stock went %d -> %d, want a decrement of 1", before.Stock, after.Stock)
+				}
+				return nil
 			}},
 	}
 }

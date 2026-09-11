@@ -408,3 +408,55 @@ func (j jsonExtractExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	}
 	return d.JSONExtract(j.column, j.path)
 }
+
+// --- Arithmetic ---
+
+// Add, Subtract, Multiply and Divide render binary arithmetic, parenthesised
+// so composition does not depend on the reader (or the engine) agreeing about
+// precedence.
+//
+// The motivating use is an UPDATE that reads the column it writes:
+//
+//	q.Where("id", "=", id).UpdateMap(map[string]any{
+//	    "stock": quark.Subtract(quark.Col("stock"), quark.Lit(1)),
+//	})
+//
+// which is not the same as loading the row, subtracting in Go and writing it
+// back: that version loses the atomicity, and two concurrent decrements can
+// leave one of them unapplied.
+//
+// The operator is a constant in each constructor, so nothing a caller types
+// reaches the SQL surface.
+func Add(lhs, rhs Expr) Expr { return arithExpr{op: "+", lhs: lhs, rhs: rhs} }
+
+// Subtract renders `(<lhs> - <rhs>)`.
+func Subtract(lhs, rhs Expr) Expr { return arithExpr{op: "-", lhs: lhs, rhs: rhs} }
+
+// Multiply renders `(<lhs> * <rhs>)`.
+func Multiply(lhs, rhs Expr) Expr { return arithExpr{op: "*", lhs: lhs, rhs: rhs} }
+
+// Divide renders `(<lhs> / <rhs>)`. Division by zero is the engine's to
+// report: engines disagree (an error on PostgreSQL, NULL on SQLite) and
+// papering over that would hide a real difference.
+func Divide(lhs, rhs Expr) Expr { return arithExpr{op: "/", lhs: lhs, rhs: rhs} }
+
+type arithExpr struct {
+	op       string
+	lhs, rhs Expr
+}
+
+func (a arithExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
+	if a.lhs == nil || a.rhs == nil {
+		return "", nil, fmt.Errorf("%w: arithmetic requires two non-nil operands", ErrInvalidQuery)
+	}
+	lsql, largs, err := a.lhs.ToSQL(d, g)
+	if err != nil {
+		return "", nil, err
+	}
+	rsql, rargs, err := a.rhs.ToSQL(d, g)
+	if err != nil {
+		return "", nil, err
+	}
+	args := append(append([]any{}, largs...), rargs...)
+	return "(" + lsql + " " + a.op + " " + rsql + ")", args, nil
+}

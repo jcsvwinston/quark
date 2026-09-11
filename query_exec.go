@@ -710,19 +710,36 @@ func (q *Query[T]) Count() (int64, error) {
 		sqlBuf.WriteString(q.fullTableName())
 	}
 
-	// JOIN clauses
+	// JOIN clauses — same shapes buildSelect renders, or Count() would
+	// reject a query List() accepts.
 	for _, j := range q.joins {
 		if err := q.guard.ValidateIdentifier(j.table); err != nil {
 			return 0, err
-		}
-		if err := guard.ValidateJoinOn(j.onClause); err != nil {
-			return 0, fmt.Errorf("%w: %v", ErrInvalidJoin, err)
 		}
 		sqlBuf.WriteString(" ")
 		sqlBuf.WriteString(j.joinType)
 		sqlBuf.WriteString(" ")
 		sqlBuf.WriteString(q.dialect.Quote(j.table))
+		if j.onClause == "" {
+			continue
+		}
 		sqlBuf.WriteString(" ON ")
+		if j.astON {
+			rendered, n, err := substitutePathMarkers(j.onClause, len(j.args), q.dialect, len(args)+1)
+			if err != nil {
+				return 0, err
+			}
+			if n != len(j.args) {
+				return 0, fmt.Errorf("%w: OnExpr on %q expected %d markers, substituted %d",
+					ErrInvalidQuery, j.table, len(j.args), n)
+			}
+			sqlBuf.WriteString(rendered)
+			args = append(args, j.args...)
+			continue
+		}
+		if err := guard.ValidateJoinOn(j.onClause); err != nil {
+			return 0, fmt.Errorf("%w: %v", ErrInvalidJoin, err)
+		}
 		sqlBuf.WriteString(j.onClause)
 	}
 
@@ -1000,14 +1017,34 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 			if err := q.guard.ValidateIdentifier(j.table); err != nil {
 				return "", nil, err
 			}
-			if err := guard.ValidateJoinOn(j.onClause); err != nil {
-				return "", nil, fmt.Errorf("%w: %v", ErrInvalidJoin, err)
-			}
 			sqlBuf.WriteString(" ")
 			sqlBuf.WriteString(j.joinType)
 			sqlBuf.WriteString(" ")
 			sqlBuf.WriteString(q.dialect.Quote(j.table))
+			// CROSS JOIN takes no ON clause.
+			if j.onClause == "" {
+				continue
+			}
 			sqlBuf.WriteString(" ON ")
+			if j.astON {
+				// Already rendered by the AST with '?' markers: renumber
+				// them for this dialect at the position the JOIN occupies,
+				// which is after the projection's args and before WHERE's.
+				rendered, n, err := substitutePathMarkers(j.onClause, len(j.args), q.dialect, len(args)+1)
+				if err != nil {
+					return "", nil, err
+				}
+				if n != len(j.args) {
+					return "", nil, fmt.Errorf("%w: OnExpr on %q expected %d markers, substituted %d",
+						ErrInvalidQuery, j.table, len(j.args), n)
+				}
+				sqlBuf.WriteString(rendered)
+				args = append(args, j.args...)
+				continue
+			}
+			if err := guard.ValidateJoinOn(j.onClause); err != nil {
+				return "", nil, fmt.Errorf("%w: %v", ErrInvalidJoin, err)
+			}
 			sqlBuf.WriteString(j.onClause)
 		}
 	}
@@ -1038,6 +1075,19 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 
 	// GROUP BY clause
 	if len(q.groupBy) > 0 {
+		// GROUP BY without an explicit projection leaves "SELECT *", which is
+		// invalid on every engine except SQLite and MySQL in its permissive
+		// mode: the non-aggregated columns are not functionally dependent on
+		// the grouping key. It passes in development and fails on deploy,
+		// which is the worst shape a defect can take, so it is said out loud.
+		//
+		// Making it an error is the right end state and is a breaking change
+		// for anyone relying on the permissive engines, so it waits for the
+		// major QADR-0010 collects breaking changes into.
+		if len(q.selectCols) == 0 && len(q.selectExprs) == 0 && q.client != nil && q.client.logger != nil {
+			q.client.logger.Warn("GROUP BY without Select() or SelectExpr() emits SELECT *, which PostgreSQL, SQL Server, Oracle and MySQL in strict mode reject: only the grouped columns and aggregates may appear. Add Select(...) naming the grouped columns, or SelectExpr for the aggregates.",
+				"table", q.table, "group_by", strings.Join(q.groupBy, ", "))
+		}
 		quotedGrp := make([]string, len(q.groupBy))
 		for i, col := range q.groupBy {
 			// Qualified form under JOINs (AQ-01) + opt-in strict-columns

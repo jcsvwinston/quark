@@ -103,6 +103,24 @@ func (q *BaseQuery) loadStandard(parents reflect.Value, ownerMeta *ModelMeta, re
 			whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(len(chunk)+1)))
 			args = append(args, q.tenantID)
 		}
+		// Per-relation filters from PreloadWhere. They narrow which children
+		// load; they never drop a parent that ends up with none.
+		for _, cond := range q.preloadConds[relName] {
+			if err := q.guard.ValidateIdentifier(cond.column); err != nil {
+				return err
+			}
+			if err := q.guard.ValidateOperator(cond.operator); err != nil {
+				return err
+			}
+			op := strings.ToUpper(strings.TrimSpace(cond.operator))
+			if op == "IS NULL" || op == "IS NOT NULL" {
+				whereClauses = append(whereClauses, fmt.Sprintf("%s %s", q.dialect.Quote(cond.column), op))
+				continue
+			}
+			whereClauses = append(whereClauses, fmt.Sprintf("%s %s %s",
+				q.dialect.Quote(cond.column), op, q.dialect.Placeholder(len(args)+1)))
+			args = append(args, cond.value)
+		}
 
 		query := fmt.Sprintf("SELECT * FROM %s WHERE %s",
 			q.dialect.Quote(relModel.Table),
