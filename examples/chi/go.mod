@@ -14,7 +14,7 @@ replace github.com/jcsvwinston/quark/drivers/sqlite => ../../drivers/sqlite
 
 require (
 	github.com/go-chi/chi/v5 v5.3.2
-	github.com/jcsvwinston/quark v1.12.0
+	github.com/jcsvwinston/quark v1.13.0
 	github.com/jcsvwinston/quark/drivers/sqlite v0.1.2
 )
 

@@ -12,7 +12,7 @@ replace github.com/jcsvwinston/quark => ../..
 replace github.com/jcsvwinston/quark/drivers/mssql => ../../drivers/mssql
 
 require (
-	github.com/jcsvwinston/quark v1.12.0
+	github.com/jcsvwinston/quark v1.13.0
 	github.com/jcsvwinston/quark/drivers/mssql v0.1.0
 )
 

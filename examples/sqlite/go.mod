@@ -12,7 +12,7 @@ replace github.com/jcsvwinston/quark => ../..
 replace github.com/jcsvwinston/quark/drivers/sqlite => ../../drivers/sqlite
 
 require (
-	github.com/jcsvwinston/quark v1.12.0
+	github.com/jcsvwinston/quark v1.13.0
 	github.com/jcsvwinston/quark/drivers/sqlite v0.1.0
 )
 
