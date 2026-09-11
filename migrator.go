@@ -51,6 +51,11 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 	if meta.TagError != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidTag, meta.TagError)
 	}
+	if c.logger != nil {
+		for _, w := range meta.TagWarnings {
+			c.logger.Warn("struct tag looks like the Nucleus pkg/model grammar", "detail", w)
+		}
+	}
 
 	var columns []string
 	for _, field := range meta.Fields {
