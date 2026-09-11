@@ -27,6 +27,9 @@ func runSurfaceFuncs(ctx context.Context, client *quark.Client, rec *recorder.Re
 	if err := surfaceWindow(ctx, client, rec); err != nil {
 		return err
 	}
+	if err := surfaceAggregateConstructors(ctx, client, rec); err != nil {
+		return err
+	}
 	if err := surfaceDialectFactories(rec); err != nil {
 		return err
 	}
@@ -105,6 +108,59 @@ func surfaceWindow(ctx context.Context, client *quark.Client, rec *recorder.Reco
 		return fmt.Errorf("surface window: %w", err)
 	}
 	rec.Note(QF("Rank"), QF("DenseRank"), QF("Lag"), QF("Lead"))
+
+	// Las window-funcs que A4/S1 añadió. Se ejecutan de verdad contra cada
+	// motor: son las que el banco de consultas sólo mide sobre SQLite, así
+	// que aquí es donde se comprueba que los seis las rinden igual.
+	w2 := quark.NewWindow().PartitionBy(quark.Col("id")).OrderBy(quark.Col("id"), false)
+	if _, err := quark.For[domain.Account](ctx, client).
+		SelectExpr("nt", quark.Over(quark.NTile(4), w2)).
+		SelectExpr("pr", quark.Over(quark.PercentRank(), w2)).
+		SelectExpr("cd", quark.Over(quark.CumeDist(), w2)).
+		SelectExpr("fv", quark.Over(quark.FirstValue(quark.Col("id")), w2)).
+		SelectExpr("lv", quark.Over(quark.LastValue(quark.Col("id")), w2)).
+		SelectExpr("nv", quark.Over(quark.NthValue(quark.Col("id"), 2), w2)).
+		Limit(5).List(); err != nil {
+		return fmt.Errorf("surface window (S1): %w", err)
+	}
+	rec.Note(QF("NTile"), QF("PercentRank"), QF("CumeDist"),
+		QF("FirstValue"), QF("LastValue"), QF("NthValue"))
+	return nil
+}
+
+// surfaceAggregateConstructors ejerce CountDistinct, Case y JSONExtract: los
+// tres que A4/S1 entregó como constructores en lugar de ampliar la whitelist
+// de funciones del AST. Se ejecutan contra el motor porque su razón de ser es
+// justamente la portabilidad — el accesor JSON se llama distinto en cada uno.
+func surfaceAggregateConstructors(ctx context.Context, client *quark.Client, rec *recorder.Recorder) error {
+	if _, err := quark.For[domain.Account](ctx, client).
+		SelectExpr("n", quark.CountDistinct(quark.Col("id"))).
+		Limit(1).List(); err != nil {
+		return fmt.Errorf("surface CountDistinct: %w", err)
+	}
+	rec.Note(QF("CountDistinct"))
+
+	// SUM(CASE WHEN … THEN 1 ELSE 0 END): el agregado condicional.
+	if _, err := quark.For[domain.Account](ctx, client).
+		SelectExpr("flagged", quark.Func("SUM", quark.Case().
+			When(quark.Gt(quark.Col("id"), quark.Lit(0)), quark.Lit(1)).
+			Else(quark.Lit(0)))).
+		Limit(1).List(); err != nil {
+		return fmt.Errorf("surface Case: %w", err)
+	}
+	rec.Note(QF("Case"), QF("(*CaseBuilder).When"), QF("(*CaseBuilder).Else"),
+		QF("(*CaseBuilder).ToSQL"))
+
+	// JSONExtract sobre Account.Settings, que es una columna JSON de verdad.
+	// Aquí es donde se gana el constructor: el accesor se llama
+	// jsonb_extract_path_text, JSON_EXTRACT o JSON_VALUE según el motor, y
+	// esta llamada es idéntica en los seis.
+	if _, err := quark.For[domain.Account](ctx, client).
+		SelectExpr("theme", quark.JSONExtract("settings", "theme")).
+		Limit(1).List(); err != nil {
+		return fmt.Errorf("surface JSONExtract: %w", err)
+	}
+	rec.Note(QF("JSONExtract"))
 	return nil
 }
 
