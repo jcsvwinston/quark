@@ -88,6 +88,27 @@ added.
 
 </details>
 
+:::caution If you are coming from Nucleus's `pkg/model`
+Both read a tag called `db`, and they do not agree on what is inside it.
+
+| | Quark | Nucleus `pkg/model` |
+| --- | --- | --- |
+| what the tag holds | the **column name**, plus options | **directives** |
+| separator | comma | semicolon |
+| primary key | a separate `pk:"true"` tag | `db:"pk"` |
+| column name | `db:"email"` | `db:"column:email"` |
+| not null / unique | `quark:"not_null,unique"` | `db:"not null;unique"` |
+
+A model written the other way used to produce a Quark column called literally
+`column:email;unique;not null` — no error, no warning, and a table nobody
+could query. Quark now refuses a `db` tag whose column name cannot be an
+identifier, and the error says how to spell it here.
+
+A tag whose column name happens to be a legal identifier but reads like a
+directive — `db:"pk"`, `db:"readonly"` — only warns: a table really can have a
+column called `pk`, so refusing it would be wrong.
+:::
+
 ## Primary keys
 
 Tag the key with `pk:"true"`:

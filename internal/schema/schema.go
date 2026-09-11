@@ -122,6 +122,15 @@ type ModelMeta struct {
 	// Migrate fail fast wrapping quark.ErrInvalidTag. A typo used to mean
 	// DDL silently missing NOT NULL/UNIQUE/columns.
 	TagError error
+
+	// TagWarnings holds tag shapes that are legal but almost certainly a
+	// mistake, where refusing them outright would be wrong. The case that
+	// motivates it: a db tag whose column name is exactly a Nucleus
+	// pkg/model directive — `db:"pk"`, `db:"readonly"` — which Quark reads
+	// as a column called "pk". A table really can have a column named pk,
+	// so this warns rather than fails. RegisterModel and Migrate surface
+	// them through the client logger.
+	TagWarnings []string
 }
 
 // FieldMeta holds metadata about a single struct field.
@@ -222,6 +231,7 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 	// Tag lint (DX-8): recorded here, surfaced fail-fast by
 	// RegisterModel/Migrate — same contract as TZError.
 	tagError := lintFieldTags(t)
+	tagWarnings := warnForeignTagGrammar(t)
 
 	meta := &ModelMeta{
 		Table:             tableName,
@@ -229,6 +239,7 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 		Relations:         make(map[string]*RelationMeta),
 		VersionFieldIndex: -1,
 		TagError:          tagError,
+		TagWarnings:       tagWarnings,
 	}
 
 	// Find PKs: collect all pk:"true" tags; fall back to db:"id".
@@ -556,6 +567,29 @@ func lintFieldTags(t reflect.Type) error {
 		}
 		name := t.Name() + "." + field.Name
 
+		// The db tag written in the OTHER grammar. Nucleus's pkg/model reads
+		// a tag with the same name and a different shape: directives
+		// separated by semicolons, with the column name itself a directive
+		// (`db:"column:email;unique;not null"`). Quark reads the first
+		// comma-separated element as the column NAME, so such a tag used to
+		// produce a column literally called `column:email;unique;not null`
+		// — no error, no warning, and a table nobody could query.
+		//
+		// A column name is an identifier, so anything that cannot be one is
+		// a mistake regardless of which grammar the author had in mind.
+		if dbTag, ok := field.Tag.Lookup("db"); ok && dbTag != "" && dbTag != "-" {
+			col := strings.TrimSpace(strings.SplitN(dbTag, ",", 2)[0])
+			if bad := firstNonIdentifierRune(col); bad != 0 {
+				problems = append(problems, fmt.Sprintf(
+					"%s: db:%q — %q is not a usable column name (found %q). "+
+						"In Quark the db tag holds the COLUMN NAME with optional %s; "+
+						"directives go in quark:%q. A semicolon-separated tag with "+
+						"`column:`/`not null`/`pk` inside is the Nucleus pkg/model grammar — "+
+						"write it as db:\"email\" pk:\"true\" quark:\"unique,not_null\"",
+					name, dbTag, col, string(bad), dbOptions, quarkTokens))
+			}
+		}
+
 		// pk: only "true" (any case) means anything.
 		if v, ok := field.Tag.Lookup("pk"); ok && !strings.EqualFold(v, "true") {
 			problems = append(problems, fmt.Sprintf(
@@ -628,4 +662,72 @@ func lintFieldTags(t reflect.Type) error {
 	}
 	return fmt.Errorf("model %s has invalid struct tags:\n  - %s",
 		t.Name(), strings.Join(problems, "\n  - "))
+}
+
+// firstNonIdentifierRune returns the first character of s that cannot appear
+// in a column name, or 0 when every character can. Letters, digits and
+// underscore are allowed; a leading digit is not flagged here because the
+// SQL guard already rejects it with its own message.
+//
+// It exists to catch a db tag written in another grammar before the name
+// reaches DDL. Quoted identifiers make almost anything legal to the engine,
+// which is why this has to be caught here rather than by the database.
+func firstNonIdentifierRune(s string) rune {
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+		default:
+			return r
+		}
+	}
+	return 0
+}
+
+// nucleusDBDirectives are the tokens Nucleus's pkg/model reads inside its own
+// `db` tag. Each is a legal column name, so finding one cannot be an error —
+// but a field whose column is called "pk" or "readonly" is far more likely to
+// be a model written for the other layer than a table that really has such a
+// column.
+var nucleusDBDirectives = map[string]string{
+	"pk":             `pk:"true"`,
+	"primarykey":     `pk:"true"`,
+	"primary_key":    `pk:"true"`,
+	"readonly":       "no Quark equivalent; the framework decides what is writable",
+	"read_only":      "no Quark equivalent; the framework decides what is writable",
+	"ro":             "no Quark equivalent; the framework decides what is writable",
+	"index":          "declare indexes on the model, not in the db tag",
+	"unique":         `quark:"unique"`,
+	"tenant":         "tenancy is configured on the client, not in the tag",
+	"fk":             `rel:"belongs_to"` + " with " + `join:"..."`,
+	"required":       `quark:"not_null"`,
+	"autocreatetime": "set the value in a BeforeCreate hook",
+	"autoupdatetime": "set the value in a BeforeUpdate hook",
+}
+
+// warnForeignTagGrammar reports db tags whose column name is exactly a
+// Nucleus pkg/model directive. See ModelMeta.TagWarnings.
+func warnForeignTagGrammar(t reflect.Type) []string {
+	var out []string
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		dbTag, ok := field.Tag.Lookup("db")
+		if !ok || dbTag == "" || dbTag == "-" {
+			continue
+		}
+		col := strings.ToLower(strings.TrimSpace(strings.SplitN(dbTag, ",", 2)[0]))
+		hint, isDirective := nucleusDBDirectives[col]
+		if !isDirective {
+			continue
+		}
+		out = append(out, fmt.Sprintf(
+			"%s.%s: db:%q names a column called %q. That is a directive in the Nucleus "+
+				"pkg/model tag grammar, not a column name — in Quark the db tag holds the "+
+				"column name. If you meant the directive, write %s. If the column really "+
+				"is called %q, ignore this.",
+			t.Name(), field.Name, dbTag, col, hint, col))
+	}
+	return out
 }

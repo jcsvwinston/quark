@@ -74,6 +74,14 @@ func (c *Client) RegisterModel(models ...any) error {
 			if meta.TagError != nil {
 				return fmt.Errorf("%w: %v", ErrInvalidTag, meta.TagError)
 			}
+			// Legal but near-certainly wrong tag shapes warn instead of
+			// failing: a column really can be called "pk". See
+			// schema.ModelMeta.TagWarnings.
+			if c.logger != nil {
+				for _, w := range meta.TagWarnings {
+					c.logger.Warn("struct tag looks like the Nucleus pkg/model grammar", "detail", w)
+				}
+			}
 		}
 	}
 	c.registeredModelsMu.Lock()
