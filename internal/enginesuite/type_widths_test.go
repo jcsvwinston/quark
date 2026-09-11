@@ -46,13 +46,20 @@ func testTypeWidths(ctx context.Context, t *testing.T, client *quark.Client) {
 	// 15 significant digits: representable in float64, lost in float32.
 	const exactVal = 1234567890.12345
 
-	row := &twWide{ID: 1, Big: bigVal, Ubig: ubigVal, Exact: exactVal}
+	// The key is left for the engine to generate: SQL Server and Oracle
+	// refuse an explicit value for an identity column, and the width being
+	// measured here is the DATA columns', not the key's — testAutoPKWidth
+	// covers that one.
+	row := &twWide{Big: bigVal, Ubig: ubigVal, Exact: exactVal}
 	if err := quark.For[twWide](ctx, client).Create(row); err != nil {
 		t.Fatalf("insert of a value that needs the wide type failed: %v\n"+
 			"this is QK-21: the generated column is too narrow for the Go type", err)
 	}
+	if row.ID == 0 {
+		t.Fatal("the engine did not report the generated key")
+	}
 
-	got, err := quark.For[twWide](ctx, client).Find(int64(1))
+	got, err := quark.For[twWide](ctx, client).Find(row.ID)
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
@@ -86,25 +93,77 @@ func testAutoPKWidth(ctx context.Context, t *testing.T, client *quark.Client) {
 	}
 	defer dropTable(client, "tw_auto_pks")
 
-	// Assigning a key past the 32-bit range proves the column is wide
-	// enough to reach it, without having to insert two billion rows.
+	// Assigning a key past the 32-bit range proves the column reaches it,
+	// without inserting two billion rows. Identity columns refuse a
+	// caller-supplied value (SQL Server unless IDENTITY_INSERT is ON,
+	// Oracle with ORA-32795), so there the width is read from the catalog
+	// instead — which is the thing under test either way.
 	beyond32 := int64(math.MaxInt32) + 1000
-	if err := quark.For[twAutoPK](ctx, client).Create(&twAutoPK{ID: beyond32, Name: "far"}); err != nil {
-		// Oracle's identity columns are GENERATED ALWAYS, so the engine
-		// refuses any caller-supplied key (ORA-32795). That is not a width
-		// problem — NUMBER has no 32-bit ceiling — so the case does not
-		// apply there.
-		if errors.Is(err, quark.ErrUnsupportedFeature) || strings.Contains(err.Error(), "ORA-32795") {
-			t.Skipf("engine does not accept a caller-assigned identity key: %v", err)
+	err := quark.For[twAutoPK](ctx, client).Create(&twAutoPK{ID: beyond32, Name: "far"})
+	if err == nil {
+		got, ferr := quark.For[twAutoPK](ctx, client).Find(beyond32)
+		if ferr != nil {
+			t.Fatalf("read back a key past 2^31: %v", ferr)
 		}
+		if got.ID != beyond32 {
+			t.Errorf("pk round-trip: got %d, want %d", got.ID, beyond32)
+		}
+		return
+	}
+	if !isIdentityInsertRefusal(err) {
 		t.Fatalf("a primary key past 2^31 was rejected: %v\n"+
 			"this is QK-21: the auto-increment key column is 32-bit", err)
 	}
-	got, err := quark.For[twAutoPK](ctx, client).Find(beyond32)
-	if err != nil {
-		t.Fatalf("read back a key past 2^31: %v", err)
+
+	schema, serr := client.IntrospectSchema(ctx)
+	if serr != nil {
+		t.Fatalf("introspect: %v", serr)
 	}
-	if got.ID != beyond32 {
-		t.Errorf("pk round-trip: got %d, want %d", got.ID, beyond32)
+	col, ok := findColumn(schema, "tw_auto_pks", "id")
+	if !ok {
+		t.Fatalf("column tw_auto_pks.id not found in the catalog")
 	}
+	if !isWideIntegerType(col.Type) {
+		t.Errorf("the identity key column is %q, want a 64-bit type\n"+
+			"this is QK-21: the auto-increment key column is 32-bit", col.Type)
+	}
+}
+
+// isIdentityInsertRefusal reports whether the engine refused the insert
+// because the key is an identity column, not because of its width.
+func isIdentityInsertRefusal(err error) bool {
+	if errors.Is(err, quark.ErrUnsupportedFeature) {
+		return true
+	}
+	msg := strings.ToUpper(err.Error())
+	return strings.Contains(msg, "ORA-32795") || strings.Contains(msg, "IDENTITY_INSERT")
+}
+
+// isWideIntegerType reports whether a catalog type name is 64-bit.
+func isWideIntegerType(t string) bool {
+	u := strings.ToUpper(strings.TrimSpace(t))
+	switch {
+	case strings.HasPrefix(u, "BIGINT"):
+		return true
+	case strings.HasPrefix(u, "NUMBER"): // Oracle identity columns
+		return true
+	case u == "INTEGER": // SQLite: INTEGER PRIMARY KEY is the 64-bit rowid
+		return true
+	default:
+		return false
+	}
+}
+
+func findColumn(s quark.Schema, table, column string) (quark.Column, bool) {
+	for _, tb := range s.Tables {
+		if !strings.EqualFold(tb.Name, table) {
+			continue
+		}
+		for _, c := range tb.Columns {
+			if strings.EqualFold(c.Name, column) {
+				return c, true
+			}
+		}
+	}
+	return quark.Column{}, false
 }
