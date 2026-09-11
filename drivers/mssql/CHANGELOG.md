@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/jcsvwinston/quark/compare/drivers/mssql/v0.2.0...drivers/mssql/v0.2.1) (2026-09-11)
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.13.0 ([#396](https://github.com/jcsvwinston/quark/issues/396)) ([7de0e34](https://github.com/jcsvwinston/quark/commit/7de0e344507445356dad62c540d4553702c76563))
+
 ## [0.2.0](https://github.com/jcsvwinston/quark/compare/drivers/mssql/v0.1.3...drivers/mssql/v0.2.0) (2026-09-10)
 
 
