@@ -15,11 +15,14 @@ func TestSQLType_IntPK_AutoIncrement(t *testing.T) {
 		dialect string
 		want    string
 	}{
+		// 64-bit everywhere (QK-21): SERIAL and INT are four bytes, so the
+		// key ran out at 2,147,483,647 rows. SQLite's INTEGER PRIMARY KEY
+		// is the 64-bit rowid, and Oracle's NUMBER has no width problem.
 		{"sqlite", "INTEGER PRIMARY KEY AUTOINCREMENT"},
-		{"postgres", "SERIAL PRIMARY KEY"},
-		{"mysql", "INT AUTO_INCREMENT PRIMARY KEY"},
-		{"mariadb", "INT AUTO_INCREMENT PRIMARY KEY"},
-		{"mssql", "INT IDENTITY(1,1) PRIMARY KEY"},
+		{"postgres", "BIGSERIAL PRIMARY KEY"},
+		{"mysql", "BIGINT AUTO_INCREMENT PRIMARY KEY"},
+		{"mariadb", "BIGINT AUTO_INCREMENT PRIMARY KEY"},
+		{"mssql", "BIGINT IDENTITY(1,1) PRIMARY KEY"},
 		{"oracle", "NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY"},
 	}
 

@@ -181,6 +181,14 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testWindow(ctx, t, client)
 	})
 
+	t.Run("TypeWidths", func(t *testing.T) {
+		testTypeWidths(ctx, t, client)
+	})
+
+	t.Run("AutoPKWidth", func(t *testing.T) {
+		testAutoPKWidth(ctx, t, client)
+	})
+
 	t.Run("SetOp", func(t *testing.T) {
 		testSetOp(ctx, t, client)
 	})

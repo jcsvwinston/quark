@@ -187,6 +187,17 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 				Scale:     f.Scale,
 				IsPK:      false,
 			})
+			// …with one exception: a SINGLE-column auto-increment key does
+			// not always get the same DATA type a plain column of that Go
+			// type would. A composite key does — only a lone INTEGER
+			// PRIMARY KEY aliases SQLite's rowid, so the columns of a
+			// two-column key are ordinary BIGINTs. See
+			// migrate.PKBareColumnType.
+			if f.IsPK && !meta.HasCompositePK {
+				if bare, ok := migrate.PKBareColumnType(c.dialect.Name(), f.Type); ok {
+					sqlType = bare
+				}
+			}
 			col := Column{
 				Name: f.Column,
 				Type: sqlType,

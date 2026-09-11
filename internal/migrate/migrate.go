@@ -311,19 +311,24 @@ func PKColumnSQL(dialectName string, class PKClass, fallback string) string {
 			return "VARCHAR(36) PRIMARY KEY"
 		}
 	case PKInteger:
+		// 64-bit throughout (QK-21). SERIAL and INT are four bytes, so an
+		// auto-increment key ran out at 2,147,483,647 rows — and a model
+		// assigning its own int64 key was rejected outright by MySQL and
+		// PostgreSQL. SQLite's INTEGER PRIMARY KEY is the 64-bit rowid
+		// already, and Oracle's NUMBER has no width problem.
 		switch dialectName {
 		case "sqlite":
 			return "INTEGER PRIMARY KEY AUTOINCREMENT"
 		case "postgres":
-			return "SERIAL PRIMARY KEY"
+			return "BIGSERIAL PRIMARY KEY"
 		case "mysql", "mariadb":
-			return "INT AUTO_INCREMENT PRIMARY KEY"
+			return "BIGINT AUTO_INCREMENT PRIMARY KEY"
 		case "mssql":
-			return "INT IDENTITY(1,1) PRIMARY KEY"
+			return "BIGINT IDENTITY(1,1) PRIMARY KEY"
 		case "oracle":
 			return "NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY"
 		default:
-			return "INTEGER PRIMARY KEY"
+			return "BIGINT PRIMARY KEY"
 		}
 	default:
 		return fallback + " PRIMARY KEY"
@@ -407,22 +412,54 @@ func SQLType(dialectName string, t reflect.Type, isPK bool) string {
 		default:
 			return "VARCHAR(255)"
 		}
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	// Integers map by the WIDTH of the Go type (QK-21). They all used to
+	// collapse onto INTEGER, which is four bytes on PostgreSQL, MySQL and
+	// SQL Server: an int64 past 2^31 was rejected by MySQL ("Out of range
+	// value") and by PostgreSQL, having looked fine on SQLite, whose
+	// INTEGER is dynamically sized.
+	case reflect.Int8, reflect.Uint8, reflect.Int16, reflect.Uint16:
+		if dialectName == "oracle" {
+			return "NUMBER(5)"
+		}
+		return "SMALLINT"
+	case reflect.Int32, reflect.Uint32:
+		if dialectName == "oracle" {
+			return "NUMBER(10)"
+		}
+		return "INTEGER"
+	case reflect.Int, reflect.Uint, reflect.Int64, reflect.Uint64:
+		// Go's int is 64-bit on every platform Quark supports, so it takes
+		// the wide type rather than gambling on the target.
 		if dialectName == "oracle" {
 			return "NUMBER(19)"
 		}
-		return "INTEGER"
-	case reflect.Float32, reflect.Float64:
+		return "BIGINT"
+	case reflect.Float32:
 		switch dialectName {
-		case "sqlite", "postgres":
+		case "mssql":
 			return "REAL"
-		case "mysql", "mariadb":
-			return "DOUBLE"
-		case "oracle", "mssql":
-			return "FLOAT"
+		case "oracle":
+			return "BINARY_FLOAT"
 		default:
 			return "REAL"
+		}
+	case reflect.Float64:
+		// REAL is single precision on PostgreSQL — about seven significant
+		// digits, where a float64 carries fifteen. SQLite's REAL is an
+		// 8-byte IEEE double, so it was never wrong there.
+		switch dialectName {
+		case "sqlite":
+			return "REAL"
+		case "postgres":
+			return "DOUBLE PRECISION"
+		case "mysql", "mariadb":
+			return "DOUBLE"
+		case "mssql":
+			return "FLOAT(53)"
+		case "oracle":
+			return "BINARY_DOUBLE"
+		default:
+			return "DOUBLE PRECISION"
 		}
 	case reflect.Bool:
 		switch dialectName {
@@ -462,4 +499,44 @@ func SQLType(dialectName string, t reflect.Type, isPK bool) string {
 	}
 
 	return "TEXT" // Fallback
+}
+
+// PKBareColumnType returns the DATA type an auto-increment integer primary
+// key column actually ends up with, when that differs from what SQLType
+// reports for the same Go type outside a key.
+//
+// It exists for the diff and sync paths, which compare a bare type against
+// what the catalog reports and therefore ask SQLType with IsPK false. That
+// answer is right for every engine but SQLite: there, only `INTEGER PRIMARY
+// KEY` aliases the rowid — `BIGINT PRIMARY KEY` is an ordinary indexed column
+// with different behaviour — so the migrator emits INTEGER for the key while
+// a plain int64 column is BIGINT. Without this, widening integers to BIGINT
+// (QK-21) made every SQLite table report drift against itself immediately
+// after being created.
+//
+// It applies to a SINGLE-column key only. Only a lone INTEGER PRIMARY KEY
+// aliases the rowid; the columns of a composite key are ordinary integers,
+// which is why callers check for a composite key before asking.
+//
+// The second return is false when the column takes the ordinary type, which
+// is every other engine: BIGSERIAL, BIGINT AUTO_INCREMENT and BIGINT IDENTITY
+// all leave a bigint column that matches SQLType's answer, and Oracle's
+// identity NUMBER is already handled by the diff's bare-number rule.
+func PKBareColumnType(dialectName string, t reflect.Type) (string, bool) {
+	if dialectName != "sqlite" {
+		return "", false
+	}
+	if t != nil && t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t == nil {
+		return "", false
+	}
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "INTEGER", true
+	default:
+		return "", false
+	}
 }
