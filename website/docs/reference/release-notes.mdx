@@ -21,6 +21,62 @@ Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
 
+## v1.14.0
+
+A minor that widens what the typed API can express and fixes the width of the
+column types it generates.
+
+### Added
+
+**Queries that needed `RawQuery`, and no longer do.** The
+[query bench](https://github.com/jcsvwinston/quark/blob/main/docs/query-bench.md)
+measures which of 60 real-world queries the typed API can express; it went from
+44 to 58.
+
+- `CountDistinct`, `Case` for conditional aggregates, `JSONExtract` to put a
+  JSON member in the SELECT list, and the window functions `NTile`,
+  `PercentRank`, `CumeDist`, `FirstValue`, `LastValue` and `NthValue`.
+- `FromCTE` reads from a CTE declared with `With`, for when the derived rows
+  *are* the query; `FromTable` names the source table for a projection struct.
+- `PreloadWhere` filters which related rows eager-load.
+- `Window.Rows` / `Window.Range` set the frame. Without one, a "moving
+  average" is silently a running average.
+- `UpdateMap` accepts an `Expr` value, so `stock = stock - 1` is expressible
+  with `Subtract` and keeps its atomicity.
+- `OnExpr` puts a literal in a `JOIN … ON`. For an outer join that is not
+  cosmetic: moving the predicate to `WHERE` turns a `LEFT JOIN` into an inner
+  one. `FullJoin` and `CrossJoin` complete the set.
+
+**`Plan.Down()`** returns the plan that undoes a migration plan. Operations
+that record a name but not the shape behind it — `DROP TABLE`, `DROP COLUMN` —
+return `ErrIrreversibleOperation` naming what is missing, instead of a partial
+rollback that reports success.
+
+### Changed
+
+A `db` tag whose column name cannot be an identifier is now **refused**. Quark
+and Nucleus's `pkg/model` both read a tag called `db` with different grammars,
+and a model written the other way produced a column called literally
+`column:email;unique;not null` — silently. A name that *is* a legal identifier
+but reads like a directive (`db:"pk"`) warns instead, because a table really
+can have a column called `pk`.
+
+### Fixed
+
+**Integer and float columns were too narrow.** Every Go integer width mapped to
+a single `INTEGER` — four bytes on PostgreSQL, MySQL and SQL Server — so an
+`int64` past 2³¹ was *rejected* by those engines while looking fine on SQLite.
+Auto-increment keys were `SERIAL`/`INT` and ran out at 2,147,483,647 rows, and
+`float64` mapped to single-precision `REAL` on PostgreSQL.
+
+Integers now map by width, floats take the double-precision type per engine,
+and keys are 64-bit everywhere. The [type matrix](../reference/type-matrix.mdx)
+is generated from the mapper, so it cannot drift from the code.
+
+If you have tables from before this release, `PlanMigration` reports the
+widening as an `ALTER COLUMN`. Applying it loses no data, but on a large table
+the engine may rewrite it — run it when a rewrite is acceptable.
+
 ## v1.13.0
 
 A packaging release: the library's module graph loses two thirds of its
