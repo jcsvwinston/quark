@@ -44,10 +44,15 @@ type join struct {
 
 // BaseQuery holds the non-generic state of a database query.
 type BaseQuery struct {
-	client  *Client
-	ctx     context.Context
-	table   string
-	schema  string // optional schema prefix for multi-tenant isolation
+	client *Client
+	ctx    context.Context
+	table  string
+	schema string // optional schema prefix for multi-tenant isolation
+	// fromCTE, when set, replaces the model's table in the SELECT's FROM
+	// clause with the name of a CTE declared by With/WithRecursive. It
+	// affects the SELECT path only: UPDATE, DELETE and INSERT keep writing
+	// to the model's real table, which is the only thing they could mean.
+	fromCTE string
 	dialect Dialect
 	guard   *SQLGuard
 	pk      pkMeta

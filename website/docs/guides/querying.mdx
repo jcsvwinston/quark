@@ -231,6 +231,37 @@ The plain `Having(column, op, value)` validates `column` as a plain identifier,
 so it's for post-aggregation filtering on a non-aggregate column. For aggregate
 predicates the helper can't express, use [`HavingExpr`](#composable-expressions).
 
+### Distinct counts and conditional aggregates
+
+`CountDistinct` renders `COUNT(DISTINCT <expr>)`, and `Case` builds a searched
+`CASE` so a conditional aggregate is expressible without raw SQL:
+
+```go
+rows, err := quark.For[Order](ctx, client).
+    GroupBy("user_id").
+    SelectExpr("customers", quark.CountDistinct(quark.Col("user_id"))).
+    SelectExpr("paid", quark.Func("SUM", quark.Case().
+        When(quark.Eq(quark.Col("status"), quark.Lit("paid")), quark.Col("amount")).
+        Else(quark.Lit(0)))).
+    List()
+```
+
+`Case()` takes any number of `When(condition, result)` branches, which render
+in the order you add them, and an optional `Else`. A `Case` with no branch is
+rejected.
+
+:::caution Give one CASE branch a known type
+Every `Lit` binds as a parameter, so a `CASE` whose branches are **all**
+literals has no branch with a type PostgreSQL can infer. It settles on `text`,
+and wrapping the result in `SUM` then fails with `function sum(text) does not
+exist`. Using a column in one branch — as above — fixes the type of the whole
+expression. The other five engines are more forgiving, which is what makes
+this easy to miss until a PostgreSQL deploy.
+
+Oracle also rejects a bare aggregate in a query that does not group
+(`ORA-00937`), so pair `CountDistinct` with `GroupBy` there.
+:::
+
 ## JSON predicates
 
 `WhereJSON` asks the dialect to build a JSON-extraction comparison:
@@ -258,6 +289,23 @@ except Oracle, whose `JSON_VALUE` requires a literal path; there the
 | MySQL | `JSON_EXTRACT(\`metadata\`, ?) = ?` (path bound as `"$.plan"`) |
 | MariaDB / SQL Server / Oracle | `JSON_VALUE(...) = ...` |
 | SQLite | `JSON_EXTRACT("metadata", ?) = ?` |
+
+### Projecting a JSON member
+
+`WhereJSON` filters on a JSON member; `JSONExtract` puts one in the SELECT
+list:
+
+```go
+rows, err := quark.For[User](ctx, client).
+    SelectExpr("tier", quark.JSONExtract("profile", "tier")).
+    List()
+```
+
+The accessor is named differently by every engine —
+`jsonb_extract_path_text` on PostgreSQL, `JSON_EXTRACT` on MySQL and SQLite,
+`JSON_VALUE` on SQL Server and Oracle — and the dialect renders the right one,
+so the call is the same everywhere. The path is a dotted identifier chain
+(`"address.city"`), the same grammar `WhereJSON` uses, not JSONPath.
 
 ## Joins
 
@@ -588,10 +636,23 @@ sales, err := quark.For[Sale](ctx, client).
 | --- | --- |
 | `RowNumber()` / `Rank()` / `DenseRank()` | `ROW_NUMBER()` / `RANK()` / `DENSE_RANK()` |
 | `Lag(col, n)` / `Lead(col, n)` | `LAG(<col>, ?)` / `LEAD(<col>, ?)` (offset bound) |
+| `NTile(n)` | `NTILE(?)` — which of n equal buckets the row falls in |
+| `PercentRank()` / `CumeDist()` | `PERCENT_RANK()` / `CUME_DIST()` |
+| `FirstValue(col)` / `LastValue(col)` | `FIRST_VALUE(<col>)` / `LAST_VALUE(<col>)` |
+| `NthValue(col, n)` | `NTH_VALUE(<col>, ?)`, 1-based |
 
 For a running total, wrap any whitelisted aggregate:
 `Over(Func("SUM", Col("amount")), NewWindow().OrderBy(Col("id"), false))`.
 `Window` is immutable, so one definition is reusable across `Over` calls.
+
+:::caution Two engine limits worth knowing
+**SQL Server has no `NTH_VALUE`.** The other five engines do. Quark does not
+emulate it — an emulation would differ on NULLs and frames — so a query using
+`NthValue` is not portable to SQL Server.
+
+**`LastValue` rarely means what it reads like.** With the default frame the
+"last" row of the window is the current one, so it returns the current row's
+value. Windows do not expose a frame clause yet.
 
 The emitted shapes are standard SQL, and run on PostgreSQL, MySQL 8+,
 MariaDB 10.2+, SQL Server, Oracle, and SQLite 3.25+.
@@ -617,8 +678,58 @@ dialect-specific: PostgreSQL, MySQL, MariaDB, and SQLite require it, while Oracl
 and SQL Server infer recursion and reject the keyword. Quark emits the right
 spelling per engine, so you call `WithRecursive` the same way everywhere.
 
+A recursive CTE needs a body of the form *anchor* `UNION ALL` *step*, where
+the step joins the CTE being defined. `UnionAll` composes exactly that, and
+`AsSubquery` captures it:
+
+```go
+anchor := quark.For[Category](ctx, client).Where("id", "=", rootID)
+step := quark.For[Category](ctx, client).
+    Join("tree").On("categories.parent_id", "=", "tree.id")
+
+body, _ := anchor.UnionAll(step).AsSubquery()
+
+rows, err := quark.For[Category](ctx, client).
+    WithRecursive("tree", body).
+    FromCTE("tree").
+    List()
+```
+
 On Oracle, a genuinely recursive CTE also needs a column-alias list in the
 subquery's own SQL.
+
+### Reading from the CTE
+
+`With` declares the CTE; it does not change what the outer SELECT reads. By
+default the outer query still reads the model's table, so a CTE is reached by
+joining it — which is the right shape when you want rows from both.
+
+When the derived rows **are** the query, `FromCTE(name)` replaces the model's
+table in the `FROM`:
+
+```go
+// average number of orders per user: the aggregate is over the derived
+// rows, and the base table must not be in the FROM at all
+perUser, _ := quark.For[Order](ctx, client).
+    GroupBy("user_id").
+    SelectExpr("n", quark.Func("COUNT", quark.Col("*"))).
+    AsSubquery()
+
+avg, err := quark.For[Order](ctx, client).
+    With("per_user", perUser).
+    FromCTE("per_user").
+    Avg("n")
+```
+
+`FromCTE` affects reads only. `Update`, `Delete` and `Create` keep writing to
+the model's table — a CTE is not a write target.
+
+Two implicit scopes behave differently under `FromCTE`, on purpose:
+
+| Scope | Under `FromCTE` | Why |
+| --- | --- | --- |
+| Soft delete | **dropped** | It filters the model's table, and a CTE need not carry `deleted_at`. Apply it in the subquery that builds the CTE. |
+| Tenant | **kept** | Dropping it would turn a missing column into cross-tenant reads, so the CTE has to project the tenant column. |
 
 ## Pessimistic locking
 

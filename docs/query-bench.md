@@ -31,35 +31,35 @@ whether the call returned an error.
 
 ## The result
 
-**48 of 60 typed. 4 emit the wrong SQL. 8 have no API.**
+**52 of 60 typed. 2 emit the wrong SQL. 6 have no API.**
 
 | family | typed | wrong-sql | no-api |
 |---|---|---|---|
 | filtering | 10 | 0 | 0 |
 | joins | 4 | 0 | 4 |
 | aggregation | 6 | 2 | 0 |
-| subquery | 6 | 1 | 0 |
-| cte | 3 | 1 | 1 |
-| window | 5 | 0 | 2 |
+| subquery | 7 | 0 | 0 |
+| cte | 5 | 0 | 0 |
+| window | 6 | 0 | 1 |
 | setop | 4 | 0 | 0 |
 | json | 3 | 0 | 0 |
 | locking | 4 | 0 | 0 |
 | writes | 3 | 0 | 1 |
 
-Filtering, aggregation, set operations, JSON and locking are complete. The
-gaps that remain cluster in joins, CTEs and windows.
+Everything except joins, one window case and one write case is complete.
 
 ### Progress
 
 | session | typed | what it closed |
 |---|---|---|
 | S0 (measurement) | 44 | — |
-| **S1** | **48** | the four cases that needed a function the AST would not render |
+| S1 | 48 | the four cases that needed a function the AST would not render |
+| **S2** | **52** | `FromCTE`, plus two cases S0 had measured wrong |
 
 ## The gaps, grouped by cause
 
-Twelve failing cases come from **six** causes. Fixing them one case at a time
-would be six times more work than fixing them one cause at a time.
+Eight failing cases come from **four** causes. Fixing them one case at a time
+would be twice the work of fixing them one cause at a time.
 
 ### CLOSED by S1 — the four cases the AST would not render
 
@@ -104,36 +104,40 @@ constructor itself:
 - **Oracle rejects a bare aggregate without `GROUP BY`** (ORA-00937), so
   `CountDistinct` needs a `GroupBy` to run there.
 
-### 1. `With()` declares a CTE but never changes the `FROM` — 2 cases
+### CLOSED by S2 — reading from a CTE, and two cases S0 got wrong
 
-`With("t", sub)` emits `WITH "t" AS (…) SELECT * FROM base_table`. The CTE is
-declared and then ignored, unless the caller explicitly joins it (Q38, which
-works). There is no `From(subquery)`.
+`With("t", sub)` declares the CTE and leaves the outer `SELECT` on the base
+table. Joining the CTE reaches it, which is the right shape when you want rows
+from both — but not when the derived rows **are** the query. `FromCTE(name)`
+replaces the model's table in the `FROM`, and closes Q33.
 
-That costs Q33 (derived table in `FROM`) and Q44 (top-N per group, which needs
-to select from the windowed subquery). Q44 is the sharper illustration: the
-statement runs, the CTE is there, and the engine reports "no such column:
-ranked.rn" because the `SELECT` never left the base table.
+**Two of the four cases in this group were never broken.** S0 recorded them as
+gaps and was wrong, which is worth writing down plainly:
 
-### 2. `WITH RECURSIVE` emits the keyword without the recursion — 2 cases
+- **Q36/Q37, the recursive CTE.** A recursive body is
+  *anchor* `UNION ALL` *step*, and `UnionAll(...).AsSubquery()` has composed
+  exactly that since set operators landed. What S0 read was the comment on
+  `WithRecursive`, which still said the typed subquery surface could not model
+  `UNION` — stale long enough to outlive the thing it described. The
+  measurement then wrote the case the way the comment implied, got a
+  non-recursive statement, and recorded the capability as missing. The comment
+  is corrected, and Q37 now asserts a **four-level** tree comes back whole: a
+  two-level tree cannot tell recursion from a single join.
+- **Q44, top-N per group.** Joining the ranked CTE already worked. S0's
+  version failed because it declared the CTE and never referenced it.
 
-`WithRecursive(name, sub)` takes a single subquery, and nothing can reference
-the CTE being defined from inside its own body. The result is a statement that
-is syntactically a recursive CTE and never recurses (Q36), and no way at all
-to write the anchor-`UNION ALL`-recursive-term form (Q37).
+The lesson generalises past this bench: a measurement that trusts a comment
+measures the comment. Both cases now run against a real database and assert
+their result, not just their SQL.
 
-This is the most misleading gap in the bench: the API name says the capability
-is there. Walking a category tree — the canonical reason to reach for a
-recursive CTE — cannot be done.
-
-### 3. `For[T]` derives the `FROM` table from `T` — 1 case
+### 1. `For[T]` derives the `FROM` table from `T` — 1 case
 
 A join cannot be projected onto a DTO (Q17): `For[OrderEmail]` selects `FROM
 order_emails`, a table that does not exist. There is no way to say "read from
 `orders`, scan into this struct". Any query whose result shape is not exactly
 one registered model has to drop to `RawQuery`.
 
-### 4. `Preload` has no per-relation condition — 1 case
+### 2. `Preload` has no per-relation condition — 1 case
 
 `Preload(relations ...string)` is variadic over relation *names*. Q16 shows
 the trap: `Preload("Orders", "status = ?")` compiles, and the extra argument
@@ -141,14 +145,14 @@ is read as a second relation name. It then fails with "relation not found" —
 but **only once the parent query returns rows**, so against an empty table the
 mistake is silent.
 
-### 5. Windows have no frame clause — 1 case
+### 3. Windows have no frame clause — 1 case
 
 `Window` exposes `PartitionBy` and `OrderBy` only (Q43). Omitting the frame is
 not a smaller version of the query: the default frame runs from the start of
 the partition to the current row, so a moving average silently becomes a
 running one.
 
-### 6. Four one-offs
+### 4. Four one-offs
 
 - **Q14** — a literal cannot ride in a `JOIN … ON` clause; `OnRaw` accepts
   identifier-to-identifier conditions only. Moving the literal to `WHERE` is
