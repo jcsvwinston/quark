@@ -995,7 +995,7 @@ PRs included in this release: [#77] (Phase 5 opening, ADR-0012/0013),
   rolls back the entire install. See
   [`row-level-native.mdx`](website/docs/advanced/row-level-native.mdx)
   for the embedding pattern and
-  [`examples/tenant-rls-native/main.go`](examples/tenant-rls-native/main.go)
+  `examples/tenant-rls-native/main.go`
   for a runnable example.
 - multi-tenant: `quarktenant.InstallOptions` covers `TenantColumn`,
   `NativeRLSVar`, `ForceRLS` (default true), `DryRun`, `LockTimeout`,
