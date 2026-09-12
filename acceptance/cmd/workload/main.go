@@ -20,11 +20,11 @@ import (
 	"time"
 
 	"github.com/jcsvwinston/quark"
-	"github.com/jcsvwinston/quark/cache/memory"
 	"github.com/jcsvwinston/quark/acceptance/control"
 	"github.com/jcsvwinston/quark/acceptance/domain"
 	"github.com/jcsvwinston/quark/acceptance/recorder"
 	"github.com/jcsvwinston/quark/acceptance/workload"
+	"github.com/jcsvwinston/quark/cache/memory"
 
 	// Registering the driver is not enough on its own: how the engine reports
 	// uniqueness, deadlock and connection loss has to be registered too

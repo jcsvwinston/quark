@@ -13,11 +13,11 @@ import (
 	"fmt"
 
 	"github.com/jcsvwinston/quark"
-	"github.com/jcsvwinston/quark/cache/memory"
 	"github.com/jcsvwinston/quark/acceptance/control"
 	"github.com/jcsvwinston/quark/acceptance/domain"
 	"github.com/jcsvwinston/quark/acceptance/engine"
 	"github.com/jcsvwinston/quark/acceptance/recorder"
+	"github.com/jcsvwinston/quark/cache/memory"
 )
 
 // qpkg es el import path del paquete raíz de Quark; las keys deben casar EXACTO

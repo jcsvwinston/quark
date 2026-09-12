@@ -33,8 +33,8 @@ import (
 	"time"
 
 	"github.com/jcsvwinston/quark"
-	"github.com/jcsvwinston/quark/cache/redis"
 	"github.com/jcsvwinston/quark/acceptance/control"
+	"github.com/jcsvwinston/quark/cache/redis"
 	qotel "github.com/jcsvwinston/quark/otel"
 
 	"go.opentelemetry.io/otel"

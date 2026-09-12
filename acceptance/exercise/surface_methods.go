@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/jcsvwinston/quark"
-	"github.com/jcsvwinston/quark/cache/memory"
 	"github.com/jcsvwinston/quark/acceptance/domain"
 	"github.com/jcsvwinston/quark/acceptance/recorder"
+	"github.com/jcsvwinston/quark/cache/memory"
 )
 
 const memPkg = "github.com/jcsvwinston/quark/cache/memory"
