@@ -16,7 +16,7 @@ replace github.com/jcsvwinston/quark => ../
 require (
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jcsvwinston/quark v0.0.0-00010101000000-000000000000
 	github.com/microsoft/go-mssqldb v1.11.0
 	github.com/shopspring/decimal v1.4.0

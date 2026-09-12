@@ -23,7 +23,7 @@ replace github.com/jcsvwinston/quark/drivers/sqlite => ../../drivers/sqlite
 
 require (
 	github.com/go-sql-driver/mysql v1.10.1
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jcsvwinston/quark v1.13.0
 	github.com/jcsvwinston/quark/drivers/mssql v0.1.3
 	github.com/jcsvwinston/quark/drivers/mysql v0.1.3
