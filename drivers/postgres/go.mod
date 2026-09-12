@@ -3,7 +3,7 @@ module github.com/jcsvwinston/quark/drivers/postgres
 go 1.25.7
 
 require (
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jcsvwinston/quark v1.13.0
 )
 
