@@ -50,7 +50,7 @@ fence_re = re.compile(r'^```.*?^```[ \t]*$', re.MULTILINE | re.DOTALL)
 #    `config/rbac_policy.csv` son rutas de su proyecto, no del nuestro), y sin
 #    ella el guard perseguiría ficheros que nunca debieron existir aquí.
 REPO_DIRS = ("internal/", "cmd/", "scripts/", "docs/", "website/",
-             "examples/", "migrate/", "quarkmigrate/", "quarktenant/",
+             "acceptance/", "migrate/", "quarkmigrate/", "quarktenant/",
              "quarktest/", "cache/", "otel/", ".github/")
 path_re = re.compile(r'`((?:[\w.-]+/)+[\w.-]+\.(?:go|md|yml|yaml|json|sql|sh|ts|tsx|csv|txt))`')
 

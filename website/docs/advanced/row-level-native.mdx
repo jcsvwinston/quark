@@ -73,9 +73,6 @@ go run ./cmd/tenant install-rls-policies             # apply (takes a migration 
 go run ./cmd/tenant install-rls-policies --tenant-col=org_id --native-rls-var=app.org_id
 ```
 
-A runnable example is at
-[`examples/tenant-rls-native/`](https://github.com/jcsvwinston/quark/blob/main/examples/tenant-rls-native/main.go).
-
 **Option B — manual DDL** through your normal migration pipeline:
 
 ```sql

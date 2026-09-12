@@ -75,7 +75,7 @@ docs: add comparison table justifications
 ```
 
 > **Version-neutral scopes:** PRs that only touch the test-harness areas
-> (`examples/superapp/`, `bugbash/`, `benchmarks/`, `TASKS.md`) must use the
+> (`acceptance/`, `bugbash/`, `benchmarks/`, `TASKS.md`) must use the
 > `test` or `chore` types — a `feat`/`fix` there bumps the library version and
 > enters the library CHANGELOG, which records library-level changes only.
 > (`release-please-config.json` also lists these paths under `exclude-paths`
@@ -238,7 +238,7 @@ Two guards you WILL meet on your first API change:
   regenerating both files in the same change — `make regen` (order
   matters: the allowlist reads the surface). If the symbol cannot be
   exercised by the superapp (needs a live engine, or takes `testing.TB`),
-  add a REASONED entry to `examples/superapp/cmd/gen-allowlist/main.go`
+  add a REASONED entry to `acceptance/cmd/gen-allowlist/main.go`
   and regenerate — an unclassified symbol fails the strict gate.
 - **version coherence** (release PRs only): `scripts/check-version-coherence.sh`
   demands the docs bump in the same PR. release-please bumps the marked

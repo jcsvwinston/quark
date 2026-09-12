@@ -170,8 +170,8 @@ Code generation is a **type-safety** feature, not a speedup — see
   [Read replicas](../advanced/read-replicas).
 - **Sharding** (`ShardRouter`): routes each query by shard key. Cross-shard reads
   (`ScatterGather`/`ScatterCount`) and deriving the shard key from the entity
-  (`ShardKeyer` plus `WithShardKeyOf`) both ship. There is a runnable example
-  under `examples/sharding/`.
+  (`ShardKeyer` plus `WithShardKeyOf`) both ship. See
+  [Sharding](../advanced/sharding).
 - A stress and load harness (latency percentiles, throughput, pool contention)
   under `benchmarks/stress/`, and a comparison benchmark harness that includes
   ent and sqlc. See [Benchmarks](./benchmarks).

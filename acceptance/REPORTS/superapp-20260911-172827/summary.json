@@ -1,0 +1,22 @@
+{
+  "generated_at": "2026-09-11T15:28:27Z",
+  "total_symbols": 763,
+  "strict": true,
+  "engines": [
+    {
+      "engine": "sqlite",
+      "covered": 354,
+      "total": 763,
+      "missing": 3,
+      "allowlisted": 406,
+      "stray": 4,
+      "leak_ok": true,
+      "stray_keys": [
+        "github.com/jcsvwinston/quark.(*Query[T]).OnExpr",
+        "github.com/jcsvwinston/quark.(*Query[T]).Add",
+        "github.com/jcsvwinston/quark.(*Query[T]).(*Window).Rows",
+        "github.com/jcsvwinston/quark.(*Query[T]).(*Window).Range"
+      ]
+    }
+  ]
+}

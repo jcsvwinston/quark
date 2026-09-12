@@ -108,7 +108,7 @@ en el switch) y `comparison.mdx`. Commits `3208f2cf` (fix) + `5c186b2a` (docs). 
 ### DS-9 · La CLI infravalorada; `migrations.mdx` afirma que no existe — ALTO · **cerrado #219**
 - **doc:** `cli.mdx:9-16` ("gen es el primer subcomando GA"; el resto "best expressed as small Go commands"); `migrations.mdx:16-17` ("There is no standalone migration CLI in the current module tree").
 - **código:** `cmd/quark` despacha 9 subcomandos (`init/migrate/model/inspect/validate/seed/sync/tenant/gen`; `cmd/quark/commands/migrate.go:37,45-84`). Contradice además a `codegen.mdx`.
-- **fix:** reescribir `cli.mdx` y `migrations.mdx:16-17` a los 9 subcomandos reales (fuente de verdad de paths: `examples/superapp/cli/cli_test.go`).
+- **fix:** reescribir `cli.mdx` y `migrations.mdx:16-17` a los 9 subcomandos reales (fuente de verdad de paths: `acceptance/cli/cli_test.go`).
 
 ### DS-10 · `modeling.mdx` usa `rel:"m2m"` (falla escritura/migración) — ALTO · **cerrado #219**
 - **doc:** ejemplo m2m de `reference/api/modeling.mdx` (≈ líneas 49, 59) con `rel:"m2m"`.
@@ -175,8 +175,8 @@ en el switch) y `comparison.mdx`. Commits `3208f2cf` (fix) + `5c186b2a` (docs). 
 
 ## Superapp — arnés de aceptación cross-engine (en construcción)
 
-> Plan e instrucciones de continuación en [`examples/superapp/HANDOFF.md`](examples/superapp/HANDOFF.md)
-> (para Code) y blueprint en [`examples/superapp/README.md`](examples/superapp/README.md).
+> Plan e instrucciones de continuación en [`acceptance/HANDOFF.md`](acceptance/HANDOFF.md)
+> (para Code) y blueprint en [`acceptance/README.md`](acceptance/README.md).
 > **Objetivo:** arnés headless que ejerce TODA la superficie pública de Quark en
 > los 6 motores y **demuestra** la cobertura por manifiesto (gate estricto +
 > allowlist). Versión permanente del bug-bash F1–F14 vía capa servicio→Quark.

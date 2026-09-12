@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-09-11T15:48:25Z",
+  "total_symbols": 763,
+  "strict": true,
+  "engines": [
+    {
+      "engine": "sqlite",
+      "covered": 169,
+      "total": 763,
+      "missing": 178,
+      "allowlisted": 416,
+      "stray": 1,
+      "leak_ok": true,
+      "functional_error": "migrate: round-trip roto: el plan post-Migrate no es vacío:",
+      "stray_keys": [
+        "github.com/jcsvwinston/quark.(*Query[T]).Add"
+      ]
+    }
+  ]
+}

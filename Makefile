@@ -11,7 +11,7 @@
 
 # Los módulos que se construyen y testean junto a la raíz. Los ejemplos
 # runnable no están: los cubre la lane "Examples (own modules)" de CI.
-NESTED_MODULES := cmd/quark internal/enginesuite examples/superapp
+NESTED_MODULES := cmd/quark internal/enginesuite acceptance
 
 .PHONY: help check lint test test-race test-all fuzz docs-guards regen superapp oracle-up workspace
 
@@ -35,8 +35,8 @@ check: workspace lint docs-guards ## Las lanes baratas de CI: vet+gofmt, guards 
 	bash scripts/check-version-coherence.sh --self-test
 	bash scripts/release/gen_release_notes_skeleton.sh --self-test
 	bash scripts/ci/check_action_pins.sh
-	cd examples/superapp && go run ./cmd/gen-apisurface && go run ./cmd/gen-allowlist
-	@git diff --quiet examples/superapp/apisurface.json examples/superapp/allowlist.json || \
+	cd acceptance && go run ./cmd/gen-apisurface && go run ./cmd/gen-allowlist
+	@git diff --quiet acceptance/apisurface.json acceptance/allowlist.json || \
 		{ echo "apisurface/allowlist rancios: commitea la regeneración (make regen)"; exit 1; }
 	CGO_ENABLED=0 go build ./...
 	GOOS=linux GOARCH=arm64 go build ./...
@@ -74,11 +74,11 @@ test-all: workspace ## Matriz completa: exporta los QUARK_TEST_*_DSN de los moto
 	cd internal/enginesuite && go test -tags=integration ./... -count=1 -timeout 25m
 
 superapp: workspace ## Aceptación del superapp con gate estricto en sqlite (all-engines: ~45 min con 6 contenedores, ver ci.yml)
-	cd examples/superapp && go run . -engines=sqlite -gate=strict
+	cd acceptance && go run . -engines=sqlite -gate=strict
 
 regen: ## Regenera apisurface.json y allowlist.json EN ESTE ORDEN (allowlist lee apisurface)
-	cd examples/superapp && go run ./cmd/gen-apisurface
-	cd examples/superapp && go run ./cmd/gen-allowlist
+	cd acceptance && go run ./cmd/gen-apisurface
+	cd acceptance && go run ./cmd/gen-allowlist
 
 oracle-up: ## Arranca el Oracle de la matriz con el mismo bootstrap que CI (readiness + GRANT DBMS_LOCK)
 	bash scripts/ci/oracle-up.sh

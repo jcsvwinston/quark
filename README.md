@@ -12,7 +12,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/jcsvwinston/quark)](https://github.com/jcsvwinston/quark/releases/latest)
 
-[Docs](https://jcsvwinston.github.io/quark/) · [Quick Start](#-quick-start) · [Examples](examples/) · [CLI](#️-cli) · [Changelog](CHANGELOG.md)
+[Docs](https://jcsvwinston.github.io/quark/) · [Quick Start](#-quick-start) · [CLI](#️-cli) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -208,18 +208,14 @@ import _ "github.com/jcsvwinston/quark/drivers/postgres"
 client, _ = quark.New("pgx", "postgres://user:pass@localhost/db")
 ```
 
-See the per-dialect runnable examples under [`examples/`](examples/) (one folder per supported engine).
+The driver module is the only per-engine difference: the import above changes, the code that follows it does not.
 
 ---
 
 ## 🎬 Demo
 
-> **Recording coming soon.** To preview Quark locally right now:
->
-> ```bash
-> git clone https://github.com/jcsvwinston/quark
-> cd quark/examples/sqlite && go run .
-> ```
+> **Recording coming soon.** To preview Quark locally right now, follow the
+> Quick Start above in a new module: it is eight lines and a SQLite file.
 
 ---
 
@@ -522,7 +518,7 @@ github.com/jcsvwinston/quark
 ├── internal/             Private implementation (guard, schema, introspection, driver classifiers)
 ├── cmd/
 │   └── quark/            CLI tool
-├── examples/             Runnable examples (own modules) and the superapp acceptance harness
+├── acceptance/           Cross-engine acceptance harness (own module), gated on a generated API manifest
 ├── benchmarks/           Benchmark harness (own module) against database/sql, GORM and ent
 ├── bugbash/              Bug-bash harness (own module)
 ├── website/              Docusaurus source of the published documentation

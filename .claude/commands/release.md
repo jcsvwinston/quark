@@ -71,19 +71,16 @@ toca SQL Oracle-specific (MERGE, sequences, etc.) y no tienes el contenedor
 arriba, corre con DSN env-var (`QUARK_TEST_ORACLE_DSN`) y déjalo registrado
 en el PR.
 
-## Paso 3 — Compilar todos los `examples/`
+## Paso 3 — Compilar el arnés de aceptación
 
 ```bash
-for dir in examples/*/; do
-  [ -f "$dir/go.mod" ] || [ -f "$dir/main.go" ] || continue
-  echo "→ $dir"
-  (cd "$dir" && go build -o /dev/null ./...) || exit 1
-done
+(cd acceptance && GOWORK=off go vet ./... && GOWORK=off go build -o /dev/null .)
 ```
 
-Cualquier ejemplo roto = fix antes de seguir. Los ejemplos son la cara
-pública del API. Incluye `examples/tenant-rls-native/`, `examples/migrations/`,
-y los `examples/{postgres,mysql,mssql,oracle,sqlite}/`.
+El arnés ejerce la superficie pública contra los seis motores: si no compila
+contra la API nueva, la API nueva rompe a quien la usa. Los ejemplos runnable
+se retiraron del árbol el 2026-09-12 y vuelven, si vuelven, cuando la suite
+cierre su plan.
 
 ## Paso 4 — Migration guide si hay breaking changes
 

@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-08-29T14:08:42Z",
+  "total_symbols": 690,
+  "strict": true,
+  "engines": [
+    {
+      "engine": "sqlite",
+      "covered": 323,
+      "total": 690,
+      "missing": 0,
+      "allowlisted": 367,
+      "stray": 0,
+      "leak_ok": true
+    },
+    {
+      "engine": "postgres",
+      "covered": 8,
+      "total": 690,
+      "missing": 279,
+      "allowlisted": 403,
+      "stray": 0,
+      "leak_ok": true,
+      "functional_error": "crud: create: constraint violation"
+    }
+  ]
+}

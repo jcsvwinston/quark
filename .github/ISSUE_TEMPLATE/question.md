@@ -24,5 +24,4 @@ Which docs, examples, or issues have you already read?
 
 - [ ] README.md
 - [ ] The documentation site: https://jcsvwinston.github.io/quantum/quark/
-- [ ] examples/ directory
 - [ ] Existing issues / discussions

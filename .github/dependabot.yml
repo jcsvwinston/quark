@@ -1,9 +1,8 @@
 # Dependency update proposals, weekly, grouped so a Monday brings one pull
 # request per family of modules rather than one per module and one per
-# dependency. Quark is twenty-one Go modules — the library at the root, the
-# CLI, the five driver modules, three local harnesses and the ten runnable
-# examples — so each family is listed on its own, with the reason for every
-# `ignore` written next to it. Every go.mod in the tree has an entry here, and
+# dependency. Quark is eleven Go modules — the library at the root, the CLI,
+# the five driver modules and four local harnesses — so each family is listed
+# on its own, with the reason for every `ignore` written next to it. Every go.mod in the tree has an entry here, and
 # the lint job fails if one appears without it.
 version: 2
 updates:
@@ -88,40 +87,26 @@ updates:
       # is noise about a number nothing reads.
       - dependency-name: github.com/jcsvwinston/quark
 
-  # The ten runnable examples and the acceptance harness. Each is its own
-  # module (ADR-0023, and ADR-0024 for the superapp) and each is
-  # built and vetted by the "Examples (own modules)" job, which is the same
-  # reason the harnesses above are covered: their dependencies age, and a bump
-  # that breaks one is caught before it is merged. They are kept apart from
-  # the library because a proposal here changes a file a reader copies as a
-  # template, not anything that ships.
+  # The acceptance harness (ADR-0024). Its dependencies age like any other
+  # module's, and a bump that breaks it is caught before it is merged — which
+  # is the same reason the harnesses above are covered. It is kept apart from
+  # the library because a proposal here changes nothing that ships.
   - package-ecosystem: gomod
     directories:
-      - /examples/chi
-      - /examples/echo
-      - /examples/gin
-      - /examples/migrations
-      - /examples/mssql
-      - /examples/mysql
-      - /examples/postgres
-      - /examples/sharding
-      - /examples/sqlite
-      - /examples/superapp
-      - /examples/tenant-rls-native
+      - /acceptance
     schedule:
       interval: weekly
     groups:
       example-modules:
         patterns: ["*"]
     ignore:
-      # These two requirements, and only these two, are the ones the `replace`
-      # directives at the top of every example go.mod point back into this
+      # These requirements, and only these, are the ones the `replace`
+      # directives at the top of the harness go.mod point back into this
       # tree. Their versions are never resolved, so a proposal against them
-      # would move a number the build does not read; they are re-pointed by
-      # hand when an example is refreshed. Everything else an example requires
-      # resolves from the proxy and ages normally — the framework it
-      # demonstrates (chi, echo, gin) and the engine libraries underneath
-      # (modernc.org/sqlite, jackc/pgx/v5, go-mssqldb, golang.org/x/crypto).
+      # would move a number the build does not read. Everything else it
+      # requires resolves from the proxy and ages normally — the engine
+      # libraries underneath (modernc.org/sqlite, jackc/pgx/v5, go-mssqldb,
+      # golang.org/x/crypto).
       - dependency-name: github.com/jcsvwinston/quark
       - dependency-name: github.com/jcsvwinston/quark/drivers/*
 
