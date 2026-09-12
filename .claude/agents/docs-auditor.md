@@ -165,22 +165,25 @@ grep -nE 'v?0\.[0-9]+\.x|\[maintainer-domain\]|\[[A-Z][^]]+\]' SECURITY.md
 
 **(auto-fix)** SÍ para la versión soportada; NO para el email (decisión humana sobre qué dirección poner).
 
-### H · `examples/` que se referencian existen y compilan
+### H · el arnés de aceptación que se referencia existe
 
-**(qué)** Cualquier path bajo `examples/` mencionado en `README.md`, `website/docs/**`, `docs/**` debe existir.
+**(qué)** Cualquier path bajo `acceptance/` mencionado en `README.md`,
+`website/docs/**` o `docs/**` debe existir. Los ejemplos runnable se retiraron
+del árbol (2026-09-12): una referencia a `examples/` es texto que quedó atrás.
 
 **(cómo)**
 
 ```bash
-# Paths a examples referenciados
-grep -rohE 'examples/[a-z][a-z0-9/_-]+' README.md website/docs/ docs/ 2>/dev/null | sort -u
-# Examples existentes
-ls examples/
+# Paths referenciados
+grep -rohE '(acceptance|examples)/[a-z][a-z0-9/_-]+' README.md website/docs/ docs/ 2>/dev/null | sort -u
+# Lo que existe
+ls acceptance/
 ```
 
-**(veredicto)** DRIFT si se referencia un example inexistente.
+**(veredicto)** DRIFT si se referencia un path inexistente, o cualquier
+`examples/` fuera de las notas de release y el changelog (que son historia).
 
-**(auto-fix)** NO.
+**(auto-fix)** SÍ.
 
 ### I · Sidebar enlaza todas las páginas existentes
 

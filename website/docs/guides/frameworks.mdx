@@ -23,9 +23,8 @@ whichever one you use:
    and silently turns the 409 below into a 500. See
    [Pick a driver](installation#pick-a-driver).
 
-Each section below is a runnable example under `examples/` in the
-repository, its own Go module with a test that drives the handlers through
-`httptest`. They all serve the same two routes over this model:
+Each section below serves the same two routes over this model, so the only
+thing that changes between them is the framework's own idiom:
 
 ```go
 type Note struct {
@@ -101,9 +100,6 @@ r.Post("/notes", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
-Full example:
-[`examples/chi`](https://github.com/jcsvwinston/quark/tree/main/examples/chi).
-
 ## Echo
 
 Echo wraps the request: the context is `c.Request().Context()`, and
@@ -134,9 +130,6 @@ e.POST("/notes", func(c echo.Context) error {
     return c.JSON(http.StatusCreated, n)
 })
 ```
-
-Full example:
-[`examples/echo`](https://github.com/jcsvwinston/quark/tree/main/examples/echo).
 
 ## Gin
 
@@ -172,9 +165,6 @@ r.POST("/notes", func(c *gin.Context) {
     c.JSON(http.StatusCreated, n)
 })
 ```
-
-Full example:
-[`examples/gin`](https://github.com/jcsvwinston/quark/tree/main/examples/gin).
 
 ## Nucleus
 

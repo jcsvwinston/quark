@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-08-29T14:26:27Z",
+  "total_symbols": 690,
+  "strict": true,
+  "engines": [
+    {
+      "engine": "mssql",
+      "covered": 324,
+      "total": 690,
+      "missing": 0,
+      "allowlisted": 366,
+      "stray": 0,
+      "leak_ok": true
+    }
+  ]
+}

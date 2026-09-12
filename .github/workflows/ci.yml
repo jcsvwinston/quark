@@ -133,20 +133,19 @@ jobs:
         # the surface being inventoried is the one in the pull request.
         run: |
           set -euo pipefail
-          (cd examples/superapp && go run ./cmd/gen-apisurface && go run ./cmd/gen-allowlist)
-          if ! git diff --quiet examples/superapp/apisurface.json examples/superapp/allowlist.json; then
+          (cd acceptance && go run ./cmd/gen-apisurface && go run ./cmd/gen-allowlist)
+          if ! git diff --quiet acceptance/apisurface.json acceptance/allowlist.json; then
             echo "apisurface.json / allowlist.json are stale. Run:"
             echo "  make regen"
             echo "and commit the result. Drift:"
-            git --no-pager diff --stat examples/superapp/apisurface.json examples/superapp/allowlist.json
+            git --no-pager diff --stat acceptance/apisurface.json acceptance/allowlist.json
             exit 1
           fi
 
       - name: every Go module is covered by Dependabot
-        # .github/dependabot.yml names its directories one at a time: a glob
-        # would also match examples/oracle, which belongs to the root module
-        # and has no go.mod of its own. A hand-kept list is the kind that goes
-        # stale in silence — a new module would simply never be offered an
+        # .github/dependabot.yml names its directories one at a time rather
+        # than by glob: a hand-kept list is the kind that goes stale in
+        # silence — a new module would simply never be offered an
         # update, with nothing on screen to say so. Fail instead, so a module
         # and its entry land in the same pull request. It has caught three
         # already: the CLI, the superapp and the engine suites all became
@@ -302,39 +301,6 @@ jobs:
               go build ./...
               go vet ./...
             )
-          done
-
-  # The runnable examples are their own modules (examples/<engine>/go.mod):
-  # they import the driver modules the way an application does, and those
-  # modules import Quark, so the library module cannot require them without a
-  # cycle (ADR-0023). Local replace directives point them at this tree, so
-  # this lane needs no workspace either — but the root `go build ./...` does
-  # not reach them, and without this lane an example could stop compiling
-  # against the API it demonstrates. Since ADR-0024 the acceptance harness
-  # (examples/superapp) is a module too, and this lane picks it up by the
-  # same find: compiling it here is cheap, and the expensive part — actually
-  # running it against six engines — is the `superapp` job below.
-  examples:
-    name: Examples (own modules)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build and vet each example module
-        env:
-          GOWORK: "off"
-        run: |
-          set -euo pipefail
-          for m in $(find examples -mindepth 2 -maxdepth 2 -name go.mod -exec dirname {} \; | sort); do
-            echo "== $m"
-            # -o /dev/null: a module with a single main package would
-            # otherwise write an executable into the tree.
-            (cd "$m" && go vet ./... && go build -o /dev/null .)
           done
 
   govulncheck:
@@ -716,7 +682,7 @@ jobs:
   # Unlike the integration matrix, this is a SINGLE job with `-engines=all`:
   # the gate is union-based over one manifest, so fragmenting it per engine
   # would break its semantics. The harness boots PG/MySQL/MariaDB/MSSQL
-  # itself via `docker run` (examples/superapp/engine); only Oracle needs the
+  # itself via `docker run` (acceptance/engine); only Oracle needs the
   # same out-of-band setup as the integration job (testcontainers crashes the
   # gvenzl image on hosted runners), handed in via SUPERAPP_DSN_ORACLE — which
   # short-circuits the harness's own Docker management for Oracle.
@@ -740,12 +706,21 @@ jobs:
         # superapp.
         run: bash scripts/ci/oracle-up.sh SUPERAPP_DSN_ORACLE
 
+      - name: Build and vet the harness
+        # The examples lane used to compile every nested module, this one
+        # included. With the examples gone, the cheap check lives here, in
+        # front of the expensive run.
+        working-directory: acceptance
+        env:
+          GOWORK: "off"
+        run: go vet ./... && go build -o /dev/null .
+
       - name: Run superapp acceptance (all engines, strict gate)
         timeout-minutes: 25
         # From inside its own module (ADR-0024): the manifest and allowlist
         # paths default to this directory, and its go.mod already replaces
         # every Quark requirement with this tree.
-        working-directory: examples/superapp
+        working-directory: acceptance
         run: go run . -engines=all -gate=strict
 
   # A3. This is the single check name branch protection should require on
@@ -768,7 +743,6 @@ jobs:
       - static-build
       - drivers
       - drivers-standalone
-      - examples
       - govulncheck
       - cli
       - suites

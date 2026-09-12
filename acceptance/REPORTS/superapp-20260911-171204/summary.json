@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-09-11T15:12:04Z",
+  "total_symbols": 746,
+  "strict": true,
+  "engines": [
+    {
+      "engine": "sqlite",
+      "covered": 124,
+      "total": 746,
+      "missing": 206,
+      "allowlisted": 416,
+      "stray": 0,
+      "leak_ok": true,
+      "functional_error": "builder-advanced: FromCTE: 0 filas, esperaba las 4 de la CTE"
+    }
+  ]
+}

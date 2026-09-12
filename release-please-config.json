@@ -63,7 +63,7 @@
     ".": {
         "release-type": "go",
       "exclude-paths": [
-        "examples/superapp",
+        "acceptance",
         "bugbash",
         "benchmarks",
         "TASKS.md"

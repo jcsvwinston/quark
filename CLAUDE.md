@@ -27,7 +27,7 @@ quark/
 ├── cmd/quark/                   ← el CLI, MÓDULO PROPIO (ADR-0024), tags cmd/quark/vX.Y.Z
 ├── drivers/                     ← un módulo por motor (ADR-0023)
 ├── internal/enginesuite/        ← las suites por motor, MÓDULO PROPIO sin publicar (ADR-0024)
-├── examples/                    ← ejemplos por motor (sqlite/postgres/mysql/mssql/oracle); superapp es módulo propio
+├── acceptance/                  ← arnés de aceptación cross-engine, MÓDULO PROPIO sin publicar (ADR-0024)
 ├── docs/                        ← markdown fuente (ROADMAP, ARCHITECTURE, ANALISIS_MADUREZ…)
 ├── website/                     ← sitio Docusaurus publicado en GitHub Pages del repo quark (jcsvwinston.github.io/quark/) vía .github/workflows/deploy.yml
 │   ├── docusaurus.config.ts
@@ -71,7 +71,7 @@ Cuando se taggea una nueva versión `vX.Y.Z`, **el mismo PR que bumpea la versi�
    ```
    Esto congela el contenido actual de `website/docs/` como `website/versioned_docs/version-X.Y.Z/` y deja `website/docs/` como "next".
 5. Revisar `website/sidebars.ts` por si hay nuevas páginas no enlazadas.
-6. Validar que todos los ejemplos (`examples/*/main.go`) siguen compilando con la nueva API.
+6. Validar que el arnés de aceptación (`acceptance/`) sigue compilando con la nueva API.
 7. Si la release tiene breaking changes, escribir/actualizar `docs/MIGRATION_vX.Y.Z.md` y enlazarlo desde el sidebar y el release.
 8. Escribir/actualizar `docs/RELEASE_NOTES_vX.Y.Z.md`. **No añadas marketing.** Lista features, fixes, breaking changes con referencia al issue/PR.
 9. Verificar que el badge de coverage en README refleja un reporte real (no un número hardcoded).
@@ -176,7 +176,7 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 - **Arranque de sesión enfocado en pendiente**: `.claude/commands/next-session.md`.
 - **Anti-patterns codificados**: invoca el subagente `code-reviewer` (`.claude/agents/code-reviewer.md`) antes de cerrar cualquier PR.
 - **Auditoría docs↔código**: subagente `docs-auditor` (`.claude/agents/docs-auditor.md`); pasada periódica vía `/doc-sync`.
-- **Superapp de aceptación cross-engine (en construcción)**: arnés headless que ejerce toda la superficie pública en los 6 motores con cobertura demostrada por manifiesto. Instrucciones de continuación en [`examples/superapp/HANDOFF.md`](examples/superapp/HANDOFF.md) (+ blueprint `examples/superapp/README.md`); backlog en `TASKS.md` § "Superapp". **Versionado**: la versión de la librería refleja sólo cambios de la librería. Un PR que sólo toca harness (`examples/superapp/`, `bugbash/`, `benchmarks/`, `TASKS.md`) usa `test(superapp):` o `chore(...):`, **nunca `feat:`/`fix:`** — esos types bumpean la versión y entran en el CHANGELOG. (`release-please-config.json` lista esas rutas en `exclude-paths` como segunda barrera, pero release-please 17.3.0 NO la aplica al paquete raíz — verificado empíricamente en #180→#156 — así que la convención de types es la barrera efectiva.)
+- **Superapp de aceptación cross-engine (en construcción)**: arnés headless que ejerce toda la superficie pública en los 6 motores con cobertura demostrada por manifiesto. Instrucciones de continuación en [`acceptance/HANDOFF.md`](acceptance/HANDOFF.md) (+ blueprint `acceptance/README.md`); backlog en `TASKS.md` § "Superapp". **Versionado**: la versión de la librería refleja sólo cambios de la librería. Un PR que sólo toca harness (`acceptance/`, `bugbash/`, `benchmarks/`, `TASKS.md`) usa `test(superapp):` o `chore(...):`, **nunca `feat:`/`fix:`** — esos types bumpean la versión y entran en el CHANGELOG. (`release-please-config.json` lista esas rutas en `exclude-paths` como segunda barrera, pero release-please 17.3.0 NO la aplica al paquete raíz — verificado empíricamente en #180→#156 — así que la convención de types es la barrera efectiva.)
 
 ## Cómo arrancar una sesión productiva
 

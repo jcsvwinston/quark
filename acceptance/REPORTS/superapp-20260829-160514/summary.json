@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-08-29T14:05:14Z",
+  "total_symbols": 690,
+  "strict": true,
+  "engines": [
+    {
+      "engine": "sqlite",
+      "covered": 323,
+      "total": 690,
+      "missing": 0,
+      "allowlisted": 367,
+      "stray": 0,
+      "leak_ok": true
+    }
+  ]
+}
