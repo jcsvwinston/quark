@@ -1,6 +1,6 @@
 module github.com/jcsvwinston/quark
 
-go 1.25.7
+go 1.26.0
 
 toolchain go1.26.6
 
@@ -12,7 +12,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.46.0
 	go.opentelemetry.io/otel/sdk/metric v1.46.0
 	go.opentelemetry.io/otel/trace v1.46.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	modernc.org/sqlite v1.58.0
 )
 
