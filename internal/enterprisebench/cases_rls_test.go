@@ -77,17 +77,15 @@ func controlsRls() []control {
 		{
 			id:     "RLS-06",
 			family: "rls",
-			title:  "install-rls-policies exists only as an action of the embeddable runner: the `tenant` prefix the docs print is rejected by it",
-			want:   absent,
-			note: "quarktenant.Run is a runner the application embeds in a main of its own; " +
-				"its actions are install-rls-policies and verify-rls-policies, and it " +
-				"answers the `tenant` word ADR-0012 and the CHANGELOG print in front of " +
-				"them with `unknown action \"tenant\"`. The shipped `quark` binary does have " +
-				"a cobra `tenant` group — provision, migrate, list, migrate-all — and no " +
-				"install-rls-policies inside it; that binary is a module of its own " +
-				"(cmd/quark, ADR-0024) which this bench's module cannot import, so its " +
-				"refusal is not what the probe reads. Either way whoever follows the " +
-				"documentation types something nothing accepts.",
+			title:  "`quark tenant install-rls-policies` and `verify-rls-policies` exist in the shipped binary, and the embeddable runner keeps its bare actions",
+			want:   present,
+			note: "Closed at A8 S10. The cobra `tenant` group of cmd/quark registers both commands, " +
+				"reading the models from source (--from-models) and rendering the runner's own DDL " +
+				"shape, so what ADR-0012 prints is what the binary accepts. quarktenant.Run is the " +
+				"embeddable runner an application wires into a main of its own; its actions stay bare " +
+				"(install-rls-policies, verify-rls-policies) and it still rejects a `tenant` prefix — that " +
+				"is not a gap, it is a different program. The binary is a module of its own, so this " +
+				"bench reads its sources for the commands.",
 			probe: probeRlsPolicyCommandLine,
 		},
 		{

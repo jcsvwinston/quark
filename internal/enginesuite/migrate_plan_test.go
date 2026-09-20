@@ -5,6 +5,7 @@ package enginesuite
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -114,18 +115,29 @@ func TestPlanMigration_DropsUnknownTable(t *testing.T) {
 		t.Fatalf("seed legacy: %v", err)
 	}
 
-	// PlanMigration against an empty model list: every table in
-	// the DB is "unknown" and should be dropped.
-	plan, err := c.PlanMigration(ctx)
+	// PlanMigration with NO models refuses (A8 S10): a plan against nothing
+	// would drop every live table, which is what a precompiled binary used
+	// to be handed.
+	if _, err := c.PlanMigration(ctx); !errors.Is(err, quark.ErrInvalidQuery) {
+		t.Fatalf("PlanMigration with no models: %v, want ErrInvalidQuery", err)
+	}
+	// With a model the database does not have, the table the models do not
+	// name is "unknown" and is dropped, alongside the create.
+	type PlanKnown struct {
+		ID int64 `db:"id" pk:"true"`
+	}
+	plan, err := c.PlanMigration(ctx, &PlanKnown{})
 	if err != nil {
 		t.Fatalf("PlanMigration: %v", err)
 	}
-	if len(plan.Ops) != 1 {
-		t.Fatalf("want 1 op (drop legacy), got %d:\n%s", len(plan.Ops), plan.String())
+	var sawDrop bool
+	for _, op := range plan.Ops {
+		if drop, ok := op.(quark.OpDropTable); ok && drop.Table == "legacy" {
+			sawDrop = true
+		}
 	}
-	drop, ok := plan.Ops[0].(quark.OpDropTable)
-	if !ok || drop.Table != "legacy" {
-		t.Errorf("want OpDropTable{legacy}, got %T %+v", plan.Ops[0], plan.Ops[0])
+	if !sawDrop {
+		t.Errorf("want an OpDropTable{legacy} among the ops, got:\n%s", plan.String())
 	}
 }
 

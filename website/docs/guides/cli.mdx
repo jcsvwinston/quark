@@ -39,7 +39,7 @@ rather not build from source, and check it before you run it:
 | `inspect` | `schema` / `table <name>` / `sql` introspection. |
 | `sync` | Check the connection and print how to wire `client.Sync(...)` — the diff/apply itself needs your compiled model types, so it runs in your app, not the CLI. |
 | `seed` | `create` / `run` / `list` seed scripts. |
-| `tenant` | `provision` / `migrate` / `list` / `migrate-all` for multi-tenant databases. |
+| `tenant` | `provision` / `migrate` / `list` / `migrate-all` for multi-tenant databases; `install-rls-policies` / `verify-rls-policies` for PostgreSQL row-level security. |
 | `validate` | Validate a model's tags against the live schema. |
 | `gen` | Generate typed accessors / binders (see [Code Generation](codegen)). |
 
@@ -115,6 +115,21 @@ quark migrate up                        # apply pending migrations
 quark migrate status                    # show applied vs pending
 quark migrate down                      # roll back the last migration
 ```
+
+The same static reader lets the binary **diff your models against the live
+database** without compiling them in:
+
+```sh
+quark migrate diff   --from-models ./models   # the pending operations, human-readable
+quark migrate plan   --from-models ./models   # alias of diff
+quark migrate verify --from-models ./models   # exit 1 on drift — a CI gate
+```
+
+The structs are read with `go/packages`, mapped with the runtime's own type
+mapping, and diffed with `quark.Diff` against `IntrospectSchema`; the indexes,
+foreign keys and checks the tags cannot name are carried over, so the plan never
+proposes dropping what your models are silent about. (`PlanMigration`, the
+library entry point, needs Go values and refuses when given none.)
 
 `migrate create` can also write the migration **body** for you. Point it at
 the package that holds your model structs and name the dialect, and it

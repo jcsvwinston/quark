@@ -173,7 +173,7 @@ func generateFromDefinition(name string) error {
 	for _, f := range fields {
 		parts := strings.Split(f, ":")
 		if len(parts) != 2 && len(parts) != 3 {
-			return fmt.Errorf("invalid field definition %q: use name:type or name:type:modifier (modifiers: not_null, unique, version; rich types: nullable<T>, array<T>, json<T>, belongs_to<Model>)", f)
+			return fmt.Errorf("invalid field definition %q: use name:type or name:type:modifier (modifiers: not_null, unique, version, index; rich types: nullable<T>, array<T>, json<T>, belongs_to<Model>)", f)
 		}
 
 		fieldName := parts[0]
@@ -184,10 +184,10 @@ func generateFromDefinition(name string) error {
 		quarkTag := ""
 		if len(parts) == 3 {
 			switch parts[2] {
-			case "not_null", "unique", "version":
+			case "not_null", "unique", "version", "index":
 				quarkTag = parts[2]
 			default:
-				return fmt.Errorf("invalid field modifier %q in %q: expected not_null, unique or version", parts[2], f)
+				return fmt.Errorf("invalid field modifier %q in %q: expected not_null, unique, version or index", parts[2], f)
 			}
 		}
 

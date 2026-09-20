@@ -105,6 +105,13 @@ func (p Plan) String() string {
 // SQLite quirk: same Checks=nil handling as the rest of F3-3-core —
 // no spurious drops when the database doesn't introspect checks.
 func (c *Client) PlanMigration(ctx context.Context, models ...any) (Plan, error) {
+	// With no models the desired schema is empty, and a plan against it is
+	// "drop every live table" — what a precompiled binary with none of the
+	// user's models used to be handed (A8 S10, MIG-11). Refuse instead.
+	if len(models) == 0 {
+		return Plan{}, fmt.Errorf("%w: PlanMigration with no models would plan to drop every live table; pass the models, diff a Schema you built with quark.Diff, or plan from source with `quark migrate diff --from-models`",
+			ErrInvalidQuery)
+	}
 	desired, err := c.modelsToSchema(models...)
 	if err != nil {
 		return Plan{}, fmt.Errorf("PlanMigration: build desired schema: %w", err)

@@ -499,10 +499,19 @@ func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		}
 		defer dropTable(baseClient, "plan_extraneous")
 
-		plan, err := baseClient.PlanMigration(ctx)
+		// No models refuses (A8 S10); with a model of its own the plan drops
+		// the table the models do not name.
+		if _, err := baseClient.PlanMigration(ctx); err == nil {
+			t.Fatalf("PlanMigration with no models should refuse")
+		}
+		type PlanKnown struct {
+			ID int64 `db:"id" pk:"true"`
+		}
+		plan, err := baseClient.PlanMigration(ctx, &PlanKnown{})
 		if err != nil {
 			t.Fatalf("PlanMigration: %v", err)
 		}
+		defer dropTable(baseClient, "plan_knowns")
 		var sawDrop bool
 		for _, op := range plan.Ops {
 			if drop, ok := op.(quark.OpDropTable); ok && drop.Table == "plan_extraneous" {

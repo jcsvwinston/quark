@@ -39,6 +39,13 @@ type ddlField struct {
 	Size      int
 	Precision int
 	Scale     int
+	// Default is the default:"…" tag verbatim; IndexName the index the
+	// column declares with quark:"index" / "index=<name>"; Check the CHECK
+	// expression from quark:"check=<expr>" or db:"…,enum=a|b" (A8 S10,
+	// mirroring what the runtime reads since S3 and S5).
+	Default   string
+	IndexName string
+	Check     string
 }
 
 type ddlModel struct {
@@ -158,9 +165,19 @@ func buildDDLStatements(models []ddlModel, dialect string) (up, down []string, e
 		for _, col := range fkCols {
 			cols = append(cols, fmt.Sprintf("\tFOREIGN KEY (%s) REFERENCES %s(id)", col, m.FKs[col]))
 		}
+		for _, f := range m.Fields {
+			if f.Check != "" {
+				cols = append(cols, fmt.Sprintf("\tCONSTRAINT ck_%s_%s CHECK (%s)", m.Table, f.Column, f.Check))
+			}
+		}
 		up = append(up, fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n%s\n)", m.Table, strings.Join(cols, ",\n")))
 		for _, col := range fkCols {
 			up = append(up, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_%s_%s ON %s (%s)", m.Table, col, m.Table, col))
+		}
+		for _, f := range m.Fields {
+			if f.IndexName != "" {
+				up = append(up, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s)", f.IndexName, m.Table, f.Column))
+			}
 		}
 	}
 
@@ -211,6 +228,13 @@ func ddlColumnSQL(f ddlField, dialect string) (string, error) {
 	}
 	if f.NotNull && !nullable {
 		b.WriteString(" NOT NULL")
+	}
+	if f.Default != "" {
+		def := f.Default
+		if migrate.IsBoolColumn(rt) {
+			def = migrate.NormalizeBoolDefault(dialect, def)
+		}
+		b.WriteString(" DEFAULT " + def)
 	}
 	if f.Unique {
 		b.WriteString(" UNIQUE")
@@ -345,8 +369,14 @@ func extractDDLModel(obj types.Object, tableNames map[string]string) (ddlModel, 
 		for _, opt := range parts[1:] {
 			opt = strings.TrimSpace(opt)
 			if eq := strings.IndexByte(opt, '='); eq > 0 {
-				n, _ := strconv.Atoi(strings.TrimSpace(opt[eq+1:]))
-				switch strings.ToLower(strings.TrimSpace(opt[:eq])) {
+				key := strings.ToLower(strings.TrimSpace(opt[:eq]))
+				val := strings.TrimSpace(opt[eq+1:])
+				if key == "enum" {
+					f.Check = enumCheck(f.Column, val)
+					continue
+				}
+				n, _ := strconv.Atoi(val)
+				switch key {
 				case "size":
 					f.Size = n
 				case "precision":
@@ -357,14 +387,22 @@ func extractDDLModel(obj types.Object, tableNames map[string]string) (ddlModel, 
 			}
 		}
 		f.IsPK = strings.EqualFold(tag.Get("pk"), "true") && tag.Get("pk") != ""
-		for _, token := range strings.Split(tag.Get("quark"), ",") {
-			switch strings.TrimSpace(token) {
-			case "not_null":
+		f.Default = tag.Get("default")
+		for _, token := range splitQuarkTag(tag.Get("quark")) {
+			token = strings.TrimSpace(token)
+			switch {
+			case token == "not_null":
 				f.NotNull = true
-			case "unique":
+			case token == "unique":
 				f.Unique = true
-			case "version":
+			case token == "version":
 				f.IsVersion = true
+			case token == "index":
+				f.IndexName = "idx_" + m.Table + "_" + f.Column
+			case strings.HasPrefix(token, "index="):
+				f.IndexName = strings.TrimSpace(strings.TrimPrefix(token, "index="))
+			case strings.HasPrefix(token, "check="):
+				f.Check = strings.TrimSpace(strings.TrimPrefix(token, "check="))
 			}
 		}
 		f.GoType = staticTypeName(fld.Type())
@@ -391,6 +429,54 @@ func extractDDLModel(obj types.Object, tableNames map[string]string) (ddlModel, 
 		}
 	}
 	return m, true
+}
+
+// splitQuarkTag splits the quark tag on the commas between tokens, not on
+// the ones inside parentheses or quotes — a check=<expr> has those. It is the
+// runtime's rule (internal/schema.splitTagTokens), copied so this module does
+// not need a root release to read the same tags.
+func splitQuarkTag(tag string) []string {
+	var out []string
+	depth := 0
+	quote := byte(0)
+	start := 0
+	for i := 0; i < len(tag); i++ {
+		ch := tag[i]
+		switch {
+		case quote != 0:
+			if ch == quote {
+				quote = 0
+			}
+		case ch == '\'' || ch == '"':
+			quote = ch
+		case ch == '(':
+			depth++
+		case ch == ')':
+			if depth > 0 {
+				depth--
+			}
+		case ch == ',' && depth == 0:
+			out = append(out, tag[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, tag[start:])
+}
+
+// enumCheck renders the CHECK an enum=a|b|c option means, as the runtime does.
+func enumCheck(column, raw string) string {
+	var quoted []string
+	for _, v := range strings.Split(raw, "|") {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		quoted = append(quoted, "'"+strings.ReplaceAll(v, "'", "''")+"'")
+	}
+	if len(quoted) == 0 {
+		return ""
+	}
+	return column + " IN (" + strings.Join(quoted, ", ") + ")"
 }
 
 // staticTypeName renders a field type the way the static tables expect:
