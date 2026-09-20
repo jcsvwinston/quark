@@ -56,6 +56,8 @@ These five cover almost everything:
 | `pk:"true"` | Marks the primary key (or a member of a composite key). |
 | `quark:"not_null"` | Emits `NOT NULL` in the schema. |
 | `quark:"unique"` | Emits `UNIQUE`. Combine them: `quark:"unique,not_null"`. |
+| `quark:"index"` / `quark:"index=name"` | Declares a secondary index `Migrate` creates and `PlanMigration` proposes when missing. |
+| `quark:"check=expr"` / `db:"col,enum=a\|b"` | Declares a `CHECK` on the column — an expression verbatim, or the allowed values of an enum — emitted as `ck_<table>_<column>`. |
 | `validate:"rule"` | Runs a [validator/v10](https://github.com/go-playground/validator) rule before writes. |
 
 That's enough to model most tables. The rest of this page covers the situations
@@ -415,6 +417,17 @@ func init() {
 ```
 
 Pointer types are stripped before lookup, so this also covers `*uuid.UUID`.
+A mapped **primary key** keeps its key: the mapper's type is taken verbatim and
+`PRIMARY KEY` is appended unless the mapper wrote it itself. (No auto-increment
+is inferred from a mapped type.)
+
+You may not need the mapper for UUIDs at all: any 16-byte array — the shape of
+`google/uuid.UUID` — gets `UUID` on PostgreSQL, `CHAR(36)` on MySQL and
+MariaDB, `VARCHAR2(36)` on Oracle, `NCHAR(36)` on SQL Server and a declared
+`UUID` on SQLite, with the value travelling in its text form through the type's
+own `Valuer` / `Scanner`. SQL Server's `UNIQUEIDENTIFIER` is deliberately not
+used: the driver scans it as sixteen bytes in the engine's own byte order,
+which a `Scanner` expecting the RFC order reads as a different UUID.
 
 The mapper only decides the DDL type. The round-trip still goes through
 `database/sql`, so the type must implement `sql.Scanner` and `driver.Valuer`, or

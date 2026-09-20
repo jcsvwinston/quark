@@ -77,7 +77,14 @@ func SQLTypeWithOpts(dialectName string, t reflect.Type, opts TypeOptions) strin
 	// SQLType builder appends. Custom mappers can opt in to PK handling by
 	// reading opts.IsPK and emitting the suffix themselves.
 	if mapper := LookupTypeMapper(t); mapper != nil {
-		return mapper(dialectName, opts)
+		mapped := mapper(dialectName, opts)
+		// A mapped key column keeps its key (QK-29). The mapper's type is
+		// taken verbatim — no auto-increment is inferred from it — and the
+		// PRIMARY KEY suffix is appended unless the mapper wrote one itself.
+		if opts.IsPK && !strings.Contains(strings.ToUpper(mapped), "PRIMARY KEY") {
+			mapped += " PRIMARY KEY"
+		}
+		return mapped
 	}
 
 	// sql.Null[T] (re-exported as quark.Nullable[T]): unwrap and recurse
@@ -373,6 +380,19 @@ func ClassifyPKType(bareType string) PKClass {
 //   - int / int64 → dialect-native auto-increment (SERIAL, AUTO_INCREMENT, IDENTITY…)
 //   - string      → VARCHAR(36) PRIMARY KEY — UUID-friendly; no auto-increment
 //   - anything else → its natural SQL type + PRIMARY KEY (no auto-increment)
+//
+// IsUUIDShaped reports whether t is a 16-byte array — the shape of
+// google/uuid.UUID and of the other UUID types — after stripping a pointer.
+func IsUUIDShaped(t reflect.Type) bool {
+	if t == nil {
+		return false
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t.Kind() == reflect.Array && t.Len() == 16 && t.Elem().Kind() == reflect.Uint8
+}
+
 func SQLType(dialectName string, t reflect.Type, isPK bool) string {
 	if isPK {
 		// Unwrap pointer (e.g. *string, *int64)
@@ -398,6 +418,31 @@ func SQLType(dialectName string, t reflect.Type, isPK bool) string {
 	// Handle pointers (e.g. *time.Time, *string)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
+	}
+
+	// A UUID-shaped value — 16 bytes, the shape of google/uuid.UUID and of
+	// every other UUID type in the ecosystem — gets the engine's uuid type
+	// where one exists and a 36-character text column where it does not
+	// (A8 S5). The value travels in its text form through the type's own
+	// Valuer/Scanner. SQL Server's UNIQUEIDENTIFIER is NOT used: its driver
+	// scans the value as sixteen bytes in the engine's mixed-endian order,
+	// which a Scanner expecting the RFC order reads as a different UUID.
+	if IsUUIDShaped(t) {
+		switch dialectName {
+		case "postgres":
+			return "UUID"
+		case "oracle":
+			return "VARCHAR2(36)"
+		case "mssql":
+			return "NCHAR(36)"
+		case "sqlite":
+			// Any type name is legal; UUID names the intent, and text
+			// stores as text under its NUMERIC affinity because a UUID is
+			// never a well-formed number.
+			return "UUID"
+		default:
+			return "CHAR(36)"
+		}
 	}
 
 	switch t.Kind() {

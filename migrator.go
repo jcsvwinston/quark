@@ -103,6 +103,12 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 		}
 		columns = append(columns, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(pkCols, ", ")))
 	}
+	// The checks the model declares (quark:"check=…", db:"…,enum=…"), as
+	// named table constraints in the shape applyCreateTable writes — the
+	// one SQLite's rebuild can read back (A8 S5).
+	for _, chk := range modelChecks(meta) {
+		columns = append(columns, fmt.Sprintf("CONSTRAINT %s CHECK %s", c.dialect.Quote(chk.Name), wrapExpressionInParens(chk.Expression)))
+	}
 
 	if len(columns) == 0 {
 		return fmt.Errorf("no database columns found for model %s", t.Name())
@@ -152,6 +158,20 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 	}
 
 	return nil
+}
+
+// modelChecks lists the CHECK constraints a model declares through its struct
+// tags — quark:"check=<expr>" verbatim, db:"…,enum=a|b" as an IN list — one
+// per column, named ck_<table>_<column>.
+func modelChecks(meta *ModelMeta) []Check {
+	var out []Check
+	for _, f := range meta.Fields {
+		if f.Column == "" || f.Check == "" {
+			continue
+		}
+		out = append(out, Check{Name: "ck_" + meta.Table + "_" + f.Column, Expression: f.Check})
+	}
+	return out
 }
 
 // modelIndexes lists the secondary indexes a model declares through its

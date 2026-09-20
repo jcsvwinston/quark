@@ -3,6 +3,7 @@ package enginesuite
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"strings"
 	"sync"
@@ -149,6 +150,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	})
 	t.Run("AlterColumn", func(t *testing.T) {
 		testAlterColumn(ctx, t, client)
+	})
+	t.Run("ModelTypesAndChecks", func(t *testing.T) {
+		testModelTypesAndChecks(ctx, t, client)
 	})
 	t.Run("PlanMigration", func(t *testing.T) {
 		testPlanMigration(ctx, t, client)
@@ -838,6 +842,80 @@ func testAlterColumn(ctx context.Context, t *testing.T, client *quark.Client) {
 	}
 	if fks() != 0 {
 		t.Errorf("drop fk on %s: the catalog still shows %d keys", engine, fks())
+	}
+}
+
+// suiteUUID is a UUID-shaped value with the Valuer/Scanner pair google/uuid
+// ships: text on the wire, 16 bytes in Go.
+type suiteUUID [16]byte
+
+func (u suiteUUID) Value() (driver.Value, error) {
+	return fmt.Sprintf("%x-%x-%x-%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16]), nil
+}
+
+func (u *suiteUUID) Scan(src any) error {
+	var s string
+	switch v := src.(type) {
+	case string:
+		s = v
+	case []byte:
+		s = string(v)
+	default:
+		return fmt.Errorf("suiteUUID: cannot scan %T", src)
+	}
+	s = strings.ReplaceAll(strings.TrimSpace(s), "-", "")
+	if len(s) != 32 {
+		return fmt.Errorf("suiteUUID: bad length %d in %q", len(s), s)
+	}
+	for i := 0; i < 16; i++ {
+		var b byte
+		if _, err := fmt.Sscanf(s[2*i:2*i+2], "%02x", &b); err != nil {
+			return err
+		}
+		u[i] = b
+	}
+	return nil
+}
+
+// testModelTypesAndChecks proves on the engine this lane runs (A8 S5,
+// controls TYP-01/02/03): a UUID-shaped value round-trips through the type
+// Migrate gives it, and a CHECK declared on the model is enforced by the
+// engine — proven by the row it refuses.
+func testModelTypesAndChecks(ctx context.Context, t *testing.T, client *quark.Client) {
+	engine := client.Dialect().Name()
+	dropTable(client, "mt_rows")
+	type MTRow struct {
+		ID     int64     `db:"id" pk:"true"`
+		Ref    suiteUUID `db:"ref"`
+		Status string    `db:"status" quark:"check=status IN ('draft','live')"`
+		Kind   string    `db:"kind,enum=a|b"`
+	}
+	if err := client.Migrate(ctx, &MTRow{}); err != nil {
+		t.Fatalf("migrate on %s: %v", engine, err)
+	}
+	t.Cleanup(func() { dropTable(client, "mt_rows") })
+	row := &MTRow{Ref: suiteUUID{0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, Status: "draft", Kind: "a"}
+	if err := quark.For[MTRow](ctx, client).Create(row); err != nil {
+		t.Fatalf("create on %s: %v", engine, err)
+	}
+	got, err := quark.For[MTRow](ctx, client).Find(row.ID)
+	if err != nil || got.Ref != row.Ref {
+		t.Errorf("uuid round trip on %s: err=%v got=%x want=%x", engine, err, got.Ref, row.Ref)
+	}
+	if err := quark.For[MTRow](ctx, client).Create(&MTRow{Ref: row.Ref, Status: "gone", Kind: "a"}); err == nil {
+		t.Errorf("%s: the check= constraint is not enforced", engine)
+	}
+	if err := quark.For[MTRow](ctx, client).Create(&MTRow{Ref: row.Ref, Status: "live", Kind: "zzz"}); err == nil {
+		t.Errorf("%s: the enum= constraint is not enforced", engine)
+	}
+	plan, err := client.PlanMigration(ctx, &MTRow{})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	for _, op := range plan.Ops {
+		if strings.Contains(strings.ToLower(op.String()), "mt_rows") {
+			t.Errorf("%s: a freshly migrated model with checks plans to something about its table: %s", engine, op)
+		}
 	}
 }
 

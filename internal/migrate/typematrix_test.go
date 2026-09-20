@@ -71,6 +71,7 @@ func matrixRows() []matrixRow {
 		{"`time.Time`", reflect.TypeOf(time.Time{}), migrate.TypeOptions{}, ""},
 		{"`[]byte`", reflect.TypeOf([]byte{}), migrate.TypeOptions{}, ""},
 		{"`time.Duration`", reflect.TypeOf(time.Duration(0)), migrate.TypeOptions{}, "Stored as an integer count of nanoseconds."},
+		{"`[16]byte` (UUID-shaped, e.g. `uuid.UUID`)", reflect.TypeOf([16]byte{}), migrate.TypeOptions{}, "The value travels in text form through the type's own Valuer/Scanner. SQL Server's UNIQUEIDENTIFIER is not used: its driver scans it in the engine's mixed-endian byte order."},
 		{"integer primary key", reflect.TypeOf(int64(0)), migrate.TypeOptions{IsPK: true}, "Auto-increment."},
 		{"`string` primary key", reflect.TypeOf(""), migrate.TypeOptions{IsPK: true}, "For UUID/ULID keys the caller supplies."},
 		{"`[]string`, `[]int64`, `map[string]any`", reflect.TypeOf([]string{}), migrate.TypeOptions{}, "Serialised as text; no native array or JSONB column yet."},
