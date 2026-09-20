@@ -1,0 +1,237 @@
+---
+sidebar_position: 1
+title: Multi-Tenant
+description: Isolate each tenant's data with one of three strategies — database-per-tenant, schema-per-tenant, or row-level — all behind one TenantRouter.
+---
+
+# Multi-Tenant
+
+You're running one application for many customers (tenants), and each must see
+only its own data.
+
+A `TenantRouter` handles that. It resolves a tenant ID from the request's
+`context.Context` and applies the isolation strategy you chose. You then query
+the router **exactly like a normal client**, through the same `quark.For[T]`
+entry point:
+
+```go
+users, _ := quark.For[User](ctx, client).List()       // single-tenant
+users, _ = quark.For[User](tenantCtx, router).List()  // multi-tenant — same call
+```
+
+## Pick a strategy
+
+| Strategy | How it isolates | Requires | Best fit |
+| --- | --- | --- | --- |
+| `DatabasePerTenant` | A separate `*sql.DB` / `Client` per tenant. | a `factory func(tenantID) (*Client, error)` | Strongest isolation, custom DSNs, per-tenant scaling. |
+| `SchemaPerTenant` | Qualifies tables with the tenant ID as the schema. | `BaseClient` | One database, schema namespaces. |
+| `RowLevelSecurityClient` | Injects `WHERE tenant_id = ?` into every query Quark builds. **Client-side** — `client.Raw()`/`Exec()` bypass it. | `BaseClient`, `TenantColumn` | Shared tables across all six engines. |
+
+On PostgreSQL there's a fourth option,
+[`RowLevelSecurityNative`](row-level-native), which pushes the filter into the
+database engine so even raw SQL can't escape it. Tenant IDs must match
+`^[a-z0-9_-]+$` (this keeps schema names and cache keys safe).
+
+## Resolve the tenant from context
+
+Keep resolution small and deterministic, and pass it to the router:
+
+```go
+type tenantKey struct{}
+
+func WithTenant(ctx context.Context, id string) context.Context {
+    return context.WithValue(ctx, tenantKey{}, id)
+}
+func ResolveTenant(ctx context.Context) string {
+    id, _ := ctx.Value(tenantKey{}).(string)
+    return id
+}
+```
+
+If the resolver returns an empty or invalid tenant ID, the query fails before any
+SQL is built — it never silently falls back to a "public" tenant.
+
+## Row-level isolation
+
+One shared client; Quark adds the tenant predicate to every query and write:
+
+```go
+type Document struct {
+    ID       int64  `db:"id" pk:"true"`
+    TenantID string `db:"tenant_id"`
+    Title    string `db:"title"`
+}
+
+cfg := quark.DefaultTenantConfig()
+cfg.Strategy = quark.RowLevelSecurityClient
+cfg.BaseClient = client
+cfg.TenantColumn = "tenant_id"
+router := quark.NewTenantRouter(cfg, ResolveTenant, nil)
+
+acme := WithTenant(ctx, "acme")
+
+doc := Document{Title: "Invoice 1001"}
+quark.For[Document](acme, router).Create(&doc)
+fmt.Println(doc.TenantID)
+// => acme   (writes inherit the tenant; a zero tenant field is filled in)
+
+docs, _ := quark.For[Document](acme, router).List()
+// docs contains only acme's rows — even though the query never names tenant_id
+```
+
+`Or()` groups inherit the predicate too. SQL parses `A AND B OR C` as
+`(A AND B) OR C`, so an OR branch needs its own `tenant_id = ?` to stay isolated.
+Quark adds it for you:
+
+```go
+quark.For[Document](acme, router).
+    Where("status", "=", "draft").
+    Or(func(q *quark.Query[Document]) *quark.Query[Document] {
+        return q.Where("status", "=", "published")
+    }).
+    List()
+// WHERE tenant_id = ? AND status = ? OR (tenant_id = ? AND status = ?)
+```
+
+Remember the boundary: this is client-side scoping, so `client.Raw()` and
+`client.Exec()` aren't filtered. When that bypass risk matters and you're on
+PostgreSQL, use [Native RLS](row-level-native).
+
+## Schema-per-tenant
+
+One shared client; Quark qualifies table names with the resolved tenant ID:
+
+```go
+cfg := quark.DefaultTenantConfig()
+cfg.Strategy = quark.SchemaPerTenant
+cfg.BaseClient = client
+router := quark.NewTenantRouter(cfg, ResolveTenant, nil)
+
+users, _ := quark.For[User](WithTenant(ctx, "tenant_acme"), router).List()
+// table references become "tenant_acme"."users"
+```
+
+The resolver's return value is used directly as the schema name.
+
+`quark tenant provision <id>` creates the schema and registers the tenant in
+`quark_tenants`. It refuses to re-provision an already-registered id, so a retry
+never half-executes.
+
+Running migrations into each schema stays your job. The CLI skips that step
+explicitly under `schema_per_tenant`, because it would need a `TenantRouter`
+wired to your models. `client.Migrate` runs on the base client, and the router
+does not orchestrate per-schema provisioning.
+
+## Database-per-tenant
+
+Your factory builds a client per tenant; the router caches them (LRU):
+
+```go
+cfg := quark.DefaultTenantConfig()
+cfg.Strategy = quark.DatabasePerTenant
+cfg.MaxCachedPools = 100
+
+router := quark.NewTenantRouter(cfg, ResolveTenant,
+    func(tenantID string) (*quark.Client, error) {
+        return quark.New("postgres", dsnForTenant(tenantID),
+            quark.WithMaxOpenConns(10))
+    },
+)
+
+users, _ := quark.For[User](WithTenant(ctx, "acme"), router).List()
+active := router.ActiveTenants()
+```
+
+When the cache exceeds `MaxCachedPools`, the least-recently-used client is
+evicted and its connections closed.
+
+Budget the total: 100 active tenants at 10 connections each is up to 1000
+connections against the server. Size `MaxCachedPools` and the per-client limits
+together.
+
+## What each engine gives you
+
+| Engine | Row-level isolation | Why |
+| --- | --- | --- |
+| PostgreSQL | `RowLevelSecurityNative` (engine-enforced) or `RowLevelSecurityClient` | `set_config(..., true)` is transaction-scoped and `CREATE POLICY` filters server-side. |
+| MySQL, MariaDB, SQLite | `RowLevelSecurityClient` | No engine-side row security. |
+| SQL Server, Oracle | `RowLevelSecurityClient` | Both have engine-side row security (`CREATE SECURITY POLICY` over `SESSION_CONTEXT`; `DBMS_RLS` over a session context), but the context is **session**-scoped: set inside a transaction it survives the commit on the pooled connection, and the next tenant to borrow that connection would inherit it. Quark does not offer a strategy it cannot make safe on a pool. |
+
+A `RowLevelSecurityNative` router over any engine but PostgreSQL refuses on all
+three of its doors — `For`, `Tx` and `GetClient` — with `ErrUnsupportedFeature`.
+`SchemaPerTenant` and `DatabasePerTenant` work on every engine.
+
+## Transactions
+
+A transaction opened for a tenant is confined to it, and so is every query built
+inside it:
+
+```go
+err := router.Tx(acme, func(tx *quark.Tx) error {
+    docs, err := quark.ForTx[Document](acme, tx).List() // acme's rows only
+    if err != nil {
+        return err
+    }
+    return quark.ForTx[Document](acme, tx).Create(&Document{Title: "Invoice 1002"})
+})
+```
+
+`router.Tx` resolves the tenant from the context, opens the transaction on the
+right client — the tenant's own pool, or the shared one — and stamps it.
+`ForTx` then applies the same confinement `For` applies: the schema prefix, the
+injected predicate, or, under [Native RLS](row-level-native), the session
+variable the transaction already set. Relations loaded with `Preload` inside it
+are qualified the same way.
+
+**The transaction fixes the tenant.** Under Native RLS the engine is already
+filtering by the tenant the transaction set; under database-per-tenant the pool
+was chosen for it. So a query context inside the transaction that resolves a
+*different* tenant fails with `quark.ErrTenantMismatch` rather than reading or
+writing across tenants, and a context that resolves no tenant inherits the
+transaction's — `quark.ForTx[T](context.Background(), tx)` is fine.
+
+`router.GetClient(ctx)` followed by `client.Tx(ctx, ...)` on the shared base
+client is the same door: when the context carries a tenant, the transaction is
+confined exactly as `router.Tx` confines it. With no tenant in the context the
+transaction stays what the base client always gave — one on the shared pool,
+unconfined — which is how migrations and provisioning run.
+
+Earlier releases handed back a bare transaction from `router.Tx` for every
+strategy except Native RLS, so a query built inside it read every tenant's rows
+and wrote to the default schema (QK-26). If you worked around that by adding the
+predicate or the schema by hand inside `router.Tx`, the workaround is now
+redundant and can go.
+
+## Configuration
+
+```go
+type TenantConfig struct {
+    Strategy       TenantStrategy // default DatabasePerTenant
+    MaxCachedPools int            // default 100 (database-per-tenant)
+    BaseClient     *quark.Client  // required for schema / row-level
+    TenantColumn   string         // default "tenant_id" (row-level)
+}
+```
+
+(The strategy `RowLevelSecurityClient` was once called `RowLevelSecurity`; the old
+name still works as a deprecated alias and is removed in v2.)
+
+## Relations, cache, and the bigger picture
+
+Tenant context flows into `Preload`. When a related model has the tenant column,
+Quark filters the relation query too, so a parent can't preload another tenant's
+children.
+
+Cache keys include the tenant ID and the schema, so two tenants never share a
+cached result for the same SQL.
+
+| Concern | Guidance |
+| --- | --- |
+| Missing tenant | Fail fast — never default to a shared tenant. |
+| Tenant-owned tables | Put `tenant_id` on every one (row-level strategy). |
+| Global lookup tables | Use the base client directly. |
+| Reporting / cross-tenant | Use an explicit reporting client, not an accidental bypass. |
+| Defense in depth | Pair app-level filters with [Native RLS](row-level-native) where it matters. |
+
+`TenantRouter` centralizes tenant selection — it's the ORM layer of a tenancy
+design, not a replacement for database permissions, audit logging, and backups.
