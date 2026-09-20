@@ -47,7 +47,7 @@ func TestRawUnderNativeRLSWarns(t *testing.T) {
 
 	// Constructing the Native router stamps `base` with the resolver.
 	_ = quark.NewTenantRouter(
-		quark.TenantConfig{Strategy: quark.RowLevelSecurityNative, BaseClient: base},
+		quark.TenantConfig{Strategy: quark.RowLevelSecurityNative, BaseClient: base, SkipPolicyVerification: true},
 		rawWarnResolver, nil,
 	)
 
@@ -103,7 +103,7 @@ func TestRawNativeNilResolverDoesNotPanic(t *testing.T) {
 	base := newRawWarnClient(t, &buf)
 
 	_ = quark.NewTenantRouter(
-		quark.TenantConfig{Strategy: quark.RowLevelSecurityNative, BaseClient: base},
+		quark.TenantConfig{Strategy: quark.RowLevelSecurityNative, BaseClient: base, SkipPolicyVerification: true},
 		nil, nil,
 	)
 

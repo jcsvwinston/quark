@@ -23,22 +23,23 @@ func controlsRls() []control {
 			family: "rls",
 			title:  "Native RLS is offered by exactly one of the six dialects, and it emits PostgreSQL's set_config",
 			want:   partial,
-			note: "One engine, not the three the arc plan assumed. The session-variable " +
-				"mechanism is hardcoded PostgreSQL (set_config + CREATE POLICY); SQL Server " +
-				"would need SESSION_CONTEXT plus CREATE SECURITY POLICY and Oracle DBMS_RLS, " +
-				"and neither exists. MySQL/MariaDB have no engine-side RLS at all.",
+			note: "One engine, and measured again at A8 S8, which decided to leave it so. SQL Server's " +
+				"SESSION_CONTEXT and Oracle's DBMS_SESSION context are SESSION-scoped: set inside a " +
+				"transaction they survive its commit on the pooled connection, so the next tenant to " +
+				"borrow that connection would inherit the previous one's identity unless every path " +
+				"cleared it — PostgreSQL's set_config(..., true) is transaction-scoped and needs no " +
+				"clearing. What each engine gets is written in the multi-tenant guide: PostgreSQL " +
+				"Native; the five others RowLevelSecurityClient, and Native refuses on all three doors.",
 			probe: probeRlsNativeDialectCoverage,
 		},
 		{
 			id:     "RLS-02",
 			family: "rls",
-			title:  "On an engine without native RLS, For[T] and Tx refuse — GetClient hands back an unscoped client",
-			want:   partial,
-			note: "Two of the three public doors of the router fail closed with " +
-				"ErrUnsupportedFeature. The third, GetClient — the ClientProvider method, " +
-				"exported and documented — returns the base client with no dialect check, " +
-				"and reads through it return every tenant's rows. That is the silent " +
-				"degradation the strategy claims not to have.",
+			title:  "On an engine without native RLS, For[T], Tx and GetClient all refuse",
+			want:   present,
+			note: "Closed at A8 S8: GetClient — the ClientProvider method — fails closed with " +
+				"ErrUnsupportedFeature like the other two doors, instead of handing back the base " +
+				"client through which a read returned every tenant's rows.",
 			probe: probeRlsNativeRefusalOnOtherEngines,
 		},
 		{
@@ -57,14 +58,13 @@ func controlsRls() []control {
 		{
 			id:     "RLS-04",
 			family: "rls",
-			title:  "VerifyRLSPolicies is reachable and refuses to certify nothing, but nothing calls it at boot",
-			want:   partial,
-			note: "The preflight reads the PostgreSQL catalog, so a bench without a live " +
-				"engine can only measure that it is gated to that dialect and that it " +
-				"refuses a client with no registered models; what it reports about a real " +
-				"policy is proven in internal/enginesuite. And no code path calls it: a " +
-				"Native router serves rows over a database whose policies were never " +
-				"installed, without a word.",
+			title:  "VerifyRLSPolicies is reachable and refuses to certify nothing, and the Native router verifies the engine enforces before it serves",
+			want:   present,
+			note: "Closed at A8 S8: the router checks once per table, at first use, that row-level " +
+				"security is enabled and a policy exists (pg_class, pg_policy), and refuses with " +
+				"ErrRLSNotEnforced otherwise — a catalog it cannot read included, which is what this " +
+				"bench's PostgreSQL-shaped SQLite measures. TenantConfig.SkipPolicyVerification opts " +
+				"out; quarktenant.VerifyRLSPolicies remains the detailed preflight.",
 			probe: probeRlsVerifyPolicies,
 		},
 		{

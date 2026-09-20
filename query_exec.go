@@ -308,6 +308,12 @@ func (q *BaseQuery) queryRowOn(ctx context.Context, exec Executor, sqlStr string
 // If Limit() is not called, uses a safe default (100) to prevent OOM.
 // Use Iter() for unbounded streaming or Paginate() for large datasets.
 func (q *Query[T]) List() ([]T, error) {
+	// A query that failed to build says why — the provider that refused,
+	// the strategy the dialect lacks — before "client not initialized",
+	// which is the same fact by the wrong name (A8 S1, S8).
+	if q.err != nil {
+		return nil, q.err
+	}
 	if q.client == nil {
 		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -531,6 +537,12 @@ func (q *Query[T]) First() (T, error) {
 func (q *Query[T]) Find(id any) (T, error) {
 	var zero T
 
+	// A query that failed to build says why — the provider that refused,
+	// the strategy the dialect lacks — before "client not initialized",
+	// which is the same fact by the wrong name (A8 S1, S8).
+	if q.err != nil {
+		return zero, q.err
+	}
 	if q.client == nil {
 		return zero, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -567,6 +579,12 @@ func (q *Query[T]) Find(id any) (T, error) {
 //	    process(user)
 //	}
 func (q *Query[T]) Cursor() (*Cursor[T], error) {
+	// A query that failed to build says why — the provider that refused,
+	// the strategy the dialect lacks — before "client not initialized",
+	// which is the same fact by the wrong name (A8 S1, S8).
+	if q.err != nil {
+		return nil, q.err
+	}
 	if q.client == nil {
 		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}

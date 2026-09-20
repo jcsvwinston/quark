@@ -105,6 +105,7 @@ func TestRowLevelSecurityNativeWriteDurableOnReturn(t *testing.T) {
 
 	cfg := quark.DefaultTenantConfig()
 	cfg.Strategy = quark.RowLevelSecurityNative
+	cfg.SkipPolicyVerification = true // this test measures durability, not policies
 	cfg.BaseClient = baseClient
 	router := quark.NewTenantRouter(cfg,
 		func(c context.Context) string {

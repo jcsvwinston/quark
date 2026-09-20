@@ -76,6 +76,16 @@ type TenantConfig struct {
 	BaseClient     *Client // Used for SchemaPerTenant, RowLevelSecurityClient and RowLevelSecurityNative
 	TenantColumn   string  // Column name for RowLevelSecurityClient, default is "tenant_id"
 
+	// SkipPolicyVerification turns off the check a RowLevelSecurityNative
+	// router runs the first time it touches each table: that row-level
+	// security is enabled on it and at least one policy exists (A8 S8). Off
+	// by default, the router refuses with ErrRLSNotEnforced instead of
+	// serving every tenant's rows over a table whose policies were never
+	// installed. Set it when policies are managed outside Quark's catalog
+	// view — a test that measures something else, a schema the connecting
+	// role cannot inspect — and run quarktenant.VerifyRLSPolicies yourself.
+	SkipPolicyVerification bool
+
 	// NativeRLSVar is the PostgreSQL session variable name used by
 	// RowLevelSecurityNative to carry the resolved tenant ID. Each
 	// query under a Native router is wrapped in a transaction that
@@ -126,6 +136,13 @@ type TenantRouter struct {
 	cache   map[string]*list.Element
 	lruList *list.List
 	mu      sync.Mutex
+
+	// verified holds the tables whose row-level security this Native
+	// router has confirmed in the engine's catalog; a table is checked
+	// once and a failure is not cached, so installing the policies is
+	// enough to recover (A8 S8).
+	verified   map[string]bool
+	verifiedMu sync.Mutex
 }
 
 // NewTenantRouter creates a new router for multi-tenant database access.
@@ -244,6 +261,55 @@ func (r *TenantRouter) confineTx(ctx context.Context, tx *Tx) error {
 	return nil
 }
 
+// verifyNativePolicy confirms, once per table, that the engine enforces
+// row-level security on it: pg_class.relrowsecurity is on and at least one
+// pg_policy exists. Anything else — disabled, no policy, a catalog that
+// cannot be read — is ErrRLSNotEnforced, and the query that asked does not
+// run (A8 S8, RLS-04). Before this, a Native router served rows over a
+// database whose policies were never installed, without a word; the only
+// check was quarktenant.VerifyRLSPolicies, which nothing called at boot.
+// That function remains the detailed preflight (policy name, FORCE, what the
+// predicate says); this is the floor under it.
+func (r *TenantRouter) verifyNativePolicy(ctx context.Context, client *Client, table string) error {
+	if r.config.SkipPolicyVerification {
+		return nil
+	}
+	r.verifiedMu.Lock()
+	ok := r.verified[table]
+	r.verifiedMu.Unlock()
+	if ok {
+		return nil
+	}
+	if err := client.guard.ValidateIdentifier(table); err != nil {
+		return err
+	}
+	var enabled bool
+	var policies int
+	err := client.db.QueryRowContext(ctx, `
+		SELECT c.relrowsecurity, (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid)
+		  FROM pg_class c
+		  JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE c.relname = $1 AND c.relkind = 'r' AND n.nspname = current_schema()`, table).Scan(&enabled, &policies)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w: cannot confirm the policies on %q from the catalog (%v); set TenantConfig.SkipPolicyVerification to serve anyway",
+			ErrRLSNotEnforced, table, err)
+	case !enabled:
+		return fmt.Errorf("%w: table %q has row-level security disabled — run install-rls-policies (quarktenant.InstallRLSPolicies)",
+			ErrRLSNotEnforced, table)
+	case policies == 0:
+		return fmt.Errorf("%w: table %q has row-level security enabled but no policy — run install-rls-policies (quarktenant.InstallRLSPolicies)",
+			ErrRLSNotEnforced, table)
+	}
+	r.verifiedMu.Lock()
+	if r.verified == nil {
+		r.verified = map[string]bool{}
+	}
+	r.verified[table] = true
+	r.verifiedMu.Unlock()
+	return nil
+}
+
 // GetClient resolves the tenant ID from the context and returns the corresponding Client.
 // It implements the ClientProvider interface so it can be used with For[T].
 func (r *TenantRouter) GetClient(ctx context.Context) (*Client, error) {
@@ -258,6 +324,15 @@ func (r *TenantRouter) GetClient(ctx context.Context) (*Client, error) {
 	case SchemaPerTenant, RowLevelSecurityClient, RowLevelSecurityNative:
 		if r.config.BaseClient == nil {
 			return nil, errors.New("BaseClient must be provided for SchemaPerTenant, RowLevelSecurityClient or RowLevelSecurityNative strategies")
+		}
+		// The third door fails closed like the other two (A8 S8, RLS-02):
+		// a Native router over an engine with no native RLS used to hand
+		// back the base client here, and a read through it returned every
+		// tenant's rows — the silent degradation the strategy claims not
+		// to have.
+		if r.config.Strategy == RowLevelSecurityNative && r.config.BaseClient.dialect.Name() != "postgres" {
+			return nil, fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
+				ErrUnsupportedFeature, r.config.BaseClient.dialect.Name())
 		}
 		return r.config.BaseClient, nil
 	default:

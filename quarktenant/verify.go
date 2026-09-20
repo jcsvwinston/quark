@@ -21,7 +21,7 @@ import (
 // sets the session variable on every query, but with no policy installed
 // (or with the owner exemption still active) PostgreSQL applies no
 // predicate — every tenant reads every row, silently.
-var ErrRLSNotEnforced = errors.New("quarktenant: row-level security is not enforced")
+var ErrRLSNotEnforced = quark.ErrRLSNotEnforced
 
 // VerifyFinding describes one table whose engine-level enforcement is
 // incomplete. Zero findings means every registered model's table is

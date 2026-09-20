@@ -179,6 +179,12 @@ func rlsRouter(base *quark.Client, strategy quark.TenantStrategy) *quark.TenantR
 	cfg := quark.DefaultTenantConfig()
 	cfg.Strategy = strategy
 	cfg.BaseClient = base
+	// These probes measure the router's MECHANISM — which variable it sets,
+	// how it scopes the cache — on a PostgreSQL-shaped SQLite that has no
+	// pg_class. The policy check a Native router runs at first use (A8 S8)
+	// would refuse every one of them; RLS-04 is the control that measures
+	// that check, and builds its router with the check on.
+	cfg.SkipPolicyVerification = true
 	return quark.NewTenantRouter(cfg, rlsResolver, nil)
 }
 
@@ -611,7 +617,10 @@ func probeRlsVerifyPolicies(t *testing.T, e *env) verdict {
 	// list below stops with ErrRLSNotEnforced instead of returning rows, and
 	// this control has gained its missing half.
 	rlsSetConfigReset()
-	rows, err := quark.For[rlsRow](rlsCtx("ta"), rlsRouter(shaped, quark.RowLevelSecurityNative)).List()
+	verifying := quark.DefaultTenantConfig()
+	verifying.Strategy = quark.RowLevelSecurityNative
+	verifying.BaseClient = shaped
+	rows, err := quark.For[rlsRow](rlsCtx("ta"), quark.NewTenantRouter(verifying, rlsResolver, nil)).List()
 	bootVerified := errors.Is(err, quarktenant.ErrRLSNotEnforced)
 	if err != nil && !bootVerified {
 		t.Fatalf("native list over an unverified database: %v", err)
@@ -812,6 +821,7 @@ func probeRlsRouterPolicyCoupling(t *testing.T, e *env) verdict {
 	cfg.Strategy = quark.RowLevelSecurityNative
 	cfg.BaseClient = shaped
 	cfg.NativeRLSVar = "app.divergent_from_the_policy"
+	cfg.SkipPolicyVerification = true // the mechanism, not the policies: see rlsRouter
 	router := quark.NewTenantRouter(cfg, rlsResolver, nil)
 
 	rlsSetConfigReset()
