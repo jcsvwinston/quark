@@ -760,33 +760,37 @@ func probeRlsPolicyCommandLine(t *testing.T, e *env) verdict {
 		t.Fatalf("register the model: %v", err)
 	}
 
+	// The embeddable runner keeps its bare actions and reaches its dialect
+	// gate through them; a `tenant` prefix is not its grammar.
 	var stdout, stderr bytes.Buffer
-	documented := quarktenant.RunWithIO(context.Background(),
+	prefixed := quarktenant.RunWithIO(context.Background(),
 		[]string{"tenant", "install-rls-policies", "--dry-run"}, plain, &stdout, &stderr)
-	rejected := documented == quarktenant.ExitError &&
-		strings.Contains(stderr.String(), `unknown action "tenant"`)
-
-	// The embedded runner, invoked the way it really works, gets as far as
-	// the dialect gate — so the actions themselves are reachable, just not
-	// under the documented command.
+	prefixRejected := prefixed == quarktenant.ExitError && strings.Contains(stderr.String(), `unknown action "tenant"`)
 	stdout.Reset()
 	stderr.Reset()
 	embedded := quarktenant.RunWithIO(context.Background(),
 		[]string{"install-rls-policies", "--dry-run"}, plain, &stdout, &stderr)
-	runnerReached := embedded == quarktenant.ExitError &&
-		strings.Contains(stderr.String(), "requires PostgreSQL")
+	runnerReached := embedded == quarktenant.ExitError && strings.Contains(stderr.String(), "requires PostgreSQL")
+	if !prefixRejected || !runnerReached {
+		t.Fatalf("the embeddable runner changed shape (prefix rejected=%v, bare action reached the gate=%v, stderr %q): re-measure",
+			prefixRejected, runnerReached, stderr.String())
+	}
 
+	// The shipped binary, read from its sources: the tenant group registers
+	// the two commands the documentation prints.
+	src, ok := qk25RepoFile("cmd/quark/commands/tenant_rls.go")
+	if !ok {
+		src = ""
+	}
+	install := strings.Contains(src, `Use:           "install-rls-policies"`) && strings.Contains(src, "tenantCmd.AddCommand(")
+	verify := strings.Contains(src, `Use:           "verify-rls-policies"`)
 	switch {
-	case rejected && runnerReached:
-		return absent
+	case install && verify:
+		return present
+	case install || verify:
+		t.Logf("the binary registers install=%v verify=%v", install, verify)
+		return partial
 	default:
-		// The old shape of this switch turned "the runner accepted a `tenant`
-		// prefix" into present. It is not: the runner growing a prefix would
-		// not give anyone the command the documentation prints, and declaring
-		// the control present would retire a gap nobody closed. Either half
-		// moving means this control has to be measured again.
-		t.Fatalf("command-line measured: the documented prefix rejected=%v, the runner's own action reached the dialect gate=%v (exit %d, stderr %q) — re-measure and retitle",
-			rejected, runnerReached, embedded, stderr.String())
 		return absent
 	}
 }

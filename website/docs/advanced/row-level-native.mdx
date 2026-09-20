@@ -68,6 +68,11 @@ func main() {
 ```
 
 ```bash
+quark tenant install-rls-policies --from-models ./models --dry-run   # the shipped binary: print the DDL, no change
+quark tenant install-rls-policies --from-models ./models             # apply
+quark tenant verify-rls-policies  --from-models ./models             # exit 1 unless every tenant table enforces its policy
+
+# or the embeddable runner, in a main of your own:
 go run ./cmd/tenant install-rls-policies --dry-run   # print the DDL, no change
 go run ./cmd/tenant install-rls-policies             # apply (takes a migration lock first)
 go run ./cmd/tenant install-rls-policies --tenant-col=org_id --native-rls-var=app.org_id

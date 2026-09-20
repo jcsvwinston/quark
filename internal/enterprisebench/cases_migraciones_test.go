@@ -134,13 +134,14 @@ func controlsMigraciones() []control {
 		{
 			id:     "MIG-11",
 			family: fam,
-			title:  "PlanMigration serves a binary that has none of the user's compiled models",
-			want:   absent,
-			note: "Planning with no models — all a precompiled CLI can pass — yields a plan that drops the " +
-				"live tables, because the desired schema is whatever Go values the caller supplies. This is " +
-				"the obstacle a `quark migrate diff` subcommand would have to clear through this entry " +
-				"point; the route that does work without compiled models is a schema document through " +
-				"quark.Diff and ApplyPlan, which MIG-02 measures with its own limits.",
+			title:  "A binary with none of the user's compiled models can diff: PlanMigration refuses to plan against nothing, and `quark migrate diff|plan|verify` plans from source",
+			want:   present,
+			note: "Closed at A8 S10. PlanMigration with no models used to hand back \"drop every live table\"; " +
+				"it refuses with ErrInvalidQuery now. The CLI reads the model structs with go/packages — " +
+				"the reader `migrate create --from-models` already had — maps them with the runtime's type " +
+				"mapping, carries over the catalog objects the tags cannot name, and diffs with quark.Diff; " +
+				"`verify` exits non-zero on drift. The CLI is a module of its own, so this bench reads its " +
+				"sources for the commands and runs the refusal.",
 			probe: probeMigDiffWithoutCompiledModels,
 		},
 		{

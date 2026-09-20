@@ -1180,24 +1180,42 @@ func probeMigDiffWithoutCompiledModels(t *testing.T, e *env) verdict {
 	if err := c.Migrate(e.ctx, &mig11Thing{}); err != nil {
 		t.Fatalf("create the live schema: %v", err)
 	}
+	// The library door: with no models there is nothing honest to plan, and
+	// the answer has to be a refusal, not a plan that empties the database.
 	plan, err := c.PlanMigration(e.ctx)
-	if err != nil {
-		t.Logf("planning with no models refuses outright: %v — a binary learns it cannot do this, "+
-			"instead of being handed a plan that empties the database", err)
-		return partial
-	}
-	for _, op := range plan.Ops {
-		if drop, ok := op.(quark.OpDropTable); ok && drop.Table == "mig11_things" {
-			t.Logf("with no models the plan reads as \"the database should be empty\": %s", opNames(plan.Ops))
-			return absent
+	refuses := errors.Is(err, quark.ErrInvalidQuery)
+	dropsLive := false
+	if err == nil {
+		for _, op := range plan.Ops {
+			if drop, ok := op.(quark.OpDropTable); ok && drop.Table == "mig11_things" {
+				dropsLive = true
+			}
 		}
 	}
-	if plan.IsEmpty() {
-		t.Logf("with no models the plan is empty: not destructive any more, and not a diff of the live schema either")
-		return partial
+
+	// The CLI door, read from its sources — a module this bench cannot
+	// import: the migrate group has to register diff, plan and verify, and
+	// they have to plan from source (--from-models).
+	src, ok := qk25RepoFile("cmd/quark/commands/migrate_diff.go")
+	if !ok {
+		src = ""
 	}
-	t.Logf("with no models the plan proposes work that is not dropping the live tables: %s", opNames(plan.Ops))
-	return present
+	cliDiff := strings.Contains(src, `Use:           "diff"`) && strings.Contains(src, `Use:           "verify"`) &&
+		strings.Contains(src, `"from-models"`) && strings.Contains(src, "quark.Diff(")
+
+	switch {
+	case refuses && cliDiff:
+		return present
+	case dropsLive:
+		t.Logf("with no models the plan reads as \"the database should be empty\": %s", opNames(plan.Ops))
+		return absent
+	case refuses || cliDiff:
+		t.Logf("half: PlanMigration refuses=%v, the CLI plans from source=%v", refuses, cliDiff)
+		return partial
+	default:
+		t.Logf("PlanMigration with no models: err=%v plan=%s; CLI diff present=%v", err, opNames(plan.Ops), cliDiff)
+		return absent
+	}
 }
 
 // --- MIG-12 ------------------------------------------------------------------
