@@ -74,7 +74,7 @@ func matrixRows() []matrixRow {
 		{"`[16]byte` (UUID-shaped, e.g. `uuid.UUID`)", reflect.TypeOf([16]byte{}), migrate.TypeOptions{}, "The value travels in text form through the type's own Valuer/Scanner. SQL Server's UNIQUEIDENTIFIER is not used: its driver scans it in the engine's mixed-endian byte order."},
 		{"integer primary key", reflect.TypeOf(int64(0)), migrate.TypeOptions{IsPK: true}, "Auto-increment."},
 		{"`string` primary key", reflect.TypeOf(""), migrate.TypeOptions{IsPK: true}, "For UUID/ULID keys the caller supplies."},
-		{"`[]string`, `[]int64`, `map[string]any`", reflect.TypeOf([]string{}), migrate.TypeOptions{}, "Serialised as text; no native array or JSONB column yet."},
+		{"`[]string`, `[]int64`, `map[string]any`", reflect.TypeOf([]string{}), migrate.TypeOptions{}, "NOT stored: the column is created, but `database/sql` refuses the value on the first write. Use `quark.Array[T]` (a JSON-backed list) or `quark.JSON[T]`."},
 	}
 }
 

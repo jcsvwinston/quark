@@ -598,7 +598,9 @@ func typesEqual(a, b string) bool {
 // oracleBareNumberMatch reports whether `bare` is exactly `number` and
 // `sized` is a parameterised `number(...)`. See [typesEqual].
 func oracleBareNumberMatch(bare, sized string) bool {
-	return bare == "number" && strings.HasPrefix(sized, "number(")
+	// A sized NUMBER(p,s) has already been normalised to decimal(p,s) by
+	// the time it gets here (see normalizeType); it is still a NUMBER.
+	return bare == "number" && (strings.HasPrefix(sized, "number(") || strings.HasPrefix(sized, "decimal("))
 }
 
 // defaultsEqual returns true when two Column.Default values are
@@ -844,6 +846,14 @@ func normalizeType(t string) string {
 	// exist but the discipline is cheap).
 	if s == "integer" {
 		s = "int"
+	}
+	// Fixed-point decimals: the migrator emits DECIMAL(p,s) (NUMBER(p,s)
+	// on Oracle), PostgreSQL's catalog answers numeric(p[,s]) and Oracle's
+	// NUMBER(p,s). One family, three spellings (A8 S7). Oracle's NUMBER(p)
+	// with no scale is left alone: it is the integer mapping there, and
+	// typesEqual already matches it against a bare NUMBER.
+	if strings.HasPrefix(s, "numeric(") || (strings.HasPrefix(s, "number(") && strings.Contains(s, ",")) {
+		s = "decimal(" + s[strings.Index(s, "(")+1:]
 	}
 	return s
 }

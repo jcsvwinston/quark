@@ -118,7 +118,7 @@ func SQLTypeWithOpts(dialectName string, t reflect.Type, opts TypeOptions) strin
 	if opts.Size > 0 {
 		base = applySize(base, dialectName, opts.Size)
 	}
-	if opts.Precision > 0 {
+	if opts.Precision > 0 && isDecimalKind(t) {
 		base = applyPrecisionScale(base, dialectName, opts.Precision, opts.Scale)
 	}
 	return base
@@ -269,17 +269,40 @@ func applySize(base, dialectName string, size int) string {
 	return base
 }
 
-// applyPrecisionScale rewrites the DECIMAL family default. Today the built-in
-// switch never emits DECIMAL itself (it is not in the Go-kind switch), so
-// this is reachable only when a custom type mapper has produced a DECIMAL
-// expression and the field tag adds extra precision hints. Kept here for
-// symmetry with applySize.
-func applyPrecisionScale(base, dialectName string, precision, scale int) string {
-	_ = dialectName
-	if scale == 0 {
-		return fmt.Sprintf("DECIMAL(%d)", precision)
+// isDecimalKind reports whether a precision/scale hint has a type to refine:
+// the floating-point kinds, which the hint turns into a fixed-point decimal.
+// On any other kind the hint is ignored — and the tag linter records a
+// warning — because before A8 S7 (QK-28) the rewrite replaced the base type
+// of ANY field that carried it: a string tagged precision=10,scale=2 became
+// DECIMAL(10,2) and a bool tagged precision=3 became DECIMAL(3).
+func isDecimalKind(t reflect.Type) bool {
+	if t == nil {
+		return false
 	}
-	return fmt.Sprintf("DECIMAL(%d,%d)", precision, scale)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if isSQLNull(t) {
+		if vf, ok := t.FieldByName("V"); ok {
+			return isDecimalKind(vf.Type)
+		}
+	}
+	return t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64
+}
+
+// applyPrecisionScale refines a floating-point column into the engine's
+// fixed-point decimal at the declared precision and scale: NUMBER(p,s) on
+// Oracle, DECIMAL(p,s) everywhere else. Only isDecimalKind columns get here.
+func applyPrecisionScale(base, dialectName string, precision, scale int) string {
+	_ = base
+	family := "DECIMAL"
+	if dialectName == "oracle" {
+		family = "NUMBER"
+	}
+	if scale == 0 {
+		return fmt.Sprintf("%s(%d)", family, precision)
+	}
+	return fmt.Sprintf("%s(%d,%d)", family, precision, scale)
 }
 
 // SQLType maps Go types to SQL types for the given dialect name.

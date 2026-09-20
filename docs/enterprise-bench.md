@@ -59,7 +59,7 @@ control needs a live engine to go further, its note says so, and
 
 ## The result
 
-**38 of 69 controls present. 21 partial. 10 absent.**
+**39 of 69 controls present. 20 partial. 10 absent.**
 
 ### migraciones — 11 present · 1 partial · 4 absent
 
@@ -139,7 +139,7 @@ control needs a live engine to go further, its note says so, and
 | `RLS-12` | Sharding and multi-tenancy do not compose: neither a key-routed read nor a scatter-gather honours the tenant in its context | **absent** | Both sharded doors return every owner's rows with the tenant sitting in the context: the tenancy hook fires on a type assertion to *TenantRouter, and a *ShardRouter is a different provider — scatter-gather goes further and builds its per-shard query against each shard's raw client. The opposite direction is not measured and cannot be: TenantConfig.BaseClient is a *Client, so a TenantRouter over a ShardRouter is not something the bench can construct. An application with both has to inject the predicate by hand in every query. |
 | `RLS-13` | Tenant confinement survives a transaction: DatabasePerTenant through its pool, SchemaPerTenant through its schema prefix, RowLevelSecurityClient through its predicate | **present** | — |
 
-### tipos — 6 present · 2 partial · 3 absent
+### tipos — 7 present · 1 partial · 3 absent
 
 | id | control | verdict | what is missing |
 |---|---|---|---|
@@ -153,4 +153,4 @@ control needs a live engine to go further, its note says so, and
 | `TYP-08` | JSON column: typed round-trip and dotted-path filtering | **partial** | What works is measured: JSON[T] in and out, and a filter that binds a dotted path into the dialect's JSON function. What is missing is what JSONB is asked for — a path into an array is refused by the path grammar (ErrInvalidJSONPath) and containment is refused by the operator allowlist, so @>, ?, jsonb_path_query and GIN indexes have no surface at all. That the PostgreSQL column really is JSONB needs a live engine. |
 | `TYP-09` | quark.Nullable[T], including Nullable[Array[T]] and Nullable[JSON[T]] | **present** | Measured on SQLite, NULL against the zero value, over the two compositions the godoc recommends for exactly that and that no test in the repository exercises. The binding trap those compositions were written for is SQL Server's, and it needs a live engine to see. |
 | `TYP-10` | built-in rich types: time.Duration and []byte | **present** | Measured on SQLite end to end: the column time.Duration takes (BIGINT, from the shipped mapper), the column []byte takes (BLOB), and the value of each one back out. The db tag's precision/scale used to be the third item here and is now TYP-11: a shipped mapper that stops mapping and a sizing hint that turns into a type are different defects, and sharing one verdict meant every way the hint could break still read as this control's recorded `partial`. What the other engines emit for these two types comes from the same per-dialect switch and is proved in internal/enginesuite, not here. |
-| `TYP-11` | the db tag's precision/scale sizes a decimal without retyping other fields | **partial** | The hint does size a decimal: a float64 tagged precision=10,scale=2 is emitted as DECIMAL(10,2) — measured, and it decides the verdict, because a probe that only watched the defect would go green the day the hint stopped working altogether. What is missing is the guard on the Go type: the rewrite applies to any field, so a string tagged precision=10,scale=2 is also DECIMAL(10,2) and a bool tagged precision=3 is DECIMAL(3), and the tag linter accepts both. The two halves are read as two facts, so an inert hint measures absent instead of hiding inside this partial. No engine test declares precision/scale on any model, and on PostgreSQL and Oracle the catalog answers numeric/NUMBER against the desired DECIMAL, so the plan never converges; that part needs a live engine. |
+| `TYP-11` | the db tag's precision/scale sizes a decimal without retyping other fields | **present** | Closed at A8 S7 (QK-28): the hint refines float columns only — DECIMAL(p,s), NUMBER(p,s) on Oracle — and on any other kind it is ignored with a tag warning instead of replacing the base type. Diff reads numeric(p,s) and NUMBER(p,s) as the same family, so the plan converges on PostgreSQL and Oracle; proven per engine in internal/enginesuite. |

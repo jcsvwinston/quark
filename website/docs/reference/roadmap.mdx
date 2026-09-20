@@ -46,7 +46,7 @@ test suite. Everything under "Planned" is not built yet.
 
 - `Nullable[T]` generic.
 - `JSON[T]` typed JSON column wrapper.
-- `Array[T]` typed array wrapper (native on PostgreSQL, JSON-backed elsewhere).
+- `Array[T]` typed array wrapper, JSON-backed on every engine (a native PostgreSQL array column for raw slices is planned; see the type matrix).
 - `RegisterTypeMapper` for extensible mapping (decimal, UUID and similar, opt-in).
 - `time.Duration` mapped out of the box.
 - **Per-column timezones** via the `quark:"tz=..."` tag or the client-wide

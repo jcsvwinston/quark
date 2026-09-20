@@ -243,7 +243,7 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 	// Tag lint (DX-8): recorded here, surfaced fail-fast by
 	// RegisterModel/Migrate — same contract as TZError.
 	tagError := lintFieldTags(t)
-	tagWarnings := warnForeignTagGrammar(t)
+	tagWarnings := append(warnForeignTagGrammar(t), warnPrecisionOnNonDecimal(t)...)
 
 	meta := &ModelMeta{
 		Table:             tableName,
@@ -568,6 +568,43 @@ func parseDBTag(tag string) (col string, size, precision, scale int) {
 		}
 	}
 	return col, size, precision, scale
+}
+
+// warnPrecisionOnNonDecimal records a precision/scale hint on a field the
+// hint cannot refine — anything that is not a float — because the hint is
+// ignored there (A8 S7, QK-28) and a silent no-op is a tag the author
+// believes is doing something.
+func warnPrecisionOnNonDecimal(t reflect.Type) []string {
+	var out []string
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		dbTag := field.Tag.Get("db")
+		if dbTag == "" || dbTag == "-" {
+			continue
+		}
+		_, _, precision, scale := parseDBTag(dbTag)
+		if precision == 0 && scale == 0 {
+			continue
+		}
+		ft := field.Type
+		if ft.Kind() == reflect.Ptr {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.Float32 || ft.Kind() == reflect.Float64 {
+			continue
+		}
+		if ft.Kind() == reflect.Struct { // Nullable[float64] and the like
+			if vf, ok := ft.FieldByName("V"); ok && (vf.Type.Kind() == reflect.Float32 || vf.Type.Kind() == reflect.Float64) {
+				continue
+			}
+		}
+		out = append(out, fmt.Sprintf("%s.%s: precision/scale in the db tag refines a float column into a decimal; on a %s it is ignored",
+			t.Name(), field.Name, ft.Kind()))
+	}
+	return out
 }
 
 // splitTagTokens splits a quark tag on the commas that separate its tokens
