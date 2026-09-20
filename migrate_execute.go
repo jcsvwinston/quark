@@ -263,35 +263,7 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 		_, err := exec.ExecContext(ctx, ddl)
 		return err
 	case OpAlterColumn:
-		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
-			return fmt.Errorf("alter column: %w", err)
-		}
-		if err := c.guard.ValidateIdentifier(o.New.Name); err != nil {
-			return fmt.Errorf("alter column: %w", err)
-		}
-		// A PRIMARY KEY delta can't be expressed as a column ALTER —
-		// it needs dropping/adding the table-level constraint (and on
-		// several engines a full table rebuild). Refuse loudly BEFORE
-		// the type check so a combined type+PK delta doesn't emit a
-		// bare ALTER TYPE that silently ignores the PK half.
-		if o.Old.PrimaryKey != o.New.PrimaryKey {
-			return fmt.Errorf("%w: OpAlterColumn for %s.%s: primary-key changes need a table rebuild (not expressible as ALTER COLUMN)",
-				ErrUnsupportedFeature, o.Table, o.New.Name)
-		}
-		// F3-3-execute only emits DDL for Type changes. Nullable
-		// and Default deltas need per-dialect ALTER syntax that
-		// we don't expose via Dialect yet. Rather than silently
-		// no-op (which would leave the schema drifted forever and
-		// confuse the user re-running PlanMigration), fail loud
-		// with ErrUnsupportedFeature so the caller knows the gap
-		// is real. F3-3-execute-alter follow-up will close this.
-		if normalizeType(o.Old.Type) == normalizeType(o.New.Type) {
-			return fmt.Errorf("%w: OpAlterColumn for %s.%s: nullable/default-only changes need F3-3-execute-alter (only type changes are emitted today)",
-				ErrUnsupportedFeature, o.Table, o.New.Name)
-		}
-		ddl := c.dialect.AlterTableAlterColumn(o.Table, o.New.Name, c.mapColumnType(o.New.Type))
-		_, err := exec.ExecContext(ctx, ddl)
-		return err
+		return c.applyAlterColumn(ctx, exec, o)
 	case OpCreateIndex:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
 			return fmt.Errorf("create index: %w", err)
@@ -336,6 +308,9 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 			}
 		}
 		fk := o.ForeignKey
+		if c.dialect.Name() == "sqlite" {
+			return c.sqliteAddForeignKey(ctx, exec, o.Table, fk)
+		}
 		return c.addForeignKeyOn(ctx, exec, o.Table, fk.Name, fk.Columns, fk.RefTable, fk.RefColumns, fk.OnDelete, fk.OnUpdate)
 	case OpDropForeignKey:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
@@ -346,6 +321,9 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 				return fmt.Errorf("drop fk: %w", err)
 			}
 		}
+		if c.dialect.Name() == "sqlite" {
+			return c.sqliteDropForeignKey(ctx, exec, o.Table, o.ForeignKey)
+		}
 		return c.dropForeignKey(ctx, exec, o.Table, o.ForeignKey)
 	case OpAddCheck:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
@@ -354,6 +332,9 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 		if err := c.guard.ValidateIdentifier(o.Check.Name); err != nil {
 			return fmt.Errorf("add check: %w", err)
 		}
+		if c.dialect.Name() == "sqlite" {
+			return c.sqliteAddCheck(ctx, exec, o.Table, o.Check)
+		}
 		return c.addCheck(ctx, exec, o.Table, o.Check.Name, o.Check.Expression)
 	case OpDropCheck:
 		if err := c.guard.ValidateIdentifier(o.Table); err != nil {
@@ -361,6 +342,9 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 		}
 		if err := c.guard.ValidateIdentifier(o.Check); err != nil {
 			return fmt.Errorf("drop check: %w", err)
+		}
+		if c.dialect.Name() == "sqlite" {
+			return c.sqliteDropCheck(ctx, exec, o.Table, o.Check)
 		}
 		return c.dropCheck(ctx, exec, o.Table, o.Check)
 	default:
@@ -560,11 +544,9 @@ func (c *Client) dropIndex(ctx context.Context, exec Executor, table, index stri
 }
 
 // dropForeignKey renders the per-dialect DROP FK DDL. SQLite does
-// NOT support `ALTER TABLE DROP CONSTRAINT` — dropping an FK
-// requires the 12-step table-rebuild procedure documented in the
-// SQLite manual, which is out of scope for F3-3-execute. We return
-// `ErrUnsupportedFeature` so the caller knows the gap is real and
-// not a typo.
+// NOT support `ALTER TABLE DROP CONSTRAINT`; applyOne routes SQLite
+// to sqliteDropForeignKey, the table rebuild (A8 S4), and this
+// helper keeps refusing so no other caller mistakes it for one.
 //
 // PG / MSSQL use `ALTER TABLE ... DROP CONSTRAINT <name>`; MySQL /
 // MariaDB use `ALTER TABLE ... DROP FOREIGN KEY <name>`. Oracle

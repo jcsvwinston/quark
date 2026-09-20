@@ -147,6 +147,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("PlanConstraints", func(t *testing.T) {
 		testPlanConstraints(ctx, t, client)
 	})
+	t.Run("AlterColumn", func(t *testing.T) {
+		testAlterColumn(ctx, t, client)
+	})
 	t.Run("PlanMigration", func(t *testing.T) {
 		testPlanMigration(ctx, t, client)
 	})
@@ -715,6 +718,126 @@ func testPlanConstraints(ctx context.Context, t *testing.T, client *quark.Client
 		if strings.Contains(strings.ToLower(op.String()), "pc_docs") {
 			t.Errorf("%s: a freshly migrated model with a declared index plans to something about its table: %s", engine, op)
 		}
+	}
+}
+
+// testAlterColumn proves the four ALTER COLUMN deltas — type, nullable,
+// default, primary key — and the foreign-key round trip on the engine this
+// lane runs (A8 S4, controls MIG-07 and MIG-09). Every delta is read back
+// from the catalog; the default is matched by content because each engine
+// spells it its own way.
+func testAlterColumn(ctx context.Context, t *testing.T, client *quark.Client) {
+	engine := client.Dialect().Name()
+	dropTable(client, "ac_items")
+	dropTable(client, "ac_orgs")
+	intType, textType := "INTEGER", "TEXT"
+	switch engine {
+	case "postgres":
+		intType, textType = "bigint", "text"
+	case "mysql", "mariadb":
+		intType, textType = "BIGINT", "VARCHAR(255)"
+	case "mssql":
+		intType, textType = "BIGINT", "NVARCHAR(255)"
+	case "oracle":
+		intType, textType = "NUMBER(19)", "VARCHAR2(255)"
+	}
+	// No primary key yet: the key delta ADDS it, on a column that is NOT
+	// NULL from the start (SQL Server and Oracle require that).
+	desired := quark.Schema{Tables: []quark.Table{
+		{Name: "ac_orgs", Columns: []quark.Column{{Name: "id", Type: intType, PrimaryKey: true}}},
+		{Name: "ac_items", Columns: []quark.Column{
+			{Name: "id", Type: intType, Nullable: false},
+			{Name: "amount", Type: intType, Nullable: false},
+			{Name: "org_id", Type: intType, Nullable: true},
+		}},
+	}}
+	current, err := client.IntrospectSchema(ctx)
+	if err != nil {
+		t.Fatalf("introspect: %v", err)
+	}
+	if err := client.ApplyPlan(ctx, quark.Plan{Ops: quark.Diff(desired, current)}); err != nil {
+		t.Fatalf("create on %s: %v", engine, err)
+	}
+	t.Cleanup(func() { dropTable(client, "ac_items"); dropTable(client, "ac_orgs") })
+
+	column := func(table, name string) quark.Column {
+		live, err := client.IntrospectSchema(ctx)
+		if err != nil {
+			t.Fatalf("introspect: %v", err)
+		}
+		for _, tb := range live.Tables {
+			if !strings.EqualFold(tb.Name, table) {
+				continue
+			}
+			for _, col := range tb.Columns {
+				if strings.EqualFold(col.Name, name) {
+					return col
+				}
+			}
+		}
+		t.Fatalf("%s.%s not introspected", table, name)
+		return quark.Column{}
+	}
+	cur := column("ac_items", "amount")
+	step := func(label string, mutate func(*quark.Column), landed func(quark.Column) bool) {
+		next := cur
+		mutate(&next)
+		if err := client.ApplyPlan(ctx, quark.Plan{Ops: []quark.Operation{quark.OpAlterColumn{Table: "ac_items", Old: cur, New: next}}}); err != nil {
+			t.Fatalf("%s on %s: %v", label, engine, err)
+		}
+		got := column("ac_items", "amount")
+		if !landed(got) {
+			t.Errorf("%s on %s: ApplyPlan returned nil and the catalog did not move: type=%s nullable=%v pk=%v default=%v",
+				label, engine, got.Type, got.Nullable, got.PrimaryKey, got.Default)
+		}
+		cur = got
+	}
+	step("type", func(c *quark.Column) { c.Type = textType }, func(c quark.Column) bool {
+		return !strings.Contains(strings.ToUpper(c.Type), "INT") && !strings.Contains(strings.ToUpper(c.Type), "NUMBER")
+	})
+	step("nullable", func(c *quark.Column) { c.Nullable = true }, func(c quark.Column) bool { return c.Nullable })
+	def := "'none'"
+	step("default", func(c *quark.Column) { c.Default = &def }, func(c quark.Column) bool {
+		return c.Default != nil && strings.Contains(*c.Default, "none")
+	})
+	// The key goes on id, a NOT NULL column with no key yet.
+	idCol := column("ac_items", "id")
+	idPK := idCol
+	idPK.PrimaryKey = true
+	if err := client.ApplyPlan(ctx, quark.Plan{Ops: []quark.Operation{quark.OpAlterColumn{Table: "ac_items", Old: idCol, New: idPK}}}); err != nil {
+		t.Fatalf("add primary key on %s: %v", engine, err)
+	}
+	if got := column("ac_items", "id"); !got.PrimaryKey {
+		t.Errorf("primary key on %s: ApplyPlan returned nil and id is not the key", engine)
+	}
+
+	// The foreign-key round trip: up, catalog agrees, generated down, gone.
+	up := quark.Plan{Ops: []quark.Operation{quark.OpAddForeignKey{Table: "ac_items", ForeignKey: quark.ForeignKey{
+		Name: "fk_ac_items_org", Columns: []string{"org_id"}, RefTable: "ac_orgs", RefColumns: []string{"id"}}}}}
+	down, err := up.Down()
+	if err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if err := client.ApplyPlan(ctx, up); err != nil {
+		t.Fatalf("add fk on %s: %v", engine, err)
+	}
+	fks := func() int {
+		live, _ := client.IntrospectSchema(ctx)
+		for _, tb := range live.Tables {
+			if strings.EqualFold(tb.Name, "ac_items") {
+				return len(tb.ForeignKeys)
+			}
+		}
+		return -1
+	}
+	if fks() != 1 {
+		t.Errorf("add fk on %s: the catalog shows %d keys", engine, fks())
+	}
+	if err := client.ApplyPlan(ctx, down); err != nil {
+		t.Fatalf("drop fk (generated down) on %s: %v", engine, err)
+	}
+	if fks() != 0 {
+		t.Errorf("drop fk on %s: the catalog still shows %d keys", engine, fks())
 	}
 }
 

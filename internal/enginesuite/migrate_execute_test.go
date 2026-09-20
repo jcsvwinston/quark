@@ -5,7 +5,6 @@ package enginesuite
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -110,38 +109,51 @@ func TestApplyPlan_AddDropColumn(t *testing.T) {
 	}
 }
 
-// TestApplyPlan_SQLite_RejectsDropFK pins the SQLite limitation
-// explicitly: OpDropForeignKey returns ErrUnsupportedFeature on
-// SQLite. The test is the lever that flips when F3-3-execute-
-// sqlite-rebuild lands the 12-step procedure.
-func TestApplyPlan_SQLite_RejectsDropFK(t *testing.T) {
+// TestApplyPlan_SQLite_DropsFKByRebuild: SQLite has no ALTER TABLE DROP
+// CONSTRAINT, so the key is dropped by rebuilding the table (A8 S4). The
+// name the op carries is read back from the CREATE TABLE text.
+func TestApplyPlan_SQLite_DropsFKByRebuild(t *testing.T) {
 	ctx := context.Background()
 	c := newSQLitePlanClient(t)
-	plan := quark.Plan{Ops: []quark.Operation{
-		quark.OpDropForeignKey{Table: "t", ForeignKey: "fk_x"},
+	up := quark.Plan{Ops: []quark.Operation{
+		quark.OpCreateTable{Table: quark.Table{Name: "fk_p", Columns: []quark.Column{{Name: "id", Type: "INTEGER", PrimaryKey: true}}}},
+		quark.OpCreateTable{Table: quark.Table{Name: "fk_c", Columns: []quark.Column{
+			{Name: "id", Type: "INTEGER", PrimaryKey: true}, {Name: "p", Type: "INTEGER", Nullable: true}},
+			ForeignKeys: []quark.ForeignKey{{Name: "fk_x", Columns: []string{"p"}, RefTable: "fk_p", RefColumns: []string{"id"}}}}},
 	}}
-	err := c.ApplyPlan(ctx, plan)
-	if err == nil {
-		t.Fatalf("DropFK on SQLite should error, got nil")
+	if err := c.ApplyPlan(ctx, up); err != nil {
+		t.Fatalf("create: %v", err)
 	}
-	if !errors.Is(err, quark.ErrUnsupportedFeature) {
-		t.Errorf("want ErrUnsupportedFeature, got %v", err)
+	if err := c.ApplyPlan(ctx, quark.Plan{Ops: []quark.Operation{quark.OpDropForeignKey{Table: "fk_c", ForeignKey: "fk_x"}}}); err != nil {
+		t.Fatalf("drop fk on SQLite by rebuild: %v", err)
+	}
+	live, _ := c.IntrospectSchema(ctx)
+	for _, tb := range live.Tables {
+		if tb.Name == "fk_c" && len(tb.ForeignKeys) != 0 {
+			t.Fatalf("the key is still there: %+v", tb.ForeignKeys)
+		}
 	}
 }
 
-// TestApplyPlan_SQLite_RejectsDropCheck — same as above for CHECK.
-func TestApplyPlan_SQLite_RejectsDropCheck(t *testing.T) {
+// TestApplyPlan_SQLite_AddsAndDropsCheckByRebuild — same for CHECK.
+func TestApplyPlan_SQLite_AddsAndDropsCheckByRebuild(t *testing.T) {
 	ctx := context.Background()
 	c := newSQLitePlanClient(t)
-	plan := quark.Plan{Ops: []quark.Operation{
-		quark.OpDropCheck{Table: "t", Check: "chk_x"},
-	}}
-	err := c.ApplyPlan(ctx, plan)
-	if err == nil {
-		t.Fatalf("DropCheck on SQLite should error, got nil")
+	if err := c.ApplyPlan(ctx, quark.Plan{Ops: []quark.Operation{quark.OpCreateTable{Table: quark.Table{
+		Name: "chk_t", Columns: []quark.Column{{Name: "id", Type: "INTEGER", PrimaryKey: true}, {Name: "a", Type: "INTEGER", Nullable: true}}}}}}); err != nil {
+		t.Fatal(err)
 	}
-	if !errors.Is(err, quark.ErrUnsupportedFeature) {
-		t.Errorf("want ErrUnsupportedFeature, got %v", err)
+	if err := c.ApplyPlan(ctx, quark.Plan{Ops: []quark.Operation{quark.OpAddCheck{Table: "chk_t", Check: quark.Check{Name: "chk_x", Expression: "a > 0"}}}}); err != nil {
+		t.Fatalf("add check on SQLite by rebuild: %v", err)
+	}
+	if _, err := c.Raw().ExecContext(ctx, "INSERT INTO chk_t (id, a) VALUES (1, -1)"); err == nil {
+		t.Fatal("the check is not enforced")
+	}
+	if err := c.ApplyPlan(ctx, quark.Plan{Ops: []quark.Operation{quark.OpDropCheck{Table: "chk_t", Check: "chk_x"}}}); err != nil {
+		t.Fatalf("drop check on SQLite by rebuild: %v", err)
+	}
+	if _, err := c.Raw().ExecContext(ctx, "INSERT INTO chk_t (id, a) VALUES (1, -1)"); err != nil {
+		t.Fatalf("the dropped check is still enforced: %v", err)
 	}
 }
 
@@ -195,49 +207,35 @@ func TestApplyPlan_SQLite_RollbackOnMidPlanFailure(t *testing.T) {
 	}
 }
 
-// TestApplyPlan_SQLite_RejectsAddCheck: same SQLite limitation as
-// DropFK / DropCheck — symmetric pin.
-func TestApplyPlan_SQLite_RejectsAddCheck(t *testing.T) {
+// TestApplyPlan_AlterColumn_NullableOnlyLands: a nullable-only delta used
+// to be refused with ErrUnsupportedFeature (the F3-3-execute-alter gap);
+// since A8 S4 it lands, on SQLite through the table rebuild.
+func TestApplyPlan_AlterColumn_NullableOnlyLands(t *testing.T) {
 	ctx := context.Background()
 	c := newSQLitePlanClient(t)
-	plan := quark.Plan{Ops: []quark.Operation{
-		quark.OpAddCheck{Table: "t", Check: quark.Check{Name: "chk_x", Expression: "a > 0"}},
-	}}
-	err := c.ApplyPlan(ctx, plan)
-	if err == nil {
-		t.Fatalf("AddCheck on SQLite should error, got nil")
+	if _, err := c.Raw().ExecContext(ctx, `CREATE TABLE nn_t (id INTEGER PRIMARY KEY, x TEXT)`); err != nil {
+		t.Fatal(err)
 	}
-	if !errors.Is(err, quark.ErrUnsupportedFeature) {
-		t.Errorf("want ErrUnsupportedFeature, got %v", err)
-	}
-}
-
-// TestApplyPlan_AlterColumn_NullableOnlyIsError pins the
-// fail-loud contract: when OpAlterColumn carries no Type change
-// (only nullable or default deltas), ApplyPlan returns
-// ErrUnsupportedFeature pointing at F3-3-execute-alter. The
-// alternative — silent noop — was the original implementation;
-// the reviewer caught it (B3) and we converted to fail-loud so
-// users don't see an unending "dirty" plan.
-func TestApplyPlan_AlterColumn_NullableOnlyIsError(t *testing.T) {
-	ctx := context.Background()
-	c := newSQLitePlanClient(t)
 	plan := quark.Plan{Ops: []quark.Operation{
 		quark.OpAlterColumn{
-			Table: "t",
+			Table: "nn_t",
 			Old:   quark.Column{Name: "x", Type: "TEXT", Nullable: true},
 			New:   quark.Column{Name: "x", Type: "TEXT", Nullable: false},
 		},
 	}}
-	err := c.ApplyPlan(ctx, plan)
-	if err == nil {
-		t.Fatalf("nullable-only alter should error, got nil")
+	if err := c.ApplyPlan(ctx, plan); err != nil {
+		t.Fatalf("nullable-only alter: %v", err)
 	}
-	if !errors.Is(err, quark.ErrUnsupportedFeature) {
-		t.Errorf("want ErrUnsupportedFeature, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "F3-3-execute-alter") {
-		t.Errorf("error should reference F3-3-execute-alter follow-up, got %q", err)
+	live, _ := c.IntrospectSchema(ctx)
+	for _, tb := range live.Tables {
+		if tb.Name != "nn_t" {
+			continue
+		}
+		for _, col := range tb.Columns {
+			if col.Name == "x" && col.Nullable {
+				t.Fatalf("the column is still nullable")
+			}
+		}
 	}
 }
 
@@ -442,30 +440,36 @@ func TestApplyPlan_CreateTableCompositePK(t *testing.T) {
 	}
 }
 
-// TestApplyPlan_RejectsPrimaryKeyChange pins the executor's refusal:
-// a PK delta can't be expressed as ALTER COLUMN (it needs a table
-// rebuild), so it must fail loudly — and BEFORE the type check, so a
-// combined type+PK delta can't sneak through as a bare ALTER TYPE.
-func TestApplyPlan_RejectsPrimaryKeyChange(t *testing.T) {
+// TestApplyPlan_PrimaryKeyChangeLands: a primary-key delta used to be
+// refused (it needs a table rebuild); since A8 S4 SQLite rebuilds, and the
+// key moves.
+func TestApplyPlan_PrimaryKeyChangeLands(t *testing.T) {
 	ctx := context.Background()
 	c := newSQLitePlanClient(t)
 
 	if _, err := c.Raw().ExecContext(ctx,
-		`CREATE TABLE pk_change_probe (id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
+		`CREATE TABLE pk_change_probe (id INTEGER, v TEXT)`); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	plan := quark.Plan{Ops: []quark.Operation{
 		quark.OpAlterColumn{
 			Table: "pk_change_probe",
-			Old:   quark.Column{Name: "v", Type: "TEXT", Nullable: true},
-			New:   quark.Column{Name: "v", Type: "BIGINT", Nullable: true, PrimaryKey: true},
+			Old:   quark.Column{Name: "id", Type: "INTEGER", Nullable: true},
+			New:   quark.Column{Name: "id", Type: "INTEGER", Nullable: false, PrimaryKey: true},
 		},
 	}}
-	err := c.ApplyPlan(ctx, plan)
-	if !errors.Is(err, quark.ErrUnsupportedFeature) {
-		t.Fatalf("expected ErrUnsupportedFeature for a PK change, got %v", err)
+	if err := c.ApplyPlan(ctx, plan); err != nil {
+		t.Fatalf("primary-key change: %v", err)
 	}
-	if !strings.Contains(err.Error(), "primary-key") {
-		t.Errorf("error should name the primary-key gap, got %q", err)
+	live, _ := c.IntrospectSchema(ctx)
+	for _, tb := range live.Tables {
+		if tb.Name != "pk_change_probe" {
+			continue
+		}
+		for _, col := range tb.Columns {
+			if col.Name == "id" && !col.PrimaryKey {
+				t.Fatalf("id is not the primary key after the alter: %+v", col)
+			}
+		}
 	}
 }

@@ -846,10 +846,16 @@ func probeMigAlterColumn(t *testing.T, e *env) verdict {
 
 	landedCount := 0
 
-	wantPK := !cur.PrimaryKey
-	if measure("primary-key delta",
-		func(col *quark.Column) { col.PrimaryKey = wantPK },
-		func(col quark.Column) bool { return col.PrimaryKey == wantPK }) {
+	// Order matters, and it is the order of the title: type, nullable,
+	// default, and the primary key LAST. The S0 probe led with the key on
+	// the assumption that it would be refused; once it lands, the column is
+	// a primary key, and a primary key is never nullable — so a nullable
+	// delta measured after it reads "the catalog did not move" for a fact
+	// about keys, not about ALTER COLUMN.
+	wantType := "TEXT"
+	if measure("type delta",
+		func(col *quark.Column) { col.Type = wantType },
+		func(col quark.Column) bool { return strings.EqualFold(col.Type, wantType) }) {
 		landedCount++
 	}
 
@@ -871,10 +877,10 @@ func probeMigAlterColumn(t *testing.T, e *env) verdict {
 		landedCount++
 	}
 
-	wantType := "TEXT"
-	if measure("type delta",
-		func(col *quark.Column) { col.Type = wantType },
-		func(col quark.Column) bool { return strings.EqualFold(col.Type, wantType) }) {
+	wantPK := !cur.PrimaryKey
+	if measure("primary-key delta",
+		func(col *quark.Column) { col.PrimaryKey = wantPK },
+		func(col quark.Column) bool { return col.PrimaryKey == wantPK }) {
 		landedCount++
 	}
 
