@@ -93,13 +93,12 @@ func controlsMigraciones() []control {
 			id:     "MIG-07",
 			family: fam,
 			title:  "ALTER COLUMN covers type, nullable, default and primary key",
-			want:   absent,
-			note: "None of the four deltas reaches the column on SQLite. Primary-key, nullable-only and " +
-				"default-only deltas are refused with ErrUnsupportedFeature — loud gaps. The type change, " +
-				"the one delta the executor claims to emit, is rendered by the SQLite dialect as a SQL " +
-				"comment: ApplyPlan returns nil and the column keeps its type. Every delta is read back from " +
-				"the catalog, so a nil error that changes nothing counts as the gap it is. Whether the type " +
-				"path works elsewhere needs a live engine — internal/enginesuite.",
+			want:   present,
+			note: "Closed at A8 S4. On SQLite every delta goes through the table rebuild the engine's manual " +
+				"documents (no ALTER COLUMN there), and each is read back from the catalog. On the other " +
+				"engines the deltas are native ALTERs — PostgreSQL per facet, MySQL/MariaDB as one MODIFY, " +
+				"SQL Server with its named default and key constraints, Oracle as one MODIFY of what " +
+				"changed — proven per engine in internal/enginesuite.",
 			probe: probeMigAlterColumn,
 		},
 		{
@@ -112,14 +111,11 @@ func controlsMigraciones() []control {
 		{
 			id:     "MIG-09",
 			family: fam,
-			title:  "Reversible round trips beyond CREATE/DROP TABLE: column and index yes, foreign key no",
-			want:   partial,
-			note: "Add-column and create-index go to the database and back with the catalog agreeing. The " +
-				"foreign-key pair does not even go forward on SQLite (ALTER TABLE ADD CONSTRAINT is a " +
-				"syntax error there), and its generated rollback — applied on its own, since the round trip " +
-				"never reaches it — answers ErrUnsupportedFeature. The probe keeps each round trip in its " +
-				"own variable, so this partial means exactly the two the title names; any other split " +
-				"answers absent. Proving the FK round trip needs an engine with ALTER TABLE ADD CONSTRAINT.",
+			title:  "Reversible round trips beyond CREATE/DROP TABLE: column, index and foreign key",
+			want:   present,
+			note: "Closed at A8 S4: on SQLite a foreign key is added and dropped by rebuilding the table, and " +
+				"the name the op carries is kept in the CREATE TABLE text so the generated rollback can " +
+				"find it. Add-column and create-index round-tripped already.",
 			probe: probeMigReversibleBeyondTables,
 		},
 		{

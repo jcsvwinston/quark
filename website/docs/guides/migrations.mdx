@@ -321,12 +321,22 @@ How `ApplyPlan` recovers from a mid-plan failure depends on the engine:
 A few changes are refused on purpose, so that drift stays visible instead of
 being silently mis-applied:
 
-- A **primary-key change** returns `ErrUnsupportedFeature` (it needs a table
-  rebuild). The diff still reports it.
-- `OpAlterColumn` emits DDL for a **type** change; a nullable- or default-only
-  delta returns `ErrUnsupportedFeature`.
-- Dropping a constraint on **SQLite** returns `ErrUnsupportedFeature` (no
-  `ALTER TABLE DROP CONSTRAINT`).
+- **Renaming** a column through `OpAlterColumn` returns `ErrUnsupportedFeature`:
+  a rename is `Sync`'s `quark:"rename:old"` tag or a versioned migration.
+- On **SQLite**, a table whose `CREATE TABLE` carries a `CHECK` in a shape the
+  rebuild cannot read back (anything but `CONSTRAINT name CHECK (expr)` on its
+  own line) returns `ErrUnsupportedFeature` rather than rebuilding without it.
+
+`OpAlterColumn` covers the four facets a column can change — **type, nullable,
+default and primary key** — on every engine. PostgreSQL alters each facet on
+its own; MySQL and MariaDB restate the column with one `MODIFY`; SQL Server
+alters the column and manages its named default and key constraints; Oracle
+emits one `MODIFY` with exactly what changed. SQLite has no `ALTER COLUMN` and
+no `ADD` or `DROP CONSTRAINT` at all, so there every column, foreign-key and
+check change goes through the table rebuild its manual documents — create the
+changed table under a temporary name, copy the rows, drop, rename, recreate the
+indexes and triggers — inside the plan's transaction, so a failure (a `NOT
+NULL` over rows that hold `NULL`, say) leaves the table as it was.
 
 ### A CI drift gate with `quarkmigrate`
 
