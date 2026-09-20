@@ -2247,6 +2247,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "ErrTenantMismatch",
+      "kind": "var"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrTimeout",
       "kind": "var"
     },
