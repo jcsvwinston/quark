@@ -149,6 +149,18 @@ Budget the total: 100 active tenants at 10 connections each is up to 1000
 connections against the server. Size `MaxCachedPools` and the per-client limits
 together.
 
+## What each engine gives you
+
+| Engine | Row-level isolation | Why |
+| --- | --- | --- |
+| PostgreSQL | `RowLevelSecurityNative` (engine-enforced) or `RowLevelSecurityClient` | `set_config(..., true)` is transaction-scoped and `CREATE POLICY` filters server-side. |
+| MySQL, MariaDB, SQLite | `RowLevelSecurityClient` | No engine-side row security. |
+| SQL Server, Oracle | `RowLevelSecurityClient` | Both have engine-side row security (`CREATE SECURITY POLICY` over `SESSION_CONTEXT`; `DBMS_RLS` over a session context), but the context is **session**-scoped: set inside a transaction it survives the commit on the pooled connection, and the next tenant to borrow that connection would inherit it. Quark does not offer a strategy it cannot make safe on a pool. |
+
+A `RowLevelSecurityNative` router over any engine but PostgreSQL refuses on all
+three of its doors — `For`, `Tx` and `GetClient` — with `ErrUnsupportedFeature`.
+`SchemaPerTenant` and `DatabasePerTenant` work on every engine.
+
 ## Transactions
 
 A transaction opened for a tenant is confined to it, and so is every query built

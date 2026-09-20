@@ -214,6 +214,7 @@ func TestNativeRLSInsideTxKeepsTheTransactionExecutor(t *testing.T) {
 		t.Fatalf("client: %v", err)
 	}
 	router := txConfinementRouter(c, RowLevelSecurityNative)
+	router.config.SkipPolicyVerification = true // this test measures the executor, not the policies
 	ctx := txConfinementCtx("acme")
 
 	sqlTx, err := db.BeginTx(ctx, nil)

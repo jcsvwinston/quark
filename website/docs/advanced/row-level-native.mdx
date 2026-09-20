@@ -147,8 +147,14 @@ tenant is refused with `ErrTenantMismatch` (see
 ## Verify enforcement at startup
 
 Point a Native router at a database where the DDL was never applied, and there
-is no predicate at all: every tenant reads every row, and nothing errors. Make
-startup fail instead:
+would be no predicate at all. The router does not let that happen: the first
+time it touches each table it reads the catalog — row-level security enabled,
+at least one policy — and refuses with `ErrRLSNotEnforced` otherwise, a catalog
+it cannot read included. `TenantConfig.SkipPolicyVerification` turns the check
+off when policies are managed outside Quark's view.
+
+That is the floor. For the detailed preflight — the policy's name, `FORCE`, and
+**what the predicate actually says** — make startup fail on it:
 
 ```go
 if _, err := quarktenant.VerifyRLSPolicies(ctx, client, quarktenant.DefaultInstallOptions()); err != nil {

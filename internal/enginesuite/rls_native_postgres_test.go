@@ -470,6 +470,7 @@ func TestRowLevelSecurityNativeCreateReleasesImplicitTx(t *testing.T) {
 
 	cfg := quark.DefaultTenantConfig()
 	cfg.Strategy = quark.RowLevelSecurityNative
+	cfg.SkipPolicyVerification = true // this test measures retention, not policies
 	cfg.BaseClient = base
 	router := quark.NewTenantRouter(cfg,
 		func(c context.Context) string {

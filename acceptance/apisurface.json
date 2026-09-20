@@ -2302,6 +2302,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "ErrRLSNotEnforced",
+      "kind": "var"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrStaleEntity",
       "kind": "var"
     },

@@ -624,6 +624,12 @@ func applyTenantConfinement(q *BaseQuery, router *TenantRouter, client *Client, 
 				ErrUnsupportedFeature, client.dialect.Name())
 			return
 		}
+		// The engine has to be enforcing on THIS table, or the strategy's
+		// promise is a predicate that does not exist (A8 S8).
+		if err := router.verifyNativePolicy(ctx, client, q.table); err != nil {
+			q.err = err
+			return
+		}
 		// tenantID participates ONLY in the cache key here.
 		// tenantCol stays empty on purpose, so every SQL-shaping
 		// consumer (WHERE injection, soft-delete scoping, create

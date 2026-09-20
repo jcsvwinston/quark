@@ -181,3 +181,11 @@ func wrapDBError(err error) error {
 // without silently reading or writing across tenants. A context that resolves
 // NO tenant inherits the transaction's instead.
 var ErrTenantMismatch = errors.New("tenant mismatch inside transaction")
+
+// ErrRLSNotEnforced is returned, wrapped, by a RowLevelSecurityNative router
+// that cannot confirm the engine enforces row-level security on the table a
+// query is about to touch: the table has row security disabled, has no
+// policy, or the catalog could not be read. The router refuses to serve
+// rather than return every tenant's rows over a database whose policies were
+// never installed (A8 S8). quarktenant.ErrRLSNotEnforced is this value.
+var ErrRLSNotEnforced = errors.New("row-level security is not enforced")
