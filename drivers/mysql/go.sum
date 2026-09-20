@@ -10,8 +10,8 @@ github.com/go-playground/validator/v10 v10.30.4 h1:9Rcod2ZPO6mOEG6b4GqyoHE/H6//Z
 github.com/go-playground/validator/v10 v10.30.4/go.mod h1:numpT+RPLE91R9oYWMY/R9zRgJBewr3IXHko4OISPpk=
 github.com/go-sql-driver/mysql v1.10.1 h1:arlSnNLq6a5yxGxV7qg9lF4j0C+KwD6NbQyKr9QL6ME=
 github.com/go-sql-driver/mysql v1.10.1/go.mod h1:M+cqaI7+xxXGG9swrdeUIoPG3Y3KCkF0pZej+SK+nWk=
-github.com/jcsvwinston/quark v1.13.0 h1:HiH7HCBiquRRjPm5Zt10ysfum/w7+eH3bsGTjaAHBXg=
-github.com/jcsvwinston/quark v1.13.0/go.mod h1:36Zkg7m2llmvZEdBE6bAF3MEa666gdtjs5quWSMMU+U=
+github.com/jcsvwinston/quark v1.14.0 h1:CBE/aJO8F+2yGTC3Cwxhm3PTCrRY7GzfRnaOM9cBMvw=
+github.com/jcsvwinston/quark v1.14.0/go.mod h1:36Zkg7m2llmvZEdBE6bAF3MEa666gdtjs5quWSMMU+U=
 github.com/leodido/go-urn v1.5.0 h1:pLqT2kq1zpHW/1D18QMjMpdtX7cekxqtJJjg5ANyWw0=
 github.com/leodido/go-urn v1.5.0/go.mod h1:9BORnCDhdPBJNDEX+w1bJisa8yOKYi116VeO96s4ifE=
 golang.org/x/crypto v0.55.0 h1:+KWHjbgOaAQ66dh/YlkZKHlz9ZUlq61AFirAR9ntP8M=

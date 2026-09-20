@@ -26,8 +26,8 @@ github.com/golang-sql/sqlexp v0.1.0 h1:ZCD6MBpcuOVfGVqsEmY5/4FtYiKz6tSyUv9LPEDei
 github.com/golang-sql/sqlexp v0.1.0/go.mod h1:J4ad9Vo8ZCWQ2GMrC4UCQy1JpCbwU9m3EOqtpKwwwHI=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/jcsvwinston/quark v1.13.0 h1:HiH7HCBiquRRjPm5Zt10ysfum/w7+eH3bsGTjaAHBXg=
-github.com/jcsvwinston/quark v1.13.0/go.mod h1:36Zkg7m2llmvZEdBE6bAF3MEa666gdtjs5quWSMMU+U=
+github.com/jcsvwinston/quark v1.14.0 h1:CBE/aJO8F+2yGTC3Cwxhm3PTCrRY7GzfRnaOM9cBMvw=
+github.com/jcsvwinston/quark v1.14.0/go.mod h1:36Zkg7m2llmvZEdBE6bAF3MEa666gdtjs5quWSMMU+U=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/leodido/go-urn v1.5.0 h1:pLqT2kq1zpHW/1D18QMjMpdtX7cekxqtJJjg5ANyWw0=
