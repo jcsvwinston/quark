@@ -1,0 +1,211 @@
+// Copyright 2026 jcsvwinston
+// SPDX-License-Identifier: Apache-2.0
+
+package enterprisebench
+
+// controlsMigraciones is the migration family: what an enterprise application
+// can do to change its schema on purpose — compare, plan, apply, roll back,
+// serialise and backfill.
+//
+// Every title here says only what its probe reads back from the database. Where
+// the probe could measure half of a capability, the title is the half it
+// measured: a title that promises more than its probe checks is a control that
+// passes for ever.
+//
+// And every verdict here has ONE way to be reached. A probe that answers
+// "partial" both when a capability is half there and when it is gone measures
+// nothing: the bench stays green through the regression. So each probe's
+// recorded verdict is the conjunction of the facts its title states, and every
+// other split returns something else, with a log saying which fact moved.
+func controlsMigraciones() []control {
+	const fam = "migraciones"
+	return []control{
+		{
+			id:     "MIG-01",
+			family: fam,
+			title:  "Declarative diff: a desired schema is compared against the live one and applied, tables and columns only",
+			want:   partial,
+			note: "The loop does not converge. A desired schema carrying an index and a foreign key applies " +
+				"with a nil error and neither reaches the database, so re-diffing the same desired schema " +
+				"against the result proposes the same work again. Tables and columns do round-trip — the " +
+				"probe reads them back and classifies the residual, so a residual carrying table or column " +
+				"work answers absent instead of this partial.",
+			probe: probeMigDeclarativeDiff,
+		},
+		{
+			id:     "MIG-02",
+			family: fam,
+			title: "A desired schema can come from a versionable document instead of compiled Go models, " +
+				"tables and columns only",
+			want: partial,
+			note: "A JSON document deserialises into quark.Schema (every field is exported) and goes through " +
+				"quark.Diff and ApplyPlan with no Go model compiled in: its tables and columns reach the " +
+				"database. What it declares beyond them does not — the index and the foreign key in the " +
+				"document apply with a nil error and never arrive, the same half MIG-01 measures from a " +
+				"hand-built schema. PlanMigration is not the way in: it reflects over Go values, which is " +
+				"MIG-11's subject.",
+			probe: probeMigSchemaFromDocument,
+		},
+		{
+			id:     "MIG-03",
+			family: fam,
+			title:  "The plan built from models carries the index set (proposes creating or dropping indexes)",
+			want:   absent,
+			note: "The plan is identical with the index present and with it dropped. The mechanism is not a " +
+				"blind diff: PlanMigration copies the live index set (and the FKs) into the desired schema " +
+				"before diffing — mergeNonColumnSurface, on purpose, so a model that cannot declare an index " +
+				"never proposes dropping one. quark.Diff does compare indexes and emits OpCreateIndex / " +
+				"OpDropIndex; the ops exist and apply, but only if the caller builds the desired schema by " +
+				"hand (MIG-01) or reads it from a document (MIG-02).",
+			probe: probeMigModelDeclaredIndexes,
+		},
+		{
+			id:     "MIG-04",
+			family: fam,
+			title:  "Plan.Hash is a deterministic 64-character digest that separates plans that differ",
+			want:   present,
+			probe:  probeMigPlanHash,
+		},
+		{
+			id:     "MIG-05",
+			family: fam,
+			title:  "Applying a plan detects that the schema changed between planning and applying",
+			want:   absent,
+			note: "The plan's digest is a function of its ops alone, so it does not move when the database " +
+				"does, and ApplyPlan re-reads nothing. Measured twice: a plan stale against a table it does " +
+				"not touch applies with no error and with no log line about it at any level — the probe " +
+				"installs a Debug-level sink rather than assuming the silence — and a plan that collides " +
+				"with the change is stopped by SQLite's own \"table already exists\", not by anything that " +
+				"knows the plan is out of date. That layer is measured, not read: a collision stopped for " +
+				"any other reason, or stopped by nothing at all, fails this control instead of sharing " +
+				"this absent.",
+			probe: probeMigStaleSchemaDetected,
+		},
+		{
+			id:     "MIG-06",
+			family: fam,
+			title:  "ApplyPlan is all-or-nothing on SQLite, and reports success for a CREATE TABLE it applied in part",
+			want:   partial,
+			note: "The rollback half holds: a failing second op leaves nothing of the first behind — and if it " +
+				"ever stops holding the probe answers absent, because that is the half this title publishes " +
+				"as a guarantee. The other half does not hold: an OpCreateTable carrying an index creates " +
+				"the table without it and returns nil — the columns the op declares are read back from the " +
+				"catalog and the residual classified, so a create that also started losing columns answers " +
+				"absent instead of this partial. The engines with no transactional DDL (MySQL, " +
+				"MariaDB, Oracle) and their resumable checkpoint path need a live engine — " +
+				"internal/enginesuite.",
+			probe: probeMigApplyPlan,
+		},
+		{
+			id:     "MIG-07",
+			family: fam,
+			title:  "ALTER COLUMN covers type, nullable, default and primary key",
+			want:   absent,
+			note: "None of the four deltas reaches the column on SQLite. Primary-key, nullable-only and " +
+				"default-only deltas are refused with ErrUnsupportedFeature — loud gaps. The type change, " +
+				"the one delta the executor claims to emit, is rendered by the SQLite dialect as a SQL " +
+				"comment: ApplyPlan returns nil and the column keeps its type. Every delta is read back from " +
+				"the catalog, so a nil error that changes nothing counts as the gap it is. Whether the type " +
+				"path works elsewhere needs a live engine — internal/enginesuite.",
+			probe: probeMigAlterColumn,
+		},
+		{
+			id:     "MIG-08",
+			family: fam,
+			title:  "Plan.Down derives a rollback, applies it, and refuses what it cannot invert",
+			want:   present,
+			probe:  probeMigPlanDown,
+		},
+		{
+			id:     "MIG-09",
+			family: fam,
+			title:  "Reversible round trips beyond CREATE/DROP TABLE: column and index yes, foreign key no",
+			want:   partial,
+			note: "Add-column and create-index go to the database and back with the catalog agreeing. The " +
+				"foreign-key pair does not even go forward on SQLite (ALTER TABLE ADD CONSTRAINT is a " +
+				"syntax error there), and its generated rollback — applied on its own, since the round trip " +
+				"never reaches it — answers ErrUnsupportedFeature. The probe keeps each round trip in its " +
+				"own variable, so this partial means exactly the two the title names; any other split " +
+				"answers absent. Proving the FK round trip needs an engine with ALTER TABLE ADD CONSTRAINT.",
+			probe: probeMigReversibleBeyondTables,
+		},
+		{
+			id:     "MIG-10",
+			family: fam,
+			title:  "Distributed migration lock: refused on SQLite, and the versioned migrator runs anyway without it",
+			want:   partial,
+			note: "AcquireMigrationLock answers ErrUnsupportedFeature on SQLite, which a caller can act on. " +
+				"The migrator that asks for it by default degrades to running unserialised and reports it at " +
+				"Debug only — measured with a sink on the migrator's logger: the degradation line is there, " +
+				"at Debug, and nothing at Warn or above came with it. A migrator that refused, or that " +
+				"returned nil without applying, answers absent. The five engines that implement the lock " +
+				"need internal/enginesuite.",
+			probe: probeMigLock,
+		},
+		{
+			id:     "MIG-11",
+			family: fam,
+			title:  "PlanMigration serves a binary that has none of the user's compiled models",
+			want:   absent,
+			note: "Planning with no models — all a precompiled CLI can pass — yields a plan that drops the " +
+				"live tables, because the desired schema is whatever Go values the caller supplies. This is " +
+				"the obstacle a `quark migrate diff` subcommand would have to clear through this entry " +
+				"point; the route that does work without compiled models is a schema document through " +
+				"quark.Diff and ApplyPlan, which MIG-02 measures with its own limits.",
+			probe: probeMigDiffWithoutCompiledModels,
+		},
+		{
+			id:     "MIG-12",
+			family: fam,
+			title:  "Embeddable plan/verify/apply wrapper with CI exit codes",
+			want:   present,
+			probe:  probeMigEmbeddableWrapper,
+		},
+		{
+			id:     "MIG-13",
+			family: fam,
+			title:  "A plan can be rendered as the DDL of a migration file from the library",
+			want:   absent,
+			note: "The only rendering the library offers names the table and drops its columns, their types " +
+				"and its indexes, so nothing callable from Go can write a migration file. The CLI's " +
+				"`migrate create --from-models` does generate one, but it lives in the cmd/quark module, " +
+				"out of this bench's reach, and its emitted DDL is unbranched per dialect. WHAT the " +
+				"rendering drops decides this verdict: a rendering that carried the columns and their " +
+				"types and still dropped the indexes would be the half MIG-01 and MIG-02 call partial, " +
+				"and answers partial here.",
+			probe: probeMigRenderPlanAsDDL,
+		},
+		{
+			id:     "MIG-14",
+			family: fam,
+			title:  "Hand-written versioned migrations: ledger, dry run, up, down",
+			want:   present,
+			note: "The cycle needs the client the migration guide prescribes — AllowRawQueries enabled. " +
+				"Measured, not read: on a default-limits client Init and the migration body go through " +
+				"Raw() and are not refused, and the run fails at the LEDGER INSERT, which the migrator does " +
+				"through Client.Exec (ErrInvalidQuery, \"raw queries are disabled by default\") — after the " +
+				"schema change already happened.",
+			probe: probeMigVersionedMigrations,
+		},
+		{
+			id:     "MIG-15",
+			family: fam,
+			title:  "Data backfill resumes where an interrupted run stopped",
+			want:   present,
+			probe:  probeMigBackfill,
+		},
+		{
+			id:     "MIG-16",
+			family: fam,
+			title:  "On SQLite the resumable checkpoint table is never created (ApplyPlan takes the transactional path)",
+			want:   absent,
+			note: "Measured here, on the one dialect this bench runs: after a successful ApplyPlan, " +
+				"quark_migration_state is not in sqlite_master. Read, not measured: supportsTransactionalDDL " +
+				"in migrate_execute.go puts PostgreSQL and SQL Server on the same path, so the checkpoint " +
+				"DDL written for those three dialects never runs there either — proving that needs a live " +
+				"engine. MySQL, MariaDB and Oracle take the other path and do exercise it, in " +
+				"internal/enginesuite.",
+			probe: probeMigCheckpointTable,
+		},
+	}
+}
