@@ -385,6 +385,39 @@ with operators, drop to `pgx`/`pgtype` or `RawQuery`.
 A nil `V` serializes to `[]`, not `null`. Wrap it in `Nullable[Array[T]]` when
 you need to tell SQL NULL apart from "valid but empty".
 
+### Raw slices and maps, ranges, IP addresses
+
+A raw `[]string`, `[]int64` or `map[string]any` field is stored as it is: on
+PostgreSQL a slice of a scalar kind becomes a native array column (`TEXT[]`,
+`BIGINT[]`, `DOUBLE PRECISION[]`, `BOOLEAN[]`) and the value travels as the
+array literal; on every other engine — and for maps and slices of structs
+everywhere — the column is the dialect's JSON type and the value JSON text.
+`Array[T]` stays the JSON-backed wrapper on every engine when you want the same
+column shape on all six.
+
+`quark.Range[T]` is a bounded interval — `Lower`, `Upper`, `Bounds` (`"[)"` by
+default) and `Empty` — stored as `TSTZRANGE`, `INT8RANGE`, `INT4RANGE` or
+`NUMRANGE` on PostgreSQL and as JSON elsewhere. A `net.IP` field is an `INET`
+column on PostgreSQL and a text column elsewhere, bound and scanned as the
+address you would type.
+
+The operators PostgreSQL has for these types — `@>`, `<@`, `&&` for containment
+and overlap, `>>`, `<<`, `>>=`, `<<=` for networks — are accepted by `Where` on
+PostgreSQL and refused with `ErrUnsupportedFeature` naming the engine anywhere
+else, before any SQL is built. Nothing is rewritten into an approximation.
+
+```go
+type Event struct {
+    ID     int64                  `db:"id" pk:"true"`
+    Tags   []string               `db:"tags"`
+    Window quark.Range[time.Time] `db:"window"`
+    Source net.IP                 `db:"source"`
+}
+quark.For[Event](ctx, client).Where("tags", "@>", []string{"go"}).List()   // PostgreSQL only
+quark.For[Event](ctx, client).Where("window", "@>", time.Now()).List()     // PostgreSQL only
+quark.For[Event](ctx, client).Where("source", "<<", "10.0.0.0/8").List()   // PostgreSQL only
+```
+
 ### Binary columns
 
 A plain `[]byte` maps to the native binary type — `BYTEA` (PostgreSQL),

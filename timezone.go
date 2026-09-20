@@ -99,6 +99,7 @@ func (q *BaseQuery) columnTZ(dbTag string) *time.Location {
 // is inactive for this query it returns val untouched with no lookup.
 func (q *BaseQuery) bindColumnArg(dbTag string, val any) any {
 	val = nullBytesArg(val)
+	val = q.nativeBind(val)
 	if !q.tzActive() {
 		return val
 	}

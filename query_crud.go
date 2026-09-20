@@ -948,6 +948,9 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		if err := q.guard.ValidateOperator(cond.operator); err != nil {
 			return 0, err
 		}
+		if err := checkOperatorDialect(q.dialect, cond.operator); err != nil {
+			return 0, err
+		}
 		sqlBuf.WriteString(q.dialect.Quote(cond.column))
 		sqlBuf.WriteString(" ")
 		sqlBuf.WriteString(cond.operator)
@@ -1178,6 +1181,9 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 		if err := q.guard.ValidateOperator(cond.operator); err != nil {
 			return "", nil, err
 		}
+		if err := checkOperatorDialect(q.dialect, cond.operator); err != nil {
+			return "", nil, err
+		}
 
 		sql.WriteString(q.dialect.Quote(cond.column))
 		sql.WriteString(" ")
@@ -1260,6 +1266,9 @@ func (q *BaseQuery) buildUpdateMap(data map[string]any) (string, []any, error) {
 				return "", nil, err
 			}
 			if err := q.guard.ValidateOperator(cond.operator); err != nil {
+				return "", nil, err
+			}
+			if err := checkOperatorDialect(q.dialect, cond.operator); err != nil {
 				return "", nil, err
 			}
 
@@ -1566,6 +1575,9 @@ func (q *Query[T]) hardDeleteWhere() (int64, error) {
 				return 0, err
 			}
 			if err := q.guard.ValidateOperator(cond.operator); err != nil {
+				return 0, err
+			}
+			if err := checkOperatorDialect(q.dialect, cond.operator); err != nil {
 				return 0, err
 			}
 

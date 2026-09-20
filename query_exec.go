@@ -149,6 +149,9 @@ func (s emptyStringScanner) Scan(src any) error {
 // timezone conversion — for *sql.Null[time.Time] that also means the field
 // keeps its native Scanner rather than being wrapped at all.
 func makeScanDest(field reflect.Value, loc *time.Location) any {
+	if d := nativeScanDest(field); d != nil {
+		return d
+	}
 	return scanDestForPtr(field.Addr().Interface(), loc)
 }
 
@@ -181,6 +184,11 @@ func scanDestForPtr(iface any, loc *time.Location) any {
 // by generated scanners — which run only when the per-column timezone feature
 // is inactive, so a nil location is always correct. Not intended for hand use.
 func ScanTarget(ptr any) any {
+	if rv := reflect.ValueOf(ptr); rv.Kind() == reflect.Ptr && !rv.IsNil() {
+		if d := nativeScanDest(rv.Elem()); d != nil {
+			return d
+		}
+	}
 	return scanDestForPtr(ptr, nil)
 }
 
@@ -1434,6 +1442,9 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 		if err := q.guard.ValidateOperator(cond.operator); err != nil {
 			return "", nil, err
 		}
+		if err := checkOperatorDialect(q.dialect, cond.operator); err != nil {
+			return "", nil, err
+		}
 
 		var condSQL strings.Builder
 		condSQL.WriteString(connector)
@@ -1483,7 +1494,7 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 		default:
 			condSQL.WriteString(q.dialect.Placeholder(argIndex))
 			condSQL.WriteString(likeTail(cond, q.dialect))
-			args = append(args, cond.value)
+			args = append(args, q.nativeBind(cond.value))
 			argIndex++
 		}
 

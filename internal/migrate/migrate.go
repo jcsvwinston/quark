@@ -3,9 +3,11 @@ package migrate
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 // TypeOptions carry the SQL-type sizing hints parsed from a struct's db tag,
@@ -403,7 +405,59 @@ func ClassifyPKType(bareType string) PKClass {
 //   - int / int64 → dialect-native auto-increment (SERIAL, AUTO_INCREMENT, IDENTITY…)
 //   - string      → VARCHAR(36) PRIMARY KEY — UUID-friendly; no auto-increment
 //   - anything else → its natural SQL type + PRIMARY KEY (no auto-increment)
-//
+var netIPType = reflect.TypeOf(net.IP{})
+
+// isQuarkRange reports whether t is quark.Range[T], by the same package-path
+// and name-prefix detection as isQuarkArray.
+func isQuarkRange(t reflect.Type) bool {
+	if t == nil || t.Kind() != reflect.Struct || t.PkgPath() != "github.com/jcsvwinston/quark" {
+		return false
+	}
+	return t.Name() == "Range" || strings.HasPrefix(t.Name(), "Range[")
+}
+
+// pgRangeType is the PostgreSQL range type for a Range[T], read off the type
+// of its Lower bound; "" when PostgreSQL has none for that T.
+func pgRangeType(t reflect.Type) string {
+	lower, ok := t.FieldByName("Lower")
+	if !ok {
+		return ""
+	}
+	switch lt := lower.Type; {
+	case lt == reflect.TypeOf(time.Time{}):
+		return "TSTZRANGE"
+	case lt.Kind() == reflect.Int64 || lt.Kind() == reflect.Int:
+		return "INT8RANGE"
+	case lt.Kind() == reflect.Int32:
+		return "INT4RANGE"
+	case lt.Kind() == reflect.Float64 || lt.Kind() == reflect.Float32:
+		return "NUMRANGE"
+	}
+	return ""
+}
+
+// pgArrayElemType is the PostgreSQL element type for a slice of a scalar
+// kind; "" for a kind that has no array here (a slice of structs is JSON).
+func pgArrayElemType(k reflect.Kind) string {
+	switch k {
+	case reflect.String:
+		return "TEXT"
+	case reflect.Bool:
+		return "BOOLEAN"
+	case reflect.Int8, reflect.Int16, reflect.Uint8, reflect.Uint16:
+		return "SMALLINT"
+	case reflect.Int32, reflect.Uint32:
+		return "INTEGER"
+	case reflect.Int, reflect.Int64, reflect.Uint, reflect.Uint64:
+		return "BIGINT"
+	case reflect.Float32:
+		return "REAL"
+	case reflect.Float64:
+		return "DOUBLE PRECISION"
+	}
+	return ""
+}
+
 // IsUUIDShaped reports whether t is a 16-byte array — the shape of
 // google/uuid.UUID and of the other UUID types — after stripping a pointer.
 func IsUUIDShaped(t reflect.Type) bool {
@@ -441,6 +495,48 @@ func SQLType(dialectName string, t reflect.Type, isPK bool) string {
 	// Handle pointers (e.g. *time.Time, *string)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
+	}
+
+	// An IP address (net.IP): PostgreSQL's inet, text elsewhere. The bind
+	// and scan paths carry it as text (A8 S6).
+	if t == netIPType {
+		switch dialectName {
+		case "postgres":
+			return "INET"
+		case "oracle":
+			return "VARCHAR2(45)"
+		case "mssql":
+			return "NVARCHAR(45)"
+		case "sqlite":
+			return "TEXT"
+		default:
+			return "VARCHAR(45)"
+		}
+	}
+	// quark.Range[T]: PostgreSQL's range type for T, the JSON column type
+	// elsewhere (A8 S6).
+	if isQuarkRange(t) {
+		if dialectName == "postgres" {
+			if r := pgRangeType(t); r != "" {
+				return r
+			}
+		}
+		return jsonColumnType(dialectName)
+	}
+	// A raw slice or map: PostgreSQL's array type for a slice of a scalar
+	// kind, the JSON column type otherwise and everywhere else (A8 S6).
+	// Before this the column was created and the first write failed in
+	// database/sql's converter.
+	if t.Kind() == reflect.Slice && t.Elem().Kind() != reflect.Uint8 {
+		if dialectName == "postgres" {
+			if elem := pgArrayElemType(t.Elem().Kind()); elem != "" {
+				return elem + "[]"
+			}
+		}
+		return jsonColumnType(dialectName)
+	}
+	if t.Kind() == reflect.Map {
+		return jsonColumnType(dialectName)
 	}
 
 	// A UUID-shaped value — 16 bytes, the shape of google/uuid.UUID and of

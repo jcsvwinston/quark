@@ -220,8 +220,8 @@ type tiposTSRange struct {
 }
 
 type tiposRangeRow struct {
-	ID     int64        `db:"id" pk:"true"`
-	Window tiposTSRange `db:"window"`
+	ID     int64                  `db:"id" pk:"true"`
+	Window quark.Range[time.Time] `db:"window"`
 }
 
 func (tiposRangeRow) TableName() string { return "tipos_range" }
@@ -502,25 +502,32 @@ func probeTiposNativeArray(t *testing.T, e *env) verdict {
 	}
 
 	col := tiposColumnType(t, tiposDDL(t, c, "tipos_native_array"), "tags")
-	err := quark.For[tiposNativeArrayRow](ctx, c).Create(&tiposNativeArrayRow{Tags: []string{"go", "orm"}})
-
-	if strings.Contains(col, "[]") {
-		t.Logf("an array column type appeared: %q (write: %v)", col, err)
-		if err == nil {
-			return present
+	row := &tiposNativeArrayRow{Tags: []string{"go", "orm", "a,b"}}
+	err := quark.For[tiposNativeArrayRow](ctx, c).Create(row)
+	if err != nil {
+		if tiposUnsupportedType(err) {
+			// The S0 state: the column exists and database/sql refuses the
+			// value above the driver.
+			t.Logf("a raw slice is refused on write (column %q): %v", col, err)
+			return absent
 		}
+		t.Fatalf("the write failed for a reason the probe cannot attribute to slice support: %v", err)
+	}
+	got, err := quark.For[tiposNativeArrayRow](ctx, c).Find(row.ID)
+	if err != nil || len(got.Tags) != 3 || got.Tags[2] != "a,b" {
+		t.Logf("the slice was written but did not come back whole: err=%v tags=%v", err, got.Tags)
 		return partial
 	}
-	if err == nil {
-		t.Errorf("the column is %q and the slice was written anyway: the raw-slice "+
-			"failure this control records is no longer what happens", col)
+	// This bench opens SQLite, where the column is the JSON-backed text
+	// column; the native TEXT[] on PostgreSQL is proven in
+	// internal/enginesuite. What is measured here is the round trip and
+	// that the value in the column is JSON, not fmt's rendering of a slice.
+	raw := tiposRawString(t, c, `SELECT tags FROM tipos_native_array WHERE id = ?`, row.ID)
+	if !strings.HasPrefix(raw, "[") {
+		t.Logf("the slice round-trips but the column holds %q, which is not JSON", raw)
 		return partial
 	}
-	if !tiposUnsupportedType(err) {
-		t.Fatalf("the write failed for a reason the probe cannot attribute to the "+
-			"missing array support: %v", err)
-	}
-	return absent
+	return present
 }
 
 // TYP-05. The wrapper that does exist, measured end to end: the column it
@@ -608,55 +615,53 @@ func probeTiposRanges(t *testing.T, e *env) verdict {
 		t.Fatalf("migrate the range-shaped models: %v", err)
 	}
 
-	col := tiposColumnType(t, tiposDDL(t, c, "tipos_range"), "window")
-	now := time.Now().UTC()
-	writeErr := quark.For[tiposRangeRow](ctx, c).Create(&tiposRangeRow{
-		Window: tiposTSRange{Lower: now, Upper: now.Add(time.Hour)},
-	})
+	now := time.Now().UTC().Truncate(time.Second)
+	row := &tiposRangeRow{Window: quark.Range[time.Time]{Lower: now, Upper: now.Add(time.Hour)}}
+	writeErr := quark.For[tiposRangeRow](ctx, c).Create(row)
+	roundTrip := writeErr == nil
+	if roundTrip {
+		got, err := quark.For[tiposRangeRow](ctx, c).Find(row.ID)
+		roundTrip = err == nil && got.Window.Lower.Equal(now) && got.Window.Upper.Equal(now.Add(time.Hour))
+		if !roundTrip {
+			t.Logf("the range was written but did not come back: err=%v window=%+v", err, got.Window)
+		}
+	}
 
-	// The escape hatch: the DDL really does say TSTZRANGE, and the value still
-	// cannot be bound into it.
+	// A plain struct that merely LOOKS like a range is still refused by
+	// database/sql, mapper or no mapper: the shape Quark stores is Range[T].
 	mappedCol := tiposColumnType(t, tiposDDL(t, c, "tipos_range_mapped"), "window")
 	if mappedCol != "TSTZRANGE" {
-		t.Fatalf("the mapper did not produce the column type, so the probe cannot "+
-			"tell the two doors apart: %q", mappedCol)
+		t.Fatalf("the mapper did not produce the column type: %q", mappedCol)
 	}
-	mappedErr := quark.For[tiposRangeMappedRow](ctx, c).Create(&tiposRangeMappedRow{
+	if err := quark.For[tiposRangeMappedRow](ctx, c).Create(&tiposRangeMappedRow{
 		Window: tiposTSRangeMapped{Lower: now, Upper: now.Add(time.Hour)},
-	})
-	if mappedErr == nil {
-		t.Errorf("the note records that a mapped range column buys the DDL and " +
-			"nothing else; a value now binds into TSTZRANGE, so the note is stale")
+	}); err == nil {
+		t.Errorf("a plain struct binds into a mapped TSTZRANGE column now; the note about the mapper door is stale")
 	}
 
+	// Containment: the operator PostgreSQL has for a range. On this bench's
+	// engine the honest answer is a refusal BY ENGINE — the builder knows
+	// the operator and says which engine has it — with no SQL sent. A
+	// refusal by the allowlist (ErrInvalidQuery) is the S0 state: the
+	// operator did not exist at all.
 	rec.reset()
 	_, opErr := quark.For[tiposRangeRow](ctx, c).Where("window", "@>", now).List()
 	emitted := rec.sql()
+	operatorKnown := opErr == nil || errors.Is(opErr, quark.ErrUnsupportedFeature)
+	if len(emitted) != 0 && opErr != nil {
+		t.Errorf("the refused operator still emitted SQL: %v", emitted)
+	}
 
-	nativeType := strings.Contains(strings.ToUpper(col), "RANGE")
-	operator := opErr == nil
 	switch {
-	case nativeType && writeErr == nil && operator:
+	case roundTrip && operatorKnown:
 		return present
-	case nativeType || operator:
-		t.Logf("half the range surface appeared: column %q (write: %v), containment: %v (SQL: %v)",
-			col, writeErr, opErr, emitted)
+	case roundTrip || operatorKnown:
+		t.Logf("half the range surface: round trip=%v, containment known=%v (%v)", roundTrip, operatorKnown, opErr)
 		return partial
 	}
 	if !errors.Is(opErr, quark.ErrInvalidQuery) {
 		t.Fatalf("containment failed for a reason other than the operator guard: %v", opErr)
 	}
-	if len(emitted) != 0 {
-		t.Errorf("the rejected operator still emitted SQL: %v", emitted)
-	}
-	if !tiposUnsupportedType(writeErr) {
-		t.Fatalf("the range write failed in a way the probe cannot attribute to the "+
-			"missing type: %v", writeErr)
-	}
-	// Measured: no range column (the value lands in col and never crosses
-	// database/sql, mapper or no mapper) and no containment operator.
-	t.Logf("range-shaped value mapped to %q; with a mapper the column is TSTZRANGE "+
-		"and the write still fails (%v)", col, mappedErr)
 	return absent
 }
 
@@ -716,27 +721,29 @@ func probeTiposInet(t *testing.T, e *env) verdict {
 	_, opErr := quark.For[tiposInetMappedRow](ctx, c).Where("addr", ">>", "10.0.0.0/8").List()
 	emitted := rec.sql()
 
-	nativeType := strings.Contains(strings.ToUpper(plainCol), "INET")
-	operator := opErr == nil
+	// The address is stored AS text on this engine (INET on PostgreSQL,
+	// proven in internal/enginesuite), so the column holds the address the
+	// way a person reads it, not four opaque bytes.
+	rawAddr := tiposRawString(t, c, `SELECT addr FROM tipos_inet_plain WHERE id = ?`, plain.ID)
+	asText := rawAddr == "10.0.0.1"
+	// The network operator: known to the builder, refused by ENGINE here
+	// with no SQL sent. A refusal by the allowlist is the S0 state.
+	operatorKnown := opErr == nil || errors.Is(opErr, quark.ErrUnsupportedFeature)
+	if opErr != nil && len(emitted) != 0 {
+		t.Errorf("the refused operator still emitted SQL: %v", emitted)
+	}
 	switch {
-	case nativeType && operator:
+	case stored && asText && operatorKnown:
 		return present
-	case nativeType || operator:
-		t.Logf("half the inet surface appeared: column %q, network operator: %v (SQL: %v)",
-			plainCol, opErr, emitted)
+	case stored && (asText || operatorKnown):
+		t.Logf("half the inet surface: stored as text=%v (column holds %q, type %q), network operator known=%v (%v)",
+			asText, rawAddr, plainCol, operatorKnown, opErr)
 		return partial
 	}
 	if !errors.Is(opErr, quark.ErrInvalidQuery) {
-		t.Fatalf("the network operator failed for a reason other than the operator "+
-			"guard: %v", opErr)
+		t.Fatalf("the network operator failed for a reason other than the operator guard: %v", opErr)
 	}
-	if len(emitted) != 0 {
-		t.Errorf("the rejected operator still emitted SQL: %v", emitted)
-	}
-	// Measured: no inet branch (an address lands in plainCol as bytes) and no
-	// network operator, not even over a column a mapper declared INET.
-	t.Logf("IP-shaped value mapped to %q; a mapper buys the INET declaration, and "+
-		"containment is still refused over it", plainCol)
+	t.Logf("IP-shaped value mapped to %q and stored as %q; the network operator is refused by the allowlist", plainCol, rawAddr)
 	return absent
 }
 
@@ -791,8 +798,12 @@ func probeTiposJSON(t *testing.T, e *env) verdict {
 		t.Fatalf("the array path failed for a reason other than the path grammar: %v", idxErr)
 	}
 	if containErr != nil {
-		if !errors.Is(containErr, quark.ErrInvalidQuery) {
-			t.Fatalf("containment failed for a reason other than the operator guard: %v", containErr)
+		// Since A8 S6 the operator is known to the builder and refused BY
+		// ENGINE where the engine lacks it (ErrUnsupportedFeature); the
+		// allowlist refusal (ErrInvalidQuery) is the older state. Either is
+		// the same fact for this control: no containment on this engine.
+		if !errors.Is(containErr, quark.ErrInvalidQuery) && !errors.Is(containErr, quark.ErrUnsupportedFeature) {
+			t.Fatalf("containment failed for a reason other than the operator guards: %v", containErr)
 		}
 		if len(containSQL) != 0 {
 			t.Errorf("the rejected operator still emitted SQL: %v", containSQL)

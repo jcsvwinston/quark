@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
+	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -153,6 +156,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	})
 	t.Run("ModelTypesAndChecks", func(t *testing.T) {
 		testModelTypesAndChecks(ctx, t, client)
+	})
+	t.Run("NativeTypes", func(t *testing.T) {
+		testNativeTypes(ctx, t, client)
 	})
 	t.Run("PlanMigration", func(t *testing.T) {
 		testPlanMigration(ctx, t, client)
@@ -922,6 +928,87 @@ func testModelTypesAndChecks(ctx context.Context, t *testing.T, client *quark.Cl
 		if strings.Contains(strings.ToLower(op.String()), "mt_rows") {
 			t.Errorf("%s: a freshly migrated model with checks plans to something about its table: %s", engine, op)
 		}
+	}
+}
+
+// testNativeTypes proves on the engine this lane runs (A8 S6, controls
+// TYP-04/06/07): a raw slice, a map, a Range[T] and a net.IP round-trip
+// through the column type Migrate gives them; on PostgreSQL those types are
+// the native ones and the containment operators answer, elsewhere the
+// operators are refused by engine before any SQL.
+func testNativeTypes(ctx context.Context, t *testing.T, client *quark.Client) {
+	engine := client.Dialect().Name()
+	dropTable(client, "nt_events")
+	type NTEvent struct {
+		ID     int64                  `db:"id" pk:"true"`
+		Tags   []string               `db:"tags"`
+		Counts []int64                `db:"counts"`
+		Meta   map[string]any         `db:"meta"`
+		Window quark.Range[time.Time] `db:"window"`
+		Span   quark.Range[int64]     `db:"span"`
+		Source net.IP                 `db:"source"`
+	}
+	if err := client.Migrate(ctx, &NTEvent{}); err != nil {
+		t.Fatalf("migrate on %s: %v", engine, err)
+	}
+	t.Cleanup(func() { dropTable(client, "nt_events") })
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	row := &NTEvent{
+		Tags: []string{"go", "a,b"}, Counts: []int64{1, 2}, Meta: map[string]any{"k": "v"},
+		Window: quark.Range[time.Time]{Lower: now, Upper: now.Add(time.Hour)}, Span: quark.Range[int64]{Lower: 1, Upper: 5},
+		Source: net.ParseIP("10.0.0.1"),
+	}
+	if err := quark.For[NTEvent](ctx, client).Create(row); err != nil {
+		t.Fatalf("create on %s: %v", engine, err)
+	}
+	got, err := quark.For[NTEvent](ctx, client).Find(row.ID)
+	if err != nil {
+		t.Fatalf("find on %s: %v", engine, err)
+	}
+	if !reflect.DeepEqual(got.Tags, row.Tags) || !reflect.DeepEqual(got.Counts, row.Counts) || got.Meta["k"] != "v" ||
+		!got.Window.Lower.Equal(now) || !got.Window.Upper.Equal(now.Add(time.Hour)) || got.Span.Lower != 1 || got.Span.Upper != 5 ||
+		!got.Source.Equal(row.Source) {
+		t.Errorf("round trip on %s: %+v", engine, got)
+	}
+	// The plan says nothing about the table.
+	plan, err := client.PlanMigration(ctx, &NTEvent{})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	for _, op := range plan.Ops {
+		if strings.Contains(strings.ToLower(op.String()), "nt_events") {
+			t.Errorf("%s: a freshly migrated model plans to something about its table: %s", engine, op)
+		}
+	}
+	if engine == "postgres" {
+		// The native types, read from the catalog.
+		live, _ := client.IntrospectSchema(ctx)
+		for _, tb := range live.Tables {
+			if tb.Name != "nt_events" {
+				continue
+			}
+			want := map[string]string{"tags": "text[]", "counts": "bigint[]", "meta": "jsonb", "window": "tstzrange", "span": "int8range", "source": "inet"}
+			for _, col := range tb.Columns {
+				if w, ok := want[col.Name]; ok && !strings.EqualFold(col.Type, w) {
+					t.Errorf("postgres %s: %q, want %q", col.Name, col.Type, w)
+				}
+			}
+		}
+		// And the operators answer.
+		if rows, err := quark.For[NTEvent](ctx, client).Where("tags", "@>", []string{"go"}).List(); err != nil || len(rows) != 1 {
+			t.Errorf("postgres array containment: %d rows, %v", len(rows), err)
+		}
+		if rows, err := quark.For[NTEvent](ctx, client).Where("window", "@>", now.Add(30*time.Minute)).List(); err != nil || len(rows) != 1 {
+			t.Errorf("postgres range containment: %d rows, %v", len(rows), err)
+		}
+		if rows, err := quark.For[NTEvent](ctx, client).Where("source", "<<", "10.0.0.0/8").List(); err != nil || len(rows) != 1 {
+			t.Errorf("postgres network containment: %d rows, %v", len(rows), err)
+		}
+		return
+	}
+	_, opErr := quark.For[NTEvent](ctx, client).Where("tags", "@>", []string{"go"}).List()
+	if !errors.Is(opErr, quark.ErrUnsupportedFeature) || !strings.Contains(opErr.Error(), engine) {
+		t.Errorf("%s: containment should be refused by engine, got %v", engine, opErr)
 	}
 }
 

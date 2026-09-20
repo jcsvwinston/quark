@@ -144,6 +144,9 @@ func (c cmpExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	if err := g.ValidateOperator(c.op); err != nil {
 		return "", nil, err
 	}
+	if err := checkOperatorDialect(d, c.op); err != nil {
+		return "", nil, err
+	}
 	lsql, largs, err := c.lhs.ToSQL(d, g)
 	if err != nil {
 		return "", nil, err
