@@ -133,9 +133,9 @@ func controlsOperacion() []control {
 		{
 			id:     "OPS-15",
 			family: "operacion",
-			title:  "Keyset pagination: no entrypoint emits a continuation predicate or returns a resumable page token",
-			want:   absent,
-			note:   "Measured on both entrypoints the API offers: Paginate spends two statements per page (a COUNT and a SELECT) and moves the window with OFFSET, so page N makes the server walk the pages before it; Cursor streams one plain SELECT with no WHERE and nothing to resume from. Neither emits a comparison against the last row read. An application can hand-roll the predicate with Where/OrderBy, but the seek, the tuple comparison and the token are its own problem. (The one place in the repository that says 'keyset' is a mislabelled benchmark case whose body is just .Cursor().)",
+			title:  "Keyset pagination: PaginateAfter seeks to the last row read with one statement and returns a resumable token",
+			want:   present,
+			note:   "Closed at A8 S9. PaginateAfter(pageSize, token) emits the continuation as a comparison against the last row's ordering values — the row-value comparison spelled out, since SQL Server and Oracle have none — appends the primary key to make the order total, and returns an opaque token that refuses to seek under another ORDER BY. Paginate keeps its page-number contract (COUNT + OFFSET) for the callers that want a total; the two are different tools and the guide says which is which.",
 			probe:  probePagination,
 		},
 		{

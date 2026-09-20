@@ -1754,6 +1754,9 @@ func probePagination(t *testing.T, e *env) verdict {
 		}
 	}
 
+	// The page-number entrypoint keeps its contract: a COUNT and an OFFSET
+	// select. That is the ground, not the gap — a caller who wants a total
+	// pays for it here.
 	rec.reset()
 	page, err := quark.For[opsAccount](ctx, c).OrderBy("id", "ASC").Paginate(2, 2)
 	if err != nil {
@@ -1762,93 +1765,51 @@ func probePagination(t *testing.T, e *env) verdict {
 	if len(page.Items) != 2 || page.Items[0].ID != 5 {
 		t.Fatalf("page 2 of size 2 returned %+v", page.Items)
 	}
+
+	// The keyset entrypoint: a first page, a token, and the second page
+	// asked with it — read as the statement it emits and the rows it returns.
+	first, err := quark.For[opsAccount](ctx, c).OrderBy("id", "ASC").PaginateAfter(2, "")
+	if err != nil {
+		t.Logf("PaginateAfter is refused: %v", err)
+		return absent
+	}
+	if len(first.Items) != 2 || first.Next == "" {
+		t.Logf("the first keyset page returned %d rows and token %q", len(first.Items), first.Next)
+		return partial
+	}
+	rec.reset()
+	second, err := quark.For[opsAccount](ctx, c).OrderBy("id", "ASC").PaginateAfter(2, first.Next)
+	if err != nil {
+		t.Fatalf("the second keyset page: %v", err)
+	}
 	stmts := rec.sql()
-	keyset := false
-	offset := false
+	keyset, offset := false, false
 	for _, s := range stmts {
 		upper := strings.ToUpper(s)
 		if strings.Contains(upper, "OFFSET") {
 			offset = true
 		}
-		// A keyset page asks for the rows after the last one it saw: the
-		// ordering column appears in the WHERE clause, not only in ORDER BY.
-		// The quoting is SQLite's, which is the only dialect this bench
-		// emits; a predicate written with another engine's quotes would not
-		// be seen here, and would still be caught by the OFFSET check below —
-		// a keyset page has no OFFSET to fall back on.
 		if where := strings.Index(upper, " WHERE "); where >= 0 {
 			tail := upper[where:]
 			if end := strings.Index(tail, " ORDER BY "); end > 0 {
 				tail = tail[:end]
 			}
-			if strings.Contains(tail, `"ID" >`) || strings.Contains(tail, `"ID" <`) ||
-				strings.Contains(tail, "(\"ID\",") {
+			if strings.Contains(tail, `"ID" >`) {
 				keyset = true
 			}
 		}
 	}
-	if keyset {
+	rowsRight := len(second.Items) == 2 && second.Items[0].ID == 3 && second.Items[1].ID == 4
+	switch {
+	case keyset && !offset && len(stmts) == 1 && rowsRight:
 		return present
+	case keyset || second.Next != "":
+		t.Logf("half a keyset: predicate=%v offset=%v statements=%d rows=%+v", keyset, offset, len(stmts), second.Items)
+		return partial
+	default:
+		t.Logf("PaginateAfter exists but neither seeks nor resumes: %v", stmts)
+		return absent
 	}
-	if !offset {
-		t.Fatalf("Paginate emitted neither OFFSET nor a keyset predicate: %v", stmts)
-	}
-
-	// The second half of the title is about the VALUE, not the statement: a
-	// page that carried a resumable token would be keyset pagination even
-	// over an OFFSET query. So the returned type is read, not grepped — a
-	// token would have to be a field on the page an application holds.
-	pageType := reflect.TypeOf(*page)
-	for i := 0; i < pageType.NumField(); i++ {
-		lower := strings.ToLower(pageType.Field(i).Name)
-		if strings.Contains(lower, "cursor") || strings.Contains(lower, "token") ||
-			strings.Contains(lower, "after") || strings.Contains(lower, "seek") ||
-			strings.Contains(lower, "next") {
-			return partial // the page hands back a position to resume from
-		}
-	}
-
-	// The other entrypoint: streaming, and equally without a continuation.
-	rec.reset()
-	cursor, err := quark.For[opsAccount](ctx, c).OrderBy("id", "ASC").Limit(2).Cursor()
-	if err != nil {
-		t.Fatalf("cursor: %v", err)
-	}
-	var last opsAccount
-	for cursor.Next() {
-		if err := cursor.Scan(&last); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-	}
-	if err := cursor.Close(); err != nil {
-		t.Fatalf("close cursor: %v", err)
-	}
-	for _, s := range rec.sql() {
-		if strings.Contains(strings.ToUpper(s), " WHERE ") {
-			return partial // the stream carries some continuation after all
-		}
-	}
-
-	// And the cursor value itself, the same way: a stream an application can
-	// resume would have to say where it stopped, through a field or a method.
-	// Next/Scan/Err/Close advance and drain it; none of them hands back a
-	// position the caller can store and come back with.
-	cursorType := reflect.TypeOf(cursor)
-	for i := 0; i < cursorType.NumMethod(); i++ {
-		lower := strings.ToLower(cursorType.Method(i).Name)
-		if strings.Contains(lower, "token") || strings.Contains(lower, "position") ||
-			strings.Contains(lower, "resume") || strings.Contains(lower, "after") ||
-			strings.Contains(lower, "seek") {
-			return partial // the stream exposes somewhere to resume from
-		}
-	}
-	elem := cursorType.Elem()
-	for i := 0; i < elem.NumField(); i++ {
-		if elem.Field(i).IsExported() {
-			return partial // a field an application could read a position out of
-		}
-	}
-	return absent
 }
 
 // probeSchemaSync drives the two changes an application makes to a live

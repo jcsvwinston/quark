@@ -160,6 +160,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("NativeTypes", func(t *testing.T) {
 		testNativeTypes(ctx, t, client)
 	})
+	t.Run("Keyset", func(t *testing.T) {
+		testKeyset(ctx, t, client)
+	})
 	t.Run("PlanMigration", func(t *testing.T) {
 		testPlanMigration(ctx, t, client)
 	})
@@ -1013,6 +1016,47 @@ func testNativeTypes(ctx context.Context, t *testing.T, client *quark.Client) {
 	_, opErr := quark.For[NTEvent](ctx, client).Where("tags", "@>", []string{"go"}).List()
 	if !errors.Is(opErr, quark.ErrUnsupportedFeature) || !strings.Contains(opErr.Error(), engine) {
 		t.Errorf("%s: containment should be refused by engine, got %v", engine, opErr)
+	}
+}
+
+// testKeyset proves PaginateAfter on the engine this lane runs (A8 S9,
+// OPS-15): a composite order with ties and a DESC leg, pages of two, every
+// row exactly once and in order.
+func testKeyset(ctx context.Context, t *testing.T, client *quark.Client) {
+	engine := client.Dialect().Name()
+	dropTable(client, "ks_rows")
+	type KSRow struct {
+		ID    int64  `db:"id" pk:"true"`
+		Owner string `db:"owner"`
+		Score int64  `db:"score"`
+	}
+	if err := client.Migrate(ctx, &KSRow{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() { dropTable(client, "ks_rows") })
+	for _, r := range []KSRow{{Owner: "a", Score: 10}, {Owner: "a", Score: 10}, {Owner: "b", Score: 5}, {Owner: "b", Score: 20}, {Owner: "c", Score: 5}} {
+		row := r
+		if err := quark.For[KSRow](ctx, client).Create(&row); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	var seen []string
+	token := ""
+	for pages := 0; pages < 10; pages++ {
+		page, err := quark.For[KSRow](ctx, client).OrderBy("owner", "ASC").OrderBy("score", "DESC").PaginateAfter(2, token)
+		if err != nil {
+			t.Fatalf("PaginateAfter on %s: %v", engine, err)
+		}
+		for _, r := range page.Items {
+			seen = append(seen, fmt.Sprintf("%s%d", r.Owner, r.Score))
+		}
+		if !page.HasMore {
+			break
+		}
+		token = page.Next
+	}
+	if got, want := strings.Join(seen, ","), "a10,a10,b20,b5,c5"; got != want {
+		t.Errorf("%s: keyset walk saw %s, want %s", engine, got, want)
 	}
 }
 

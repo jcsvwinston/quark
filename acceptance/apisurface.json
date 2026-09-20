@@ -1012,6 +1012,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).PaginateAfter",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Preload",
       "kind": "method"
     },
@@ -2513,6 +2518,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "JoinBuilder",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "KeysetPage",
       "kind": "type"
     },
     {
