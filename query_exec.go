@@ -269,8 +269,14 @@ func (q *BaseQuery) executeReadRow(ctx context.Context, sqlStr string, args []an
 // queryRowOn runs a QueryRowContext on the given exec through the middleware
 // chain. The exec selection (replica vs primary) is the caller's decision.
 func (q *BaseQuery) queryRowOn(ctx context.Context, exec Executor, sqlStr string, args []any) *sql.Row {
-	// A build error (q.err) surfaces naturally through Scan: *sql.Row defers its
-	// error until Scan, so there is nothing to return early here.
+	// A build error (q.err) has to be minted into the row here: *sql.Row is
+	// opaque, and the comment that used to sit here — "it surfaces naturally
+	// through Scan" — described a mechanism that did not exist. The statement
+	// went to the engine with the error ignored, which is how a Create whose
+	// tenant failed to resolve still wrote its row (QK-26).
+	if q.err != nil {
+		return errorRow(q.err)
+	}
 	// Base handler: direct execution
 	handler := QueryRowFunc(func(ctx context.Context, exec Executor, s string, a []any) *sql.Row {
 		start := time.Now()

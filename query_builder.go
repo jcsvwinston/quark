@@ -146,12 +146,23 @@ type Query[T any] struct {
 	BaseQuery
 }
 
-// fullTableName returns the table name optionally prefixed by a schema.
+// fullTableName returns the query's own table, quoted and prefixed by its
+// schema when it has one.
 func (q *BaseQuery) fullTableName() string {
+	return q.qualifiedTable(q.table)
+}
+
+// qualifiedTable quotes a table name and prefixes it with the query's schema
+// when it has one. Every table a query touches goes through here — its own,
+// a relation's, a join table's — because a name that skips it is a name that
+// leaves the tenant's schema: the eager-loading SELECTs used to quote
+// relModel.Table bare, so a Preload on a SchemaPerTenant query read the
+// related rows from the default schema (QK-26).
+func (q *BaseQuery) qualifiedTable(table string) string {
 	if q.schema != "" {
-		return q.dialect.Quote(q.schema) + "." + q.dialect.Quote(q.table)
+		return q.dialect.Quote(q.schema) + "." + q.dialect.Quote(table)
 	}
-	return q.dialect.Quote(q.table)
+	return q.dialect.Quote(table)
 }
 
 // clone returns a copy of the Query for a builder method to mutate, leaving

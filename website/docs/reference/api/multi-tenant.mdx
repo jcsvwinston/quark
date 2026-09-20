@@ -13,6 +13,8 @@ start with [Multi-Tenant](../../advanced/multi-tenant).
 | `NewTenantRouter` | `NewTenantRouter(config TenantConfig, resolver func(context.Context) string, factory func(string) (*Client, error)) *TenantRouter` | Builds a tenant-aware router. |
 | `TenantRouter.ResolveTenant` | `ResolveTenant(ctx) (string, error)` | Extracts the tenant ID from context. |
 | `TenantRouter.GetClient` | `GetClient(ctx) (*Client, error)` | Returns the client for the resolved tenant. |
+| `TenantRouter.Tx` | `Tx(ctx, fn func(*Tx) error) error` | Opens a transaction confined to the resolved tenant; `ForTx` inside `fn` inherits the confinement. |
+| `ErrTenantMismatch` | `error` sentinel | A query built inside a transaction resolved a different tenant than the transaction was opened for. |
 | `TenantRouter.ActiveTenants` | `ActiveTenants() []string` | Lists cached tenant connections. |
 | `DatabasePerTenant` | `TenantStrategy` const | Separate DB pool per tenant. |
 | `SchemaPerTenant` | `TenantStrategy` const | Shared pool, schema prefix per tenant. |
@@ -55,10 +57,13 @@ router := quark.NewTenantRouter(
 )
 ```
 
-The router exposes three methods. `ResolveTenant(ctx)` returns the tenant ID the
-resolver extracted, `GetClient(ctx)` returns the `*Client` that ID maps to, and
-`ActiveTenants()` lists the tenant connections currently cached. Normal query
-code needs none of them — pass the router itself.
+The router exposes four methods. `ResolveTenant(ctx)` returns the tenant ID the
+resolver extracted, `GetClient(ctx)` returns the `*Client` that ID maps to,
+`ActiveTenants()` lists the tenant connections currently cached, and `Tx(ctx, fn)`
+opens a transaction confined to the resolved tenant (see
+[Transactions](../../advanced/multi-tenant#transactions)). Normal query code
+needs only the last one — pass the router itself to `For`, and the `*Tx` it
+hands you to `ForTx`.
 
 ## Usage with Queries
 

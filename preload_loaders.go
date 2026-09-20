@@ -123,7 +123,7 @@ func (q *BaseQuery) loadStandard(parents reflect.Value, ownerMeta *ModelMeta, re
 		}
 
 		query := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-			q.dialect.Quote(relModel.Table),
+			q.qualifiedTable(relModel.Table),
 			strings.Join(whereClauses, " AND "),
 		)
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
@@ -179,7 +179,7 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 		joinQuery := fmt.Sprintf("SELECT %s, %s FROM %s WHERE %s IN (%s)",
 			q.dialect.Quote(relMeta.JoinFK),
 			q.dialect.Quote(relMeta.JoinRefFK),
-			q.dialect.Quote(relMeta.JoinTable),
+			q.qualifiedTable(relMeta.JoinTable),
 			q.dialect.Quote(relMeta.JoinFK),
 			strings.Join(joinPlaceholders, ", "),
 		)
@@ -246,7 +246,7 @@ func (q *BaseQuery) loadM2M(parents reflect.Value, ownerMeta *ModelMeta, relName
 		}
 
 		relQuery := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-			q.dialect.Quote(relModel.Table),
+			q.qualifiedTable(relModel.Table),
 			strings.Join(whereClauses, " AND "),
 		)
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
@@ -344,7 +344,7 @@ func (q *BaseQuery) loadPolymorphic(parents reflect.Value, ownerMeta *ModelMeta,
 			args = append(args, q.tenantID)
 		}
 		polyQuery := fmt.Sprintf("SELECT * FROM %s WHERE %s",
-			q.dialect.Quote(relModel.Table),
+			q.qualifiedTable(relModel.Table),
 			strings.Join(whereClauses, " AND "),
 		)
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)

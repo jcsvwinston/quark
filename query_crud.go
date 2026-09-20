@@ -331,6 +331,7 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 					tenantID:  q.tenantID,
 					tenantCol: q.tenantCol,
 					schema:    q.schema,
+					err:       q.err,
 				}
 
 				if _, err := sq.saveAny(ctx, exec, relatedVal.Interface(), actualUpdate); err != nil {
@@ -367,6 +368,7 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		// via fullTableName; without this, INSERT/UPDATE diverged from SELECT
 		// and rows landed in the wrong schema (BB-8).
 		schema: q.schema,
+		err:    q.err,
 	}
 
 	rowsAffected := int64(0)
@@ -506,6 +508,15 @@ func relMetaFromType(t reflect.Type) *ModelMeta {
 // Returns with the ID set from the database.
 // Create inserts a new record and recursively saves associations.
 func (q *Query[T]) Create(entity *T) error {
+	// A query that failed to build — a tenant that did not resolve, a
+	// strategy the dialect refuses — runs nothing, and runs no hook either.
+	// Checked here, before validation and BeforeCreate, and again at the
+	// executors: the write paths mint their own BaseQuery copies, and a copy
+	// that forgot to carry err once let the statement through (QK-26). Every
+	// mutator in this file opens the same way.
+	if q.err != nil {
+		return q.err
+	}
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -708,6 +719,9 @@ func (q *BaseQuery) scanReturning(row *sql.Row, v reflect.Value) error {
 // associations are about to be written, Update logs a WARN naming them.
 // Call [Query.WithoutAssociations] to write only the entity's own row.
 func (q *Query[T]) Update(entity *T) (int64, error) {
+	if q.err != nil {
+		return 0, q.err
+	}
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -797,6 +811,9 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 //
 // Returns the number of rows affected.
 func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
+	if q.err != nil {
+		return 0, q.err
+	}
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -983,6 +1000,9 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 // Requires Where clause for safety.
 // Returns the number of rows affected.
 func (q *Query[T]) UpdateMap(data map[string]any) (int64, error) {
+	if q.err != nil {
+		return 0, q.err
+	}
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -1293,6 +1313,9 @@ func isWarnableZero(v reflect.Value) bool {
 // If the model doesn't have deleted_at field, performs hard delete.
 // Returns the number of rows affected.
 func (q *Query[T]) Delete(entity *T) (int64, error) {
+	if q.err != nil {
+		return 0, q.err
+	}
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -1357,6 +1380,9 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 // DeleteBy performs a hard delete with WHERE conditions.
 // Requires Where clause for safety.
 func (q *Query[T]) DeleteBy() (int64, error) {
+	if q.err != nil {
+		return 0, q.err
+	}
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -1370,6 +1396,9 @@ func (q *Query[T]) DeleteBy() (int64, error) {
 
 // HardDelete permanently deletes the entity by its primary key.
 func (q *Query[T]) HardDelete(entity *T) (int64, error) {
+	if q.err != nil {
+		return 0, q.err
+	}
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -1641,6 +1670,9 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 //
 //	quark.For[User](ctx, client).Upsert(&user, []string{"email"}, []string{"name", "updated_at"})
 func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string) error {
+	if q.err != nil {
+		return q.err
+	}
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -1889,6 +1921,9 @@ func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCol
 //	users := []*User{{Name: "Alice"}, {Name: "Bob"}}
 //	err := quark.For[User](ctx, client).CreateBatch(users)
 func (q *Query[T]) CreateBatch(entities []*T) error {
+	if q.err != nil {
+		return q.err
+	}
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -2215,6 +2250,9 @@ func DeleteBatchOf[T any, V any](q *Query[T], ids []V) (int64, error) {
 }
 
 func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
+	if q.err != nil {
+		return 0, q.err
+	}
 	if q.client == nil {
 		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -2272,6 +2310,9 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 //
 //	err := quark.For[User](ctx, client).UpsertBatch(users, []string{"email"}, []string{"name"})
 func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols []string) error {
+	if q.err != nil {
+		return q.err
+	}
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -2558,6 +2599,9 @@ func (q *Query[T]) upsertBatchOracle(
 //
 //	err := quark.For[User](ctx, client).UpdateBatch(users)
 func (q *Query[T]) UpdateBatch(entities []*T) error {
+	if q.err != nil {
+		return q.err
+	}
 	if q.client == nil {
 		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
 	}
@@ -2607,6 +2651,7 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 				tenantID:  q.tenantID,
 				tenantCol: q.tenantCol,
 				schema:    q.schema, // SchemaPerTenant: keep writes in the tenant schema (BB-8)
+				err:       q.err,
 			}
 			sqlStr, args, err := bq.buildUpdate(v)
 			if err != nil {
@@ -2638,10 +2683,7 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 func (q *BaseQuery) linkM2M(rel RelationMeta, parentPK, childPK any) error {
 	// Qualify the join table with the tenant schema under SchemaPerTenant, so
 	// the link rows land in the tenant's schema like the entity rows (BB-8).
-	joinTable := q.dialect.Quote(rel.JoinTable)
-	if q.schema != "" {
-		joinTable = q.dialect.Quote(q.schema) + "." + joinTable
-	}
+	joinTable := q.qualifiedTable(rel.JoinTable)
 	sqlStr := fmt.Sprintf("INSERT INTO %s (%s, %s) VALUES (%s, %s)",
 		joinTable,
 		q.dialect.Quote(rel.JoinFK),

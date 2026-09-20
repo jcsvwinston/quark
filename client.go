@@ -175,6 +175,16 @@ type Client struct {
 	// security boundary (ADR-0012). nil (the default) makes the check a
 	// no-op. Assigned once at router setup, before queries run.
 	nativeTenantResolver func(context.Context) string
+
+	// tenantRouter is set by [NewTenantRouter] when this Client is the
+	// BaseClient of a SchemaPerTenant, RowLevelSecurityClient or
+	// RowLevelSecurityNative router — the strategies where every tenant
+	// shares this one pool. [Client.BeginTx] asks it to confine a transaction
+	// whose context carries a tenant, so a transaction opened through
+	// router.GetClient(ctx) + client.Tx is confined like one opened through
+	// router.Tx (QK-26). nil for a client no router shares. If two routers
+	// share one BaseClient the last one wins, as with nativeTenantResolver.
+	tenantRouter *TenantRouter
 }
 
 // warnRawUnderNativeRLS emits a developer-experience warning when a raw
@@ -545,7 +555,7 @@ func For[T any](ctx context.Context, provider ClientProvider) *Query[T] {
 
 	// Apply multi-tenant configurations if the provider is a TenantRouter
 	if router, ok := provider.(*TenantRouter); ok {
-		applyTenantConfinement(&q.BaseQuery, router, client, ctx, false)
+		applyTenantConfinement(&q.BaseQuery, router, client, ctx, nil)
 	}
 
 	return q
@@ -561,24 +571,36 @@ func For[T any](ctx context.Context, provider ClientProvider) *Query[T] {
 // agree and can drift will drift. There is one path now, and a strategy added
 // here reaches both or neither.
 //
-// The tenant comes from the CONTEXT rather than from whoever opened the
-// transaction, which is the rule the non-transactional path has always had:
-// the query is confined to the tenant it runs under.
-// inTx says the query runs inside a transaction the router opened. It changes
-// exactly one thing, and only for RowLevelSecurityNative: there the engine
-// enforces the isolation through a session variable that TenantRouter.Tx has
-// already set on the transaction, so the query must NOT be given the native
-// executor — that would set the variable on a different connection and leave
-// the transaction filtering by nothing. The tenant is still stamped, because
-// the cache key needs it either way.
-func applyTenantConfinement(q *BaseQuery, router *TenantRouter, client *Client, ctx context.Context, inTx bool) {
-	tenantID, err := router.ResolveTenant(ctx)
+// tx is the transaction the query runs in, or nil outside one. It decides two
+// things:
+//
+//   - WHICH tenant. Outside a transaction the tenant is resolved from the
+//     query's context, as it always was. Inside one the transaction's tenant
+//     rules (ADR-0025): a context that resolves no tenant inherits it, and a
+//     context that resolves a DIFFERENT tenant makes the query fail with
+//     ErrTenantMismatch rather than read or write across tenants. See
+//     TenantRouter.tenantFor.
+//   - The executor under RowLevelSecurityNative. There the engine enforces
+//     the isolation through a session variable that confineTx has already
+//     set on the transaction's connection, so the query must NOT be given the
+//     native executor: that would send every statement down a second
+//     connection of its own, commit writes the outer rollback can no longer
+//     undo, read outside the transaction's snapshot, and wait on the first
+//     connection for a row the first connection holds — with MaxOpenConns(1)
+//     it never gets a connection at all. The tenant is still stamped, because
+//     the cache key needs it either way.
+func applyTenantConfinement(q *BaseQuery, router *TenantRouter, client *Client, ctx context.Context, tx *Tx) {
+	tenantID, err := router.tenantFor(ctx, tx)
 	if err != nil {
 		q.err = err
 		return
 	}
 
 	switch router.config.Strategy {
+	case DatabasePerTenant:
+		// The pool IS the confinement: GetClient chose it for this tenant,
+		// and the transaction, when there is one, was opened on it. Nothing
+		// to stamp on the statement.
 	case SchemaPerTenant:
 		q.schema = tenantID
 	case RowLevelSecurityClient:
@@ -613,16 +635,11 @@ func applyTenantConfinement(q *BaseQuery, router *TenantRouter, client *Client, 
 		// the database, nothing protected the cache
 		// (TestRowLevelSecurityNativeCacheIsTenantScoped).
 		q.tenantID = tenantID
-		// Only OUTSIDE a transaction, and this guard is the whole reason
-		// inTx exists. Inside one, TenantRouter.Tx has already armed the
-		// session variable on THAT connection; handing the query a native
-		// executor would send every statement down a second connection of
-		// its own, which commits writes the outer rollback can no longer
-		// undo, reads outside the transaction's snapshot, and waits on the
-		// first connection for a row the first connection holds — with
-		// MaxOpenConns(1) it never gets a connection at all. The tenant is
-		// still stamped above, because the cache key needs it either way.
-		if !inTx {
+		// The native executor only OUTSIDE a transaction; inside one the
+		// transaction's own connection already carries the variable. The
+		// first cut of this fix declared this guard in a comment and read
+		// the flag nowhere — a parameter nobody reads is legal Go.
+		if tx == nil {
 			q.exec = newNativeRLSExecutor(client, tenantID, router.config.defaultNativeRLSVar())
 		}
 	}

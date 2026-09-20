@@ -59,7 +59,7 @@ control needs a live engine to go further, its note says so, and
 
 ## The result
 
-**20 of 69 controls present. 28 partial. 21 absent.**
+**21 of 69 controls present. 27 partial. 21 absent.**
 
 ### migraciones — 5 present · 5 partial · 6 absent
 
@@ -121,7 +121,7 @@ control needs a live engine to go further, its note says so, and
 | `LIKE-10` | One aggregating check covers every lane the workflow declares | **present** | — |
 | `LIKE-11` | An engine lane fails, rather than skips, when its engine does not answer | **partial** | One of the five engines the matrix declares. MariaDB's suite skips after a failed Ping in three places, so its lane can report green with the shared suite never run; the other four skip only on an unset DSN, which the integration tag makes impossible. The sweep reads every test in the suite module, not the files whose name ends in _suite_test.go, and charges each hole to the engine its own skip message names — the two skips that fire when Redis does not answer belong to a cache control, not to an engine lane. |
 
-### rls — 3 present · 8 partial · 2 absent
+### rls — 4 present · 7 partial · 2 absent
 
 | id | control | verdict | what is missing |
 |---|---|---|---|
@@ -137,7 +137,7 @@ control needs a live engine to go further, its note says so, and
 | `RLS-10` | The implicit transaction behind a native query commits the write before returning and gives its connection back when the request context ends | **present** | — |
 | `RLS-11` | RawQuery and Exec warn under a Native router; Raw() cannot, and the client-side strategy never warns | **partial** | The warning is armed only when the strategy is RowLevelSecurityNative, where raw SQL is still filtered by the engine. Under RowLevelSecurityClient, where raw SQL really does bypass the only filter there is, nothing is logged. And Raw() hands out the pool without a context, so it has no tenant to resolve and cannot warn at all. |
 | `RLS-12` | Sharding and multi-tenancy do not compose: neither a key-routed read nor a scatter-gather honours the tenant in its context | **absent** | Both sharded doors return every owner's rows with the tenant sitting in the context: the tenancy hook fires on a type assertion to *TenantRouter, and a *ShardRouter is a different provider — scatter-gather goes further and builds its per-shard query against each shard's raw client. The opposite direction is not measured and cannot be: TenantConfig.BaseClient is a *Client, so a TenantRouter over a ShardRouter is not something the bench can construct. An application with both has to inject the predicate by hand in every query. |
-| `RLS-13` | DatabasePerTenant holds inside a transaction; SchemaPerTenant loses its schema inside router.Tx and RowLevelSecurityClient loses its predicate there too | **partial** | router.Tx delegates to the base client for every strategy that is not Native, and ForTx builds its query without schema, tenant id or tenant column — so inside the transaction a SchemaPerTenant read hits the shared default-schema table and a write lands there too, and a RowLevelSecurityClient read loses its predicate the same way. DatabasePerTenant survives because its isolation is the pool itself. |
+| `RLS-13` | Tenant confinement survives a transaction: DatabasePerTenant through its pool, SchemaPerTenant through its schema prefix, RowLevelSecurityClient through its predicate | **present** | — |
 
 ### tipos — 3 present · 3 partial · 5 absent
 

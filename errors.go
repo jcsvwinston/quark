@@ -171,3 +171,13 @@ func wrapDBError(err error) error {
 
 	return err
 }
+
+// ErrTenantMismatch is returned, wrapped, by a query built inside a
+// transaction whose context resolves a different tenant from the one the
+// transaction was opened for. The transaction fixes the tenant (ADR-0025):
+// under RowLevelSecurityNative the engine is already filtering by the tenant
+// TenantRouter.Tx set on that connection, and under DatabasePerTenant the pool
+// was chosen for it, so a query naming another tenant cannot be honoured
+// without silently reading or writing across tenants. A context that resolves
+// NO tenant inherits the transaction's instead.
+var ErrTenantMismatch = errors.New("tenant mismatch inside transaction")

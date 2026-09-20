@@ -31,6 +31,7 @@
 | [0022](0022-scatter-gather-cross-shard-reads.md) | Scatter-gather cross-shard reads vía funcs explícitas (`ScatterGather`/`ScatterCount`), merge caller-side, agregados no-COUNT diferidos | Accepted | v1.2 |
 | [0023](0023-driver-modules.md) | Los drivers salen a módulos propios; el contrato vive en `quarkdriver` y los tres predicados de clasificación viajan juntos porque ninguno falla al no reconocer — contesta `false` | Accepted | v1.9 |
 | [0024](0024-cli-en-modulo-propio.md) | El CLI a su propio módulo, junto al superapp y a las suites por motor: la build list del consumidor baja de 123 a 39 y el binario no cambia; a cambio, cuatro altas de registro y una serie de versiones propia para el `go install` | Accepted | v1.13 |
+| [0025](0025-la-transaccion-fija-el-inquilino.md) | La transacción fija el inquilino: `ForTx` se confina al que abrió la transacción, un contexto sin inquilino lo hereda y uno que nombre a otro falla con `ErrTenantMismatch`; `client.Tx` sobre el `BaseClient` es la misma puerta que `router.Tx` (QK-26) | Accepted | v1.14 |
 
 ## Cómo añadir un ADR nuevo
 
