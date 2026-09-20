@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0](https://github.com/jcsvwinston/quark/compare/v1.14.0...v1.15.0) (2026-09-20)
+
+
+### Added
+
+* **cli:** migrate diff|plan|verify from source, tenant install-rls-policies|verify-rls-policies, and the tags the runtime learned (MIG-11, RLS-06) ([#414](https://github.com/jcsvwinston/quark/issues/414)) ([f089c1f](https://github.com/jcsvwinston/quark/commit/f089c1ff6faea69f56f5e110d0394648a4c62d62))
+* **migrate:** ALTER COLUMN covers type, nullable, default and primary key on every engine, and SQLite rebuilds the table ([#408](https://github.com/jcsvwinston/quark/issues/408)) ([69fcd74](https://github.com/jcsvwinston/quark/commit/69fcd742c1bbb7d80f3706285816b6fa1271f991))
+* **migrate:** the plan carries indexes, foreign keys and checks, and the executor emits them (QK-27) ([#407](https://github.com/jcsvwinston/quark/issues/407)) ([ac813f9](https://github.com/jcsvwinston/quark/commit/ac813f9588ee5f5b260a408cf77dd97bd4a9f52d))
+* **model:** UUID-shaped values get the engine's uuid type, a mapped key keeps its key, and models declare CHECKs (QK-29) ([#409](https://github.com/jcsvwinston/quark/issues/409)) ([5a48aee](https://github.com/jcsvwinston/quark/commit/5a48aee433f061a05187a40af2824aad0ff151ea))
+* **query:** escaped LIKE surfaces, with the escape character declared per engine (QK-25) ([#406](https://github.com/jcsvwinston/quark/issues/406)) ([596a75a](https://github.com/jcsvwinston/quark/commit/596a75a5fe240ce755a6c3a9959606e712d8b1b2))
+* **query:** PaginateAfter — keyset pagination that seeks to the last row read and returns a resumable token (OPS-15) ([#413](https://github.com/jcsvwinston/quark/issues/413)) ([17d9d75](https://github.com/jcsvwinston/quark/commit/17d9d759f8bedd2ac0a913d78f1a08efc6fba5e7))
+* **tenancy:** a Native router fails closed on GetClient and verifies the engine enforces before it serves (RLS-02, RLS-04) ([#412](https://github.com/jcsvwinston/quark/issues/412)) ([2e3f011](https://github.com/jcsvwinston/quark/commit/2e3f011bb3b98e41c6d0118a084947393cfad012))
+* **types:** raw slices and maps, Range[T] and net.IP in each engine's type, with PostgreSQL's operators known to the builder ([#411](https://github.com/jcsvwinston/quark/issues/411)) ([2aff3f2](https://github.com/jcsvwinston/quark/commit/2aff3f2ea662fbd0fd30bf6798a990f3df03816a))
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.14.0 ([#415](https://github.com/jcsvwinston/quark/issues/415)) ([cdac4d5](https://github.com/jcsvwinston/quark/commit/cdac4d5bbbcc3c5513270f995d768249d66a8d3a))
+* **migrate:** precision/scale refines float columns only, and the decimal family is one to the diff (QK-28, QK-30) ([#410](https://github.com/jcsvwinston/quark/issues/410)) ([8df310f](https://github.com/jcsvwinston/quark/commit/8df310f3cbd0bd1db8ba1453771b35b0099eeb1e))
+* **tenancy:** tenant confinement survives a transaction, through both doors (QK-26) ([#404](https://github.com/jcsvwinston/quark/issues/404)) ([1e201d6](https://github.com/jcsvwinston/quark/commit/1e201d65983ecdf8480319b05abe96e09ff6d0f5))
+
 ## [1.14.0](https://github.com/jcsvwinston/quark/compare/v1.13.0...v1.14.0) (2026-09-11)
 
 

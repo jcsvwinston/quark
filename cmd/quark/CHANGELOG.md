@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/jcsvwinston/quark/compare/cmd/quark/v1.0.1...cmd/quark/v1.1.0) (2026-09-20)
+
+
+### Added
+
+* **cli:** migrate diff|plan|verify from source, tenant install-rls-policies|verify-rls-policies, and the tags the runtime learned (MIG-11, RLS-06) ([#414](https://github.com/jcsvwinston/quark/issues/414)) ([f089c1f](https://github.com/jcsvwinston/quark/commit/f089c1ff6faea69f56f5e110d0394648a4c62d62))
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.14.0 ([#415](https://github.com/jcsvwinston/quark/issues/415)) ([cdac4d5](https://github.com/jcsvwinston/quark/commit/cdac4d5bbbcc3c5513270f995d768249d66a8d3a))
+
 ## [1.0.1](https://github.com/jcsvwinston/quark/compare/cmd/quark/v1.0.0...cmd/quark/v1.0.1) (2026-09-11)
 
 
