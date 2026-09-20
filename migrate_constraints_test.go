@@ -216,3 +216,19 @@ func TestEmptyIndexNameIsATagError(t *testing.T) {
 		t.Fatalf("quark:\"index=\" with no name was accepted: %v", meta.TagError)
 	}
 }
+
+// MySQL and MariaDB back every FOREIGN KEY with an index named after the
+// constraint; the introspector drops it, as it drops the PRIMARY KEY's.
+func TestFKBackingIndexesAreFiltered(t *testing.T) {
+	fks := []ForeignKey{{Name: "fk_child_parent", Columns: []string{"parent_id"}, RefTable: "parent", RefColumns: []string{"id"}}}
+	idx := []Index{
+		{Name: "fk_child_parent", Columns: []string{"parent_id"}},           // the engine's backing index
+		{Name: "idx_child_email", Columns: []string{"email"}, Unique: true}, // a real one
+		{Name: "fk_child_parent_2", Columns: []string{"parent_id"}},         // same columns, other name: real
+		{Name: "other", Columns: []string{"parent_id", "email"}},            // other shape: real
+	}
+	got := withoutFKBackingIndexes(idx, fks)
+	if len(got) != 3 || got[0].Name != "idx_child_email" {
+		t.Fatalf("withoutFKBackingIndexes = %+v", got)
+	}
+}

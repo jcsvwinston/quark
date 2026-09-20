@@ -407,9 +407,36 @@ func mysqlLikeIntrospect(ctx context.Context, exec Executor, dialectName string)
 		if dialectName == "mariadb" {
 			relabelMariaDBJSONColumns(cols, checks)
 		}
-		tables = append(tables, Table{Name: name, Columns: cols, Indexes: idx, ForeignKeys: fks, Checks: checks})
+		tables = append(tables, Table{Name: name, Columns: cols, Indexes: withoutFKBackingIndexes(idx, fks), ForeignKeys: fks, Checks: checks})
 	}
 	return Schema{Tables: tables}, nil
+}
+
+// withoutFKBackingIndexes drops the indexes MySQL and MariaDB create on
+// their own to back a FOREIGN KEY — named after the constraint, on its
+// columns — the same way PRIMARY KEY backing indexes are filtered: the
+// constraint is what the diff model tracks, and the engine manages its
+// index (it goes when the key goes). Surfacing it made a plan that had
+// just created the key propose DROP INDEX on its backing index forever
+// (measured on the CI lane, A8 S3).
+func withoutFKBackingIndexes(idx []Index, fks []ForeignKey) []Index {
+	if len(fks) == 0 {
+		return idx
+	}
+	out := make([]Index, 0, len(idx))
+	for _, i := range idx {
+		backing := false
+		for _, fk := range fks {
+			if fk.Name == i.Name && !i.Unique && stringSliceEqual(fk.Columns, i.Columns) {
+				backing = true
+				break
+			}
+		}
+		if !backing {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 func mysqlListTables(ctx context.Context, exec Executor) ([]string, error) {
