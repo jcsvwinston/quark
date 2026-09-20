@@ -136,6 +136,31 @@ explícitamente. Regla: **todo `BaseQuery{}` literal en `query_crud.go` lleva
 `schema: q.schema`**. Regresión: `schema_per_tenant_write_test.go` (cubre
 insert de entidad, link m2m y update batch, schema-qualified) + fase F5.
 
+### Construir un `BaseQuery{}` interno sin propagar `err`
+
+**QK-26 (A8 S1).** `For[T]` guarda en `q.err` el fallo de construcción (el
+inquilino que no resuelve, la estrategia que el dialecto rechaza). Las
+lecturas lo devolvían; la escritura acuñaba `dq`/`sq`/`bq` **sin `err`** y
+`executeQueryRow` no lo miraba, así que un `Create` bajo
+`RowLevelSecurityNative` sobre SQLite ejecutaba su INSERT sin aislamiento
+alguno. Regla: **todo `BaseQuery{}` literal arrastra `err: q.err`**, todo
+mutador público abre con `if q.err != nil`, y `queryRowOn` acuña el error en
+el `*sql.Row` con `errorRow`. Regresión:
+`TestCreateOnAQueryThatFailedToBuildWritesNothing`.
+
+### Confinamiento dentro de una transacción: la transacción fija el inquilino
+
+**ADR-0025.** El `*Tx` lleva `router` y `tenantID`; los pone SOLO
+`TenantRouter.confineTx`, desde `router.Tx` y desde `Client.BeginTx` cuando el
+cliente es el `BaseClient` estampado. `ForTx` confina con la MISMA función que
+`For` (`applyTenantConfinement`): dentro de la transacción el inquilino es el
+de la transacción —un contexto sin inquilino lo hereda; uno que nombre a otro
+falla con `ErrTenantMismatch`—. No añadas un tercer camino que estampe el
+inquilino, ni re-resuelvas del contexto de la consulta dentro de una
+transacción: lo primero es cómo nació QK-26, lo segundo cómo el primer corte
+rompió `DatabasePerTenant`. Regresión: `tenant_tx_confinement_test.go`, un
+test por hallazgo de la revisión, cada uno verificado por mutación.
+
 ### Saltarse el router con `client.Raw()` bajo contexto de tenant
 
 ```go
@@ -229,6 +254,12 @@ setting en la policy.
 
 ## Tests críticos a no romper
 
+- `tenant_tx_confinement_test.go` — QK-26: confinamiento dentro de la
+  transacción por las cuatro estrategias y las dos puertas (`router.Tx` y
+  `client.Tx` sobre el `BaseClient`), `ErrTenantMismatch`, `Preload`
+  cualificado, y que una consulta con `q.err` no escribe.
+- `internal/enterprisebench` control `RLS-13` — la misma medición desde
+  fuera del paquete, con evidencia POSITIVA (un schema `ATTACH`ado en SQLite).
 - (Pendiente de crear) `tenant_router_test.go` con suite multi-motor para las tres estrategias.
 
 Hoy hay cobertura limitada — es deuda. Cualquier cambio en `tenant_router.go` debe traer su test de regresión que cubra al menos: `Or()`, `Where(group)`, joins, subqueries cuando existan.

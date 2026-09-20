@@ -1295,45 +1295,63 @@ func probeRlsOtherTenantStrategies(t *testing.T, e *env) verdict {
 		}
 	}
 
-	// SchemaPerTenant over one pool.
-	base, rec := rlsFixture(t, e, "rls13_schemaper")
+	// SchemaPerTenant over one pool. SQLite has no schemas, but it can attach
+	// a second database under a name and a qualified table name resolves into
+	// it — so the tenant's schema holds a table of its own with only its rows,
+	// and the evidence is the rows read back, not the shape of the statement.
+	// The first version of this probe read the qualified name out of the
+	// error SQLite raised for a schema it did not have, so a query that merely
+	// FAILED inside the transaction satisfied it: no confinement was ever
+	// observed. One connection, so the ATTACH is visible to every statement.
+	rawLimits := quark.DefaultLimits()
+	rawLimits.AllowRawQueries = true
+	base, rec := rlsFixture(t, e, "rls13_schemaper", quark.WithMaxOpenConns(1), quark.WithLimits(rawLimits))
+	for _, stmt := range []string{
+		"ATTACH DATABASE ':memory:' AS ta",
+		"CREATE TABLE ta.rls_rows (id INTEGER PRIMARY KEY, tenant_id TEXT, status TEXT)",
+		"INSERT INTO ta.rls_rows VALUES (1, 'ta', 'in-ta-schema')",
+	} {
+		if err := base.Exec(ctx, stmt); err != nil {
+			t.Fatalf("attach the tenant schema: %s: %v", stmt, err)
+		}
+	}
 	schemaRouter := rlsRouter(base, quark.SchemaPerTenant)
 	ta := rlsCtx("ta")
 
-	// Outside a transaction the table is qualified with the tenant's schema.
-	// SQLite has no such schema, so the proof is the qualified name itself —
-	// in the statement when one was recorded, otherwise in the error naming
-	// the table it could not find.
-	rec.reset()
-	_, plainErr := quark.For[rlsRow](ta, schemaRouter).List()
-	evidence := rec.last()
-	if plainErr != nil {
-		evidence += " " + plainErr.Error()
+	// confinedToSchema is the positive fact, read the same way on both sides
+	// of the transaction boundary: the statement names the tenant's schema,
+	// and the rows that came back are the ones that live there — not the
+	// shared table's rows for that tenant, which a filter would also return.
+	confinedToSchema := func(stmt string, rows []rlsRow, err error) bool {
+		return err == nil && strings.Contains(stmt, `"ta"."rls_rows"`) &&
+			rlsOwnedOnlyBy(rows, "ta") && rows[0].Status == "in-ta-schema"
 	}
-	schemaOutsideTx := strings.Contains(evidence, "ta.rls_rows")
 
-	// Inside the router's own transaction the schema is gone and so is the
-	// tenant: the query runs against the default schema's shared table.
+	rec.reset()
+	plainRows, plainErr := quark.For[rlsRow](ta, schemaRouter).List()
+	schemaOutsideTx := confinedToSchema(rec.last(), plainRows, plainErr)
+
+	// Inside the router's transaction, the same fact. An error or an
+	// unqualified read inside is a verdict, not a fatal: the state where the
+	// confinement is dropped reads the shared table and returns both tenants,
+	// and that is exactly what this control exists to tell apart.
 	schemaInsideTx := false
 	inTxTenants := []string{}
 	if err := schemaRouter.Tx(ta, func(tx *quark.Tx) error {
 		rec.reset()
 		rows, err := quark.ForTx[rlsRow](ta, tx).List()
-		if err != nil {
-			return err
-		}
-		schemaInsideTx = strings.Contains(rec.last(), "ta.rls_rows")
+		schemaInsideTx = confinedToSchema(rec.last(), rows, err)
 		inTxTenants = rlsTenantsIn(rows)
 		return nil
 	}); err != nil {
 		t.Fatalf("transaction under SchemaPerTenant: %v", err)
 	}
-	schemaLostInTx := schemaOutsideTx && !schemaInsideTx && len(inTxTenants) > 1
+	schemaLostInTx := schemaOutsideTx && !schemaInsideTx
 
 	// RowLevelSecurityClient through the same door: outside the transaction
 	// the predicate is in the WHERE (RLS-03 measures that in detail), and
-	// inside it ForTx builds the query from the base client, with no tenant to
-	// inject.
+	// inside it the same predicate, bound to the same tenant, with only that
+	// tenant's rows back.
 	clientBase, clientRec := rlsFixture(t, e, "rls13_clientside")
 	clientRouter := rlsRouter(clientBase, quark.RowLevelSecurityClient)
 	clientRec.reset()
@@ -1341,10 +1359,10 @@ func probeRlsOtherTenantStrategies(t *testing.T, e *env) verdict {
 	if outsideErr != nil {
 		t.Fatalf("client-side list outside a transaction: %v", outsideErr)
 	}
-	// This is the PREMISE of the fact the title states: "loses its predicate
-	// there too" only means something if the predicate was there, bound to
-	// this tenant, outside the transaction. A wrong-tenant binding or an empty
-	// read would have satisfied the weak form and left the control partial.
+	// This is the PREMISE of the fact the title states: "survives" only means
+	// something if the predicate was there, bound to this tenant, outside the
+	// transaction. A wrong-tenant binding or an empty read would have
+	// satisfied the weak form and left the control partial.
 	clientOutsideTx := rlsScopedTo(clientRec, "ta") && rlsOwnedOnlyBy(outsideRows, "ta")
 
 	clientInsideTx := false
@@ -1355,19 +1373,23 @@ func probeRlsOtherTenantStrategies(t *testing.T, e *env) verdict {
 		if err != nil {
 			return err
 		}
-		clientInsideTx = rlsScopedToTenant(clientRec.last())
+		// The same premise inside. The first version accepted a predicate on
+		// ANY tenant with no look at the rows, so a wrong binding passed.
+		clientInsideTx = rlsScopedTo(clientRec, "ta") && rlsOwnedOnlyBy(rows, "ta")
 		clientTxTenants = rlsTenantsIn(rows)
 		return nil
 	}); err != nil {
 		t.Fatalf("transaction under RowLevelSecurityClient: %v", err)
 	}
-	clientLostInTx := clientOutsideTx && !clientInsideTx && len(clientTxTenants) > 1
+	clientLostInTx := clientOutsideTx && !clientInsideTx
 
 	// Conjunction, not disjunction. `perDatabaseScoped || schemaOutsideTx`
 	// passed on either half alone, and schemaLostInTx — the fact the title is
 	// named after — was computed and then dropped on the floor.
+	// And present demands the POSITIVE fact on every side: confinement
+	// observed inside each transaction, not merely "not observed to be lost".
 	switch {
-	case perDatabaseScoped && schemaOutsideTx && !schemaLostInTx && !clientLostInTx:
+	case perDatabaseScoped && schemaOutsideTx && schemaInsideTx && clientOutsideTx && clientInsideTx:
 		return present
 	case perDatabaseScoped && schemaOutsideTx && schemaLostInTx && clientLostInTx:
 		return partial

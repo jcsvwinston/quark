@@ -149,6 +149,47 @@ Budget the total: 100 active tenants at 10 connections each is up to 1000
 connections against the server. Size `MaxCachedPools` and the per-client limits
 together.
 
+## Transactions
+
+A transaction opened for a tenant is confined to it, and so is every query built
+inside it:
+
+```go
+err := router.Tx(acme, func(tx *quark.Tx) error {
+    docs, err := quark.ForTx[Document](acme, tx).List() // acme's rows only
+    if err != nil {
+        return err
+    }
+    return quark.ForTx[Document](acme, tx).Create(&Document{Title: "Invoice 1002"})
+})
+```
+
+`router.Tx` resolves the tenant from the context, opens the transaction on the
+right client — the tenant's own pool, or the shared one — and stamps it.
+`ForTx` then applies the same confinement `For` applies: the schema prefix, the
+injected predicate, or, under [Native RLS](row-level-native), the session
+variable the transaction already set. Relations loaded with `Preload` inside it
+are qualified the same way.
+
+**The transaction fixes the tenant.** Under Native RLS the engine is already
+filtering by the tenant the transaction set; under database-per-tenant the pool
+was chosen for it. So a query context inside the transaction that resolves a
+*different* tenant fails with `quark.ErrTenantMismatch` rather than reading or
+writing across tenants, and a context that resolves no tenant inherits the
+transaction's — `quark.ForTx[T](context.Background(), tx)` is fine.
+
+`router.GetClient(ctx)` followed by `client.Tx(ctx, ...)` on the shared base
+client is the same door: when the context carries a tenant, the transaction is
+confined exactly as `router.Tx` confines it. With no tenant in the context the
+transaction stays what the base client always gave — one on the shared pool,
+unconfined — which is how migrations and provisioning run.
+
+Earlier releases handed back a bare transaction from `router.Tx` for every
+strategy except Native RLS, so a query built inside it read every tenant's rows
+and wrote to the default schema (QK-26). If you worked around that by adding the
+predicate or the schema by hand inside `router.Tx`, the workaround is now
+redundant and can go.
+
 ## Configuration
 
 ```go

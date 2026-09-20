@@ -599,47 +599,52 @@ func (e *nativeRLSExecutor) QueryRowContext(ctx context.Context, query string, a
 	return valueRow(cols, vals)
 }
 
-// Tx opens a single transaction on the router's BaseClient, calls
-// `set_config('<NativeRLSVar>', <resolvedTenantID>, true)` as the
-// first statement, and invokes fn(tx). On nil return from fn the
-// transaction commits; on error it rolls back. This is the
-// recommended entry point under RowLevelSecurityNative — it avoids
-// the per-query implicit-tx overhead and the connection-hold semantics
-// described on nativeRLSExecutor.
+// Tx opens a single transaction for the tenant the context resolves, confines
+// it, and invokes fn(tx). On nil return from fn the transaction commits; on
+// error it rolls back.
 //
-// For other strategies (DatabasePerTenant / SchemaPerTenant /
-// RowLevelSecurityClient), Tx delegates to the underlying client's Tx
-// without emitting the variable.
+// Under RowLevelSecurityNative the transaction is opened on the BaseClient
+// and `set_config('<NativeRLSVar>', <resolvedTenantID>, true)` runs as its
+// first statement, so the engine's policies filter everything fn runs. This
+// is the recommended entry point under Native — it avoids the per-query
+// implicit-tx overhead and the connection-hold semantics described on
+// nativeRLSExecutor. Under the other strategies (DatabasePerTenant /
+// SchemaPerTenant / RowLevelSecurityClient) no variable is emitted: the
+// transaction is opened on the tenant's client and the confinement travels
+// with the *Tx.
 //
-// Returns ErrUnsupportedFeature wrapped with the dialect name when
-// the BaseClient is not PostgreSQL under RowLevelSecurityNative.
+// Every strategy: the *Tx handed to fn carries its tenant, and a query built
+// with [ForTx] inside fn is confined to it — the schema prefix, the predicate,
+// or the engine's policy — the same way [For] confines one built from the
+// router. The transaction's tenant rules: a query context inside fn that
+// resolves a different tenant fails with [ErrTenantMismatch], and one that
+// resolves none inherits the transaction's (ADR-0025). Before that, fn got a
+// bare *Tx for every strategy but Native, and a query inside it read every
+// tenant's rows (QK-26).
+//
+// Returns ErrUnsupportedFeature wrapped with the dialect name when the
+// BaseClient is not PostgreSQL under RowLevelSecurityNative.
 func (r *TenantRouter) Tx(ctx context.Context, fn func(tx *Tx) error) error {
-	tenantID, err := r.ResolveTenant(ctx)
+	if _, err := r.ResolveTenant(ctx); err != nil {
+		return err
+	}
+	client, err := r.GetClient(ctx)
 	if err != nil {
 		return err
 	}
-
-	if r.config.Strategy != RowLevelSecurityNative {
-		client, err := r.GetClient(ctx)
-		if err != nil {
-			return err
-		}
-		return client.Tx(ctx, fn)
-	}
-
-	if r.config.BaseClient == nil {
-		return fmt.Errorf("BaseClient must be provided for RowLevelSecurityNative")
-	}
-	if r.config.BaseClient.dialect.Name() != "postgres" {
+	if r.config.Strategy == RowLevelSecurityNative && client.dialect.Name() != "postgres" {
+		// Refused before a transaction is opened; confineTx would refuse it
+		// too, but after a BEGIN with nothing to run under it.
 		return fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
-			ErrUnsupportedFeature, r.config.BaseClient.dialect.Name())
+			ErrUnsupportedFeature, client.dialect.Name())
 	}
-
-	varName := r.config.defaultNativeRLSVar()
-
-	return r.config.BaseClient.Tx(ctx, func(tx *Tx) error {
-		if _, err := tx.tx.ExecContext(ctx, "SELECT set_config($1, $2, true)", varName, tenantID); err != nil {
-			return fmt.Errorf("native rls: set_config: %w", err)
+	return client.Tx(ctx, func(tx *Tx) error {
+		// A no-op when client is this router's BaseClient — BeginTx already
+		// confined the transaction, set_config included — and the whole of
+		// the confinement under DatabasePerTenant, whose per-tenant client
+		// no router stamps. Handing back a bare *Tx is what QK-26 was.
+		if err := r.confineTx(ctx, tx); err != nil {
+			return err
 		}
 		return fn(tx)
 	})

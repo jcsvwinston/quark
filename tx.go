@@ -26,6 +26,18 @@ type Executor interface {
 type Tx struct {
 	tx     *sql.Tx
 	client *Client
+	// router is the TenantRouter this transaction is confined by, and
+	// tenantID the tenant it was opened for. Both are set by
+	// [TenantRouter.confineTx] — from [TenantRouter.Tx], or from
+	// [Client.BeginTx] when the client is a router's BaseClient and the
+	// context carries a tenant. Queries built with [ForTx] take their
+	// confinement from here, the same way [For] takes it from the provider
+	// it was handed; and the tenant they get is THIS one, not whatever the
+	// query's own context resolves (ADR-0025). Without this the confinement
+	// stopped at the transaction boundary: a query inside router.Tx read
+	// every tenant's rows and wrote to the default schema (QK-26).
+	router   *TenantRouter
+	tenantID string
 	// ctx is the context the transaction was opened with (via
 	// [Client.BeginTx] / [Client.Tx]). It is passed to the
 	// [Tx.OnCommit] / [Tx.OnRollback] callbacks when they fire. If
@@ -101,7 +113,20 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
-	return &Tx{tx: sqlTx, client: c, ctx: ctx}, nil
+	tx := &Tx{tx: sqlTx, client: c, ctx: ctx}
+	// A transaction opened on a router's BaseClient with a tenant in its
+	// context is confined to that tenant here, so router.GetClient(ctx) +
+	// client.Tx is the same door as router.Tx and not a way around it
+	// (QK-26). With no tenant in the context the transaction stays what this
+	// client always gave: one on the shared pool, like For[T] on the base
+	// client.
+	if c.tenantRouter != nil {
+		if err := c.tenantRouter.confineTx(ctx, tx); err != nil {
+			_ = sqlTx.Rollback()
+			return nil, err
+		}
+	}
+	return tx, nil
 }
 
 // Tx executes fn within a transaction. If fn returns nil, the transaction
@@ -648,7 +673,7 @@ func ForTx[T any](ctx context.Context, tx *Tx) *Query[T] {
 	// side-effect of its own.
 	ctx = context.WithValue(ctx, txContextKey{}, tx)
 
-	return &Query[T]{
+	q := &Query[T]{
 		BaseQuery: BaseQuery{
 			ctx:     ctx,
 			client:  tx.client,
@@ -661,6 +686,16 @@ func ForTx[T any](ctx context.Context, tx *Tx) *Query[T] {
 			meta:    meta,
 		},
 	}
+
+	// The same confinement the non-transactional path applies, through the
+	// same function. It used to be missing here, which is the whole of QK-26:
+	// inside router.Tx a query saw every tenant's rows and wrote to the
+	// default schema, because this constructor had no idea a router existed.
+	if tx.router != nil {
+		applyTenantConfinement(&q.BaseQuery, tx.router, tx.client, ctx, tx)
+	}
+
+	return q
 }
 
 // txContextKey is the unexported context key under which [ForTx]

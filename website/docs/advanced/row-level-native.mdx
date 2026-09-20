@@ -136,7 +136,12 @@ transaction closes depends on the operation:
   the stream.
 
 For multi-step work, batch jobs, and streaming, run inside `router.Tx` instead —
-one transaction, opened and committed exactly where you can see it.
+one transaction, opened and committed exactly where you can see it. Queries
+built with `ForTx` inside it run on the transaction's own connection, where
+`set_config` already applies; they open no implicit transaction of their own.
+The transaction fixes the tenant: a context inside it that resolves another
+tenant is refused with `ErrTenantMismatch` (see
+[Transactions](multi-tenant#transactions)).
 :::
 
 ## Verify enforcement at startup

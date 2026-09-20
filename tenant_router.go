@@ -144,13 +144,25 @@ func NewTenantRouter(
 	if config.Strategy == RowLevelSecurityNative && config.BaseClient != nil {
 		config.BaseClient.nativeTenantResolver = resolver
 	}
-	return &TenantRouter{
+	r := &TenantRouter{
 		config:   config,
 		resolver: resolver,
 		factory:  factory,
 		cache:    make(map[string]*list.Element),
 		lruList:  list.New(),
 	}
+	// The shared pool learns which router confines it, so a transaction
+	// opened straight on the BaseClient with a tenant in its context is
+	// confined the way router.Tx confines one (QK-26; see Client.BeginTx).
+	// DatabasePerTenant has no shared pool: each tenant's client is its own
+	// confinement, and router.Tx stamps the transaction itself.
+	switch config.Strategy {
+	case SchemaPerTenant, RowLevelSecurityClient, RowLevelSecurityNative:
+		if config.BaseClient != nil {
+			config.BaseClient.tenantRouter = r
+		}
+	}
+	return r
 }
 
 // ResolveTenant returns the tenant ID for the context.
@@ -163,6 +175,73 @@ func (r *TenantRouter) ResolveTenant(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("invalid tenant_id: %s", tenantID)
 	}
 	return tenantID, nil
+}
+
+// tenantFor returns the tenant a query is confined to: the context's tenant
+// outside a transaction, the transaction's inside one.
+//
+// The transaction fixes the tenant (ADR-0025). Under RowLevelSecurityNative
+// the engine is already filtering by the tenant confineTx set on that
+// connection, and under DatabasePerTenant the pool was chosen for it, so a
+// query built inside the transaction cannot be honoured for another tenant
+// without silently crossing tenants — it fails with ErrTenantMismatch
+// instead. A context that resolves no tenant at all inherits the
+// transaction's: the caller already named it when opening the transaction,
+// and asking twice is what broke DatabasePerTenant in the first cut of this
+// fix (a ForTx with a plain context failed where the pool alone had sufficed).
+func (r *TenantRouter) tenantFor(ctx context.Context, tx *Tx) (string, error) {
+	if tx == nil || tx.tenantID == "" {
+		return r.ResolveTenant(ctx)
+	}
+	if fromCtx := r.resolver(ctx); fromCtx != "" && fromCtx != tx.tenantID {
+		return "", fmt.Errorf("%w: the query's context resolves tenant %q but the transaction was opened for tenant %q",
+			ErrTenantMismatch, fromCtx, tx.tenantID)
+	}
+	return tx.tenantID, nil
+}
+
+// confineTx confines an open transaction to the tenant its context resolves,
+// for this router's strategy. It is what makes a *Tx carry its tenant, and it
+// is the ONE place that does — [TenantRouter.Tx] calls it, and so does
+// [Client.BeginTx] when the client is this router's BaseClient.
+//
+// A transaction that is already confined is left alone, so the two callers
+// compose: router.Tx over a stamped BaseClient confines once, in BeginTx, and
+// emits set_config once. A context with NO tenant leaves the transaction as
+// it was — there is nobody to confine it to — and it is the caller's job to
+// have refused that earlier when it matters (router.Tx does). A non-empty
+// tenant that fails validation is an error, never a bare transaction:
+// nothing here downgrades silently.
+//
+// Under RowLevelSecurityNative this is where `set_config('<NativeRLSVar>',
+// <tenant>, true)` runs — SET LOCAL, scoped to the transaction — so the
+// engine's policies filter every statement the transaction runs, raw SQL
+// included. Under the other strategies the confinement is applied per
+// statement by applyTenantConfinement, from the router and tenant recorded
+// here.
+func (r *TenantRouter) confineTx(ctx context.Context, tx *Tx) error {
+	if tx.router != nil {
+		return nil
+	}
+	tenantID := r.resolver(ctx)
+	if tenantID == "" {
+		return nil
+	}
+	if !validTenantID.MatchString(tenantID) {
+		return fmt.Errorf("invalid tenant_id: %s", tenantID)
+	}
+	if r.config.Strategy == RowLevelSecurityNative {
+		if tx.client.dialect.Name() != "postgres" {
+			return fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
+				ErrUnsupportedFeature, tx.client.dialect.Name())
+		}
+		if _, err := tx.tx.ExecContext(ctx, "SELECT set_config($1, $2, true)", r.config.defaultNativeRLSVar(), tenantID); err != nil {
+			return fmt.Errorf("native rls: set_config: %w", err)
+		}
+	}
+	tx.router = r
+	tx.tenantID = tenantID
+	return nil
 }
 
 // GetClient resolves the tenant ID from the context and returns the corresponding Client.
