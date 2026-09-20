@@ -252,9 +252,10 @@ func probeQk25LikeValueIsLiteralText(t *testing.T, e *env) verdict {
 // So the measurement is the VARIATION and its alignment: the six statements
 // are normalised (placeholder spelling and identifier quoting removed, since
 // those always differ and mean nothing here) and must fall into exactly two
-// shapes split along the doubling boundary, while the six BINDS must be one
-// and the same — the value is escaped identically everywhere, and an engine
-// that got a different value would be a different defect.
+// shapes split along the doubling boundary, while the six BINDS for a text
+// without a bracket must be one and the same. Then the bracket: `[` is a
+// wildcard on SQL Server alone and Oracle refuses `\[`, so for text with a
+// bracket exactly one bind differs and it is SQL Server's.
 //
 // The clients are dialect-only: they run over SQLite, so the statement fails
 // for the dialects whose placeholders SQLite cannot bind. That is irrelevant
@@ -306,12 +307,38 @@ func probeQk25DialectAwareLike(t *testing.T, e *env) verdict {
 			group[doubled] = s
 		}
 	}
-	if aligned && len(binds) == 1 {
-		return present
+	if !aligned || len(binds) != 1 {
+		t.Logf("shapes: %v; distinct binds: %d — the forms vary, but not exactly along the "+
+			"string-literal boundary with one bind for all", byShape, len(binds))
+		return partial
 	}
-	t.Logf("shapes: %v; distinct binds: %d — the forms vary, but not exactly along the "+
-		"string-literal boundary with one bind for all", byShape, len(binds))
-	return partial
+
+	// The second engine-specific fact, in the BIND this time: `[` opens a
+	// character class on SQL Server alone, and Oracle refuses an escape in
+	// front of it (ORA-01424, measured on the CI lane). So for text with a
+	// bracket exactly one engine binds a different value, and it is SQL
+	// Server; escaping it everywhere would have failed Oracle, escaping it
+	// nowhere would over-answer on SQL Server.
+	bracketBinds := map[string][]string{}
+	for _, d := range dialects {
+		c, rec := e.fresh(t, "qk25_bracket_"+d.Name(), quark.WithDialect(d))
+		rec.reset()
+		_, _ = quark.For[qk25Row](e.ctx, c).WhereContains("name", "a[b").Count()
+		bind := qk25LastArgs(rec)
+		bracketBinds[bind] = append(bracketBinds[bind], d.Name())
+	}
+	if len(bracketBinds) != 2 {
+		t.Logf("the bracket is escaped the same way on every engine (%v): SQL Server "+
+			"needs it and Oracle refuses it", bracketBinds)
+		return partial
+	}
+	for _, names := range bracketBinds {
+		if len(names) == 1 && names[0] != "mssql" {
+			t.Logf("the engine that binds the bracket differently is %s, not SQL Server", names[0])
+			return partial
+		}
+	}
+	return present
 }
 
 // qk25DoublesEscapeLiteral says, per dialect name, whether the engine's

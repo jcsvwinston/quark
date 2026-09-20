@@ -17,19 +17,20 @@ import (
 const likeEscapeChar = `\`
 
 // EscapeLike escapes text so that a LIKE pattern built around it matches the
-// text literally: `%`, `_`, `[` and the backslash itself are prefixed with a
+// text literally: `%`, `_` and the backslash itself are prefixed with a
 // backslash. The result is meant for the escaped LIKE surfaces —
 // [Query.WhereLike], [TypedStringColumn.LikeEscaped], [Like] — which declare
 // the escape character on the statement; in a plain
 // `Where(col, "LIKE", …)` the backslash keeps whatever meaning the engine
 // gives it by default.
 //
-// `[` is escaped on every engine, not only on SQL Server where it opens a
-// character class: with the escape character declared, `\[` means a literal
-// bracket everywhere, so the escaped value is the same on all six engines.
-//
-// [Query.WhereContains], [Query.WhereStartsWith] and [Query.WhereEndsWith]
-// call this for you; reach for it when composing a pattern by hand:
+// The set is the portable one. SQL Server also reads `[` as the start of a
+// character class, but Oracle refuses an escape character in front of
+// anything that is not `%`, `_` or the escape itself (ORA-01424), so `[`
+// cannot be escaped everywhere. The text searches — [Query.WhereContains]
+// and friends — escape it on SQL Server and nowhere else, because they know
+// the dialect; when composing a pattern by hand for SQL Server, write `\[`
+// yourself.
 //
 //	quark.For[Doc](ctx, c).WhereLike("title", "%"+quark.EscapeLike(userText)+"%")
 func EscapeLike(text string) string {
@@ -40,8 +41,53 @@ var likeEscaper = strings.NewReplacer(
 	likeEscapeChar, likeEscapeChar+likeEscapeChar,
 	"%", likeEscapeChar+"%",
 	"_", likeEscapeChar+"_",
+)
+
+// likeEscaperMSSQL is EscapeLike plus the bracket: on SQL Server `[` opens a
+// character class inside a LIKE pattern, so a user's `[` has to be escaped
+// there — and only there, because Oracle rejects `\[` outright (ORA-01424,
+// measured on the CI lane).
+var likeEscaperMSSQL = strings.NewReplacer(
+	likeEscapeChar, likeEscapeChar+likeEscapeChar,
+	"%", likeEscapeChar+"%",
+	"_", likeEscapeChar+"_",
 	"[", likeEscapeChar+"[",
 )
+
+// escapeLikeFor escapes user text for the engine it will run on: the portable
+// set everywhere, plus `[` on SQL Server.
+func escapeLikeFor(d Dialect, text string) string {
+	if d.Name() == "mssql" {
+		return likeEscaperMSSQL.Replace(text)
+	}
+	return EscapeLike(text)
+}
+
+// likeShape says how a text search wraps the user's text. The pattern is
+// composed at the last moment, once the dialect is known, because what needs
+// escaping in the text depends on the engine (escapeLikeFor).
+type likeShape int
+
+const (
+	likeGivenPattern likeShape = iota // the caller composed the pattern
+	likeContains                      // %text%
+	likeStartsWith                    // text%
+	likeEndsWith                      // %text
+)
+
+// likePatternFor composes the pattern of a text search for the dialect.
+func likePatternFor(d Dialect, shape likeShape, text string) string {
+	esc := escapeLikeFor(d, text)
+	switch shape {
+	case likeContains:
+		return "%" + esc + "%"
+	case likeStartsWith:
+		return esc + "%"
+	case likeEndsWith:
+		return "%" + esc
+	}
+	return text
+}
 
 // likeEscapeTail is the `ESCAPE '<c>'` clause for the dialect, spelled the way
 // that engine's string-literal rules require. MySQL and MariaDB read a
@@ -100,19 +146,19 @@ func (q *Query[T]) WhereNotLike(column, pattern string) *Query[T] {
 // a LIKE that declares its escape character. A `%` or `_` in the text is
 // matched as that character, on every engine.
 func (q *Query[T]) WhereContains(column, text string) *Query[T] {
-	return q.whereLike(column, "LIKE", "%"+EscapeLike(text)+"%")
+	return q.whereLike(column, "LIKE", likePatternFor(q.dialect, likeContains, text))
 }
 
 // WhereStartsWith adds a prefix search for text the user typed; see
 // [Query.WhereContains] for what happens to wildcards in it.
 func (q *Query[T]) WhereStartsWith(column, text string) *Query[T] {
-	return q.whereLike(column, "LIKE", EscapeLike(text)+"%")
+	return q.whereLike(column, "LIKE", likePatternFor(q.dialect, likeStartsWith, text))
 }
 
 // WhereEndsWith adds a suffix search for text the user typed; see
 // [Query.WhereContains] for what happens to wildcards in it.
 func (q *Query[T]) WhereEndsWith(column, text string) *Query[T] {
-	return q.whereLike(column, "LIKE", "%"+EscapeLike(text))
+	return q.whereLike(column, "LIKE", likePatternFor(q.dialect, likeEndsWith, text))
 }
 
 func (q *Query[T]) whereLike(column, operator, pattern string) *Query[T] {
@@ -148,19 +194,19 @@ func (c TypedStringColumn) NotLikeEscaped(pattern string) Predicate {
 // accessor a search box should call: a `%` the user typed is matched as a
 // percent sign, not as a wildcard.
 func (c TypedStringColumn) Contains(text string) Predicate {
-	return c.LikeEscaped("%" + EscapeLike(text) + "%")
+	return Predicate{column: c.name, operator: "LIKE", escape: true, likeShape: likeContains, likeText: text}
 }
 
 // StartsWith builds a prefix search for text the user typed; see
 // [TypedStringColumn.Contains].
 func (c TypedStringColumn) StartsWith(text string) Predicate {
-	return c.LikeEscaped(EscapeLike(text) + "%")
+	return Predicate{column: c.name, operator: "LIKE", escape: true, likeShape: likeStartsWith, likeText: text}
 }
 
 // EndsWith builds a suffix search for text the user typed; see
 // [TypedStringColumn.Contains].
 func (c TypedStringColumn) EndsWith(text string) Predicate {
-	return c.LikeEscaped("%" + EscapeLike(text))
+	return Predicate{column: c.name, operator: "LIKE", escape: true, likeShape: likeEndsWith, likeText: text}
 }
 
 // Like is the AST form of [Query.WhereLike]: `lhs LIKE pattern` with the
@@ -174,22 +220,30 @@ func NotLike(lhs Expr, pattern string) Expr {
 }
 
 // Contains is the AST form of [Query.WhereContains].
-func Contains(lhs Expr, text string) Expr { return Like(lhs, "%"+EscapeLike(text)+"%") }
+func Contains(lhs Expr, text string) Expr {
+	return likeExpr{lhs: lhs, shape: likeContains, pattern: text}
+}
 
 // StartsWith is the AST form of [Query.WhereStartsWith].
-func StartsWith(lhs Expr, text string) Expr { return Like(lhs, EscapeLike(text)+"%") }
+func StartsWith(lhs Expr, text string) Expr {
+	return likeExpr{lhs: lhs, shape: likeStartsWith, pattern: text}
+}
 
 // EndsWith is the AST form of [Query.WhereEndsWith].
-func EndsWith(lhs Expr, text string) Expr { return Like(lhs, "%"+EscapeLike(text)) }
+func EndsWith(lhs Expr, text string) Expr {
+	return likeExpr{lhs: lhs, shape: likeEndsWith, pattern: text}
+}
 
 type likeExpr struct {
 	lhs     Expr
-	pattern string
+	pattern string    // the pattern, or the user's text when shape is a search
+	shape   likeShape // composed against the dialect in ToSQL
 	negate  bool
 }
 
 func (e likeExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
-	if err := likePattern(g, e.pattern); err != nil {
+	pattern := likePatternFor(d, e.shape, e.pattern)
+	if err := likePattern(g, pattern); err != nil {
 		return "", nil, err
 	}
 	lsql, largs, err := e.lhs.ToSQL(d, g)
@@ -201,7 +255,7 @@ func (e likeExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 		op = "NOT LIKE"
 	}
 	args := append([]any{}, largs...)
-	args = append(args, e.pattern)
+	args = append(args, pattern)
 	return fmt.Sprintf("%s %s ? %s", lsql, op, likeEscapeTail(d)), args, nil
 }
 

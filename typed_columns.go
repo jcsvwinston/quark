@@ -32,6 +32,11 @@ type Predicate struct {
 	operator string
 	value    any
 	escape   bool // an escaped LIKE: see condition.escape
+	// likeShape / likeText describe a text search (Contains, StartsWith,
+	// EndsWith) whose pattern is composed in WhereP, once the dialect is
+	// known: what needs escaping in the text depends on the engine.
+	likeShape likeShape
+	likeText  string
 }
 
 // toCondition lowers the predicate to the builder's internal condition with
@@ -163,8 +168,12 @@ func (q *Query[T]) WhereP(preds ...Predicate) *Query[T] {
 	conds := make([]condition, len(preds))
 	for i, p := range preds {
 		if p.escape {
-			if pattern, _ := p.value.(string); likePattern(c.guard, pattern) != nil {
-				c.err = likePattern(c.guard, pattern)
+			if p.likeShape != likeGivenPattern {
+				p.value = likePatternFor(c.dialect, p.likeShape, p.likeText)
+			}
+			pattern, _ := p.value.(string)
+			if err := likePattern(c.guard, pattern); err != nil {
+				c.err = err
 				return c
 			}
 		}

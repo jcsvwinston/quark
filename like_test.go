@@ -30,12 +30,14 @@ type likeRow struct {
 
 func (likeRow) TableName() string { return "like_rows" }
 
-func likeClient(t *testing.T, name string) (*Client, *txStatementRecorder) {
+func likeClient(t *testing.T, name string, opts ...any) (*Client, *txStatementRecorder) {
 	t.Helper()
 	rec := &txStatementRecorder{}
-	c, err := New("sqlite", "file:"+name+"?mode=memory&cache=shared",
+	opts = append([]any{
 		WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
-		WithQueryObserver(rec))
+		WithQueryObserver(rec),
+	}, opts...)
+	c, err := New("sqlite", "file:"+name+"?mode=memory&cache=shared", opts...)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -60,11 +62,49 @@ func TestEscapeLike(t *testing.T) {
 		"100%":       `100\%`,
 		"a_b":        `a\_b`,
 		`back\slash`: `back\\slash`,
-		"[x]":        `\[x]`,
+		"[x]":        "[x]", // portable set only: Oracle rejects `\[` (ORA-01424)
 		"":           "",
 	} {
 		if got := EscapeLike(in); got != want {
 			t.Errorf("EscapeLike(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// `[` opens a character class on SQL Server and nowhere else, and Oracle
+// refuses an escape in front of it: the text searches escape it for SQL
+// Server only, on every surface — string, typed and AST alike.
+func TestBracketIsEscapedForSQLServerOnly(t *testing.T) {
+	for _, d := range []Dialect{SQLite(), PostgreSQL(), MySQL(), MariaDB(), Oracle()} {
+		if got := escapeLikeFor(d, "a[b"); got != "a[b" {
+			t.Errorf("%s: escapeLikeFor(a[b) = %q, want the bracket untouched", d.Name(), got)
+		}
+	}
+	if got := escapeLikeFor(MSSQL(), "a[b"); got != `a\[b` {
+		t.Errorf("mssql: escapeLikeFor(a[b) = %q, want a\\[b", got)
+	}
+	// And the typed / AST searches compose against the dialect they run on,
+	// not against the one they were built under.
+	// A dialect-only client: it speaks SQL Server over SQLite, so nothing
+	// here is migrated or answered — the bind the observer records is the
+	// whole measurement.
+	rec := &txStatementRecorder{}
+	c, err := New("sqlite", "file:qk25_bracket_mssql?mode=memory&cache=shared",
+		WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		WithQueryObserver(rec), WithDialect(MSSQL()))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	for name, q := range map[string]*Query[likeRow]{
+		"WhereContains": For[likeRow](context.Background(), c).WhereContains("name", "["),
+		"typed":         For[likeRow](context.Background(), c).WhereP(NewTypedStringColumn("name").Contains("[")),
+		"AST":           For[likeRow](context.Background(), c).WhereExpr(Contains(Col("name"), "[")),
+	} {
+		rec.reset()
+		_, _ = q.Count() // the statement fails on SQLite with @p1; the bind is what matters
+		if len(rec.args) == 0 || rec.args[len(rec.args)-1] != `%\[%` {
+			t.Errorf("%s under mssql bound %v, want [%%\\[%%]", name, rec.args)
 		}
 	}
 }

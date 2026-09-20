@@ -41,6 +41,7 @@ type txStatementRecorder struct {
 	mu   sync.Mutex
 	all  []string
 	last string
+	args []any // the binds of the last statement
 }
 
 func (r *txStatementRecorder) ObserveQuery(ev QueryEvent) {
@@ -48,6 +49,7 @@ func (r *txStatementRecorder) ObserveQuery(ev QueryEvent) {
 	defer r.mu.Unlock()
 	r.all = append(r.all, ev.SQL)
 	r.last = ev.SQL
+	r.args = ev.Args
 }
 
 func (r *txStatementRecorder) read() string {
@@ -60,7 +62,7 @@ func (r *txStatementRecorder) read() string {
 func (r *txStatementRecorder) reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.all, r.last = nil, ""
+	r.all, r.last, r.args = nil, "", nil
 }
 
 // any reports whether some statement recorded since the last reset contains

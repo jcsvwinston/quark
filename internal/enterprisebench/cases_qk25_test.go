@@ -52,7 +52,9 @@ func controlsQk25() []control {
 				"literal that names the character: MySQL and MariaDB need `'\\\\'` and SQLite " +
 				"rejects it as more than one character. The probe normalises placeholders " +
 				"and quoting away and expects exactly two shapes along that boundary, with " +
-				"the six binds identical — the value is escaped the same way everywhere.",
+				"the six binds identical for plain text — and, for text with a `[`, exactly " +
+				"SQL Server binding differently: the bracket is a wildcard there alone, " +
+				"and Oracle refuses an escape in front of it (ORA-01424).",
 			probe: probeQk25DialectAwareLike,
 		},
 		{
