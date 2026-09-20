@@ -26,6 +26,7 @@ widths for as long as it existed.
 | `time.Time` | `TIMESTAMP` | `DATETIME` | `DATETIME` | `DATETIME` | `DATETIME2` | `TIMESTAMP` |
 | `[]byte` | `BYTEA` | `BLOB` | `BLOB` | `BLOB` | `VARBINARY(MAX)` | `BLOB` |
 | `time.Duration` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `NUMBER(19)` |
+| `[16]byte` (UUID-shaped, e.g. `uuid.UUID`) | `UUID` | `CHAR(36)` | `CHAR(36)` | `UUID` | `NCHAR(36)` | `VARCHAR2(36)` |
 | integer primary key | `BIGSERIAL PRIMARY KEY` | `BIGINT AUTO_INCREMENT PRIMARY KEY` | `BIGINT AUTO_INCREMENT PRIMARY KEY` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `BIGINT IDENTITY(1,1) PRIMARY KEY` | `NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY` |
 | `string` primary key | `VARCHAR(36) PRIMARY KEY` | `VARCHAR(36) PRIMARY KEY` | `VARCHAR(36) PRIMARY KEY` | `VARCHAR(36) PRIMARY KEY` | `NVARCHAR(36) PRIMARY KEY` | `VARCHAR2(36) PRIMARY KEY` |
 | `[]string`, `[]int64`, `map[string]any` | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` |
@@ -36,6 +37,7 @@ widths for as long as it existed.
 - **uint64** — Stored signed; values above 2⁶³−1 do not fit.
 - **float64 with precision=18,scale=4** — Use this for money: binary floats cannot represent every decimal.
 - **time.Duration** — Stored as an integer count of nanoseconds.
+- **[16]byte (UUID-shaped, e.g. uuid.UUID)** — The value travels in text form through the type's own Valuer/Scanner. SQL Server's UNIQUEIDENTIFIER is not used: its driver scans it in the engine's mixed-endian byte order.
 - **integer primary key** — Auto-increment.
 - **string primary key** — For UUID/ULID keys the caller supplies.
 - **[]string, []int64, map[string]any** — Serialised as text; no native array or JSONB column yet.

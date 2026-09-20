@@ -14,43 +14,34 @@ func controlsTipos() []control {
 			id:     "TYP-01",
 			family: "tipos",
 			title:  "native UUID column type for a UUID-shaped Go value",
-			want:   absent,
-			note: "There is no uuid type and no branch for one: a UUID-shaped value — " +
-				"16 bytes with the Valuer/Scanner pair google/uuid ships, which is the " +
-				"shape RegisterTypeMapper's own godoc uses — takes the TEXT fallback. It " +
-				"does go in and come back; what it loses is the type, and with it every " +
-				"reason to ask for one. Naming the column UUID needs RegisterTypeMapper, " +
-				"and TYP-02 measures what that costs on a key. The UUID-shaped thing that " +
-				"does work out of the box is a string primary key, which the PK builder " +
-				"renders as VARCHAR(36) — measured here too, because the note says it.",
+			want:   present,
+			note: "Closed at A8 S5: a 16-byte array — the shape of google/uuid.UUID — gets UUID on " +
+				"PostgreSQL and on SQLite (a declared type name there), CHAR(36) on MySQL/MariaDB, " +
+				"VARCHAR2(36) on Oracle and NCHAR(36) on SQL Server, whose UNIQUEIDENTIFIER the driver " +
+				"scans in the engine's mixed-endian byte order. The value travels through the type's " +
+				"own Valuer/Scanner and round-trips.",
 			probe: probeTiposUUIDNative,
 		},
 		{
 			id:     "TYP-02",
 			family: "tipos",
 			title:  "RegisterTypeMapper: custom SQL type in CREATE TABLE, primary key included",
-			want:   partial,
-			note: "The mapper's answer is what the DDL gets — measured. What is missing " +
-				"is the primary key: on a mapped PK column the mapper's type REPLACES " +
-				"the PRIMARY KEY fragment, and the table ships without a key. The probe " +
-				"inserts the same id twice and both rows land. The mapper is told " +
-				"IsPK=true, so it could emit the suffix itself; the example in the godoc " +
-				"and in the modeling guide — the one an application copies for UUID keys " +
-				"— does not. Round-trip per engine lives in internal/enginesuite.",
+			want:   present,
+			note: "Closed at A8 S5 (QK-29): a mapped key column keeps its PRIMARY KEY — the mapper's " +
+				"type is taken verbatim and the suffix appended unless the mapper wrote one. Before, " +
+				"the documented UUID-key example shipped tables without a key and the same id landed " +
+				"twice.",
 			probe: probeTiposTypeMapper,
 		},
 		{
 			id:     "TYP-03",
 			family: "tipos",
 			title:  "enum constrained by a CHECK declared on the model",
-			want:   absent,
-			note: "Neither grammar exists: quark:\"check=...\" and db:\"...,enum=...\" are " +
-				"both refused by the tag linter with ErrInvalidTag, and the migrator emits " +
-				"no CHECK of its own. The CHECK machinery is there for other doors " +
-				"(introspection on five engines, addCheck/dropCheck in ApplyPlan), so what " +
-				"is missing is the bridge from the model, not the DDL. Going further needs " +
-				"a live engine: SQLite does not introspect checks and answers addCheck " +
-				"with ErrUnsupportedFeature.",
+			want:   present,
+			note: "Closed at A8 S5: both grammars exist — quark:\"check=<expr>\" verbatim and " +
+				"db:\"...,enum=a|b\" as an IN list — and Migrate emits them as named table constraints " +
+				"(ck_<table>_<column>) in the shape SQLite's rebuild reads back; PlanMigration carries " +
+				"them in the desired schema.",
 			probe: probeTiposEnumCheck,
 		},
 		{

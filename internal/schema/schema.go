@@ -150,6 +150,12 @@ type FieldMeta struct {
 	// creates it after the table and PlanMigration proposes it when it is
 	// missing — the one input the plan takes for the index set (A8 S3).
 	IndexName string
+	// Check is the CHECK expression the model declares for this column —
+	// quark:"check=<expr>" verbatim, or the IN list built from
+	// db:"...,enum=a|b|c" — and "" when it declares none. Migrate emits it
+	// as a named table constraint (ck_<table>_<column>) and PlanMigration
+	// proposes it (A8 S5).
+	Check string
 
 	// SQL-type sizing options parsed from the db tag, e.g.
 	//   db:"name,size=512"
@@ -375,10 +381,13 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 		isVersion := false
 		tzName := ""
 		indexName := ""
+		check := parseDBEnum(field.Tag.Get("db"), dbTag)
 		if quarkTag := field.Tag.Get("quark"); quarkTag != "" {
-			for _, part := range strings.Split(quarkTag, ",") {
+			for _, part := range splitTagTokens(quarkTag) {
 				part = strings.TrimSpace(part)
-				if strings.HasPrefix(part, "rename:") {
+				if strings.HasPrefix(part, "check=") {
+					check = strings.TrimSpace(strings.TrimPrefix(part, "check="))
+				} else if strings.HasPrefix(part, "rename:") {
 					oldCol = strings.TrimPrefix(part, "rename:")
 				} else if strings.HasPrefix(part, "tz=") {
 					tzName = strings.TrimSpace(strings.TrimPrefix(part, "tz="))
@@ -441,6 +450,7 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 			TZName:    tzName,
 			TZ:        tzLoc,
 			IndexName: indexName,
+			Check:     check,
 		}
 		meta.Fields = append(meta.Fields, fm)
 		meta.FieldByCol[strings.ToLower(dbTag)] = &meta.Fields[len(meta.Fields)-1]
@@ -560,6 +570,64 @@ func parseDBTag(tag string) (col string, size, precision, scale int) {
 	return col, size, precision, scale
 }
 
+// splitTagTokens splits a quark tag on the commas that separate its tokens
+// — not on the ones inside parentheses or quotes, which belong to a
+// check=<expr> such as `check=status IN ('draft','live')`.
+func splitTagTokens(tag string) []string {
+	var out []string
+	depth := 0
+	quote := byte(0)
+	start := 0
+	for i := 0; i < len(tag); i++ {
+		ch := tag[i]
+		switch {
+		case quote != 0:
+			if ch == quote {
+				quote = 0
+			}
+		case ch == '\'' || ch == '"':
+			quote = ch
+		case ch == '(':
+			depth++
+		case ch == ')':
+			if depth > 0 {
+				depth--
+			}
+		case ch == ',' && depth == 0:
+			out = append(out, tag[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, tag[start:])
+}
+
+// parseDBEnum reads the enum=a|b|c option of a db tag and returns the CHECK
+// expression it means — `<column> IN ('a', 'b', 'c')` — or "" when the tag
+// has no enum. A quote inside a value is doubled, as SQL wants it.
+func parseDBEnum(tag, column string) string {
+	for _, opt := range strings.Split(tag, ",")[1:] {
+		opt = strings.TrimSpace(opt)
+		if !strings.HasPrefix(strings.ToLower(opt), "enum=") {
+			continue
+		}
+		raw := strings.TrimSpace(opt[len("enum="):])
+		vals := strings.Split(raw, "|")
+		quoted := make([]string, 0, len(vals))
+		for _, v := range vals {
+			v = strings.TrimSpace(v)
+			if v == "" {
+				continue
+			}
+			quoted = append(quoted, "'"+strings.ReplaceAll(v, "'", "''")+"'")
+		}
+		if len(quoted) == 0 {
+			return ""
+		}
+		return column + " IN (" + strings.Join(quoted, ", ") + ")"
+	}
+	return ""
+}
+
 // lintFieldTags checks every exported field's struct tags against the
 // vocabulary quark actually reads and returns one error naming EVERY
 // problem found, or nil (DX-8). Before this, a typo — quark:"notnull",
@@ -569,8 +637,8 @@ func parseDBTag(tag string) (col string, size, precision, scale int) {
 func lintFieldTags(t reflect.Type) error {
 	var problems []string
 
-	quarkTokens := "rename:<old>, tz=<iana>, not_null, unique, version, index, index=<name>"
-	dbOptions := "size, precision, scale"
+	quarkTokens := "rename:<old>, tz=<iana>, not_null, unique, version, index, index=<name>, check=<expr>"
+	dbOptions := "size, precision, scale, enum=<a|b|c>"
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
@@ -610,11 +678,16 @@ func lintFieldTags(t reflect.Type) error {
 
 		// quark: closed token vocabulary.
 		if quarkTag := field.Tag.Get("quark"); quarkTag != "" {
-			for _, part := range strings.Split(quarkTag, ",") {
+			for _, part := range splitTagTokens(quarkTag) {
 				part = strings.TrimSpace(part)
 				switch {
 				case part == "", part == "not_null", part == "unique", part == "version", part == "index":
 				case strings.HasPrefix(part, "rename:"), strings.HasPrefix(part, "tz="):
+				case strings.HasPrefix(part, "check="):
+					if strings.TrimSpace(strings.TrimPrefix(part, "check=")) == "" {
+						problems = append(problems, fmt.Sprintf(
+							"%s: quark:\"check=\" carries no expression — write check=<expr>, e.g. check=qty >= 0", name))
+					}
 				case strings.HasPrefix(part, "index="):
 					if strings.TrimSpace(strings.TrimPrefix(part, "index=")) == "" {
 						problems = append(problems, fmt.Sprintf(
@@ -652,6 +725,11 @@ func lintFieldTags(t reflect.Type) error {
 					if n, err := strconv.Atoi(val); err != nil || n <= 0 {
 						problems = append(problems, fmt.Sprintf(
 							"%s: db tag option %s=%q must be a positive integer", name, key, val))
+					}
+				case "enum":
+					if strings.Trim(val, "| ") == "" {
+						problems = append(problems, fmt.Sprintf(
+							"%s: db tag option enum=%q names no value — write enum=a|b|c", name, val))
 					}
 				default:
 					problems = append(problems, fmt.Sprintf(

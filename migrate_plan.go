@@ -234,7 +234,7 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 		// the non-column surface struct tags DO carry. A unique column
 		// travels on the column (Migrate renders it as a constraint), and
 		// the plan matches its engine-named backing index by shape.
-		tables = append(tables, Table{Name: meta.Table, Columns: columns, Indexes: modelIndexes(meta)})
+		tables = append(tables, Table{Name: meta.Table, Columns: columns, Indexes: modelIndexes(meta), Checks: modelChecks(meta)})
 		for _, rel := range meta.Relations {
 			if rel.Type != "many_to_many" || rel.JoinTable == "" {
 				continue
