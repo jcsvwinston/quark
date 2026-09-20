@@ -437,7 +437,7 @@ func probeMigSchemaFromDocument(t *testing.T, e *env) verdict {
 
 type mig03Doc struct {
 	ID   int64  `db:"id" pk:"true"`
-	Slug string `db:"slug"`
+	Slug string `db:"slug" quark:"index"`
 }
 
 func (mig03Doc) TableName() string { return "mig03_docs" }
@@ -459,33 +459,64 @@ func (mig03Doc) TableName() string { return "mig03_docs" }
 func probeMigModelDeclaredIndexes(t *testing.T, e *env) verdict {
 	c, _ := e.fresh(t, "mig03_model_indexes")
 
+	// Migrate creates the table AND the index the model declares, and the
+	// plan against that schema is empty: the declaration is one input read
+	// by both, so a freshly migrated model has nothing to plan.
 	if err := c.Migrate(e.ctx, &mig03Doc{}); err != nil {
 		t.Fatalf("migrate the model: %v", err)
 	}
-	if err := c.CreateIndex(e.ctx, "mig03_docs", "idx_mig03_docs_slug", []string{"slug"}, true); err != nil {
-		t.Fatalf("create the index out of the model's sight: %v", err)
-	}
-
-	withIndex, err := c.PlanMigration(e.ctx, &mig03Doc{})
+	live, err := c.IntrospectSchema(e.ctx)
 	if err != nil {
-		t.Fatalf("plan against the indexed schema: %v", err)
+		t.Fatalf("introspect: %v", err)
 	}
-	if !withIndex.IsEmpty() {
-		t.Logf("the plan does mention the undeclared index: %s", opNames(withIndex.Ops))
-		return partial
+	docs, ok := tableOf(live, "mig03_docs")
+	if !ok {
+		t.Fatalf("Migrate created no table")
+	}
+	declaredCreated := hasIndex(docs, "idx_mig03_docs_slug")
+	afterMigrate, err := c.PlanMigration(e.ctx, &mig03Doc{})
+	if err != nil {
+		t.Fatalf("plan against the migrated schema: %v", err)
 	}
 
+	// An index nobody declared is left alone: the plan must not propose
+	// dropping a catalog object the model is silent about.
+	if err := c.CreateIndex(e.ctx, "mig03_docs", "idx_mig03_docs_manual", []string{"id"}, false); err != nil {
+		t.Fatalf("create the undeclared index: %v", err)
+	}
+	withManual, err := c.PlanMigration(e.ctx, &mig03Doc{})
+	if err != nil {
+		t.Fatalf("plan with the undeclared index: %v", err)
+	}
+
+	// The declared index goes missing: the plan has to propose it, and
+	// only it.
 	rawExec(t, c, "DROP INDEX idx_mig03_docs_slug")
-	withoutIndex, err := c.PlanMigration(e.ctx, &mig03Doc{})
+	withoutDeclared, err := c.PlanMigration(e.ctx, &mig03Doc{})
 	if err != nil {
 		t.Fatalf("plan against the de-indexed schema: %v", err)
 	}
-	if !withoutIndex.IsEmpty() {
-		t.Logf("the plan reacts to the missing index: %s", opNames(withoutIndex.Ops))
+	proposesDeclared := false
+	onlyThat := len(withoutDeclared.Ops) == 1
+	for _, op := range withoutDeclared.Ops {
+		if ci, ok := op.(quark.OpCreateIndex); ok && ci.Index.Name == "idx_mig03_docs_slug" {
+			proposesDeclared = true
+		}
+	}
+
+	switch {
+	case declaredCreated && afterMigrate.IsEmpty() && withManual.IsEmpty() && proposesDeclared && onlyThat:
+		return present
+	case !declaredCreated && afterMigrate.IsEmpty() && withoutDeclared.IsEmpty():
+		// Neither Migrate nor the plan read the declaration: the S0 state.
+		t.Logf("the same empty plan with and without the index: the index set is not an input to the plan built from models")
+		return absent
+	default:
+		t.Logf("declared index created by Migrate=%v; plan after migrate: %s; plan with an undeclared index: %s; "+
+			"plan without the declared index: %s", declaredCreated, opNames(afterMigrate.Ops),
+			opNames(withManual.Ops), opNames(withoutDeclared.Ops))
 		return partial
 	}
-	t.Logf("the same empty plan with and without the index: the index set is not an input to the plan built from models")
-	return absent
 }
 
 // --- MIG-04 ------------------------------------------------------------------

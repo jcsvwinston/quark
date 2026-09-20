@@ -137,9 +137,27 @@ err := client.AddForeignKey(ctx, "orders", "fk_orders_user",
 ```
 
 `AddForeignKey` needs an engine that supports `ALTER TABLE ADD CONSTRAINT`.
-SQLite does not, so declare the foreign key at table-create time there instead.
+SQLite does not, so declare the foreign key at table-create time there instead —
+a `Table` in a desired `Schema` carries its `ForeignKeys`, and `ApplyPlan` emits
+them inline with the `CREATE TABLE` on every engine (see below).
 For partial or expression indexes, included columns, or engine-specific options,
 write a versioned migration with explicit SQL.
+
+A model can declare a single-column index in its tags, and both `Migrate` and
+`PlanMigration` read the declaration:
+
+```go
+type User struct {
+    ID    int64  `db:"id" pk:"true"`
+    Email string `db:"email" quark:"unique"`          // a UNIQUE column constraint
+    Slug  string `db:"slug" quark:"index"`            // idx_users_slug
+    Org   string `db:"org" quark:"index=ix_users_org"` // a name of your choosing
+}
+```
+
+`Migrate` creates the index after the table; `PlanMigration` proposes it when it
+is missing and treats a live index of the same shape under another name — the
+one the engine gives a `unique` column — as already there.
 
 ## Versioned Go migrations
 
@@ -275,11 +293,22 @@ if !plan.IsEmpty() {
 }
 ```
 
-The desired schema includes the many-to-many join tables your models declare,
-and the live indexes, foreign keys, and check constraints are carried over as
-well — so a plan never proposes dropping an object your tags simply don't
-describe. A table created by `ApplyPlan` is interchangeable with one from
-`Migrate`: same primary key, same auto-increment shape.
+The desired schema includes the many-to-many join tables your models declare
+and the indexes they declare with `quark:"index"`. Live indexes, foreign keys
+and check constraints the tags say nothing about are carried over — so a plan
+never proposes dropping an object your models simply don't describe. A table
+created by `ApplyPlan` is interchangeable with one from `Migrate`: same primary
+key, same auto-increment shape.
+
+A `Schema` you build by hand, or read from a document, can carry more than the
+tags can: `Indexes`, `ForeignKeys` and `Checks` on each `Table`. `ApplyPlan`
+creates the whole table — foreign keys and checks inline with the `CREATE
+TABLE`, which is the one form SQLite accepts, and each index as its own
+`CREATE INDEX` — and `Diff` orders new tables so a referenced table exists
+before the table that references it. Re-diffing the desired schema against the
+result proposes nothing: the loop converges. A foreign key is matched by its
+columns and target, not by its name (SQLite keeps none), and an unspecified
+`ON DELETE` / `ON UPDATE` is the engine default, `NO ACTION`.
 
 How `ApplyPlan` recovers from a mid-plan failure depends on the engine:
 

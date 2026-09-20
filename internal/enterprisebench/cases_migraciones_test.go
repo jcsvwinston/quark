@@ -23,40 +23,37 @@ func controlsMigraciones() []control {
 		{
 			id:     "MIG-01",
 			family: fam,
-			title:  "Declarative diff: a desired schema is compared against the live one and applied, tables and columns only",
-			want:   partial,
-			note: "The loop does not converge. A desired schema carrying an index and a foreign key applies " +
-				"with a nil error and neither reaches the database, so re-diffing the same desired schema " +
-				"against the result proposes the same work again. Tables and columns do round-trip — the " +
-				"probe reads them back and classifies the residual, so a residual carrying table or column " +
-				"work answers absent instead of this partial.",
+			title:  "Declarative diff: a desired schema is compared against the live one, applied, and the loop converges — tables, columns, indexes and foreign keys",
+			want:   present,
+			note: "Closed at A8 S3 (QK-27): OpCreateTable is emitted whole — foreign keys and checks inline, " +
+				"indexes as CREATE INDEX — Diff orders new tables parents-first, and a foreign key is matched " +
+				"by what it is (columns, target) rather than by a name SQLite does not keep, so re-diffing the " +
+				"applied schema proposes nothing.",
 			probe: probeMigDeclarativeDiff,
 		},
 		{
 			id:     "MIG-02",
 			family: fam,
 			title: "A desired schema can come from a versionable document instead of compiled Go models, " +
-				"tables and columns only",
-			want: partial,
+				"and everything it declares arrives",
+			want: present,
 			note: "A JSON document deserialises into quark.Schema (every field is exported) and goes through " +
-				"quark.Diff and ApplyPlan with no Go model compiled in: its tables and columns reach the " +
-				"database. What it declares beyond them does not — the index and the foreign key in the " +
-				"document apply with a nil error and never arrive, the same half MIG-01 measures from a " +
-				"hand-built schema. PlanMigration is not the way in: it reflects over Go values, which is " +
-				"MIG-11's subject.",
+				"quark.Diff and ApplyPlan with no Go model compiled in; since A8 S3 the index and the foreign " +
+				"key it declares arrive with the table. PlanMigration is not the way in: it reflects over Go " +
+				"values, which is MIG-11's subject.",
 			probe: probeMigSchemaFromDocument,
 		},
 		{
 			id:     "MIG-03",
 			family: fam,
-			title:  "The plan built from models carries the index set (proposes creating or dropping indexes)",
-			want:   absent,
-			note: "The plan is identical with the index present and with it dropped. The mechanism is not a " +
-				"blind diff: PlanMigration copies the live index set (and the FKs) into the desired schema " +
-				"before diffing — mergeNonColumnSurface, on purpose, so a model that cannot declare an index " +
-				"never proposes dropping one. quark.Diff does compare indexes and emits OpCreateIndex / " +
-				"OpDropIndex; the ops exist and apply, but only if the caller builds the desired schema by " +
-				"hand (MIG-01) or reads it from a document (MIG-02).",
+			title:  "The plan built from models carries the model's index set: a declared index (quark:\"index\") that is missing is proposed, and an undeclared live index is left alone",
+			want:   present,
+			note: "Retitled at S3. The S0 title asked for \"creating or dropping\"; dropping an index the model " +
+				"does not name is the one thing the plan refuses on purpose, because a model that cannot " +
+				"describe every catalog object must not propose destroying the ones it is silent about. " +
+				"What the plan does carry is the index set the model DECLARES: Migrate creates it, " +
+				"PlanMigration proposes it when missing, and a quark:\"unique\" column is matched to its " +
+				"engine-named backing index by shape.",
 			probe: probeMigModelDeclaredIndexes,
 		},
 		{
@@ -84,16 +81,12 @@ func controlsMigraciones() []control {
 		{
 			id:     "MIG-06",
 			family: fam,
-			title:  "ApplyPlan is all-or-nothing on SQLite, and reports success for a CREATE TABLE it applied in part",
-			want:   partial,
-			note: "The rollback half holds: a failing second op leaves nothing of the first behind — and if it " +
-				"ever stops holding the probe answers absent, because that is the half this title publishes " +
-				"as a guarantee. The other half does not hold: an OpCreateTable carrying an index creates " +
-				"the table without it and returns nil — the columns the op declares are read back from the " +
-				"catalog and the residual classified, so a create that also started losing columns answers " +
-				"absent instead of this partial. The engines with no transactional DDL (MySQL, " +
-				"MariaDB, Oracle) and their resumable checkpoint path need a live engine — " +
-				"internal/enginesuite.",
+			title:  "ApplyPlan is all-or-nothing on SQLite, and a CREATE TABLE it reports as applied is applied whole",
+			want:   present,
+			note: "The rollback half: a failing second op leaves nothing of the first behind. The other half " +
+				"since A8 S3: an OpCreateTable carrying an index creates the table WITH it (QK-27). The " +
+				"engines with no transactional DDL (MySQL, MariaDB, Oracle) and their resumable checkpoint " +
+				"path need a live engine — internal/enginesuite.",
 			probe: probeMigApplyPlan,
 		},
 		{
