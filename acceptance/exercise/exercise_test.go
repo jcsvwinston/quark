@@ -83,6 +83,11 @@ func TestExercisersSQLite(t *testing.T) {
 		QF("NewTypedColumn"), QF("Col"), QF("Lit"), QF("Eq"), QF("NewWindow"), QF("Over"), QF("RowNumber"),
 		QF("(*JoinBuilder[T]).On"), QF("(*JoinBuilder[T]).OnRaw"),
 		QF("(*TrackedQuery[T]).Find"), QF("(*Tracked[T]).Save"),
+		// LIKEESCAPE (QK-25, A8 S2): las superficies escapadas de LIKE.
+		QM("WhereLike"), QM("WhereNotLike"), QM("WhereContains"), QM("WhereStartsWith"), QM("WhereEndsWith"),
+		QF("EscapeLike"), QF("Like"), QF("NotLike"), QF("Contains"), QF("StartsWith"), QF("EndsWith"),
+		QF("(TypedStringColumn).Contains"), QF("(TypedStringColumn).StartsWith"), QF("(TypedStringColumn).EndsWith"),
+		QF("(TypedStringColumn).LikeEscaped"), QF("(TypedStringColumn).NotLikeEscaped"),
 		// Auditoría core (AQ-02/03/07 + PR-COH-02): superficie nueva.
 		QF("WhereInOf"), QF("DeleteBatchOf"), QM("WithoutAssociations"),
 		QF("NewWithDB"), QF("WithStrictColumns"),

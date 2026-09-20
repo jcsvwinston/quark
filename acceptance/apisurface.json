@@ -1112,6 +1112,16 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).WhereContains",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).WhereEndsWith",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereExpr",
       "kind": "method"
     },
@@ -1127,12 +1137,27 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).WhereLike",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereNot",
       "kind": "method"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).WhereNotLike",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereP",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).WhereStartsWith",
       "kind": "method"
     },
     {
@@ -1892,12 +1917,37 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(TypedStringColumn).Contains",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(TypedStringColumn).EndsWith",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedStringColumn).Like",
       "kind": "method"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(TypedStringColumn).LikeEscaped",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedStringColumn).NotLike",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(TypedStringColumn).NotLikeEscaped",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(TypedStringColumn).StartsWith",
       "kind": "method"
     },
     {
@@ -2067,6 +2117,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "Contains",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "CountDistinct",
       "kind": "func"
     },
@@ -2148,6 +2203,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Divide",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "EndsWith",
       "kind": "func"
     },
     {
@@ -2259,6 +2319,11 @@
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrUnsupportedFeature",
       "kind": "var"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "EscapeLike",
+      "kind": "func"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2443,6 +2508,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Lead",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "Like",
       "kind": "func"
     },
     {
@@ -2653,6 +2723,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NotInSub",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "NotLike",
       "kind": "func"
     },
     {
@@ -3008,6 +3083,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SomeOf",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StartsWith",
       "kind": "func"
     },
     {

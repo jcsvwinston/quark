@@ -117,7 +117,10 @@ AccountColumns.Age.Eq("x")    // compile error: Age wants an int, got string
 ```
 
 Each handle offers `Eq`/`Neq`/`Gt`/`Gte`/`Lt`/`Lte`/`In`/`NotIn`/`Between`/
-`IsNull`/`IsNotNull`, typed to the field; string columns add `Like`/`NotLike`.
+`IsNull`/`IsNotNull`, typed to the field; string columns add `Like`/`NotLike`
+(a pattern, under the engine's default escape rules) and the escaped searches
+`Contains`/`StartsWith`/`EndsWith`/`LikeEscaped`, which take text the user typed
+and declare the escape character on the statement.
 `WhereP` is **pure compile-time sugar** — each predicate lowers to exactly what
 `Where("email", "=", v)` produces, so the two forms mix freely on one query. (`OR`
 and grouping aren't on the typed API; use the string `Or` helper.)

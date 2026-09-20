@@ -953,6 +953,7 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		sqlBuf.WriteString(cond.operator)
 		sqlBuf.WriteString(" ")
 		sqlBuf.WriteString(q.dialect.Placeholder(argIndex))
+		sqlBuf.WriteString(likeTail(cond, q.dialect))
 		args = append(args, cond.value)
 		argIndex++
 	}
@@ -1183,6 +1184,7 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 		sql.WriteString(cond.operator)
 		sql.WriteString(" ")
 		sql.WriteString(q.dialect.Placeholder(argIndex))
+		sql.WriteString(likeTail(cond, q.dialect))
 		args = append(args, cond.value)
 		argIndex++
 	}
@@ -1266,6 +1268,7 @@ func (q *BaseQuery) buildUpdateMap(data map[string]any) (string, []any, error) {
 			sql.WriteString(cond.operator)
 			sql.WriteString(" ")
 			sql.WriteString(q.dialect.Placeholder(argIndex))
+			sql.WriteString(likeTail(cond, q.dialect))
 			args = append(args, cond.value)
 			argIndex++
 		}
@@ -1571,6 +1574,7 @@ func (q *Query[T]) hardDeleteWhere() (int64, error) {
 			sql.WriteString(cond.operator)
 			sql.WriteString(" ")
 			sql.WriteString(q.dialect.Placeholder(argIndex))
+			sql.WriteString(likeTail(cond, q.dialect))
 			args = append(args, cond.value)
 			argIndex++
 		}

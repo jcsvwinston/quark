@@ -23,6 +23,11 @@ type condition struct {
 	group     []condition // sub-conditions for grouping
 	isRaw     bool        // if true, column is not quoted (used for JSON/Expressions)
 	extraArgs []any       // additional bind args carried by the column SQL fragment
+	// escape marks a LIKE / NOT LIKE whose statement declares the escape
+	// character (WhereLike, WhereContains, the typed and AST forms). Every
+	// renderer appends likeTail for it, so the clause is the same in a
+	// SELECT, an UPDATE and a DELETE (QK-25).
+	escape bool
 	// (e.g. JSON path components). The fragment uses '?' as a neutral
 	// bind marker that buildWhereClause substitutes for the dialect's
 	// placeholder syntax at the correct argIndex.

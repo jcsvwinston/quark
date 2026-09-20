@@ -36,6 +36,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("QueryBuilder", func(t *testing.T) {
 		testQueryBuilder(ctx, t, client)
 	})
+	t.Run("LikeEscape", func(t *testing.T) {
+		testLikeEscape(ctx, t, client)
+	})
 
 	t.Run("Transactions", func(t *testing.T) {
 		testTransactions(ctx, t, client)
@@ -503,6 +506,104 @@ func testQueryBuilder(ctx context.Context, t *testing.T, client *quark.Client) {
 		if selResult[0].Age != 0 {
 			t.Errorf("expected Age to be zero (not selected), got %d", selResult[0].Age)
 		}
+	}
+}
+
+// testLikeEscape proves the `LIKE ? ESCAPE '<c>'` form on the engine this
+// lane runs (QK-25, control LIKE-07): the tail is spelled per engine — MySQL
+// and MariaDB need the backslash doubled inside the literal, SQLite rejects
+// the doubled one — so the proof has to be per engine, and it is two things at
+// once: the STATEMENT carries the tail this engine needs, and the ROWS are the
+// ones a literal wildcard search owes. A second client over the same *sql.DB
+// carries the observer, because a client's observers are fixed at New.
+func testLikeEscape(ctx context.Context, t *testing.T, client *quark.Client) {
+	dropTable(client, "like_escape_rows")
+	type LikeEscapeRow struct {
+		ID   int64  `db:"id" pk:"true"`
+		Name string `db:"name"`
+	}
+	if err := client.Migrate(ctx, &LikeEscapeRow{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	for _, n := range []string{"alpha", "beta", "100% off", "under_score", "[bracket]", `back\slash`} {
+		row := LikeEscapeRow{Name: n}
+		if err := quark.For[LikeEscapeRow](ctx, client).Create(&row); err != nil {
+			t.Fatalf("seed %q: %v", n, err)
+		}
+	}
+
+	rec := &mockObserver{}
+	observed, err := quark.NewWithDB(client.Dialect().Name(), client.Raw(),
+		quark.WithDialect(client.Dialect()), quark.WithQueryObserver(rec))
+	if err != nil {
+		t.Fatalf("observer client: %v", err)
+	}
+
+	// The tail each engine gets, placeholder included. These are the forms
+	// the enterprise bench (LIKE-07) reads this file for, one per engine.
+	wantTail := map[string]string{
+		"sqlite":   `LIKE ? ESCAPE '\'`,
+		"postgres": `LIKE $1 ESCAPE '\'`,
+		"mysql":    `LIKE ? ESCAPE '\\'`,
+		"mariadb":  `LIKE ? ESCAPE '\\'`,
+		"mssql":    `LIKE @p1 ESCAPE '\'`,
+		"oracle":   `LIKE :1 ESCAPE '\'`,
+	}
+	engine := client.Dialect().Name()
+	tail, ok := wantTail[engine]
+	if !ok {
+		t.Fatalf("no expected LIKE ... ESCAPE form for dialect %q: add it, the proof is per engine", engine)
+	}
+
+	cases := []struct {
+		name string
+		q    *quark.Query[LikeEscapeRow]
+		want string
+	}{
+		{"contains %", quark.For[LikeEscapeRow](ctx, observed).WhereContains("name", "%"), "100% off"},
+		{"contains _", quark.For[LikeEscapeRow](ctx, observed).WhereContains("name", "_"), "under_score"},
+		{"contains [", quark.For[LikeEscapeRow](ctx, observed).WhereContains("name", "["), "[bracket]"},
+		{"contains backslash", quark.For[LikeEscapeRow](ctx, observed).WhereContains("name", `\`), `back\slash`},
+		{"hand-authored pattern", quark.For[LikeEscapeRow](ctx, observed).WhereLike("name", `%\%%`), "100% off"},
+		{"typed Contains", quark.For[LikeEscapeRow](ctx, observed).WhereP(quark.NewTypedStringColumn("name").Contains("%")), "100% off"},
+		{"AST Contains", quark.For[LikeEscapeRow](ctx, observed).WhereExpr(quark.Contains(quark.Col("name"), "%")), "100% off"},
+	}
+	for _, tc := range cases {
+		rec.mu.Lock()
+		rec.events = nil
+		rec.mu.Unlock()
+		rows, err := tc.q.List()
+		if err != nil {
+			t.Fatalf("%s on %s: %v", tc.name, engine, err)
+		}
+		rec.mu.Lock()
+		var stmt string
+		if len(rec.events) > 0 {
+			stmt = rec.events[len(rec.events)-1].SQL
+		}
+		rec.mu.Unlock()
+		if !strings.Contains(stmt, tail) {
+			t.Errorf("%s on %s: statement does not carry %q: %s", tc.name, engine, tail, stmt)
+		}
+		if len(rows) != 1 || rows[0].Name != tc.want {
+			t.Errorf("%s on %s: got %d rows %v, want exactly %q", tc.name, engine, len(rows), rows, tc.want)
+		}
+	}
+
+	// And the plain form is what it always was on this engine: an opaque
+	// pattern, no tail.
+	rec.mu.Lock()
+	rec.events = nil
+	rec.mu.Unlock()
+	if _, err := quark.For[LikeEscapeRow](ctx, observed).Where("name", "LIKE", "%a%").List(); err != nil {
+		t.Fatalf("plain LIKE on %s: %v", engine, err)
+	}
+	rec.mu.Lock()
+	plain := rec.events[len(rec.events)-1].SQL
+	rec.mu.Unlock()
+	// The clause, not the word: the table is called like_escape_rows.
+	if strings.Contains(plain, " ESCAPE '") {
+		t.Errorf("the plain LIKE grew an ESCAPE tail on %s: %s", engine, plain)
 	}
 }
 

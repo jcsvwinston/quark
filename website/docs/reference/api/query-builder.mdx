@@ -16,6 +16,8 @@ q := quark.For[User](ctx, client)
 | `WhereIn(column string, values []any)` | Adds `column IN (...)`. |
 | `WhereInOf[T, V](q *Query[T], column string, values []V)` | Package-level typed-slice form of `WhereIn` (no `[]any` conversion loop). |
 | `WhereBetween(column string, start, end any)` | Adds `column BETWEEN ? AND ?`. |
+| `WhereLike(column, pattern string)` / `WhereNotLike` | Adds `column LIKE ? ESCAPE '\'`: a pattern whose backslash escapes the next character on every engine. |
+| `WhereContains(column, text string)` / `WhereStartsWith` / `WhereEndsWith` | Searches for text the user typed, escaped with `EscapeLike` and wrapped in the wildcards named. |
 | `WhereNot(column, operator string, value any)` | Adds `NOT (column operator value)`. |
 | `Or(fn func(*Query[T]) *Query[T])` | Adds a grouped OR branch. |
 | `WhereJSON(column, path, operator string, value any)` | Adds a dialect JSON extraction predicate. |
@@ -89,6 +91,24 @@ orders, err := quark.For[Order](ctx, client).
     WhereBetween("created_at", start, end).
     List()
 ```
+
+## WhereLike and the text searches
+
+`Where(col, "LIKE", pattern)` emits the pattern as is, under the engine's default
+escape rules. The escaped forms declare the character on the statement:
+
+```go
+quark.For[Doc](ctx, client).WhereContains("title", "100%").List()
+// "title" LIKE ? ESCAPE '\'   bound to  %100\%%
+quark.For[Doc](ctx, client).WhereLike("ref", "INV-"+quark.EscapeLike(id)+"-%").List()
+```
+
+`EscapeLike` prefixes `%`, `_`, `[` and `\` with a backslash. The tail is spelled
+`ESCAPE '\\'` on MySQL and MariaDB, whose parsers read a lone backslash inside a
+literal as an escape, and `ESCAPE '\'` everywhere else. A pattern ending in a
+dangling backslash returns `ErrInvalidQuery` before any SQL runs. The typed
+columns offer `Contains` / `StartsWith` / `EndsWith` / `LikeEscaped` and the AST
+`quark.Like` / `quark.Contains` / `quark.StartsWith` / `quark.EndsWith`.
 
 ## WhereNot
 

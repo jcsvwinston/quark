@@ -45,6 +45,7 @@ membership against the model's metadata — on top of the guard; see
 | Column / table names | `"name"`, `"created_at"`, `"users"` | Lexical: must match `[A-Za-z_][A-Za-z0-9_]*`, not be a reserved SQL keyword, and be ≤64 characters. Rejections return `ErrInvalidIdentifier`. |
 | Qualified columns (queries with joins) | `"users.id"`, `"orders.total"` | One dot at most; **each segment** must independently pass the identifier rules above, and each is quoted separately (`"users"."id"`). Only accepted where the query carries a JOIN (and always by the `Col` AST leaf). |
 | Operators | `"="`, `">="`, `"LIKE"`, `"IN"` | Checked against an allowed operator set; anything else returns `ErrInvalidQuery`. |
+| Escaped LIKE patterns | `WhereLike("ref", "abc\\")` | A pattern that ends in a dangling escape character returns `ErrInvalidQuery` before the engine sees it; `WhereContains` and friends never produce one. |
 | Keywords | `"ASC"`, `"DESC"` | Checked against an allowed keyword list. |
 
 ## Runtime examples
