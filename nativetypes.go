@@ -190,13 +190,16 @@ func parseRangeBound(dst any, text string) error {
 		*d = n
 		return err
 	case *int:
-		n, err := strconv.ParseInt(text, 10, 64)
-		*d = int(n)
+		n, err := strconv.Atoi(text) // sized to int: no narrowing conversion
+		*d = n
 		return err
 	case *int32:
 		n, err := strconv.ParseInt(text, 10, 32)
-		*d = int32(n)
-		return err
+		if err != nil {
+			return err
+		}
+		*d = int32(n) // ParseInt with bitSize 32 already refused anything wider
+		return nil
 	case *float64:
 		f, err := strconv.ParseFloat(text, 64)
 		*d = f
