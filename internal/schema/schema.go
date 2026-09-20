@@ -144,6 +144,12 @@ type FieldMeta struct {
 	NotNull   bool   // from tag: quark:"not_null" or nullable:"false"
 	Default   string // from tag: default:"value"
 	Unique    bool   // from tag: quark:"unique"
+	// IndexName is the name of the secondary index the model declares on
+	// this column with quark:"index" (idx_<table>_<column>) or
+	// quark:"index=<name>"; "" when the column declares none. Migrate
+	// creates it after the table and PlanMigration proposes it when it is
+	// missing — the one input the plan takes for the index set (A8 S3).
+	IndexName string
 
 	// SQL-type sizing options parsed from the db tag, e.g.
 	//   db:"name,size=512"
@@ -368,6 +374,7 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 		unique := false
 		isVersion := false
 		tzName := ""
+		indexName := ""
 		if quarkTag := field.Tag.Get("quark"); quarkTag != "" {
 			for _, part := range strings.Split(quarkTag, ",") {
 				part = strings.TrimSpace(part)
@@ -375,6 +382,10 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 					oldCol = strings.TrimPrefix(part, "rename:")
 				} else if strings.HasPrefix(part, "tz=") {
 					tzName = strings.TrimSpace(strings.TrimPrefix(part, "tz="))
+				} else if part == "index" {
+					indexName = "idx_" + tableName + "_" + dbTag
+				} else if strings.HasPrefix(part, "index=") {
+					indexName = strings.TrimSpace(strings.TrimPrefix(part, "index="))
 				} else if part == "not_null" {
 					notNull = true
 				} else if part == "unique" {
@@ -429,6 +440,7 @@ func computeModelMeta(t reflect.Type) *ModelMeta {
 			IsVersion: isVersion,
 			TZName:    tzName,
 			TZ:        tzLoc,
+			IndexName: indexName,
 		}
 		meta.Fields = append(meta.Fields, fm)
 		meta.FieldByCol[strings.ToLower(dbTag)] = &meta.Fields[len(meta.Fields)-1]
@@ -557,7 +569,7 @@ func parseDBTag(tag string) (col string, size, precision, scale int) {
 func lintFieldTags(t reflect.Type) error {
 	var problems []string
 
-	quarkTokens := "rename:<old>, tz=<iana>, not_null, unique, version"
+	quarkTokens := "rename:<old>, tz=<iana>, not_null, unique, version, index, index=<name>"
 	dbOptions := "size, precision, scale"
 
 	for i := 0; i < t.NumField(); i++ {
@@ -601,8 +613,13 @@ func lintFieldTags(t reflect.Type) error {
 			for _, part := range strings.Split(quarkTag, ",") {
 				part = strings.TrimSpace(part)
 				switch {
-				case part == "", part == "not_null", part == "unique", part == "version":
+				case part == "", part == "not_null", part == "unique", part == "version", part == "index":
 				case strings.HasPrefix(part, "rename:"), strings.HasPrefix(part, "tz="):
+				case strings.HasPrefix(part, "index="):
+					if strings.TrimSpace(strings.TrimPrefix(part, "index=")) == "" {
+						problems = append(problems, fmt.Sprintf(
+							"%s: quark:\"index=\" names no index — write index for the default name or index=<name>", name))
+					}
 				case part == "notnull":
 					problems = append(problems, fmt.Sprintf(
 						"%s: quark:\"notnull\" is not a token — did you mean not_null? (valid: %s)", name, quarkTokens))

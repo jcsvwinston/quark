@@ -38,8 +38,14 @@ type Operation interface {
 
 // OpCreateTable is emitted when the desired schema has a table that
 // the current schema lacks. The full Table value (columns, indexes,
-// FKs, checks) is carried so the executor can emit CREATE TABLE +
-// CREATE INDEX + ALTER TABLE ADD CONSTRAINT in the right order.
+// FKs, checks) is carried, and the executor emits ALL of it: the
+// CREATE TABLE carries the foreign keys and the checks inline as
+// table constraints — the only form SQLite accepts, and one every
+// engine accepts — and the indexes follow as CREATE INDEX statements.
+// Diff orders the create-table ops so a referenced table is created
+// before the table that references it (see Diff). Before A8 S3 the
+// executor read only the columns and returned nil, and the same
+// desired schema re-proposed its indexes and keys forever (QK-27).
 type OpCreateTable struct {
 	Table Table
 }
@@ -256,11 +262,20 @@ func Diff(desired, current Schema) []Operation {
 
 	var ops []Operation
 
-	// 1. CREATE TABLE for tables only in desired, sorted by name.
+	// 1. CREATE TABLE for tables only in desired: parents before the
+	//    tables whose foreign keys reference them, name order otherwise.
+	//    An inline FOREIGN KEY needs its referenced table to exist on
+	//    every engine but SQLite, so the order is part of the plan, not
+	//    of the executor. A reference cycle falls back to name order and
+	//    the engine reports it.
+	var created []string
 	for _, name := range sortedKeys(desiredTables) {
 		if _, ok := currentTables[name]; ok {
 			continue
 		}
+		created = append(created, name)
+	}
+	for _, name := range orderByReferences(created, desiredTables) {
 		ops = append(ops, OpCreateTable{Table: desiredTables[name]})
 	}
 
@@ -288,6 +303,59 @@ func Diff(desired, current Schema) []Operation {
 	}
 
 	return ops
+}
+
+// orderByReferences returns the tables to create with every referenced
+// table ahead of the tables that reference it, keeping name order among
+// the tables that are otherwise free. References to tables that already
+// exist, or to the table itself, impose nothing. A cycle among the new
+// tables cannot be ordered: what remains is appended in name order.
+func orderByReferences(names []string, tables map[string]Table) []string {
+	creating := make(map[string]bool, len(names))
+	for _, n := range names {
+		creating[n] = true
+	}
+	pending := make(map[string]map[string]bool, len(names)) // table → unresolved parents
+	for _, n := range names {
+		deps := map[string]bool{}
+		for _, fk := range tables[n].ForeignKeys {
+			if fk.RefTable != n && creating[fk.RefTable] {
+				deps[fk.RefTable] = true
+			}
+		}
+		pending[n] = deps
+	}
+	var out []string
+	done := make(map[string]bool, len(names))
+	for len(out) < len(names) {
+		progressed := false
+		for _, n := range names { // names is sorted: ties resolve by name
+			if done[n] {
+				continue
+			}
+			free := true
+			for dep := range pending[n] {
+				if !done[dep] {
+					free = false
+					break
+				}
+			}
+			if free {
+				out = append(out, n)
+				done[n] = true
+				progressed = true
+			}
+		}
+		if !progressed {
+			for _, n := range names {
+				if !done[n] {
+					out = append(out, n)
+					done[n] = true
+				}
+			}
+		}
+	}
+	return out
 }
 
 // diffTable computes the per-table delta. See [Diff] for ordering
@@ -320,13 +388,26 @@ func diffTable(table string, cur, des Table) []Operation {
 	}
 
 	// --- Indexes (after columns: new indexes may reference new columns)
+	//
+	// Matched by name first, then by SHAPE: a desired index whose name the
+	// catalog does not have is satisfied by a live index on the same
+	// columns with the same uniqueness. That is what a quark:"unique"
+	// column looks like from the catalog — the engine named its backing
+	// index (sqlite_autoindex_…, <table>_<col>_key, …) and the model has
+	// no way to know that name — and proposing CREATE for an index whose
+	// twin exists would never converge.
 	var idxAdd, idxDrop []Operation
 	curIdx := indexesByName(cur.Indexes)
 	desIdx := indexesByName(des.Indexes)
+	satisfiedBy := map[string]bool{} // live indexes that stand in for a desired one by shape
 	for _, n := range sortedKeys(desIdx) {
 		di := desIdx[n]
 		ci, ok := curIdx[n]
 		if !ok {
+			if twin, found := indexByShape(cur.Indexes, di); found {
+				satisfiedBy[twin] = true
+				continue
+			}
 			idxAdd = append(idxAdd, OpCreateIndex{Table: table, Index: di})
 			continue
 		}
@@ -339,7 +420,7 @@ func diffTable(table string, cur, des Table) []Operation {
 		}
 	}
 	for _, n := range sortedKeys(curIdx) {
-		if _, ok := desIdx[n]; ok {
+		if _, ok := desIdx[n]; ok || satisfiedBy[n] {
 			continue
 		}
 		idxDrop = append(idxDrop, OpDropIndex{Table: table, Index: n})
@@ -432,6 +513,17 @@ func indexesByName(is []Index) map[string]Index {
 	return m
 }
 
+// indexByShape finds a live index with the same columns and uniqueness as
+// want, whatever its name, and returns its name. See diffTable.
+func indexByShape(live []Index, want Index) (string, bool) {
+	for _, li := range live {
+		if indexesEqual(li, want) {
+			return li.Name, true
+		}
+	}
+	return "", false
+}
+
 // checksByName indexes checks by their catalog-given name. NOTE:
 // per the Check godoc, Diff matches checks by name only — there's no
 // composite-key fallback like foreignKeysByMatchKey does for anonymous
@@ -450,21 +542,21 @@ func checksByName(cs []Check) map[string]Check {
 	return m
 }
 
-// foreignKeysByMatchKey indexes FKs for symmetric matching. When
-// Name is non-empty (PG / MySQL / MariaDB / MSSQL), the key IS the
-// name. When Name is empty (SQLite inline FKs), we build a composite
-// key from (columns, ref_table, ref_columns) so the same FK on both
-// sides matches even though both lack a name.
+// foreignKeysByMatchKey indexes FKs for symmetric matching by what a
+// foreign key IS — (columns, ref_table, ref_columns) — never by name.
+// SQLite keeps no constraint names, so a desired FK that names itself
+// and the same FK read back from a SQLite catalog would otherwise be
+// two different keys and the plan would re-propose it forever; on the
+// engines that do keep names, two FKs on the same columns to the same
+// target ARE the same constraint whatever they are called, and the
+// diff compares their actions with foreignKeysEqual.
 func foreignKeysByMatchKey(fks []ForeignKey) map[string]ForeignKey {
 	m := make(map[string]ForeignKey, len(fks))
 	for _, fk := range fks {
-		k := fk.Name
-		if k == "" {
-			k = fmt.Sprintf("[%s]→%s[%s]",
-				strings.Join(fk.Columns, ","),
-				fk.RefTable,
-				strings.Join(fk.RefColumns, ","))
-		}
+		k := fmt.Sprintf("[%s]→%s[%s]",
+			strings.Join(fk.Columns, ","),
+			fk.RefTable,
+			strings.Join(fk.RefColumns, ","))
 		m[k] = fk
 	}
 	return m
@@ -848,7 +940,12 @@ func foreignKeysEqual(a, b ForeignKey) bool {
 // the same FK from MySQL (NO ACTION).
 func fkActionsEqual(a, b string) bool {
 	norm := func(s string) string {
-		if s == "RESTRICT" {
+		s = strings.ToUpper(strings.TrimSpace(s))
+		// An unspecified action IS the default, and the default on every
+		// engine is NO ACTION: a desired key that says nothing and the
+		// same key read back from the catalog saying "NO ACTION" are one
+		// constraint, not a DROP + ADD on every plan (A8 S3).
+		if s == "" || s == "RESTRICT" {
 			return "NO ACTION"
 		}
 		return s

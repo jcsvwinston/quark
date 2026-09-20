@@ -134,13 +134,41 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 
 	_, err := c.db.ExecContext(ctx, query)
 	if err != nil {
-		if c.dialect.Name() == "oracle" && strings.Contains(err.Error(), "ORA-00955") {
-			return nil
+		if !(c.dialect.Name() == "oracle" && strings.Contains(err.Error(), "ORA-00955")) {
+			return fmt.Errorf("failed to create table %s: %w", meta.Table, err)
 		}
-		return fmt.Errorf("failed to create table %s: %w", meta.Table, err)
+		// ORA-00955: the table already exists. The indexes below are
+		// idempotent on every engine, so they still run.
+	}
+
+	// The indexes the model declares (quark:"index"), created after the
+	// table with the same idempotent helper CreateIndex uses. Migrate and
+	// PlanMigration read the same declaration, so a freshly migrated model
+	// plans to nothing (A8 S3).
+	for _, idx := range modelIndexes(meta) {
+		if err := c.createIndexOn(ctx, c.db, meta.Table, idx.Name, idx.Columns, idx.Unique); err != nil {
+			return fmt.Errorf("failed to create index %s on %s: %w", idx.Name, meta.Table, err)
+		}
 	}
 
 	return nil
+}
+
+// modelIndexes lists the secondary indexes a model declares through its
+// struct tags: one per column tagged quark:"index" / quark:"index=<name>".
+// A quark:"unique" column is NOT listed — Migrate renders it as a column
+// constraint and the engine names the backing index itself, so the plan
+// recognises it by shape (see diffTable) rather than by a name it cannot
+// know in advance.
+func modelIndexes(meta *ModelMeta) []Index {
+	var out []Index
+	for _, f := range meta.Fields {
+		if f.Column == "" || f.IndexName == "" {
+			continue
+		}
+		out = append(out, Index{Name: f.IndexName, Columns: []string{f.Column}})
+	}
+	return out
 }
 
 // CreateIndex creates an index on the given table and columns.

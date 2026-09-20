@@ -144,6 +144,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 		testSchemaIntrospection(ctx, t, client)
 	})
 
+	t.Run("PlanConstraints", func(t *testing.T) {
+		testPlanConstraints(ctx, t, client)
+	})
 	t.Run("PlanMigration", func(t *testing.T) {
 		testPlanMigration(ctx, t, client)
 	})
@@ -604,6 +607,114 @@ func testLikeEscape(ctx context.Context, t *testing.T, client *quark.Client) {
 	// The clause, not the word: the table is called like_escape_rows.
 	if strings.Contains(plain, " ESCAPE '") {
 		t.Errorf("the plain LIKE grew an ESCAPE tail on %s: %s", engine, plain)
+	}
+}
+
+// testPlanConstraints proves on the engine this lane runs that an
+// OpCreateTable is applied WHOLE (QK-27, A8 S3): the index, the foreign key
+// and the check the desired schema declares arrive with the table, Diff
+// creates the referenced table first, and re-diffing the applied schema
+// proposes nothing. Then the model side: a quark:"index" column is created
+// by Migrate and planned to nothing.
+func testPlanConstraints(ctx context.Context, t *testing.T, client *quark.Client) {
+	dropTable(client, "pc_child")
+	dropTable(client, "pc_parent")
+	engine := client.Dialect().Name()
+	intType := "INTEGER"
+	textType := "TEXT"
+	switch engine {
+	case "postgres":
+		intType, textType = "bigint", "text"
+	case "mysql", "mariadb":
+		intType, textType = "BIGINT", "VARCHAR(255)"
+	case "mssql":
+		intType, textType = "BIGINT", "NVARCHAR(255)"
+	case "oracle":
+		intType, textType = "NUMBER(19)", "VARCHAR2(255)"
+	}
+	desired := quark.Schema{Tables: []quark.Table{
+		{
+			Name:    "pc_parent",
+			Columns: []quark.Column{{Name: "id", Type: intType, PrimaryKey: true}},
+		},
+		{
+			// Named so that name order alone would create it FIRST: the
+			// parents-first ordering is what makes the inline FK valid on
+			// the engines that check the reference at CREATE time.
+			Name: "pc_child",
+			Columns: []quark.Column{
+				{Name: "id", Type: intType, PrimaryKey: true},
+				{Name: "parent_id", Type: intType, Nullable: true},
+				{Name: "email", Type: textType, Nullable: true},
+				{Name: "qty", Type: intType, Nullable: true},
+			},
+			Indexes:     []quark.Index{{Name: "idx_pc_child_email", Columns: []string{"email"}, Unique: true}},
+			ForeignKeys: []quark.ForeignKey{{Name: "fk_pc_child_parent", Columns: []string{"parent_id"}, RefTable: "pc_parent", RefColumns: []string{"id"}}},
+			Checks:      []quark.Check{{Name: "ck_pc_child_qty", Expression: "qty >= 0"}},
+		},
+	}}
+	current, err := client.IntrospectSchema(ctx)
+	if err != nil {
+		t.Fatalf("introspect: %v", err)
+	}
+	plan := quark.Plan{Ops: quark.Diff(desired, current)}
+	if err := client.ApplyPlan(ctx, plan); err != nil {
+		t.Fatalf("apply on %s: %v\n%s", engine, err, plan)
+	}
+	t.Cleanup(func() { dropTable(client, "pc_child"); dropTable(client, "pc_parent") })
+
+	live, err := client.IntrospectSchema(ctx)
+	if err != nil {
+		t.Fatalf("introspect after apply: %v", err)
+	}
+	var child quark.Table
+	for _, tb := range live.Tables {
+		if strings.EqualFold(tb.Name, "pc_child") {
+			child = tb
+		}
+	}
+	if len(child.Indexes) != 1 || !child.Indexes[0].Unique {
+		t.Errorf("%s: the index the op carried did not arrive: %+v", engine, child.Indexes)
+	}
+	if len(child.ForeignKeys) != 1 || !strings.EqualFold(child.ForeignKeys[0].RefTable, "pc_parent") {
+		t.Errorf("%s: the foreign key the op carried did not arrive: %+v", engine, child.ForeignKeys)
+	}
+	// The check is proven by the row it refuses: SQLite does not
+	// introspect checks, and the others spell the expression their own way.
+	if _, err := client.Raw().ExecContext(ctx, fmt.Sprintf("INSERT INTO %s (%s, %s) VALUES (1, -1)",
+		q(client, "pc_child"), q(client, "id"), q(client, "qty"))); err == nil {
+		t.Errorf("%s: the check the op carried did not arrive: a negative qty was accepted", engine)
+	}
+	// Convergence: what the residual proposes is the measurement. Type
+	// spelling is normalised by Diff; anything left is a real gap.
+	if residual := quark.Diff(desired, live); len(residual) != 0 {
+		names := make([]string, len(residual))
+		for i, op := range residual {
+			names[i] = op.String()
+		}
+		t.Errorf("%s: the loop does not converge, the applied schema re-proposes: %s", engine, strings.Join(names, " | "))
+	}
+
+	// The model side.
+	dropTable(client, "pc_docs")
+	type PCDoc struct {
+		ID   int64  `db:"id" pk:"true"`
+		Slug string `db:"slug" quark:"index"`
+	}
+	if err := client.Migrate(ctx, &PCDoc{}); err != nil {
+		t.Fatalf("migrate the model: %v", err)
+	}
+	t.Cleanup(func() { dropTable(client, "pc_docs") })
+	after, err := client.PlanMigration(ctx, &PCDoc{})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	// The suite's database holds other tests' tables, which this one-model
+	// plan proposes to drop; only what it says about pc_docs is measured.
+	for _, op := range after.Ops {
+		if strings.Contains(strings.ToLower(op.String()), "pc_docs") {
+			t.Errorf("%s: a freshly migrated model with a declared index plans to something about its table: %s", engine, op)
+		}
 	}
 }
 

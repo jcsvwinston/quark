@@ -384,11 +384,17 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 // generation clause owns the value (a catalog-sourced `nextval(...)`
 // default would conflict with SERIAL).
 //
-// Index / FK / check creation are NOT folded into the CREATE TABLE
-// emitted here; they come from subsequent ops in the plan
-// (OpCreateIndex / OpAddForeignKey / OpAddCheck). This keeps the
-// dispatch single-op-per-DDL — F3-4 transactional wrapper, when it
-// lands, will batch them cleanly.
+// The op carries the WHOLE table and this emits the whole table
+// (QK-27): the foreign keys and the checks go inline, as table-level
+// constraints — the only form SQLite has, and one every engine
+// accepts, so a plan means the same thing on the six — and each index
+// follows as its own CREATE INDEX through the same idempotent helper
+// CreateIndex uses. Before A8 S3 this read t.Columns and returned nil,
+// its godoc said the rest came "from subsequent ops", and Diff never
+// produced those ops for a new table: the same desired schema
+// re-proposed its indexes and keys after every apply. Diff orders the
+// create-table ops so a referenced table already exists (see Diff);
+// on SQLite the reference is not checked at CREATE time anyway.
 func (c *Client) applyCreateTable(ctx context.Context, exec Executor, t Table) error {
 	if len(t.Columns) == 0 {
 		return fmt.Errorf("applyCreateTable %q: table has no columns", t.Name)
@@ -450,9 +456,88 @@ func (c *Client) applyCreateTable(ctx context.Context, exec Executor, t Table) e
 		}
 		cols = append(cols, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(quoted, ", ")))
 	}
+	// Foreign keys, inline. Every identifier is validated as in the
+	// OpAddForeignKey branch of applyOne; the actions are values.
+	for _, fk := range t.ForeignKeys {
+		clause, err := c.foreignKeyClause(fk)
+		if err != nil {
+			return fmt.Errorf("create table %s: %w", t.Name, err)
+		}
+		cols = append(cols, clause)
+	}
+	// Checks, inline. SQLite has no ALTER TABLE ADD CONSTRAINT, so this
+	// is the only place a CHECK can be declared there.
+	for _, chk := range t.Checks {
+		if err := c.guard.ValidateIdentifier(chk.Name); err != nil {
+			return fmt.Errorf("create table %s: check: %w", t.Name, err)
+		}
+		cols = append(cols, fmt.Sprintf("CONSTRAINT %s CHECK %s", c.dialect.Quote(chk.Name), wrapExpressionInParens(chk.Expression)))
+	}
 	ddl := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", c.dialect.Quote(t.Name), strings.Join(cols, ",\n  "))
-	_, err := exec.ExecContext(ctx, ddl)
-	return err
+	if _, err := exec.ExecContext(ctx, ddl); err != nil {
+		return err
+	}
+	// Indexes, each its own statement: there is no inline form that is
+	// portable, and the helper already knows each engine's spelling.
+	for _, idx := range t.Indexes {
+		if err := c.guard.ValidateIdentifier(idx.Name); err != nil {
+			return fmt.Errorf("create table %s: index: %w", t.Name, err)
+		}
+		for _, col := range idx.Columns {
+			if err := c.guard.ValidateIdentifier(col); err != nil {
+				return fmt.Errorf("create table %s: index %s: %w", t.Name, idx.Name, err)
+			}
+		}
+		if err := c.createIndexOn(ctx, exec, t.Name, idx.Name, idx.Columns, idx.Unique); err != nil {
+			return fmt.Errorf("create table %s: %w", t.Name, err)
+		}
+	}
+	return nil
+}
+
+// foreignKeyClause renders one FOREIGN KEY table constraint for a CREATE
+// TABLE, validating every identifier it splices. The constraint name is
+// optional — SQLite reads back none, and a Schema built from such a
+// catalog carries "" — and an unnamed constraint is legal everywhere.
+func (c *Client) foreignKeyClause(fk ForeignKey) (string, error) {
+	if len(fk.Columns) == 0 || len(fk.RefColumns) == 0 {
+		return "", fmt.Errorf("foreign key on %v: columns and refColumns must not be empty", fk.Columns)
+	}
+	if fk.Name != "" {
+		if err := c.guard.ValidateIdentifier(fk.Name); err != nil {
+			return "", fmt.Errorf("foreign key: %w", err)
+		}
+	}
+	if err := c.guard.ValidateIdentifier(fk.RefTable); err != nil {
+		return "", fmt.Errorf("foreign key: %w", err)
+	}
+	quoted := make([]string, len(fk.Columns))
+	for i, col := range fk.Columns {
+		if err := c.guard.ValidateIdentifier(col); err != nil {
+			return "", fmt.Errorf("foreign key: %w", err)
+		}
+		quoted[i] = c.dialect.Quote(col)
+	}
+	quotedRef := make([]string, len(fk.RefColumns))
+	for i, col := range fk.RefColumns {
+		if err := c.guard.ValidateIdentifier(col); err != nil {
+			return "", fmt.Errorf("foreign key: %w", err)
+		}
+		quotedRef[i] = c.dialect.Quote(col)
+	}
+	clause := ""
+	if fk.Name != "" {
+		clause = "CONSTRAINT " + c.dialect.Quote(fk.Name) + " "
+	}
+	clause += fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s (%s)",
+		strings.Join(quoted, ", "), c.dialect.Quote(fk.RefTable), strings.Join(quotedRef, ", "))
+	if fk.OnDelete != "" {
+		clause += " ON DELETE " + fk.OnDelete
+	}
+	if fk.OnUpdate != "" {
+		clause += " ON UPDATE " + fk.OnUpdate
+	}
+	return clause, nil
 }
 
 // dropIndex renders the per-dialect DROP INDEX DDL. SQLite and PG

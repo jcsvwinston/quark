@@ -80,18 +80,18 @@ func (p Plan) String() string {
 //     normalised: PG `int8`/`int4`/`int2` aliases (don't arise from
 //     introspection; only relevant if the desired Schema is
 //     hand-constructed with those names).
-//   - **Indexes / FKs / CHECK** declared on the model: struct tags
-//     don't yet carry index or FK metadata (CreateIndex /
-//     AddForeignKey are explicit calls). PlanMigration's `desired`
-//     Schema carries columns plus the synthesised m2m join tables
-//     (see below) — indexes and FKs present in the
-//     database but not in the model would show up as OpDropIndex /
-//     OpDropForeignKey if Diff were left to its own devices. To
-//     avoid that, PlanMigration **copies** the indexes / FKs / checks
-//     from the current schema into the desired schema before
-//     diffing, on the assumption that schema-level objects not
-//     declared in models are managed manually. A future
-//     F3-3-plan-indexes follow-up will let struct tags drive these.
+//   - **Indexes declared on the model** (quark:"index" /
+//     quark:"index=<name>") are part of the desired schema: a declared
+//     index that is missing is proposed as OpCreateIndex, and one whose
+//     live shape differs (columns, uniqueness) as DROP + CREATE. A
+//     quark:"unique" column is a column constraint whose backing index
+//     the engine names; Diff matches it by shape, so it never drifts.
+//   - **Everything else the model cannot declare** — FKs, CHECKs and
+//     indexes with no tag — is **copied** from the current schema into
+//     the desired one before diffing, so a plan never proposes dropping
+//     a catalog object the tags are simply silent about. Those are
+//     managed by hand (CreateIndex / AddForeignKey) or by a hand-built
+//     Schema (see Diff).
 //   - **m2m join tables ARE part of the desired schema**: for every
 //     `rel:"many_to_many"` + `m2m:"join:fk:ref_fk"` tag, the desired
 //     Schema includes the join table with the same shape
@@ -230,7 +230,11 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 		if len(columns) == 0 {
 			return Schema{}, fmt.Errorf("no database columns for model %s", t.Name())
 		}
-		tables = append(tables, Table{Name: meta.Table, Columns: columns})
+		// The indexes the model declares (quark:"index"): the one part of
+		// the non-column surface struct tags DO carry. A unique column
+		// travels on the column (Migrate renders it as a constraint), and
+		// the plan matches its engine-named backing index by shape.
+		tables = append(tables, Table{Name: meta.Table, Columns: columns, Indexes: modelIndexes(meta)})
 		for _, rel := range meta.Relations {
 			if rel.Type != "many_to_many" || rel.JoinTable == "" {
 				continue
@@ -300,7 +304,17 @@ func mergeNonColumnSurface(desired *Schema, current Schema) {
 		if !ok {
 			continue
 		}
-		dt.Indexes = append([]Index(nil), ct.Indexes...)
+		// A live index the model DECLARES (by name) is not carried over:
+		// the model's shape is the desired one, and copying the live
+		// shape on top would hide a drift in columns or uniqueness.
+		// Undeclared live indexes are still left alone.
+		declared := indexesByName(dt.Indexes)
+		for _, ci := range ct.Indexes {
+			if _, ok := declared[ci.Name]; ok {
+				continue
+			}
+			dt.Indexes = append(dt.Indexes, ci)
+		}
 		dt.ForeignKeys = append([]ForeignKey(nil), ct.ForeignKeys...)
 		// Preserve the nil/empty distinction for Checks — Diff
 		// treats nil as "not introspected" (SQLite contract) and
