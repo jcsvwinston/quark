@@ -47,17 +47,13 @@ func controlsTipos() []control {
 		{
 			id:     "TYP-04",
 			family: "tipos",
-			title:  "native array column for a raw Go slice, and the value serialised into it",
-			want:   absent,
-			note: "A []string never becomes an array column: it takes the TEXT fallback " +
-				"and the first Create fails in database/sql's converter — the same on " +
-				"every engine, since the refusal happens above the driver, and that half " +
-				"is what the verdict rests on. The published type matrix says raw slices " +
-				"and maps are \"serialised as text\"; they are not serialised at all. " +
-				"Which column type each dialect would emit is not observable from here " +
-				"(this bench only opens SQLite), so the title no longer names one: " +
-				"whether PostgreSQL could converge on text[] belongs to " +
-				"internal/enginesuite and is not measured.",
+			title:  "a raw Go slice is stored and round-trips: a native array column on PostgreSQL, a JSON-backed column elsewhere",
+			want:   present,
+			note: "Closed at A8 S6. A []string, []int64 or map[string]any is bound and scanned by " +
+				"Quark: on PostgreSQL a slice of a scalar kind gets TEXT[] / BIGINT[] / … and travels " +
+				"as the array literal; everywhere else the column is the dialect's JSON type and the " +
+				"value JSON text. This bench opens SQLite and measures the round trip and the JSON in " +
+				"the column; the native array and its introspection are proven in internal/enginesuite.",
 			probe: probeTiposNativeArray,
 		},
 		{
@@ -76,33 +72,24 @@ func controlsTipos() []control {
 		{
 			id:     "TYP-06",
 			family: "tipos",
-			title:  "range column type for a range value, and a containment operator",
-			want:   absent,
-			note: "Both halves are missing and both are measured: a range-shaped value " +
-				"(lower, upper) takes the TEXT fallback and cannot be written — Quark " +
-				"ships Array, JSON and Nullable and nothing range-shaped, so the value has " +
-				"no Valuer to cross database/sql with — and asking for containment is " +
-				"refused by the operator allowlist with ErrInvalidQuery before any SQL is " +
-				"built. The mapper door is measured, not assumed: with a mapper the column " +
-				"really is TSTZRANGE and the write still fails. Which column type " +
-				"PostgreSQL would want is not observable here, so the title does not " +
-				"claim it.",
+			title:  "quark.Range[T]: a range column (TSTZRANGE / INT8RANGE on PostgreSQL, JSON elsewhere) that round-trips, and a containment operator the builder knows and gates by engine",
+			want:   present,
+			note: "Closed at A8 S6. Range[T] carries lower, upper and bounds; PostgreSQL stores it in its " +
+				"range type and the value travels as the range literal, every other engine as JSON. " +
+				"`@>` / `<@` are known to the builder: accepted on PostgreSQL, refused with " +
+				"ErrUnsupportedFeature naming the engine elsewhere, with no SQL sent. A plain struct " +
+				"that only looks like a range is still refused by database/sql.",
 			probe: probeTiposRanges,
 		},
 		{
 			id:     "TYP-07",
 			family: "tipos",
-			title:  "inet column type for an IP value, and a network operator over it",
-			want:   absent,
-			note: "No IP type and no network operator, which is what an inet column is " +
-				"for. A net.IP takes the BLOB fallback and does round-trip — storing an " +
-				"address is not the problem; storing it AS an address is. The escape " +
-				"hatch buys the declaration: with a mapper the column really is INET and " +
-				"the value goes in, and containment (>>) over that same column is still " +
-				"refused by the operator allowlist before any SQL is built, so there is no " +
-				"network semantics to reach. cidr and macaddr are not measured and the " +
-				"title no longer claims them. The one INET in the tree is a mapper defined " +
-				"inside a test, which only asserts that Migrate returns no error.",
+			title:  "net.IP: an inet column on PostgreSQL, the address as text elsewhere, and the network operators the builder knows and gates by engine",
+			want:   present,
+			note: "Closed at A8 S6. net.IP is bound as its textual form and scanned back from it (or " +
+				"from the raw bytes a pre-S6 row may hold): INET on PostgreSQL, a text column elsewhere. " +
+				"`>>`, `<<`, `>>=`, `<<=` and `&&` are known to the builder and refused by engine outside " +
+				"PostgreSQL. cidr and macaddr are not measured.",
 			probe: probeTiposInet,
 		},
 		{
@@ -113,9 +100,10 @@ func controlsTipos() []control {
 			note: "What works is measured: JSON[T] in and out, and a filter that binds a " +
 				"dotted path into the dialect's JSON function. What is missing is what " +
 				"JSONB is asked for — a path into an array is refused by the path grammar " +
-				"(ErrInvalidJSONPath) and containment is refused by the operator allowlist, " +
-				"so @>, ?, jsonb_path_query and GIN indexes have no surface at all. That " +
-				"the PostgreSQL column really is JSONB needs a live engine.",
+				"(ErrInvalidJSONPath), and containment (@>) is known to the builder since " +
+				"A8 S6 but refused by engine on this bench's SQLite; ?, jsonb_path_query and " +
+				"GIN indexes have no surface. That the PostgreSQL column really is JSONB " +
+				"needs a live engine.",
 			probe: probeTiposJSON,
 		},
 		{

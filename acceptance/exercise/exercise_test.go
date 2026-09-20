@@ -88,6 +88,8 @@ func TestExercisersSQLite(t *testing.T) {
 		QF("EscapeLike"), QF("Like"), QF("NotLike"), QF("Contains"), QF("StartsWith"), QF("EndsWith"),
 		QF("(TypedStringColumn).Contains"), QF("(TypedStringColumn).StartsWith"), QF("(TypedStringColumn).EndsWith"),
 		QF("(TypedStringColumn).LikeEscaped"), QF("(TypedStringColumn).NotLikeEscaped"),
+		// NATIVETYPES (A8 S6): Range[T].
+		QF("(Range[T]).Value"), QF("(*Range[T]).Scan"), QF("(Range[T]).PGLiteral"),
 		// Auditoría core (AQ-02/03/07 + PR-COH-02): superficie nueva.
 		QF("WhereInOf"), QF("DeleteBatchOf"), QM("WithoutAssociations"),
 		QF("NewWithDB"), QF("WithStrictColumns"),

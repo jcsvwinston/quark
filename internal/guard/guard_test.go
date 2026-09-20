@@ -156,7 +156,7 @@ func TestValidateOperator_CaseInsensitive(t *testing.T) {
 func TestValidateOperator_Invalid(t *testing.T) {
 	g := guard.New()
 	bad := []string{
-		"--", "/*", "*/", "OR", "AND", ";", "EXEC", "||", "&&",
+		"--", "/*", "*/", "OR", "AND", ";", "EXEC", "||",
 	}
 	for _, op := range bad {
 		if err := g.ValidateOperator(op); err == nil {

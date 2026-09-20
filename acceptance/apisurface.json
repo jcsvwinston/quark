@@ -1187,6 +1187,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Range[T]).Scan",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Routine[T]).First",
       "kind": "method"
     },
@@ -1813,6 +1818,16 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(QueryObserver).ObserveQuery",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(Range[T]).PGLiteral",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(Range[T]).Value",
       "kind": "method"
     },
     {
@@ -2908,6 +2923,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "QueryRowFunc",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "Range",
       "kind": "type"
     },
     {

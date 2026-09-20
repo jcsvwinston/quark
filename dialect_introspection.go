@@ -1272,6 +1272,28 @@ func pgListPrimaryKey(ctx context.Context, exec Executor, table string) (map[str
 	return pk, rows.Err()
 }
 
+// pgArrayTypeFromUDT turns the catalog's array udt_name (_text, _int8,
+// _float8, …) into the declared spelling (text[], bigint[], double
+// precision[]), so a desired TEXT[] and its live column compare equal.
+func pgArrayTypeFromUDT(udt string) string {
+	elem := strings.TrimPrefix(udt, "_")
+	switch elem {
+	case "int8":
+		elem = "bigint"
+	case "int4":
+		elem = "integer"
+	case "int2":
+		elem = "smallint"
+	case "float8":
+		elem = "double precision"
+	case "float4":
+		elem = "real"
+	case "bool":
+		elem = "boolean"
+	}
+	return elem + "[]"
+}
+
 func pgListColumns(ctx context.Context, exec Executor, table string) ([]Column, error) {
 	pk, err := pgListPrimaryKey(ctx, exec, table)
 	if err != nil {
@@ -1284,7 +1306,8 @@ func pgListColumns(ctx context.Context, exec Executor, table string) ([]Column, 
 		       column_default,
 		       character_maximum_length,
 		       numeric_precision,
-		       numeric_scale
+		       numeric_scale,
+		       udt_name
 		  FROM information_schema.columns
 		 WHERE table_schema = current_schema()
 		   AND table_name = $1
@@ -1303,9 +1326,10 @@ func pgListColumns(ctx context.Context, exec Executor, table string) ([]Column, 
 			charLen   sql.NullInt64
 			numPrec   sql.NullInt64
 			numScale  sql.NullInt64
+			udtName   string
 			displayed = ""
 		)
-		if err := rows.Scan(&name, &dataType, &nullable, &dflt, &charLen, &numPrec, &numScale); err != nil {
+		if err := rows.Scan(&name, &dataType, &nullable, &dflt, &charLen, &numPrec, &numScale, &udtName); err != nil {
 			return nil, err
 		}
 		// Reassemble the parameterised type so the round-trip vs the
@@ -1313,6 +1337,15 @@ func pgListColumns(ctx context.Context, exec Executor, table string) ([]Column, 
 		//   character varying(255), numeric(10,2), etc.
 		displayed = dataType
 		switch dataType {
+		case "ARRAY":
+			// information_schema says only ARRAY; the element type is the
+			// udt_name with a leading underscore (_text, _int8). Spelled
+			// the way the migrator declares it (A8 S6).
+			displayed = pgArrayTypeFromUDT(udtName)
+		case "USER-DEFINED":
+			// Range types (tstzrange, int8range) and other non-standard
+			// types come through here; udt_name is their name.
+			displayed = udtName
 		case "character varying", "character", "bit varying", "bit":
 			if charLen.Valid {
 				displayed = fmt.Sprintf("%s(%d)", dataType, charLen.Int64)

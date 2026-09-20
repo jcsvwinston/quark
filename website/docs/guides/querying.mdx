@@ -59,6 +59,7 @@ always travel as bound parameters. The operators `Where` accepts:
 | Pattern | `LIKE`, `NOT LIKE` |
 | Null | `IS NULL`, `IS NOT NULL` |
 | Set / range | `IN`, `NOT IN`, `BETWEEN`, `NOT BETWEEN` |
+| PostgreSQL only | `@>`, `<@`, `&&` (array, range and JSON containment / overlap), `>>`, `<<`, `>>=`, `<<=` (networks) — refused with `ErrUnsupportedFeature` on other engines |
 
 A null check takes `nil` as its value:
 

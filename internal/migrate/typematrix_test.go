@@ -5,6 +5,8 @@ package migrate_test
 
 import (
 	"flag"
+	"github.com/jcsvwinston/quark"
+	"net"
 	"os"
 	"reflect"
 	"strings"
@@ -74,7 +76,11 @@ func matrixRows() []matrixRow {
 		{"`[16]byte` (UUID-shaped, e.g. `uuid.UUID`)", reflect.TypeOf([16]byte{}), migrate.TypeOptions{}, "The value travels in text form through the type's own Valuer/Scanner. SQL Server's UNIQUEIDENTIFIER is not used: its driver scans it in the engine's mixed-endian byte order."},
 		{"integer primary key", reflect.TypeOf(int64(0)), migrate.TypeOptions{IsPK: true}, "Auto-increment."},
 		{"`string` primary key", reflect.TypeOf(""), migrate.TypeOptions{IsPK: true}, "For UUID/ULID keys the caller supplies."},
-		{"`[]string`, `[]int64`, `map[string]any`", reflect.TypeOf([]string{}), migrate.TypeOptions{}, "NOT stored: the column is created, but `database/sql` refuses the value on the first write. Use `quark.Array[T]` (a JSON-backed list) or `quark.JSON[T]`."},
+		{"`[]string`", reflect.TypeOf([]string{}), migrate.TypeOptions{}, "A raw slice of a scalar kind: a native array on PostgreSQL (the value travels as the array literal), JSON-backed elsewhere. `quark.Array[T]` remains the JSON-backed wrapper on every engine."},
+		{"`[]int64`", reflect.TypeOf([]int64{}), migrate.TypeOptions{}, ""},
+		{"`map[string]any`", reflect.TypeOf(map[string]any{}), migrate.TypeOptions{}, "JSON-backed on every engine."},
+		{"`quark.Range[time.Time]`", reflect.TypeOf(quark.Range[time.Time]{}), migrate.TypeOptions{}, "`Range[int64]` is `INT8RANGE`, `Range[int32]` `INT4RANGE`, `Range[float64]` `NUMRANGE` on PostgreSQL; JSON elsewhere."},
+		{"`net.IP`", reflect.TypeOf(net.IP{}), migrate.TypeOptions{}, "Bound and scanned as the textual address."},
 	}
 }
 

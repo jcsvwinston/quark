@@ -289,6 +289,10 @@ func (g *SQLGuard) ValidateOperator(op string) error {
 		"IS": true, "IS NOT": true,
 		"IS NULL": true, "IS NOT NULL": true,
 		"BETWEEN": true, "NOT BETWEEN": true,
+		// PostgreSQL's containment and network operators (A8 S6). The guard
+		// knows them; the builder refuses them on any other engine.
+		"@>": true, "<@": true, "&&": true,
+		"<<": true, ">>": true, "<<=": true, ">>=": true,
 	}
 
 	upper := strings.ToUpper(strings.TrimSpace(op))

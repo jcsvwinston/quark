@@ -29,7 +29,11 @@ widths for as long as it existed.
 | `[16]byte` (UUID-shaped, e.g. `uuid.UUID`) | `UUID` | `CHAR(36)` | `CHAR(36)` | `UUID` | `NCHAR(36)` | `VARCHAR2(36)` |
 | integer primary key | `BIGSERIAL PRIMARY KEY` | `BIGINT AUTO_INCREMENT PRIMARY KEY` | `BIGINT AUTO_INCREMENT PRIMARY KEY` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `BIGINT IDENTITY(1,1) PRIMARY KEY` | `NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY` |
 | `string` primary key | `VARCHAR(36) PRIMARY KEY` | `VARCHAR(36) PRIMARY KEY` | `VARCHAR(36) PRIMARY KEY` | `VARCHAR(36) PRIMARY KEY` | `NVARCHAR(36) PRIMARY KEY` | `VARCHAR2(36) PRIMARY KEY` |
-| `[]string`, `[]int64`, `map[string]any` | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` |
+| `[]string` | `TEXT[]` | `JSON` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
+| `[]int64` | `BIGINT[]` | `JSON` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
+| `map[string]any` | `JSONB` | `JSON` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
+| `quark.Range[time.Time]` | `TSTZRANGE` | `JSON` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
+| `net.IP` | `INET` | `VARCHAR(45)` | `VARCHAR(45)` | `TEXT` | `NVARCHAR(45)` | `VARCHAR2(45)` |
 
 ## Notes
 
@@ -40,7 +44,10 @@ widths for as long as it existed.
 - **[16]byte (UUID-shaped, e.g. uuid.UUID)** — The value travels in text form through the type's own Valuer/Scanner. SQL Server's UNIQUEIDENTIFIER is not used: its driver scans it in the engine's mixed-endian byte order.
 - **integer primary key** — Auto-increment.
 - **string primary key** — For UUID/ULID keys the caller supplies.
-- **[]string, []int64, map[string]any** — NOT stored: the column is created, but `database/sql` refuses the value on the first write. Use `quark.Array[T]` (a JSON-backed list) or `quark.JSON[T]`.
+- **[]string** — A raw slice of a scalar kind: a native array on PostgreSQL (the value travels as the array literal), JSON-backed elsewhere. `quark.Array[T]` remains the JSON-backed wrapper on every engine.
+- **map[string]any** — JSON-backed on every engine.
+- **quark.Range[time.Time]** — `Range[int64]` is `INT8RANGE`, `Range[int32]` `INT4RANGE`, `Range[float64]` `NUMRANGE` on PostgreSQL; JSON elsewhere.
+- **net.IP** — Bound and scanned as the textual address.
 
 ## Integer width
 

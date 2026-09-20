@@ -314,6 +314,7 @@
     "github.com/jcsvwinston/quark.QueryFunc": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.QueryObserver": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.QueryRowFunc": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
+    "github.com/jcsvwinston/quark.Range": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.RelationMeta": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.ReplicaLeastConn": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.ReplicaRandom": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
