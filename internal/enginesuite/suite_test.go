@@ -889,12 +889,15 @@ func testModelTypesAndChecks(ctx context.Context, t *testing.T, client *quark.Cl
 		Ref    suiteUUID `db:"ref"`
 		Status string    `db:"status" quark:"check=status IN ('draft','live')"`
 		Kind   string    `db:"kind,enum=a|b"`
+		// A8 S7: the decimal the catalog spells its own way (numeric on
+		// PostgreSQL, NUMBER on Oracle) has to plan to nothing.
+		Price float64 `db:"price,precision=10,scale=2"`
 	}
 	if err := client.Migrate(ctx, &MTRow{}); err != nil {
 		t.Fatalf("migrate on %s: %v", engine, err)
 	}
 	t.Cleanup(func() { dropTable(client, "mt_rows") })
-	row := &MTRow{Ref: suiteUUID{0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, Status: "draft", Kind: "a"}
+	row := &MTRow{Ref: suiteUUID{0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, Status: "draft", Kind: "a", Price: 12.5}
 	if err := quark.For[MTRow](ctx, client).Create(row); err != nil {
 		t.Fatalf("create on %s: %v", engine, err)
 	}
@@ -902,10 +905,13 @@ func testModelTypesAndChecks(ctx context.Context, t *testing.T, client *quark.Cl
 	if err != nil || got.Ref != row.Ref {
 		t.Errorf("uuid round trip on %s: err=%v got=%x want=%x", engine, err, got.Ref, row.Ref)
 	}
-	if err := quark.For[MTRow](ctx, client).Create(&MTRow{Ref: row.Ref, Status: "gone", Kind: "a"}); err == nil {
+	if err == nil && got.Price != 12.5 {
+		t.Errorf("decimal round trip on %s: %v", engine, got.Price)
+	}
+	if err := quark.For[MTRow](ctx, client).Create(&MTRow{Ref: row.Ref, Status: "gone", Kind: "a", Price: 1}); err == nil {
 		t.Errorf("%s: the check= constraint is not enforced", engine)
 	}
-	if err := quark.For[MTRow](ctx, client).Create(&MTRow{Ref: row.Ref, Status: "live", Kind: "zzz"}); err == nil {
+	if err := quark.For[MTRow](ctx, client).Create(&MTRow{Ref: row.Ref, Status: "live", Kind: "zzz", Price: 1}); err == nil {
 		t.Errorf("%s: the enum= constraint is not enforced", engine)
 	}
 	plan, err := client.PlanMigration(ctx, &MTRow{})

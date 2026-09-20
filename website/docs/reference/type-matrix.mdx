@@ -22,7 +22,7 @@ widths for as long as it existed.
 | `uint64` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `NUMBER(19)` |
 | `float32` | `REAL` | `REAL` | `REAL` | `REAL` | `REAL` | `BINARY_FLOAT` |
 | `float64` | `DOUBLE PRECISION` | `DOUBLE` | `DOUBLE` | `REAL` | `FLOAT(53)` | `BINARY_DOUBLE` |
-| `float64` with `precision=18,scale=4` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` |
+| `float64` with `precision=18,scale=4` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `DECIMAL(18,4)` | `NUMBER(18,4)` |
 | `time.Time` | `TIMESTAMP` | `DATETIME` | `DATETIME` | `DATETIME` | `DATETIME2` | `TIMESTAMP` |
 | `[]byte` | `BYTEA` | `BLOB` | `BLOB` | `BLOB` | `VARBINARY(MAX)` | `BLOB` |
 | `time.Duration` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `BIGINT` | `NUMBER(19)` |
@@ -40,7 +40,7 @@ widths for as long as it existed.
 - **[16]byte (UUID-shaped, e.g. uuid.UUID)** — The value travels in text form through the type's own Valuer/Scanner. SQL Server's UNIQUEIDENTIFIER is not used: its driver scans it in the engine's mixed-endian byte order.
 - **integer primary key** — Auto-increment.
 - **string primary key** — For UUID/ULID keys the caller supplies.
-- **[]string, []int64, map[string]any** — Serialised as text; no native array or JSONB column yet.
+- **[]string, []int64, map[string]any** — NOT stored: the column is created, but `database/sql` refuses the value on the first write. Use `quark.Array[T]` (a JSON-backed list) or `quark.JSON[T]`.
 
 ## Integer width
 

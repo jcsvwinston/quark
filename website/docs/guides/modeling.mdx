@@ -70,7 +70,7 @@ types, and timezones.
 | Tag | Read by | Purpose |
 | --- | --- | --- |
 | `db:"column,size=512"` | `Migrate`, `Sync` | Sets VARCHAR/CHAR length (NVARCHAR/VARCHAR2 per dialect). |
-| `db:"column,precision=18,scale=4"` | `Migrate`, `Sync`, mappers | Forwards precision/scale to DECIMAL emitters and `TypeMapper`. |
+| `db:"column,precision=18,scale=4"` | `Migrate`, `Sync`, mappers | Turns a `float32`/`float64` (or `Nullable` of one) into a fixed-point `DECIMAL(p,s)` — `NUMBER(p,s)` on Oracle — and reaches a `TypeMapper` through `TypeOptions`. On any other Go type the hint is ignored and the model carries a tag warning. |
 | `db:"-"` | parser | Ignores the field. |
 | `default:"value"` | `Migrate` | Emits `DEFAULT value` verbatim; **bool defaults are normalized per dialect** (below). |
 | `nullable:"false"` | `Migrate` | Also emits `NOT NULL`. |

@@ -149,18 +149,11 @@ func controlsTipos() []control {
 			id:     "TYP-11",
 			family: "tipos",
 			title:  "the db tag's precision/scale sizes a decimal without retyping other fields",
-			want:   partial,
-			note: "The hint does size a decimal: a float64 tagged precision=10,scale=2 is " +
-				"emitted as DECIMAL(10,2) — measured, and it decides the verdict, because " +
-				"a probe that only watched the defect would go green the day the hint " +
-				"stopped working altogether. What is missing is the guard on the Go type: " +
-				"the rewrite applies to any field, so a string tagged precision=10,scale=2 " +
-				"is also DECIMAL(10,2) and a bool tagged precision=3 is DECIMAL(3), and " +
-				"the tag linter accepts both. The two halves are read as two facts, so an " +
-				"inert hint measures absent instead of hiding inside this partial. No " +
-				"engine test declares precision/scale on any model, and on PostgreSQL and " +
-				"Oracle the catalog answers numeric/NUMBER against the desired DECIMAL, so " +
-				"the plan never converges; that part needs a live engine.",
+			want:   present,
+			note: "Closed at A8 S7 (QK-28): the hint refines float columns only — DECIMAL(p,s), NUMBER(p,s) " +
+				"on Oracle — and on any other kind it is ignored with a tag warning instead of replacing " +
+				"the base type. Diff reads numeric(p,s) and NUMBER(p,s) as the same family, so the plan " +
+				"converges on PostgreSQL and Oracle; proven per engine in internal/enginesuite.",
 			probe: probeTiposPrecisionScale,
 		},
 	}
