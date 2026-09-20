@@ -28,6 +28,7 @@ A query does nothing until you finish it with one of these:
 | `Find(id)` | You want one row by a simple primary key. |
 | `Count()` | You want a matching-row count. |
 | `Paginate(size, page)` | You want rows plus total/page metadata. |
+| `PaginateAfter(size, token)` | You want to seek through a large set, one cheap statement per page, no total. |
 | `Iter(fn)` / `Cursor()` | You want to stream rows instead of buffering them. |
 
 The rest of this page comes in two halves. First the **everyday** building
@@ -206,6 +207,25 @@ page, err := quark.For[User](ctx, client).
 fmt.Println(page.Total, page.TotalPages, len(page.Items))
 // => 3 1 3   (3 matching rows, 1 page, 3 on this page)
 ```
+
+That is page-number pagination: it costs a `COUNT` and an `OFFSET` per page, and
+page N makes the server walk past the pages before it. When you are paging
+through a feed or an export and do not need a total, seek instead:
+
+```go
+first, err := quark.For[User](ctx, client).OrderBy("created_at", "DESC").PaginateAfter(50, "")
+// first.Items, first.HasMore, first.Next — an opaque token naming the last row
+
+next, err := quark.For[User](ctx, client).OrderBy("created_at", "DESC").PaginateAfter(50, first.Next)
+// WHERE created_at < ? OR (created_at = ? AND id > ?) ORDER BY created_at DESC, id ASC LIMIT 51
+```
+
+`PaginateAfter` emits one statement per page and seeks to the last row read
+through the ordering columns, so the thousandth page costs what the first did.
+The primary key is appended to the ordering when it is not there, so ties never
+skip or repeat a row; every ordering column has to be a column of the model,
+because the token is built from the last row's values. A token minted under a
+different `ORDER BY` is refused rather than seeking to the wrong place.
 
 ## Selecting specific columns
 

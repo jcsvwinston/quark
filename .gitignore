@@ -55,6 +55,7 @@ website/test-results/
 
 # Bug-bash run artifacts (trazabilidad local; no se versionan)
 bugbash/REPORTS/
+acceptance/REPORTS/
 
 # Superapp workload run artifacts (informes/métricas/logs regenerables)
 examples/superapp/REPORTS/

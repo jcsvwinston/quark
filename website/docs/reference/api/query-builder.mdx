@@ -16,6 +16,7 @@ q := quark.For[User](ctx, client)
 | `WhereIn(column string, values []any)` | Adds `column IN (...)`. |
 | `WhereInOf[T, V](q *Query[T], column string, values []V)` | Package-level typed-slice form of `WhereIn` (no `[]any` conversion loop). |
 | `WhereBetween(column string, start, end any)` | Adds `column BETWEEN ? AND ?`. |
+| `PaginateAfter(pageSize int, after string)` | Keyset (seek) pagination: the rows after the token's position in the query's `ORDER BY`, plus the next token. |
 | `WhereLike(column, pattern string)` / `WhereNotLike` | Adds `column LIKE ? ESCAPE '\'`: a pattern whose backslash escapes the next character on every engine. |
 | `WhereContains(column, text string)` / `WhereStartsWith` / `WhereEndsWith` | Searches for text the user typed, escaped with `EscapeLike` and wrapped in the wildcards named. |
 | `WhereNot(column, operator string, value any)` | Adds `NOT (column operator value)`. |
