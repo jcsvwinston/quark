@@ -298,6 +298,37 @@ func (g *SQLGuard) ValidateOperator(op string) error {
 	return nil
 }
 
+// ValidateLikePattern checks a LIKE pattern that will run with escape declared
+// as its escape character: the guard reads the VALUE here, not only the
+// operator. A pattern that ends in a dangling escape character is refused,
+// because no engine does what the caller meant with it — PostgreSQL rejects
+// the statement ("LIKE pattern must not end with escape character"), the
+// others match nothing or match the backslash itself. The check is one pass
+// over the pattern: an escape character consumes the next one, so only a
+// trailing UNPAIRED escape is dangling.
+func (g *SQLGuard) ValidateLikePattern(pattern, escape string) error {
+	if escape == "" {
+		return nil
+	}
+	dangling := false
+	for i := 0; i < len(pattern); {
+		if strings.HasPrefix(pattern[i:], escape) {
+			if i+len(escape) >= len(pattern) {
+				dangling = true
+				break
+			}
+			i += len(escape) + 1 // the escape and the character it protects
+			continue
+		}
+		i++
+	}
+	if dangling {
+		return fmt.Errorf("%w: LIKE pattern %q ends with a dangling escape character %q — escape it as %q to match it literally",
+			ErrInvalidQuery, pattern, escape, escape+escape)
+	}
+	return nil
+}
+
 // HasPlaceholders checks if a query string contains parameter placeholders.
 func HasPlaceholders(query string) bool {
 	patterns := []string{

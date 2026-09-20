@@ -31,6 +31,7 @@ type Predicate struct {
 	column   string
 	operator string
 	value    any
+	escape   bool // an escaped LIKE: see condition.escape
 }
 
 // toCondition lowers the predicate to the builder's internal condition with
@@ -41,6 +42,7 @@ func (p Predicate) toCondition(logic string) condition {
 		operator: p.operator,
 		value:    p.value,
 		logic:    logic,
+		escape:   p.escape,
 	}
 }
 
@@ -62,22 +64,28 @@ func NewTypedColumn[T any](name string) TypedColumn[T] { return TypedColumn[T]{n
 func (c TypedColumn[T]) Name() string { return c.name }
 
 // Eq builds `column = value`.
-func (c TypedColumn[T]) Eq(v T) Predicate { return Predicate{c.name, "=", v} }
+func (c TypedColumn[T]) Eq(v T) Predicate { return Predicate{column: c.name, operator: "=", value: v} }
 
 // Neq builds `column != value`.
-func (c TypedColumn[T]) Neq(v T) Predicate { return Predicate{c.name, "!=", v} }
+func (c TypedColumn[T]) Neq(v T) Predicate {
+	return Predicate{column: c.name, operator: "!=", value: v}
+}
 
 // Gt builds `column > value`.
-func (c TypedColumn[T]) Gt(v T) Predicate { return Predicate{c.name, ">", v} }
+func (c TypedColumn[T]) Gt(v T) Predicate { return Predicate{column: c.name, operator: ">", value: v} }
 
 // Gte builds `column >= value`.
-func (c TypedColumn[T]) Gte(v T) Predicate { return Predicate{c.name, ">=", v} }
+func (c TypedColumn[T]) Gte(v T) Predicate {
+	return Predicate{column: c.name, operator: ">=", value: v}
+}
 
 // Lt builds `column < value`.
-func (c TypedColumn[T]) Lt(v T) Predicate { return Predicate{c.name, "<", v} }
+func (c TypedColumn[T]) Lt(v T) Predicate { return Predicate{column: c.name, operator: "<", value: v} }
 
 // Lte builds `column <= value`.
-func (c TypedColumn[T]) Lte(v T) Predicate { return Predicate{c.name, "<=", v} }
+func (c TypedColumn[T]) Lte(v T) Predicate {
+	return Predicate{column: c.name, operator: "<=", value: v}
+}
 
 // In builds `column IN (values...)`. Pass at least one value: with none it
 // lowers to the same empty-IN condition as the string WhereIn — which SQLite
@@ -85,25 +93,29 @@ func (c TypedColumn[T]) Lte(v T) Predicate { return Predicate{c.name, "<=", v} }
 // invalid SQL. (WhereP is a faithful lowering of the string API, so it does
 // not paper over that engine difference.)
 func (c TypedColumn[T]) In(values ...T) Predicate {
-	return Predicate{c.name, "IN", typedToAny(values)}
+	return Predicate{column: c.name, operator: "IN", value: typedToAny(values)}
 }
 
 // NotIn builds `column NOT IN (values...)`. Pass at least one value — see In
 // for the empty-list caveat.
 func (c TypedColumn[T]) NotIn(values ...T) Predicate {
-	return Predicate{c.name, "NOT IN", typedToAny(values)}
+	return Predicate{column: c.name, operator: "NOT IN", value: typedToAny(values)}
 }
 
 // Between builds `column BETWEEN lo AND hi`.
 func (c TypedColumn[T]) Between(lo, hi T) Predicate {
-	return Predicate{c.name, "BETWEEN", []any{lo, hi}}
+	return Predicate{column: c.name, operator: "BETWEEN", value: []any{lo, hi}}
 }
 
 // IsNull builds `column IS NULL`.
-func (c TypedColumn[T]) IsNull() Predicate { return Predicate{c.name, "IS NULL", nil} }
+func (c TypedColumn[T]) IsNull() Predicate {
+	return Predicate{column: c.name, operator: "IS NULL", value: nil}
+}
 
 // IsNotNull builds `column IS NOT NULL`.
-func (c TypedColumn[T]) IsNotNull() Predicate { return Predicate{c.name, "IS NOT NULL", nil} }
+func (c TypedColumn[T]) IsNotNull() Predicate {
+	return Predicate{column: c.name, operator: "IS NOT NULL", value: nil}
+}
 
 // typedToAny widens a typed slice to []any for the IN / NOT IN bind list.
 func typedToAny[T any](vs []T) []any {
@@ -130,11 +142,13 @@ func NewTypedStringColumn(name string) TypedStringColumn {
 }
 
 // Like builds `column LIKE pattern`.
-func (c TypedStringColumn) Like(pattern string) Predicate { return Predicate{c.name, "LIKE", pattern} }
+func (c TypedStringColumn) Like(pattern string) Predicate {
+	return Predicate{column: c.name, operator: "LIKE", value: pattern}
+}
 
 // NotLike builds `column NOT LIKE pattern`.
 func (c TypedStringColumn) NotLike(pattern string) Predicate {
-	return Predicate{c.name, "NOT LIKE", pattern}
+	return Predicate{column: c.name, operator: "NOT LIKE", value: pattern}
 }
 
 // WhereP appends one or more typed predicates (built from generated column
@@ -148,6 +162,12 @@ func (q *Query[T]) WhereP(preds ...Predicate) *Query[T] {
 	// re-clamping and reallocating per predicate.
 	conds := make([]condition, len(preds))
 	for i, p := range preds {
+		if p.escape {
+			if pattern, _ := p.value.(string); likePattern(c.guard, pattern) != nil {
+				c.err = likePattern(c.guard, pattern)
+				return c
+			}
+		}
 		conds[i] = p.toCondition("AND")
 	}
 	c.where = ownedAppend(c.where, conds...)

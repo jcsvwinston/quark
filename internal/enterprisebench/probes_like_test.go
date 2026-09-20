@@ -118,184 +118,143 @@ func qk25LastArgs(rec *recorder) string {
 
 // LIKE-01. Whether the query builder can write a LIKE ... ESCAPE tail.
 //
-// Read as a clause and not as rows: for a pattern with no wildcard in it both
-// statements return the same rows, so only the emitted SQL separates them.
+// Read as a clause AND as rows: for a pattern with no wildcard in it both
+// statements return the same rows, so the SQL is what separates them; and a
+// tail that is emitted but answers the wrong rows is a tail that does not
+// work. The title says "the query builder", so the probe knocks on every
+// escaped door the builder has — the string form, its negation, the typed
+// predicate, the AST — instead of generalising from one of them, and it is
+// `present` only when every door emits the tail and answers what the fixture
+// owes it; some doors is `partial`, none is `absent`.
 //
-// The title says "the query builder", so the probe knocks on every public door
-// that takes an operator string — Where, WhereNot, Having, HavingAggregate —
-// plus the expression AST, instead of generalising from one of them. (Preload-
-// Where is left out on purpose: it resolves the relation before it ever looks
-// at the operator, so on this single-table fixture it answers a question about
-// relations, not about tails.)
-//
-// And "accepted the operator" is not "emitted the tail": if the string ever
-// enters the guard's whitelist the builder would interpolate it into a
-// condition and the statement could still come out without an ESCAPE, or come
-// out wrong. So a surface that takes the operator is only `present` when what
-// it emitted carries the tail AND answers the one row that holds a literal
-// percent sign; taking it and emitting something else is `partial`.
+// The plain Where(col, "LIKE", pattern) is asserted as the ground and NOT
+// measured: it hands the engine an opaque pattern under the engine's own
+// default escape rules, its meaning is published, and turning it escape-aware
+// would change what a backslash means on three engines (QK-32, A12).
 func probeQk25BuilderEmitsEscape(t *testing.T, e *env) verdict {
 	c, rec := e.fresh(t, "qk25_builder_escape")
 	qk25Fixture(t, e, c)
 
-	// 1. Does an ordinary LIKE already carry the tail on its own?
 	rec.reset()
-	rows, err := quark.For[qk25Row](e.ctx, c).
-		Where("name", "LIKE", qk25ContainsLiteralPercent).List()
-	if err != nil {
-		t.Fatalf("a plain LIKE should run on SQLite: %v", err)
-	}
-	emitted := rec.last()
-	if emitted == "" {
-		t.Fatalf("no statement was recorded for a LIKE query")
-	}
-	if qk25HasEscape(emitted) {
-		if len(rows) == qk25WildcardRows {
-			return present
-		}
-		t.Logf("the builder writes an ESCAPE tail but answered %d rows, want %d: %s",
-			len(rows), qk25WildcardRows, emitted)
-		return partial
+	plain, err := quark.For[qk25Row](e.ctx, c).Where("name", "LIKE", qk25ContainsLiteralPercent).List()
+	if err != nil || len(plain) != qk25AllRows || qk25HasEscape(rec.last()) {
+		t.Fatalf("the plain LIKE no longer behaves as published (rows=%d err=%v stmt=%s): "+
+			"this control measures the escaped doors AGAINST that ground, and the ground moved",
+			len(plain), err, rec.last())
 	}
 
-	// 2. Ask for the tail outright, on every surface that takes an operator.
-	//    The guard's operator whitelist is what answers, and what it answers
-	//    is the measurement.
-	const op = `LIKE ? ESCAPE '\'`
 	const pattern = `%100\%%`
-	type surface struct {
+	name := quark.NewTypedStringColumn("name")
+	doors := []struct {
 		name string
-		// want is the number of fixture rows a working tail owes this
-		// surface, or -1 where the row count answers a different question
-		// (a HAVING aggregates over the whole fixture, so it cannot).
 		want int
-		run  func() (int, error)
-	}
-	surfaces := []surface{
-		{"Where", qk25WildcardRows, func() (int, error) {
-			r, err := quark.For[qk25Row](e.ctx, c).Where("name", op, pattern).List()
-			return len(r), err
+		run  func() ([]qk25Row, error)
+	}{
+		{"WhereLike", qk25WildcardRows, func() ([]qk25Row, error) {
+			return quark.For[qk25Row](e.ctx, c).WhereLike("name", pattern).List()
 		}},
-		{"WhereNot", qk25AllRows - qk25WildcardRows, func() (int, error) {
-			r, err := quark.For[qk25Row](e.ctx, c).WhereNot("name", op, pattern).List()
-			return len(r), err
+		{"WhereNotLike", qk25AllRows - qk25WildcardRows, func() ([]qk25Row, error) {
+			return quark.For[qk25Row](e.ctx, c).WhereNotLike("name", pattern).List()
 		}},
-		{"Having", -1, func() (int, error) {
-			r, err := quark.For[qk25Row](e.ctx, c).Having("name", op, pattern).List()
-			return len(r), err
+		{"WhereP(LikeEscaped)", qk25WildcardRows, func() ([]qk25Row, error) {
+			return quark.For[qk25Row](e.ctx, c).WhereP(name.LikeEscaped(pattern)).List()
 		}},
-		{"HavingAggregate", -1, func() (int, error) {
-			r, err := quark.For[qk25Row](e.ctx, c).
-				HavingAggregate("COUNT", "name", op, pattern).List()
-			return len(r), err
-		}},
-		{"WhereExpr", -1, func() (int, error) {
-			r, err := quark.For[qk25Row](e.ctx, c).
-				WhereExpr(quark.Cmp(quark.Col("name"), "LIKE ESCAPE", quark.Lit(pattern))).List()
-			return len(r), err
+		{"WhereExpr(Like)", qk25WildcardRows, func() ([]qk25Row, error) {
+			return quark.For[qk25Row](e.ctx, c).WhereExpr(quark.Like(quark.Col("name"), pattern)).List()
 		}},
 	}
 
-	var accepted, working []string
-	for _, s := range surfaces {
+	var working, broken []string
+	for _, d := range doors {
 		rec.reset()
-		n, runErr := s.run()
-		if runErr != nil {
-			t.Logf("%s refused the operator: %v", s.name, runErr)
-			continue
-		}
-		accepted = append(accepted, s.name)
+		rows, runErr := d.run()
 		stmt := rec.last()
-		if qk25HasEscape(stmt) && (s.want < 0 || n == s.want) {
-			working = append(working, s.name)
-			continue
+		switch {
+		case runErr != nil:
+			t.Logf("%s: refused: %v", d.name, runErr)
+			broken = append(broken, d.name)
+		case qk25HasEscape(stmt) && len(rows) == d.want:
+			working = append(working, d.name)
+		default:
+			t.Logf("%s: emitted %q answering %d rows (want %d)", d.name, stmt, len(rows), d.want)
+			broken = append(broken, d.name)
 		}
-		t.Logf("%s took the operator but emitted %q answering %d rows (want %d)",
-			s.name, stmt, n, s.want)
 	}
-
 	switch {
-	case len(working) > 0:
-		t.Logf("surfaces that emit a working tail: %v", working)
+	case len(broken) == 0:
 		return present
-	case len(accepted) > 0:
-		t.Logf("surfaces that take the operator without emitting a usable tail: %v", accepted)
+	case len(working) > 0:
+		t.Logf("doors that emit a working tail: %v; that do not: %v", working, broken)
 		return partial
 	default:
 		return absent
 	}
 }
 
-// LIKE-02. Whether Quark takes the value of an application-composed LIKE as
-// literal text.
+// LIKE-02. Whether a user's text reaches a LIKE as literal text, through a
+// surface that receives the text apart from the pattern.
 //
-// Rows and clause together, because neither answers alone. The pattern is
-// built the way an application builds a "contains" search — surround the
-// user's text with wildcards — and the user's text is itself a single "%".
-//
-// The title is narrower than "neutralises the wildcard the user typed", and
-// the arithmetic is why. On this surface Quark receives `%%%` and cannot tell
-// the user's percent sign from the two the application added, so the answer
-// that would prove a per-character neutralisation — one row, "100% off" — is
-// not produced by any correct implementation; a branch that waited for it
-// would be a `present` nothing can reach, and the day the capability arrived
-// the bench would have gone on publishing a stale `absent` without ever
-// turning red. What IS reachable, and what this control now claims, is the
-// whole value taken as text with an escape character declared: a search for
-// the literal string "%%%", which this fixture answers with no rows.
-//
-// Escaping the value without declaring that character also answers no rows, so
-// the ESCAPE tail is what separates the capability from the defect LIKE-08
-// measures. A refusal is neither — it leaves a literal `%` unsearchable — so
-// it is `partial` too. The surface that may legitimately refuse is LIKE-05.
+// Rows and clause together, because neither answers alone. The user typed a
+// single "%" into a "contains" search. On the surface this control measured
+// at S0 — Where(col, "LIKE", pattern) — Quark receives `%%%` and cannot tell
+// the user's percent sign from the two the application added, so the one
+// correct answer (the "100% off" row alone) was unreachable there; the surface
+// that receives the TEXT is what makes it reachable, and that is what is
+// measured now. The plain form is asserted as the ground: it still answers
+// every row for that pattern, because its meaning is published.
 func probeQk25LikeValueIsLiteralText(t *testing.T, e *env) verdict {
 	c, rec := e.fresh(t, "qk25_user_wildcard")
 	qk25Fixture(t, e, c)
 
 	rec.reset()
-	rows, err := quark.For[qk25Row](e.ctx, c).
-		Where("name", "LIKE", qk25ContainsLiteralPercent).List()
+	plain, err := quark.For[qk25Row](e.ctx, c).Where("name", "LIKE", qk25ContainsLiteralPercent).List()
+	if err != nil || len(plain) != qk25AllRows || qk25HasEscape(rec.last()) {
+		t.Fatalf("the plain LIKE no longer behaves as published (rows=%d err=%v stmt=%s): "+
+			"the ground of this control moved, which is not the capability being measured",
+			len(plain), err, rec.last())
+	}
+
+	rec.reset()
+	rows, err := quark.For[qk25Row](e.ctx, c).WhereContains("name", "%").List()
 	if err != nil {
-		t.Logf("the LIKE was refused rather than taken as text: %v", err)
+		t.Logf("the contains-search was refused rather than answered: %v", err)
 		return partial
 	}
 	stmt := rec.last()
 	switch {
-	case len(rows) == qk25AllRows && !qk25HasEscape(stmt):
-		// The value reached the bind untouched and the statement carries no
-		// tail: every `%` is still a wildcard, so the search answers every row.
-		// This is the capability at its most broken, and it has a verdict of
-		// its own — nothing else below may land on it.
-		return absent
-	case len(rows) == 0 && qk25HasEscape(stmt):
-		// The value is text, and the statement says which character makes it
-		// text: a search for the literal "%%%", which nothing here is named.
+	case len(rows) == qk25WildcardRows && qk25HasEscape(stmt) && rows[0].Name == "100% off":
 		return present
+	case len(rows) == qk25AllRows && !qk25HasEscape(stmt):
+		// The text reached the bind as a wildcard with no tail: the defect.
+		return absent
 	case len(rows) == 0:
-		t.Logf("the value was taken as text but the statement declares no escape "+
-			"character, so the search under-answers (see LIKE-08): %s", stmt)
+		t.Logf("the text was escaped but the statement declares no escape character, "+
+			"so the search under-answers: %s", stmt)
 		return partial
 	default:
-		t.Logf("neither shape: %d rows (untouched %d, taken as text 0) from %s",
-			len(rows), qk25AllRows, stmt)
+		t.Logf("neither shape: %d rows from %s", len(rows), stmt)
 		return partial
 	}
 }
 
-// LIKE-03. Whether what Quark emits for a LIKE varies with the engine.
+// LIKE-03. Whether what Quark emits for an escaped LIKE varies with the
+// engine — and along the right boundary.
 //
-// The engines differ: PostgreSQL, MySQL and MariaDB read a backslash in a LIKE
-// pattern as an escape character with no ESCAPE clause, while SQLite, SQL
-// Server and Oracle read it as an ordinary character. A library that knew that
-// would emit something different for the two groups.
+// With the escape character declared on every statement, the engines'
+// default-escape rules (the boundary this control measured at S0) stop
+// mattering: `\%` means a literal percent sign on all six. What still differs
+// is how each engine's parser reads the LITERAL that names the character.
+// MySQL and MariaDB read a backslash inside a string literal as an escape, so
+// a lone one leaves the literal unterminated and the tail has to be `'\\'`;
+// SQLite rejects that doubled form as "more than one character", and
+// PostgreSQL, SQL Server and Oracle take `'\'` as one character.
 //
-// So the measurement is the VARIATION itself, not the presence of one keyword:
-// counting how many dialects write "ESCAPE" answers a different question (six
-// of six writing the same tail is not variation, it is uniformity), and it
-// cannot see engine-awareness that lives in the bound VALUE instead of in the
-// SQL. The probe normalises away the two things that always differ and carry
-// no meaning here — the placeholder spelling and the identifier quoting — and
-// then compares the six statements and the six binds against each other.
+// So the measurement is the VARIATION and its alignment: the six statements
+// are normalised (placeholder spelling and identifier quoting removed, since
+// those always differ and mean nothing here) and must fall into exactly two
+// shapes split along the doubling boundary, while the six BINDS must be one
+// and the same — the value is escaped identically everywhere, and an engine
+// that got a different value would be a different defect.
 //
 // The clients are dialect-only: they run over SQLite, so the statement fails
 // for the dialects whose placeholders SQLite cannot bind. That is irrelevant
@@ -308,12 +267,13 @@ func probeQk25DialectAwareLike(t *testing.T, e *env) verdict {
 		quark.MariaDB(), quark.MSSQL(), quark.Oracle(),
 	}
 
-	shape := map[string]string{} // dialect -> normalised statement + bind
+	shape := map[string]string{}
 	byShape := map[string][]string{}
+	binds := map[string]bool{}
 	for _, d := range dialects {
 		c, rec := e.fresh(t, "qk25_dialect_"+d.Name(), quark.WithDialect(d))
 		rec.reset()
-		if _, err := quark.For[qk25Row](e.ctx, c).Where("name", "LIKE", `%50\%%`).Count(); err != nil {
+		if _, err := quark.For[qk25Row](e.ctx, c).WhereContains("name", "50%").Count(); err != nil {
 			t.Logf("%s: %v (the statement is what matters, not the result)", d.Name(), err)
 		}
 		stmt := rec.last()
@@ -323,51 +283,45 @@ func probeQk25DialectAwareLike(t *testing.T, e *env) verdict {
 		if !strings.Contains(strings.ToUpper(stmt), " LIKE ") {
 			t.Fatalf("%s: the recorded statement is not the LIKE query: %s", d.Name(), stmt)
 		}
-		s := qk25Normalise(stmt) + " || " + qk25LastArgs(rec)
+		s := qk25Normalise(stmt)
 		shape[d.Name()] = s
 		byShape[s] = append(byShape[s], d.Name())
-		t.Logf("%s: %s", d.Name(), s)
+		binds[qk25LastArgs(rec)] = true
+		t.Logf("%s: %s || %s", d.Name(), s, qk25LastArgs(rec))
 	}
 
 	if len(byShape) == 1 {
-		// One shape for six engines: the same escape-less LIKE and the same
-		// bind everywhere, which is the absence this control is about.
+		// One shape for six engines: either no tail anywhere (the S0 state)
+		// or one spelling for parsers that disagree about it.
 		return absent
-	}
-
-	// It varies. Whether that variation is the one the title means — the
-	// engines that need an escape treated differently from the ones that do
-	// not — decides between a capability and a coincidence.
-	wantGroup := map[bool][]string{}
-	for name := range shape {
-		wantGroup[qk25DefaultEscape[name]] = append(wantGroup[qk25DefaultEscape[name]], name)
 	}
 	aligned := len(byShape) == 2
 	if aligned {
-		for _, group := range wantGroup {
-			first := shape[group[0]]
-			for _, name := range group {
-				if shape[name] != first {
-					aligned = false
-				}
+		group := map[bool]string{}
+		for name, s := range shape {
+			doubled := qk25DoublesEscapeLiteral[name]
+			if prev, ok := group[doubled]; ok && prev != s {
+				aligned = false
 			}
+			group[doubled] = s
 		}
 	}
-	if aligned {
+	if aligned && len(binds) == 1 {
 		return present
 	}
-	t.Logf("the emitted forms vary, but not along the default-escape boundary: %v", byShape)
+	t.Logf("shapes: %v; distinct binds: %d — the forms vary, but not exactly along the "+
+		"string-literal boundary with one bind for all", byShape, len(binds))
 	return partial
 }
 
-// qk25DefaultEscape says, per dialect name, whether a backslash in a LIKE
-// pattern already means "escape the next character" with no ESCAPE clause.
-// This is the boundary a dialect-aware LIKE would have to straddle, and it is
-// what LIKE-03 compares the emitted forms against.
-var qk25DefaultEscape = map[string]bool{
-	"postgres": true,
+// qk25DoublesEscapeLiteral says, per dialect name, whether the engine's
+// parser reads a backslash inside a string literal as an escape — so that the
+// clause naming the escape character has to spell it doubled. This is the
+// boundary LIKE-03 compares the emitted forms against.
+var qk25DoublesEscapeLiteral = map[string]bool{
 	"mysql":    true,
 	"mariadb":  true,
+	"postgres": false,
 	"sqlite":   false,
 	"mssql":    false,
 	"oracle":   false,
@@ -420,8 +374,8 @@ func probeQk25RawEscapeHatch(t *testing.T, e *env) verdict {
 	return partial
 }
 
-// LIKE-05. Whether the typed column accessor — the surface generated code
-// hands a search box — refuses or neutralises a wildcard the user typed.
+// LIKE-05. Whether the typed string column — the surface generated code hands
+// a search box — offers an accessor that takes the user's text as text.
 //
 // The title says GENERATED, so the equivalence between what this probe builds
 // by hand and what `quark gen` emits has to be measured, not assumed: the CLI
@@ -466,31 +420,39 @@ func probeQk25TypedLikeGuardsValue(t *testing.T, e *env) verdict {
 			"Quark refusing a wildcard", len(ground), err)
 	}
 
+	// `Like` keeps its published pattern meaning: the wildcard pattern still
+	// answers every row, with no tail. That is the ground, not the gap.
 	rec.reset()
-	rows, err := quark.For[qk25Row](e.ctx, c).WhereP(name.Like(qk25ContainsLiteralPercent)).List()
+	if pat, err := quark.For[qk25Row](e.ctx, c).WhereP(name.Like(qk25ContainsLiteralPercent)).List(); err != nil ||
+		len(pat) != qk25AllRows || qk25HasEscape(rec.last()) {
+		t.Fatalf("the typed Like no longer behaves as published (rows=%d err=%v stmt=%s): "+
+			"this control measures Contains AGAINST that ground, and the ground moved",
+			len(pat), err, rec.last())
+	}
+
+	// The search accessor: the user typed a single "%", and the one row that
+	// holds one is the answer.
+	rec.reset()
+	rows, err := quark.For[qk25Row](e.ctx, c).WhereP(name.Contains("%")).List()
 	if err != nil {
-		// Attributable now: the same accessor answered a wildcard-free value a
-		// moment ago, so what it turned down is the VALUE.
-		t.Logf("the typed accessor refused the value: %v", err)
-		return present
+		t.Logf("the search accessor refused the user's text: %v", err)
+		return partial
 	}
 	stmt := rec.last()
 	switch {
+	case len(rows) == qk25WildcardRows && qk25HasEscape(stmt) && rows[0].Name == "100% off":
+		return present
 	case len(rows) == qk25AllRows && !qk25HasEscape(stmt):
 		return absent
-	case len(rows) == 0 && qk25HasEscape(stmt):
-		// Neutralised: see the constant's comment for why the neutralised
-		// shape on a pattern the application composed is no rows and not one.
-		return present
 	default:
-		t.Logf("neither shape: %d rows (untouched %d, neutralised 0) from %s",
-			len(rows), qk25AllRows, stmt)
+		t.Logf("neither shape: %d rows (untouched %d, literal %d) from %s",
+			len(rows), qk25AllRows, qk25WildcardRows, stmt)
 		return partial
 	}
 }
 
-// LIKE-06. Whether Quark's SQL guard looks at the LIKE VALUE, not only at the
-// operator.
+// LIKE-06. Whether Quark's SQL guard looks at an escaped LIKE's VALUE, not
+// only at the operator.
 //
 // The title's "not only" presupposes the operator half, so the probe asserts
 // it instead of logging it: if the whitelist stopped refusing an operator
@@ -499,12 +461,11 @@ func probeQk25TypedLikeGuardsValue(t *testing.T, e *env) verdict {
 // broken probe, not an absence, so it fails the test and asks for the control
 // to be rewritten.
 //
-// The value it then sends is the contains-search pattern, not a bare "%": a
-// bare one cannot distinguish a guard that neutralised the value (no name is
-// exactly "%", so zero rows) from one that escaped it without declaring an
-// escape character (also zero rows). Wrapped, the three states are three
-// different numbers, so `present` is reachable — a probe whose success is
-// arithmetically impossible cannot see its own control being closed.
+// The value it then sends is a pattern that ends in a dangling escape
+// character, on the escaped surface: the one input where reading the value
+// changes the outcome, because with the character declared no engine does
+// what the caller meant with it. A refusal with NO statement recorded is the
+// guard; a refusal after one was recorded is the engine; a run is blindness.
 func probeQk25GuardInspectsLikeValue(t *testing.T, e *env) verdict {
 	c, rec := e.fresh(t, "qk25_guard_value")
 	qk25Fixture(t, e, c)
@@ -532,32 +493,32 @@ func probeQk25GuardInspectsLikeValue(t *testing.T, e *env) verdict {
 			"control before trusting its verdict", len(plain), groundErr)
 	}
 
-	rec.reset()
-	rows, err := quark.For[qk25Row](e.ctx, c).
-		Where("name", "LIKE", qk25ContainsLiteralPercent).List()
-	if err != nil {
-		// Both premises hold — the whitelist refuses an operator, an ordinary
-		// LIKE runs — so this refusal is the guard reading the VALUE.
-		t.Logf("the value was refused: %v", err)
-		return present
+	// The third premise: an escaped LIKE with a SOUND pattern runs. Without it
+	// a refusal below could be the escaped surface being broken, wearing the
+	// verdict of the guard working.
+	if sound, groundErr := quark.For[qk25Row](e.ctx, c).WhereLike("name", "%alpha%").List(); groundErr != nil || len(sound) != 1 {
+		t.Fatalf("an escaped LIKE with a sound pattern no longer runs (rows=%d err=%v): "+
+			"rewrite the control before trusting its verdict", len(sound), groundErr)
 	}
+
+	// Now the value the guard has to READ: a pattern that ends in a dangling
+	// escape character. No engine does what the caller meant with it.
+	rec.reset()
+	_, err := quark.For[qk25Row](e.ctx, c).WhereLike("name", `abc\`).List()
 	stmt := rec.last()
 	switch {
-	case len(rows) == qk25AllRows && !qk25HasEscape(stmt):
-		// Operator-shaped and value-blind: the refusal happens on one and
-		// never on the other.
-		return absent
-	case len(rows) == 0 && qk25HasEscape(stmt):
-		// The guard read the value and made it text, declaring the character
-		// that makes it text (see the constant's comment for why that is no
-		// rows here and not one).
+	case err != nil && stmt == "":
+		// Refused before the engine saw it: the guard read the value.
+		t.Logf("the dangling escape was refused before the engine: %v", err)
 		return present
-	case len(rows) == 0:
-		t.Logf("the value was escaped but the statement declares no escape character: %s", stmt)
+	case err != nil:
+		// The ENGINE refused it — the statement was recorded first. That is
+		// PostgreSQL's error surfacing, not Quark's guard.
+		t.Logf("the dangling escape reached the engine, which refused it: %v (%s)", err, stmt)
 		return partial
 	default:
-		t.Logf("neither shape: %d rows from %s", len(rows), stmt)
-		return partial
+		// It ran. Operator-shaped and value-blind.
+		return absent
 	}
 }
 
@@ -712,12 +673,13 @@ func qk25EnginesProvingEscape(t *testing.T, engines []string) map[string]bool {
 // LIKE-08. Whether a literal percent sign in a value can be matched exactly
 // through the builder.
 //
-// The absence is measured as two wrong numbers around the right one: with the
-// value left alone the answer is every row, and with the value escaped by hand
-// the answer is no rows, because without an ESCAPE clause SQLite reads the
-// backslash as an ordinary character and looks for a name that contains one.
-// The two halves of the fix — emit the clause and escape the value — are only
-// correct together; either one alone moves the defect instead of closing it.
+// The absence was two wrong numbers around the right one: with the value left
+// alone the answer is every row, and with the value escaped by hand the answer
+// is no rows, because without an ESCAPE clause SQLite reads the backslash as
+// an ordinary character. The two halves of the fix — declare the character and
+// escape the value — are only correct together, so the probe reads the
+// hand-escaped pattern through the escaped surface and wants exactly one row;
+// the plain form is the ground and stays every row.
 func probeQk25LiteralPercentMatch(t *testing.T, e *env) verdict {
 	c, _ := e.fresh(t, "qk25_literal_percent")
 	qk25Fixture(t, e, c)
@@ -726,17 +688,28 @@ func probeQk25LiteralPercentMatch(t *testing.T, e *env) verdict {
 	if err != nil {
 		t.Fatalf("a LIKE with a wildcard pattern should run: %v", err)
 	}
-	escaped, err := quark.For[qk25Row](e.ctx, c).Where("name", "LIKE", `%\%%`).List()
+	if len(plain) != qk25AllRows {
+		t.Fatalf("the plain LIKE no longer answers every row for a wildcard pattern (%d): "+
+			"the ground of this control moved", len(plain))
+	}
+	// The hand-escaped pattern through the ESCAPED surface: the builder
+	// declares the character, so the backslash means what the caller meant.
+	escaped, err := quark.For[qk25Row](e.ctx, c).WhereLike("name", `%\%%`).List()
 	if err != nil {
-		t.Fatalf("a LIKE with a backslash in the value should run: %v", err)
+		t.Logf("the escaped surface refused the pattern: %v", err)
+		return absent
 	}
-
-	if len(plain) == qk25WildcardRows || len(escaped) == qk25WildcardRows {
+	switch len(escaped) {
+	case qk25WildcardRows:
 		return present
+	case 0:
+		t.Logf("the hand-escaped pattern answers no rows: the value was taken as text " +
+			"but no escape character was declared")
+		return partial
+	default:
+		t.Logf("literal %%-search answers %d rows, correct %d", len(escaped), qk25WildcardRows)
+		return absent
 	}
-	t.Logf("literal %%-search answers: unescaped %d rows, hand-escaped %d rows, correct %d",
-		len(plain), len(escaped), qk25WildcardRows)
-	return absent
 }
 
 // --- what the CI exercises -------------------------------------------------

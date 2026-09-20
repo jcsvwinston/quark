@@ -1464,6 +1464,7 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 			// No placeholder or value needed
 		default:
 			condSQL.WriteString(q.dialect.Placeholder(argIndex))
+			condSQL.WriteString(likeTail(cond, q.dialect))
 			args = append(args, cond.value)
 			argIndex++
 		}

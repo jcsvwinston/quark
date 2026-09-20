@@ -37,7 +37,7 @@ func TestSuiteMariaDB(t *testing.T) {
 	defer client.Close()
 
 	if err := client.Raw().Ping(); err != nil {
-		t.Skipf("MariaDB not reachable (%v), skipping", err)
+		t.Fatalf("MariaDB not reachable (%v): this lane declares the engine, so an engine that does not answer is a failure, not a skip (QK-31)", err)
 	}
 
 	SharedSuite(t, client)
@@ -57,7 +57,7 @@ func TestMariaDBCache(t *testing.T) {
 	defer baseClient.Close()
 
 	if err := baseClient.Raw().Ping(); err != nil {
-		t.Skipf("MariaDB not reachable (%v), skipping", err)
+		t.Fatalf("MariaDB not reachable (%v): this lane declares the engine, so an engine that does not answer is a failure, not a skip (QK-31)", err)
 	}
 
 	ctx := context.Background()
@@ -204,7 +204,7 @@ func TestMariaDBOtel(t *testing.T) {
 	defer db.Close()
 
 	if err := db.Ping(); err != nil {
-		t.Skipf("MariaDB not reachable (%v), skipping", err)
+		t.Fatalf("MariaDB not reachable (%v): this lane declares the engine, so an engine that does not answer is a failure, not a skip (QK-31)", err)
 	}
 
 	exporter, shutdown := setupTestTelemetry()
