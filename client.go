@@ -545,52 +545,87 @@ func For[T any](ctx context.Context, provider ClientProvider) *Query[T] {
 
 	// Apply multi-tenant configurations if the provider is a TenantRouter
 	if router, ok := provider.(*TenantRouter); ok {
-		tenantID, err := router.ResolveTenant(ctx)
-		if err != nil {
-			q.err = err
-			return q
-		}
-
-		switch router.config.Strategy {
-		case SchemaPerTenant:
-			q.schema = tenantID
-		case RowLevelSecurityClient:
-			q.tenantID = tenantID
-			q.tenantCol = router.config.TenantColumn
-			// Pre-inject the RLS WHERE condition
-			q.where = ownedAppend(q.where, condition{
-				column:   router.config.TenantColumn,
-				operator: "=",
-				value:    tenantID,
-				logic:    "AND",
-			})
-		case RowLevelSecurityNative:
-			// PostgreSQL-only: the engine itself enforces isolation
-			// via row-level security policies referencing the session
-			// variable set by nativeRLSExecutor. We don't inject a
-			// WHERE predicate — the policy does it server-side. See
-			// ADR-0012.
-			if client.dialect.Name() != "postgres" {
-				q.err = fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
-					ErrUnsupportedFeature, client.dialect.Name())
-				return q
-			}
-			// tenantID participates ONLY in the cache key here.
-			// tenantCol stays empty on purpose, so every SQL-shaping
-			// consumer (WHERE injection, soft-delete scoping, create
-			// auto-fill) stays inert — the policy remains the sole
-			// filter. Without this, generateCacheKey hashed the same
-			// bytes for every tenant over the ONE shared cacheStore of
-			// the base client, and a .Cache() fill by tenant A was
-			// served verbatim to tenant B: the engine's RLS protected
-			// the database, nothing protected the cache
-			// (TestRowLevelSecurityNativeCacheIsTenantScoped).
-			q.tenantID = tenantID
-			q.exec = newNativeRLSExecutor(client, tenantID, router.config.defaultNativeRLSVar())
-		}
+		applyTenantConfinement(&q.BaseQuery, router, client, ctx, false)
 	}
 
 	return q
+}
+
+// applyTenantConfinement stamps a query with whatever confines it to one
+// tenant, for the strategy the router is running.
+//
+// It is ONE function called from both query constructors because the
+// alternative was measured and it did not hold: For applied the confinement
+// and ForTx did not, so the same model read inside a transaction saw every
+// tenant's rows and wrote to the default schema (QK-26). Two paths that must
+// agree and can drift will drift. There is one path now, and a strategy added
+// here reaches both or neither.
+//
+// The tenant comes from the CONTEXT rather than from whoever opened the
+// transaction, which is the rule the non-transactional path has always had:
+// the query is confined to the tenant it runs under.
+// inTx says the query runs inside a transaction the router opened. It changes
+// exactly one thing, and only for RowLevelSecurityNative: there the engine
+// enforces the isolation through a session variable that TenantRouter.Tx has
+// already set on the transaction, so the query must NOT be given the native
+// executor — that would set the variable on a different connection and leave
+// the transaction filtering by nothing. The tenant is still stamped, because
+// the cache key needs it either way.
+func applyTenantConfinement(q *BaseQuery, router *TenantRouter, client *Client, ctx context.Context, inTx bool) {
+	tenantID, err := router.ResolveTenant(ctx)
+	if err != nil {
+		q.err = err
+		return
+	}
+
+	switch router.config.Strategy {
+	case SchemaPerTenant:
+		q.schema = tenantID
+	case RowLevelSecurityClient:
+		q.tenantID = tenantID
+		q.tenantCol = router.config.TenantColumn
+		// Pre-inject the RLS WHERE condition
+		q.where = ownedAppend(q.where, condition{
+			column:   router.config.TenantColumn,
+			operator: "=",
+			value:    tenantID,
+			logic:    "AND",
+		})
+	case RowLevelSecurityNative:
+		// PostgreSQL-only: the engine itself enforces isolation
+		// via row-level security policies referencing the session
+		// variable set by nativeRLSExecutor. We don't inject a
+		// WHERE predicate — the policy does it server-side. See
+		// ADR-0012.
+		if client.dialect.Name() != "postgres" {
+			q.err = fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
+				ErrUnsupportedFeature, client.dialect.Name())
+			return
+		}
+		// tenantID participates ONLY in the cache key here.
+		// tenantCol stays empty on purpose, so every SQL-shaping
+		// consumer (WHERE injection, soft-delete scoping, create
+		// auto-fill) stays inert — the policy remains the sole
+		// filter. Without this, generateCacheKey hashed the same
+		// bytes for every tenant over the ONE shared cacheStore of
+		// the base client, and a .Cache() fill by tenant A was
+		// served verbatim to tenant B: the engine's RLS protected
+		// the database, nothing protected the cache
+		// (TestRowLevelSecurityNativeCacheIsTenantScoped).
+		q.tenantID = tenantID
+		// Only OUTSIDE a transaction, and this guard is the whole reason
+		// inTx exists. Inside one, TenantRouter.Tx has already armed the
+		// session variable on THAT connection; handing the query a native
+		// executor would send every statement down a second connection of
+		// its own, which commits writes the outer rollback can no longer
+		// undo, reads outside the transaction's snapshot, and waits on the
+		// first connection for a row the first connection holds — with
+		// MaxOpenConns(1) it never gets a connection at all. The tenant is
+		// still stamped above, because the cache key needs it either way.
+		if !inTx {
+			q.exec = newNativeRLSExecutor(client, tenantID, router.config.defaultNativeRLSVar())
+		}
+	}
 }
 
 // RawQuery executes a raw SQL query with the given arguments.

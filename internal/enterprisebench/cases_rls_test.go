@@ -164,15 +164,9 @@ func controlsRls() []control {
 		{
 			id:     "RLS-13",
 			family: "rls",
-			title:  "DatabasePerTenant holds inside a transaction; SchemaPerTenant loses its schema inside router.Tx and RowLevelSecurityClient loses its predicate there too",
-			want:   partial,
-			note: "router.Tx delegates to the base client for every strategy that is not " +
-				"Native, and ForTx builds its query without schema, tenant id or tenant " +
-				"column — so inside the transaction a SchemaPerTenant read hits the shared " +
-				"default-schema table and a write lands there too, and a " +
-				"RowLevelSecurityClient read loses its predicate the same way. " +
-				"DatabasePerTenant survives because its isolation is the pool itself.",
-			probe: probeRlsOtherTenantStrategies,
+			title:  "Tenant confinement survives a transaction: DatabasePerTenant through its pool, SchemaPerTenant through its schema prefix, RowLevelSecurityClient through its predicate",
+			want:   present,
+			probe:  probeRlsOtherTenantStrategies,
 		},
 	}
 }

@@ -624,7 +624,13 @@ func (r *TenantRouter) Tx(ctx context.Context, fn func(tx *Tx) error) error {
 		if err != nil {
 			return err
 		}
-		return client.Tx(ctx, fn)
+		// The transaction remembers which router opened it, so a query built
+		// with ForTx inside fn is confined to the same tenant the caller
+		// resolved here. Handing back a bare *Tx is what QK-26 was.
+		return client.Tx(ctx, func(tx *Tx) error {
+			tx.router = r
+			return fn(tx)
+		})
 	}
 
 	if r.config.BaseClient == nil {
@@ -641,6 +647,11 @@ func (r *TenantRouter) Tx(ctx context.Context, fn func(tx *Tx) error) error {
 		if _, err := tx.tx.ExecContext(ctx, "SELECT set_config($1, $2, true)", varName, tenantID); err != nil {
 			return fmt.Errorf("native rls: set_config: %w", err)
 		}
+		// Here the engine's policy is what filters, and it is already armed
+		// on this connection by the set_config above. The router is still
+		// recorded so ForTx stamps the tenant on the cache key — the leak
+		// that TestRowLevelSecurityNativeCacheIsTenantScoped pins.
+		tx.router = r
 		return fn(tx)
 	})
 }

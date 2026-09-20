@@ -1314,15 +1314,22 @@ func probeRlsOtherTenantStrategies(t *testing.T, e *env) verdict {
 
 	// Inside the router's own transaction the schema is gone and so is the
 	// tenant: the query runs against the default schema's shared table.
+	// Read the evidence the same way on both sides of the transaction
+	// boundary, which is the whole point of the control: the qualified name in
+	// the statement, or — SQLite has no such schema — in the error naming the
+	// table it could not find. Returning the error here instead would make the
+	// probe unable to see a confinement that IS applied, which is the state
+	// this control exists to tell apart from the one where it is dropped.
 	schemaInsideTx := false
 	inTxTenants := []string{}
 	if err := schemaRouter.Tx(ta, func(tx *quark.Tx) error {
 		rec.reset()
 		rows, err := quark.ForTx[rlsRow](ta, tx).List()
+		evidence := rec.last()
 		if err != nil {
-			return err
+			evidence += " " + err.Error()
 		}
-		schemaInsideTx = strings.Contains(rec.last(), "ta.rls_rows")
+		schemaInsideTx = strings.Contains(evidence, "ta.rls_rows")
 		inTxTenants = rlsTenantsIn(rows)
 		return nil
 	}); err != nil {

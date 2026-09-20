@@ -26,6 +26,13 @@ type Executor interface {
 type Tx struct {
 	tx     *sql.Tx
 	client *Client
+	// router is the TenantRouter that opened this transaction, when one did.
+	// Queries built with [ForTx] take their tenant confinement from it, the
+	// same way [For] takes it from the provider it was handed. Without this
+	// the confinement stopped at the transaction boundary: a query inside
+	// router.Tx read every tenant's rows and wrote to the default schema
+	// (QK-26).
+	router *TenantRouter
 	// ctx is the context the transaction was opened with (via
 	// [Client.BeginTx] / [Client.Tx]). It is passed to the
 	// [Tx.OnCommit] / [Tx.OnRollback] callbacks when they fire. If
@@ -648,7 +655,7 @@ func ForTx[T any](ctx context.Context, tx *Tx) *Query[T] {
 	// side-effect of its own.
 	ctx = context.WithValue(ctx, txContextKey{}, tx)
 
-	return &Query[T]{
+	q := &Query[T]{
 		BaseQuery: BaseQuery{
 			ctx:     ctx,
 			client:  tx.client,
@@ -661,6 +668,16 @@ func ForTx[T any](ctx context.Context, tx *Tx) *Query[T] {
 			meta:    meta,
 		},
 	}
+
+	// The same confinement the non-transactional path applies, through the
+	// same function. It used to be missing here, which is the whole of QK-26:
+	// inside router.Tx a query saw every tenant's rows and wrote to the
+	// default schema, because this constructor had no idea a router existed.
+	if tx.router != nil {
+		applyTenantConfinement(&q.BaseQuery, tx.router, tx.client, ctx, true)
+	}
+
+	return q
 }
 
 // txContextKey is the unexported context key under which [ForTx]
