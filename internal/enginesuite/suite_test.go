@@ -998,7 +998,11 @@ func testNativeTypes(ctx context.Context, t *testing.T, client *quark.Client) {
 		if rows, err := quark.For[NTEvent](ctx, client).Where("tags", "@>", []string{"go"}).List(); err != nil || len(rows) != 1 {
 			t.Errorf("postgres array containment: %d rows, %v", len(rows), err)
 		}
-		if rows, err := quark.For[NTEvent](ctx, client).Where("window", "@>", now.Add(30*time.Minute)).List(); err != nil || len(rows) != 1 {
+		// A point inside the range: through a driver placeholder PostgreSQL
+		// cannot tell a bare timestamp from a range literal for `@>`, so
+		// the point is asked as the singleton range [p,p].
+		at := now.Add(30 * time.Minute)
+		if rows, err := quark.For[NTEvent](ctx, client).Where("window", "@>", quark.Range[time.Time]{Lower: at, Upper: at, Bounds: "[]"}).List(); err != nil || len(rows) != 1 {
 			t.Errorf("postgres range containment: %d rows, %v", len(rows), err)
 		}
 		if rows, err := quark.For[NTEvent](ctx, client).Where("source", "<<", "10.0.0.0/8").List(); err != nil || len(rows) != 1 {

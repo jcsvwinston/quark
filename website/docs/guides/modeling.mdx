@@ -404,7 +404,10 @@ address you would type.
 The operators PostgreSQL has for these types — `@>`, `<@`, `&&` for containment
 and overlap, `>>`, `<<`, `>>=`, `<<=` for networks — are accepted by `Where` on
 PostgreSQL and refused with `ErrUnsupportedFeature` naming the engine anywhere
-else, before any SQL is built. Nothing is rewritten into an approximation.
+else, before any SQL is built. Nothing is rewritten into an approximation. To
+ask whether a range contains a **point**, pass the point as the singleton range
+`Range[T]{Lower: p, Upper: p, Bounds: "[]"}`: through a driver placeholder
+PostgreSQL cannot tell a bare value from a range literal on the right of `@>`.
 
 ```go
 type Event struct {
@@ -414,7 +417,8 @@ type Event struct {
     Source net.IP                 `db:"source"`
 }
 quark.For[Event](ctx, client).Where("tags", "@>", []string{"go"}).List()   // PostgreSQL only
-quark.For[Event](ctx, client).Where("window", "@>", time.Now()).List()     // PostgreSQL only
+at := time.Now()
+quark.For[Event](ctx, client).Where("window", "@>", quark.Range[time.Time]{Lower: at, Upper: at, Bounds: "[]"}).List() // PostgreSQL only
 quark.For[Event](ctx, client).Where("source", "<<", "10.0.0.0/8").List()   // PostgreSQL only
 ```
 
