@@ -331,14 +331,9 @@ func probeExternalDriverEndToEnd(t *testing.T, e *env) verdict {
 // The probe compares the measured set with it exactly: a step that starts or
 // stops diverging is a change to the note, not only to the count.
 var participantRecorded = []string{
-	"ApplyPlan adds a column",
 	"ApplyPlan adds a foreign key",
 	"ApplyPlan alters a column",
-	"ApplyPlan drops a column",
-	"Migrate is idempotent (run twice)",
-	"Migrate: an insert into the migrated table gets its primary key from the engine",
-	"PlanMigration against SQLite's own table proposes nothing",
-	"Sync adds a column",
+	"ApplyPlan undoes a plan that fails half-way",
 }
 
 func probeFullParticipant(t *testing.T, e *env) verdict {

@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 // backfillStateTableName is the catalog-side state table that
@@ -145,52 +147,23 @@ func (c *Client) Backfill(ctx context.Context, spec BackfillSpec) error {
 }
 
 // ensureBackfillStateTable creates `quark_backfill_state` if it
-// doesn't exist. Same per-dialect pattern as
-// `ensureMigrationStateTable` — MSSQL uses sys.tables guard, Oracle
-// swallows ORA-00955, others use CREATE TABLE IF NOT EXISTS.
+// doesn't exist, the way `ensureMigrationStateTable` does: one template,
+// the types asked of the dialect (quarkdriver.ColumnTyper) and the
+// conditional create its quarkdriver.IdempotentDDL writes.
 //
 // Schema:
-//   - `name VARCHAR(255)` — the BackfillSpec.Name. PK.
-//   - `last_pk BIGINT NOT NULL` — highest PK successfully processed.
-//   - `updated_at TIMESTAMP` — audit only; not used for resume.
+//   - `name` — the BackfillSpec.Name, a 255-character string. PK.
+//   - `last_pk` — highest PK successfully processed, the dialect's
+//     64-bit integer.
+//   - `updated_at` — audit only; not used for resume.
 func (c *Client) ensureBackfillStateTable(ctx context.Context) error {
-	var ddl string
-	switch c.dialect.Name() {
-	case "mysql", "mariadb":
-		ddl = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			name VARCHAR(255) NOT NULL PRIMARY KEY,
-			last_pk BIGINT NOT NULL,
-			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`, c.dialect.Quote(backfillStateTableName))
-	case "mssql":
-		ddl = fmt.Sprintf(`IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '%s')
-			CREATE TABLE %s (
-				name NVARCHAR(255) NOT NULL PRIMARY KEY,
-				last_pk BIGINT NOT NULL,
-				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-			)`, backfillStateTableName, c.dialect.Quote(backfillStateTableName))
-	case "postgres", "sqlite":
-		ddl = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			name VARCHAR(255) NOT NULL PRIMARY KEY,
-			last_pk BIGINT NOT NULL,
-			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`, c.dialect.Quote(backfillStateTableName))
-	case "oracle":
-		ddl = fmt.Sprintf(`CREATE TABLE %s (
-			name VARCHAR2(255) NOT NULL,
-			last_pk NUMBER(19) NOT NULL,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-			CONSTRAINT pk_%s PRIMARY KEY (name)
-		)`, c.dialect.Quote(backfillStateTableName), backfillStateTableName)
-	default:
-		return fmt.Errorf("%w: ensureBackfillStateTable not implemented for dialect %s",
-			ErrUnsupportedFeature, c.dialect.Name())
-	}
-	_, err := c.db.ExecContext(ctx, ddl)
-	if err != nil {
-		if c.dialect.Name() == "oracle" && strings.Contains(err.Error(), "ORA-00955") {
-			return nil
-		}
+	types := c.schemaTypes()
+	body := strings.Join([]string{
+		"name " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindString, Size: 255}) + " NOT NULL PRIMARY KEY",
+		"last_pk " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindInt64}) + " NOT NULL",
+		"updated_at " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindTime}) + " DEFAULT CURRENT_TIMESTAMP NOT NULL",
+	}, ",\n  ")
+	if err := c.createTableIfNotExists(ctx, c.db, backfillStateTableName, body); err != nil {
 		return fmt.Errorf("ensureBackfillStateTable: %w", err)
 	}
 	return nil
@@ -263,38 +236,18 @@ func (c *Client) writeBackfillState(ctx context.Context, name string, lastPK int
 // `batchSize`. Returns the PKs as an int64 slice; empty means
 // done.
 //
-// LIMIT syntax varies — MSSQL uses TOP, Oracle uses FETCH NEXT.
-// We use the per-dialect form rather than the (also-portable)
-// row_number() over (...) trick because LIMIT/TOP is simpler and
-// the helper isn't a hot path.
+// The row limit is the dialect's own LimitOffset — LIMIT n, or OFFSET 0
+// ROWS FETCH NEXT n ROWS ONLY on SQL Server and Oracle, which is why the
+// query always has its ORDER BY — rather than a spelling chosen by the
+// dialect's name (A11 Q2).
 func (c *Client) fetchBackfillBatch(ctx context.Context, table, pkCol string, lastPK int64, batchSize int) ([]int64, error) {
-	var q string
-	switch c.dialect.Name() {
-	case "mssql":
-		q = fmt.Sprintf(`SELECT TOP (%d) %s FROM %s WHERE %s > %s ORDER BY %s ASC`,
-			batchSize,
-			c.dialect.Quote(pkCol),
-			c.dialect.Quote(table),
-			c.dialect.Quote(pkCol),
-			c.dialect.Placeholder(1),
-			c.dialect.Quote(pkCol))
-	case "oracle":
-		q = fmt.Sprintf(`SELECT %s FROM %s WHERE %s > %s ORDER BY %s ASC FETCH NEXT %d ROWS ONLY`,
-			c.dialect.Quote(pkCol),
-			c.dialect.Quote(table),
-			c.dialect.Quote(pkCol),
-			c.dialect.Placeholder(1),
-			c.dialect.Quote(pkCol),
-			batchSize)
-	default:
-		q = fmt.Sprintf(`SELECT %s FROM %s WHERE %s > %s ORDER BY %s ASC LIMIT %d`,
-			c.dialect.Quote(pkCol),
-			c.dialect.Quote(table),
-			c.dialect.Quote(pkCol),
-			c.dialect.Placeholder(1),
-			c.dialect.Quote(pkCol),
-			batchSize)
-	}
+	q := fmt.Sprintf(`SELECT %s FROM %s WHERE %s > %s ORDER BY %s ASC %s`,
+		c.dialect.Quote(pkCol),
+		c.dialect.Quote(table),
+		c.dialect.Quote(pkCol),
+		c.dialect.Placeholder(1),
+		c.dialect.Quote(pkCol),
+		c.dialect.LimitOffset(batchSize, 0))
 	rows, err := c.db.QueryContext(ctx, q, lastPK)
 	if err != nil {
 		return nil, err

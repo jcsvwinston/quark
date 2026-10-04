@@ -612,22 +612,22 @@ var interceptionRecorded = struct {
 	middlewareMisses, observerMisses   int
 	middlewareClasses, observerClasses []string
 }{
-	middlewareMisses: 13,
+	middlewareMisses: 17,
 	middlewareClasses: []string{
 		"ALTER TABLE", "CREATE TABLE",
 		`PRAGMA foreign_key_list("obs_rows")`, `PRAGMA index_info("sqlite_autoindex_obs_rows_1")`,
-		`PRAGMA index_list("obs_rows")`, `PRAGMA table_info("obs_rows")`, `PRAGMA table_info(obs_rows)`,
+		`PRAGMA index_list("obs_rows")`, `PRAGMA table_info("obs_rows")`,
 		"ROLLBACK TO", `SAVEPOINT "sp"`,
 		`SELECT "id"`,       // client.RawQuery
 		"SELECT name",       // the sqlite_master listing of introspection
 		`UPDATE "obs_rows"`, // client.Exec
 	},
-	observerMisses: 12,
+	observerMisses: 16,
 	observerClasses: []string{
 		"ALTER TABLE", "CREATE TABLE",
 		"INSERT INTO", // CreateBatch
 		`PRAGMA foreign_key_list("obs_rows")`, `PRAGMA index_info("sqlite_autoindex_obs_rows_1")`,
-		`PRAGMA index_list("obs_rows")`, `PRAGMA table_info("obs_rows")`, `PRAGMA table_info(obs_rows)`,
+		`PRAGMA index_list("obs_rows")`, `PRAGMA table_info("obs_rows")`,
 		"ROLLBACK TO", `SAVEPOINT "sp"`,
 		"SELECT name",
 	},

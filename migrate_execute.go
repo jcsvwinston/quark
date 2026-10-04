@@ -360,8 +360,8 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 //
 // PRIMARY KEY rendering mirrors the migrator (F3-2-pk): a single PK
 // column of an integer family renders as the dialect's auto-increment
-// fragment (the same `migrate.PKColumnSQL` the migrator uses — SERIAL,
-// AUTO_INCREMENT, IDENTITY, AUTOINCREMENT…), any other single PK keeps
+// fragment (its quarkdriver.AutoIncrementer, which the migrator asks too —
+// BIGSERIAL, AUTO_INCREMENT, IDENTITY, AUTOINCREMENT…), any other single PK keeps
 // its own type plus `PRIMARY KEY`, and a composite key renders as a
 // table-level `PRIMARY KEY (a, b)` constraint. PK columns skip NOT NULL
 // (implied) and — on the auto-increment path — skip DEFAULT too: the
@@ -407,7 +407,7 @@ func (c *Client) applyCreateTable(ctx context.Context, exec Executor, t Table) e
 		// OnDelete/OnUpdate.
 		if col.PrimaryKey && singlePK {
 			class := migrate.ClassifyPKType(col.Type)
-			piece := c.dialect.Quote(col.Name) + " " + migrate.PKColumnSQL(c.dialect.Name(), class, c.mapColumnType(col.Type))
+			piece := c.dialect.Quote(col.Name) + " " + migrate.PKColumnSQLWith(c.schemaTypes(), class, c.mapColumnType(col.Type))
 			// PRIMARY KEY implies NOT NULL; auto-increment owns the
 			// value, so only a non-auto PK keeps a declared default.
 			if class != migrate.PKInteger && col.Default != nil && !isAutoincrementDefault(*col.Default) {

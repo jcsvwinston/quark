@@ -468,8 +468,10 @@ which a `Scanner` expecting the RFC order reads as a different UUID.
 
 The mapper only decides the DDL type. The round-trip still goes through
 `database/sql`, so the type must implement `sql.Scanner` and `driver.Valuer`, or
-be natively supported by the driver. A `time.Duration` mapper ships built in; it
-emits `BIGINT`, or `NUMBER(19)` on Oracle.
+be natively supported by the driver. A `time.Duration` needs no mapper: it is an
+`int64` count of nanoseconds and gets the dialect's 64-bit integer — `BIGINT`,
+or `NUMBER(19)` on Oracle. As a primary key it is your value, never an
+auto-increment key.
 
 :::warning On SQL Server, store UUIDs as text, not `UNIQUEIDENTIFIER`
 SQL Server stores the first three groups of a GUID little-endian while

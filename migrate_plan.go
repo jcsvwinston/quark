@@ -70,7 +70,7 @@ func (p Plan) String() string {
 // Surface caveats — known asymmetries between desired and current:
 //
 //   - **Type strings**: the desired Schema uses the migrator's
-//     `SQLTypeWithOpts` output (`BIGINT`, `VARCHAR(255)`) while the
+//     column types (`BIGINT`, `VARCHAR(255)`) while the
 //     introspector returns whatever the catalog stores (lowercase,
 //     parameter-bearing, or canonical form per dialect). The diff's
 //     [normalizeType] helper collapses these to a comparable form
@@ -137,9 +137,10 @@ func (c *Client) PlanMigration(ctx context.Context, models ...any) (Plan, error)
 // resulting Schema carries columns only — see the [PlanMigration]
 // godoc for why indexes / FKs / checks aren't surfaced from models.
 //
-// The SQL type strings come from the same `migrate.SQLTypeWithOpts`
-// helper [Client.Migrate] uses, so the desired and (eventually)
-// migrator-emitted DDL stay in lockstep. The caveat is that those
+// The SQL type strings come from the same column-type pipeline
+// [Client.Migrate] uses — answered by the dialect's ColumnTyper and
+// AutoIncrementer — so the desired and migrator-emitted DDL stay in
+// lockstep. The caveat is that those
 // strings don't always match what the catalog returns from
 // [Client.IntrospectSchema] — see the type-strings note in the
 // PlanMigration godoc.
@@ -151,6 +152,7 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 	// the synthetic two-column shape.
 	type joinSpec struct{ table, fk, refFK string }
 	var joins []joinSpec
+	types := c.schemaTypes()
 	for _, model := range models {
 		t := reflect.TypeOf(model)
 		// `reflect.TypeOf(nil)` returns `nil`, which would panic on
@@ -178,7 +180,7 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 			}
 			// Critical: pass `IsPK: false` here regardless of whether
 			// the field is the PK. The migrator passes `IsPK: true`
-			// when emitting CREATE TABLE so SQLTypeWithOpts returns a
+			// when emitting CREATE TABLE so ColumnSQL returns a
 			// full constraint-bearing fragment (`INTEGER PRIMARY KEY
 			// AUTOINCREMENT` on SQLite, `SERIAL PRIMARY KEY` on PG,
 			// etc.). That's correct for DDL but wrong here — Column.Type
@@ -188,7 +190,7 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 			// Column.PrimaryKey instead (F3-2-pk): the diff compares it
 			// and ApplyPlan's CREATE TABLE renders the constraint from
 			// it, so a plan-created table matches Migrate's output.
-			sqlType := migrate.SQLTypeWithOpts(c.dialect.Name(), f.Type, migrate.TypeOptions{
+			sqlType := migrate.ColumnSQL(types, f.Type, migrate.TypeOptions{
 				Size:      f.Size,
 				Precision: f.Precision,
 				Scale:     f.Scale,
@@ -199,9 +201,9 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 			// type would. A composite key does — only a lone INTEGER
 			// PRIMARY KEY aliases SQLite's rowid, so the columns of a
 			// two-column key are ordinary BIGINTs. See
-			// migrate.PKBareColumnType.
+			// migrate.PKBareColumnTypeWith.
 			if f.IsPK && !meta.HasCompositePK {
-				if bare, ok := migrate.PKBareColumnType(c.dialect.Name(), f.Type); ok {
+				if bare, ok := migrate.PKBareColumnTypeWith(types, f.Type); ok {
 					sqlType = bare
 				}
 			}
@@ -228,7 +230,7 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 				// equivalence — that's a diff refinement, not a migration
 				// failure, and is tracked separately.)
 				if migrate.IsBoolColumn(f.Type) {
-					s = migrate.NormalizeBoolDefault(c.dialect.Name(), s)
+					s = migrate.NormalizeBoolDefaultWith(types.BoolLiteral, s)
 				}
 				col.Default = &s
 			}
@@ -269,7 +271,7 @@ func (c *Client) modelsToSchema(models ...any) (Schema, error) {
 	for _, t := range tables {
 		declared[t.Name] = true
 	}
-	fkType := migrate.SQLTypeWithOpts(c.dialect.Name(), reflect.TypeOf(int64(0)), migrate.TypeOptions{})
+	fkType := migrate.ColumnSQL(types, reflect.TypeOf(int64(0)), migrate.TypeOptions{})
 	for _, j := range joins {
 		if declared[j.table] {
 			continue

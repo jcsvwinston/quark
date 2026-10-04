@@ -19,7 +19,7 @@ phase: 0
 
 Quark tiene **dos sistemas paralelos** de migración:
 
-1. **Auto-migración** (estilo GORM `AutoMigrate`): `migrator.go` + `sync.go`. Genera `CREATE TABLE IF NOT EXISTS` desde reflect, soporta composite PK, índices, FKs, join tables M2M. `Sync` hace introspección (`internal/db/introspection.go`) y compara columnas: añade nuevas, renombra (vía tag `quark:"rename:old"`), dropa si `SafeMigrations=false`.
+1. **Auto-migración** (estilo GORM `AutoMigrate`): `migrator.go` + `sync.go`. Genera `CREATE TABLE IF NOT EXISTS` desde reflect, soporta composite PK, índices, FKs, join tables M2M. `Sync` lee las columnas con el `SchemaIntrospector` del dialecto (desde A11 Q2; antes `internal/db/introspection.go`, elegido por el nombre) y compara columnas: añade nuevas, renombra (vía tag `quark:"rename:old"`), dropa si `SafeMigrations=false`.
 
 2. **Migraciones versionadas** (estilo Flyway/Alembic): `migrate/migrate.go`. Registry global `map[string]*Migration` (`migrate/migrate.go:19`), tabla `quark_migrations`, `Up`/`Down`/`UpDryRun`.
 
@@ -174,15 +174,32 @@ así, rompiendo el invariante "plan vacío sin cambios". `mysqlLikeIntrospect`
 "mariadb"`** (MySQL debe conservar un `DEFAULT 'NULL'` real). Si tocas el
 introspector MySQL/MariaDB, no rompas esta normalización.
 
-### Migrator versionado: DDL del bookkeeping table debe ser per-dialecto
+### Bookkeeping tables: one template, the dialect answers
 
-(BB-12, cerrado.) `Migrator.Init` (`migrate/migrate.go`) creaba
-`quark_migrations` con `CREATE TABLE IF NOT EXISTS … TIMESTAMP …` — roto en
-MSSQL (no tiene `IF NOT EXISTS`; su `TIMESTAMP` es rowversion) y Oracle. Ahora es
-per-dialecto (MSSQL `IF NOT EXISTS (SELECT … sys.tables)` + `DATETIME`; Oracle
-`VARCHAR2` + swallow ORA-00955), vía `Raw` como `GetApplied`. Mismo patrón que
-`ensureMigrationStateTable`/`ensureBackfillStateTable`. Cualquier tabla interna
-nueva debe seguir este patrón, no asumir DDL portable.
+(BB-12, closed; reshaped in A11 Q2.) `Migrator.Init` (`migrate/migrate.go`)
+once created `quark_migrations` with `CREATE TABLE IF NOT EXISTS … TIMESTAMP …`,
+broken on MSSQL (no `IF NOT EXISTS`; its `TIMESTAMP` is rowversion) and Oracle.
+The fix was one DDL copy per dialect NAME, and a dialect under any other name
+got `ErrUnsupportedFeature`. Since A11 Q2 the ledger, `ensureMigrationStateTable`
+and `ensureBackfillStateTable` are one template each: the column types come
+from `quarkdriver.ColumnTyper` (`KindText` for unbounded text, `KindTime` for
+the timestamp) and the conditional create from `quarkdriver.IdempotentDDL`
+(SQL Server's `sys.tables` guard, Oracle's ORA-00955). A new internal table
+follows the same pattern — `migrate.CreateTableIfNotExists` and the dialect's
+types — never a `switch` on the name.
+
+### Never decide schema DDL by `Dialect.Name()`
+
+The A11 bench (`internal/extbench`, control `DRV-04`) runs SQLite's own dialect
+methods under another name and compares nine schema steps with SQLite's. Any
+`switch c.dialect.Name()` in `migrator.go`, `sync.go`, `migrate_*.go`,
+`internal/migrate` or `migrate/` turns a step red: the dialect has to be ASKED,
+through `SupportsTransactionalDDL()` or an optional interface of
+`quarkdriver` (`ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`; ApplyPlan's
+statements in the second half of Q2). The built-in dialects answer by passing
+their own engine constant to the tables in `internal/migrate/engines.go`; the
+name-keyed `SQLTypeWithOpts`/`PKColumnSQL`/`NormalizeBoolDefault` remain only
+for the CLI, which plans for the six built-in engines from source.
 
 ### `t.Skip` para gatear tests por motor
 
@@ -214,4 +231,4 @@ Anti-pattern explícitamente prohibido por `CLAUDE.md` regla #7. Si tu test sól
 
 ## Cuándo invocar al `code-reviewer`
 
-Antes de cualquier PR que toque `migrator.go`, `sync.go`, `migrate/`, o `internal/db/introspection.go`. El reviewer vigila especialmente: que `Sync` no afirma capacidades que no tiene, que el registry se queda local al cliente cuando se introduzca, que SQL crudo pasa por validación, y que cambios en `SQLType` cubren los 6 motores.
+Antes de cualquier PR que toque `migrator.go`, `sync.go`, `migrate/`, `internal/migrate/`, o `internal/db/introspection.go` (que hoy sólo usa el CLI). El reviewer vigila especialmente: que `Sync` no afirma capacidades que no tiene, que el registry se queda local al cliente cuando se introduzca, que SQL crudo pasa por validación, y que cambios en `SQLType` cubren los 6 motores.

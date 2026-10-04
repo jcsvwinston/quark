@@ -73,7 +73,30 @@ building a client (bench control `DRV-01`). Keep every reader behind
 `dialect_unit_test.go` (the race lane runs it) and `DRV-01` in
 `internal/extbench`, which turns red if the lock goes.
 
+### The schema path asks the dialect (A11 Q2)
+
+Migrate, PlanMigration, Sync and Quark's bookkeeping tables ask the dialect,
+through optional interfaces declared in `quarkdriver/schema.go` (ADR-0026: new
+contract is born in the leaf), for its column types (`ColumnTyper`), its
+auto-increment key (`AutoIncrementer`) and how it creates only what is missing
+(`IdempotentDDL`). The six built-ins implement them in `dialect_schema.go` by
+passing their own ENGINE constant to `internal/migrate/engines.go` — never by
+reading `Name()`, which a wrapper can change. A dialect that implements none
+gets the portable answers (`TestSchemaPathPortableDefaults`). A wrapper that
+embeds a built-in must FORWARD these interfaces: embedding the `Dialect`
+interface promotes its methods and nothing else (the extlite wrapper in
+`internal/extbench/probes_participant_test.go` is the reference, and its
+faithfulness check lists every optional interface).
+
 ## Anti-patterns a vigilar
+
+### Branching on `Dialect.Name()` where an interface can answer
+
+`DRV-04` in `internal/extbench` measures it: SQLite's methods under another
+name must behave as SQLite's. A `switch d.Name()` in schema code makes that
+dialect take another engine's branch. Ask an existing method
+(`SupportsTransactionalDDL`, `LimitOffset`, …) or add an optional interface in
+`quarkdriver` with a documented default.
 
 ### Asumir un placeholder
 

@@ -5,7 +5,6 @@ package quark
 
 import (
 	"reflect"
-	"time"
 
 	"github.com/jcsvwinston/quark/internal/migrate"
 )
@@ -36,28 +35,12 @@ type TypeMapper = migrate.TypeMapper
 //	    return "VARCHAR(36)"
 //	})
 //
-// The mapper is consulted by client.Migrate and client.Sync. database/sql's
+// The mapper is consulted by client.Migrate, client.Sync and
+// client.PlanMigration, before the dialect is asked for the column's type
+// (quarkdriver.ColumnTyper). database/sql's
 // Scanner / driver.Valuer interfaces still apply to the read/write side — a
 // type registered here must also implement those interfaces (or be already
 // supported by the underlying driver) for round-trip to work.
 func RegisterTypeMapper(t reflect.Type, m TypeMapper) {
 	migrate.RegisterTypeMapper(t, m)
-}
-
-// time.Duration is the canonical example shipped by Quark itself. We map it
-// to BIGINT (storing the duration as nanoseconds), which is the format
-// time.Duration uses natively when scanned from / written to BIGINT columns
-// across drivers. Override per app if you'd rather store as a numeric
-// string or a BIGINT in milliseconds.
-func init() {
-	RegisterTypeMapper(reflect.TypeOf(time.Duration(0)), func(dialect string, _ TypeOptions) string {
-		switch dialect {
-		case "oracle":
-			return "NUMBER(19)"
-		case "mssql":
-			return "BIGINT"
-		default:
-			return "BIGINT"
-		}
-	})
 }

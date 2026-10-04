@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/jcsvwinston/quark/internal/db"
 	"github.com/jcsvwinston/quark/internal/migrate"
 )
 
@@ -21,71 +20,101 @@ type SyncOptions struct {
 
 // Sync synchronizes the database schema with the provided models.
 // It detects missing columns, renames, and can drop columns if safe mode is disabled.
+//
+// Sync reads the current columns through the dialect's [SchemaIntrospector]
+// and writes column types through its quarkdriver.ColumnTyper, like
+// [Client.Migrate]; a dialect without a SchemaIntrospector cannot be synced
+// and Sync returns ErrUnsupportedFeature.
 func (c *Client) Sync(ctx context.Context, opts SyncOptions, models ...any) error {
 	// Execute within a transaction if supported and not disabled
 	if !opts.NoTransaction && c.dialect.SupportsTransactionalDDL() {
 		return c.Tx(ctx, func(tx *Tx) error {
-			// Temporarily bind the client to the transaction's executor
-			// Note: This is an internal sync, we don't need to swap the whole client,
-			// just ensure syncModel uses the transaction's executor.
-			for _, model := range models {
-				if err := c.syncModel(ctx, model, opts, tx.tx); err != nil {
-					return err
-				}
-			}
-			return nil
+			// syncModels runs the column changes on the transaction's
+			// executor; the client itself is not rebound.
+			return c.syncModels(ctx, opts, tx.tx, models)
 		})
 	}
+	return c.syncModels(ctx, opts, c.db, models)
+}
 
+// syncModels creates the models' missing tables, reads the schema once, and
+// brings each model's columns in line with it.
+func (c *Client) syncModels(ctx context.Context, opts SyncOptions, executor Executor, models []any) error {
+	metas := make([]*ModelMeta, 0, len(models))
 	for _, model := range models {
-		if err := c.syncModel(ctx, model, opts, c.db); err != nil {
+		v := reflect.TypeOf(model)
+		if v == nil {
+			return fmt.Errorf("could not get metadata for model type: %v", v)
+		}
+		if v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+		meta := GetModelMetaByType(v)
+		if meta == nil {
+			return fmt.Errorf("could not get metadata for model type: %v", v)
+		}
+		metas = append(metas, meta)
+	}
+
+	// 1. Ensure the tables exist.
+	if !opts.DryRun {
+		for _, model := range models {
+			if err := c.Migrate(ctx, model); err != nil {
+				return err
+			}
+		}
+	}
+
+	// 2. Read the current columns, once, through the dialect — never a
+	// catalog query chosen by the dialect's name (A11 Q2).
+	introspector, ok := c.dialect.(SchemaIntrospector)
+	if !ok {
+		return fmt.Errorf("%w: Sync reads the current columns through the dialect's SchemaIntrospector, and dialect %s does not implement it",
+			ErrUnsupportedFeature, c.dialect.Name())
+	}
+	schema, err := introspector.IntrospectSchema(ctx, c.db)
+	if err != nil {
+		return fmt.Errorf("introspection failed: %w", err)
+	}
+	current := make(map[string]map[string]bool, len(schema.Tables))
+	for _, t := range schema.Tables {
+		cols := make(map[string]bool, len(t.Columns))
+		for _, col := range t.Columns {
+			cols[strings.ToLower(col.Name)] = true
+		}
+		current[strings.ToLower(t.Name)] = cols
+	}
+
+	// 3. Each model against what the table has. The map is updated as
+	// columns are added, renamed and dropped, so two models of one table
+	// see each other's changes.
+	for _, meta := range metas {
+		key := strings.ToLower(meta.Table)
+		if current[key] == nil {
+			current[key] = map[string]bool{}
+		}
+		if err := c.syncModel(ctx, meta, opts, executor, current[key]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *Client) syncModel(ctx context.Context, model any, opts SyncOptions, executor Executor) error {
-	v := reflect.TypeOf(model)
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
+func (c *Client) syncModel(ctx context.Context, meta *ModelMeta, opts SyncOptions, executor Executor, currentCols map[string]bool) error {
+	types := c.schemaTypes()
 
-	meta := GetModelMetaByType(v)
-	if meta == nil {
-		return fmt.Errorf("could not get metadata for model type: %v", v)
-	}
-
-	// 1. Ensure table exists
-	if !opts.DryRun {
-		if err := c.Migrate(ctx, model); err != nil {
-			return err
-		}
-	}
-
-	// 2. Get current DB info (Introspection)
-	info, err := db.GetTableInfo(c.db, c.dialect.Name(), meta.Table)
-	if err != nil {
-		return fmt.Errorf("introspection failed for %s: %w", meta.Table, err)
-	}
-
-	currentCols := make(map[string]db.ColumnInfo)
-	for _, col := range info.Columns {
-		currentCols[strings.ToLower(col.Name)] = col
-	}
-
-	// 3. Sync columns (Add / Rename)
+	// Sync columns (Add / Rename)
 	for _, field := range meta.Fields {
 		if field.Column == "" {
 			continue
 		}
 
 		colNameLower := strings.ToLower(field.Column)
-		if _, ok := currentCols[colNameLower]; !ok {
+		if !currentCols[colNameLower] {
 			// Column missing in DB. Check if it's a rename.
 			if field.OldColumn != "" {
 				oldColLower := strings.ToLower(field.OldColumn)
-				if _, ok := currentCols[oldColLower]; ok {
+				if currentCols[oldColLower] {
 					// Rename it!
 					sqlStr := c.dialect.RenameColumn(meta.Table, field.OldColumn, field.Column)
 					if opts.DryRun {
@@ -97,13 +126,13 @@ func (c *Client) syncModel(ctx context.Context, model any, opts SyncOptions, exe
 						return fmt.Errorf("failed to rename column %s to %s: %w", field.OldColumn, field.Column, err)
 					}
 					delete(currentCols, oldColLower)
-					currentCols[colNameLower] = db.ColumnInfo{Name: field.Column}
+					currentCols[colNameLower] = true
 					continue
 				}
 			}
 
 			// Not a rename, just add it.
-			sqlType := migrate.SQLTypeWithOpts(c.dialect.Name(), field.Type, migrate.TypeOptions{
+			sqlType := migrate.ColumnSQL(types, field.Type, migrate.TypeOptions{
 				Size:      field.Size,
 				Precision: field.Precision,
 				Scale:     field.Scale,
@@ -118,10 +147,11 @@ func (c *Client) syncModel(ctx context.Context, model any, opts SyncOptions, exe
 			if _, err := executor.ExecContext(ctx, sqlStr); err != nil {
 				return fmt.Errorf("failed to add column %s: %w", field.Column, err)
 			}
+			currentCols[colNameLower] = true
 		}
 	}
 
-	// 4. Find columns to drop (only if NOT in safe mode)
+	// Find columns to drop (only if NOT in safe mode)
 	if !c.limits.SafeMigrations {
 		for colName := range currentCols {
 			found := false
@@ -141,6 +171,7 @@ func (c *Client) syncModel(ctx context.Context, model any, opts SyncOptions, exe
 				if _, err := executor.ExecContext(ctx, sqlStr); err != nil {
 					return fmt.Errorf("failed to drop column %s: %w", colName, err)
 				}
+				delete(currentCols, colName)
 			}
 		}
 	}
