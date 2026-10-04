@@ -1,7 +1,9 @@
 package quark_test
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -540,5 +542,53 @@ func TestRegisterDialect(t *testing.T) {
 	}
 	if d2.Name() != "sqlite" {
 		t.Errorf("got %q", d2.Name())
+	}
+}
+
+// TestRegisterDialectConcurrent pins A11 Q1 (control DRV-01): RegisterDialect
+// used to write a plain map that DetectDialect and DetectDialectByName read
+// with no lock, so a registration after start-up raced with any goroutine
+// building a client. Run under -race (the race lane runs this package), the
+// detector reports the unsynchronised access whether or not the two
+// goroutines overlapped on this run; without -race, the map could still end
+// the process with "concurrent map writes".
+func TestRegisterDialectConcurrent(t *testing.T) {
+	const n = 16
+	var start, done sync.WaitGroup
+	start.Add(1)
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("concurrent-dialect-%d", i)
+		done.Add(2)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			quark.RegisterDialect(name, quark.SQLite())
+		}()
+		go func() {
+			defer done.Done()
+			start.Wait()
+			_, _ = quark.DetectDialect(name)
+			_, _ = quark.DetectDialectByName(name)
+		}()
+	}
+	start.Done()
+	done.Wait()
+
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("concurrent-dialect-%d", i)
+		if d, err := quark.DetectDialect(name); err != nil || d.Name() != "sqlite" {
+			t.Errorf("DetectDialect(%q) after the concurrent registrations = %v, %v", name, d, err)
+		}
+	}
+}
+
+// TestRegisterDialectReplaces pins the semantics the lock kept: registering a
+// name again replaces the dialect, it does not fail.
+func TestRegisterDialectReplaces(t *testing.T) {
+	quark.RegisterDialect("replaced-dialect", quark.SQLite())
+	quark.RegisterDialect("replaced-dialect", quark.PostgreSQL())
+	d, err := quark.DetectDialectByName("replaced-dialect")
+	if err != nil || d.Name() != "postgres" {
+		t.Fatalf("DetectDialectByName after a second registration = %v, %v; want the postgres dialect", d, err)
 	}
 }

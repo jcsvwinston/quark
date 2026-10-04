@@ -63,6 +63,16 @@ MariaDB no tiene driver `database/sql` propio (usa `go-sql-driver/mysql`, nombre
 
 `query_exec.go:27-71`. MySQL en algunos drivers/configs devuelve `[]byte` para columnas `DATETIME` en lugar de `time.Time`. El wrapper parsea cuatro formatos. **No quites este código sin verificar primero qué devuelve cada driver para columnas de tiempo en su matriz de configuración.**
 
+### The dialect registry is guarded by a lock (A11 Q1)
+
+`RegisterDialect` writes, and `DetectDialect` / `DetectDialectByName` read,
+`customDialectRegistry` under `customDialectMu` (`dialect.go`). Before, it was
+a plain map, and a registration after start-up raced with any goroutine
+building a client (bench control `DRV-01`). Keep every reader behind
+`lookupCustomDialect`. Regression: `TestRegisterDialectConcurrent` in
+`dialect_unit_test.go` (the race lane runs it) and `DRV-01` in
+`internal/extbench`, which turns red if the lock goes.
+
 ## Anti-patterns a vigilar
 
 ### Asumir un placeholder
@@ -111,6 +121,8 @@ ADR 0002 (reflect → codegen Fase 6) lo tendrá más fácil de resolver con cod
 Mezcla SQL builder + DDL + procedures + JSON. Cuando MariaDB añade `CreateSequence`/`HistoryQuery` (`dialect.go:768-806`), sólo accesibles vía type-assert. **No añadas más métodos a `Dialect` sin considerar si pertenecen a una interfaz secundaria** (`SequenceSupport`, `TemporalTablesSupport`, etc.) que el usuario obtiene con type-assert opcional.
 
 ## Decisiones que afectan al módulo
+
+- **ADR 0026 (dialect contract in `quarkdriver`)**: the `Dialect` interface, the types it names, the optional interfaces and the registry move to `quarkdriver`, and package `quark` keeps every name as an alias. Until the move lands (A11 Q3), **declare any NEW dialect contract type in `quarkdriver`**, not here.
 
 - **ADR 0005 (Solo relacional)**: no hay backends NoSQL. TimescaleDB/CockroachDB se aceptan vía dialecto Postgres si emergen.
 

@@ -55,12 +55,18 @@ Supported operators:
 | `=`, `!=`, `<>` | Equality and inequality. |
 | `<`, `<=`, `>`, `>=` | Comparisons. |
 | `LIKE`, `NOT LIKE` | Pattern matching. |
-| `IN`, `NOT IN` | Usually created through `WhereIn`. |
-| `BETWEEN`, `NOT BETWEEN` | Usually created through `WhereBetween`. |
+| `IN`, `NOT IN` | The value is any slice or array (`[]any`, `[]string`, `[]int64`, a named slice type…). Usually created through `WhereIn`. |
+| `BETWEEN`, `NOT BETWEEN` | The value is a slice or array whose first two elements are the bounds. Usually created through `WhereBetween`. |
 | `IS NULL`, `IS NOT NULL` | No bound value is emitted. |
 
 Column identifiers and operators are validated by SQLGuard. Values are passed as
 driver parameters.
+
+For `IN`, `NOT IN`, `BETWEEN` and `NOT BETWEEN`, a value that is not a list —
+a scalar, `nil`, a byte slice such as `[]byte` or `net.IP`, a bare UUID — and a
+`BETWEEN` with fewer than two values return `ErrInvalidQuery` before any SQL
+runs. Byte slices and UUIDs are single values to `database/sql`; wrap one in
+`[]any{v}` to use it as a one-element list.
 
 When the query has at least one join, `Where` / `OrderBy` / `GroupBy` /
 `Select` / `Col` also accept a one-level qualified name (`table.column`); each
@@ -75,7 +81,8 @@ users, err := quark.For[User](ctx, client).
     List()
 ```
 
-Avoid empty slices. Most SQL engines reject `IN ()`.
+Avoid empty slices. Most SQL engines reject `IN ()`. The same holds for an
+empty slice of any type passed to `Where(column, "IN", values)`.
 
 For a typed slice, `WhereInOf` performs the `[]any` conversion internally (a
 package-level function — Go methods cannot add a second type parameter):

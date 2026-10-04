@@ -121,9 +121,9 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 
 ### Capa 1 — Decisiones arquitectónicas (`docs/adr/`)
 
-24 ADRs en formato MADR. Léelos cuando necesites **justificar o cuestionar** un patrón de Quark. Una decisión aceptada no se reabre sin un ADR sucesor.
+26 ADRs en formato MADR. Léelos cuando necesites **justificar o cuestionar** un patrón de Quark. Una decisión aceptada no se reabre sin un ADR sucesor.
 
-- [`docs/adr/README.md`](docs/adr/README.md) — índice (24 ADRs, 0001-0024).
+- [`docs/adr/README.md`](docs/adr/README.md) — índice (26 ADRs, 0001-0026).
 - ADR 0001 — Active Record, no Data Mapper.
 - ADR 0002 — Reflect default, codegen opt-in (Fase 6, v1.0.0; gate ≥3× retirado por 0017).
 - ADR 0003 — RLS cliente vía WHERE-injection (superseded por 0012).
@@ -148,6 +148,8 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 - ADR 0022 — Scatter-gather cross-shard reads vía funcs explícitas (`ScatterGather`/`ScatterCount`); merge caller-side (`ScatterMerge`), agregados no-COUNT diferidos.
 - ADR 0023 — Los drivers salen a módulos propios; el contrato vive en `quarkdriver` y los tres predicados de clasificación viajan juntos.
 - ADR 0024 — El CLI a su propio módulo, con el superapp y las suites por motor. La build list del consumidor baja de 123 a 39 y el binario no cambia. El CLI se construye SIEMPRE dentro de un workspace (no puede llevar `replace`: `go install` lo rechaza) y tiene su propia serie de versiones; `quark version` imprime las dos. Notas de ejecución al final del ADR.
+- ADR 0025 — The transaction fixes the tenant: `ForTx` is confined to the tenant that opened the transaction; a context naming another fails with `ErrTenantMismatch` (QK-26).
+- ADR 0026 — Successor of 0023: the dialect contract moves to `quarkdriver` and package `quark` keeps every name as a type alias (additive, nothing deprecated); new dialect contract is declared in the leaf from its first commit.
 
 ### Capa 2 — Playbooks operativos por módulo (`docs/playbooks/`)
 

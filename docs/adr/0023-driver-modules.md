@@ -12,6 +12,9 @@ tags: [architecture, packaging, drivers, dx]
 
 # 0023 — Los drivers salen a módulos propios
 
+> **Successor:** [ADR-0026](0026-dialect-contract-in-quarkdriver.md) extends
+> this leaf contract to the dialect. Everything below stays in force.
+
 ## Contexto
 
 Quark nunca registró un driver: abre el `*sql.DB` que le entregan, y la guía de

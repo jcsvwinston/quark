@@ -112,3 +112,8 @@ client, err := quark.New("pgx", dsn, quark.WithDialect(d))
 
 Custom dialects must implement the full `Dialect` interface. A partial dialect
 will fail at compile time if assigned to a `quark.Dialect` variable.
+
+`RegisterDialect`, `DetectDialect` and `DetectDialectByName` are safe to call
+from any goroutine: the registry is guarded by a lock, so registering a dialect
+while another goroutine builds a client is not a data race. Registering a name
+again replaces the dialect registered under it.
