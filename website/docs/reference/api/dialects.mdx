@@ -138,10 +138,17 @@ It never gets DDL chosen for another engine's name.
 | `quarkdriver.IdempotentDDL` | creating a table or an index only when it is missing, and which errors mean "it exists already" | `CREATE TABLE IF NOT EXISTS`, `CREATE [UNIQUE] INDEX IF NOT EXISTS`, no error counts as "exists" |
 | `quark.SchemaIntrospector` | the current schema; `Sync` reads the table's columns through it | `IntrospectSchema` and `Sync` return `ErrUnsupportedFeature` |
 | `quark.ColumnTypeMapper` | a column type a hand-built `Plan` carries, in the engine's form (`TEXT` → `CLOB` on Oracle) | the type is used as written |
+| `Dialect.SupportsTransactionalDDL()` (required) | whether `ApplyPlan` runs a plan in one transaction, and whether `Sync` wraps its changes in one | — every dialect answers |
+| `quarkdriver.ColumnAlterer` | the statements of an in-place column change (`OpAlterColumn`): type, nullability, default, primary key; it may read the catalog through the `Executor` it is given | the dialect's own `AlterTableAlterColumn` for the type, `ALTER COLUMN … SET/DROP NOT NULL`, `SET/DROP DEFAULT`, `ADD CONSTRAINT pk_<table> PRIMARY KEY`; dropping a key returns `ErrUnsupportedFeature`, since its name is in the catalog |
+| `quarkdriver.ObjectDropper` | dropping an index, a foreign key and a `CHECK` by name | `DROP INDEX <index>`, `ALTER TABLE <table> DROP CONSTRAINT <name>` |
+| `quarkdriver.TableRebuilder` | whether the engine changes a table by rebuilding it, SQLite's way | in-place `ALTER` statements |
 
-A method of `ColumnTyper`, `AutoIncrementer` or `IdempotentDDL` that returns
-`""` takes the default for that one question, so a dialect can answer only what
-its engine spells differently.
+A method of `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL` or
+`ObjectDropper` that returns `""` takes the default for that one question, so a
+dialect can answer only what its engine spells differently.
+
+`quarkdriver.Executor` is the same type as `quark.Executor`: the interface a
+`*sql.DB`, a `*sql.Tx` and a `*sql.Conn` share.
 
 Quark classifies a field's Go type into a `quarkdriver.ColumnKind` before it
 asks — it unwraps pointers, `sql.Null[T]`, `quark.JSON[T]` and
@@ -177,11 +184,28 @@ The auto-increment keys of the built-ins: `BIGSERIAL PRIMARY KEY`
 SQL standard's identity column: an engine that does not accept it fails the
 `CREATE TABLE` instead of creating a key that stays `NULL`.
 
+`SupportsTransactionalDDL()` is true for PostgreSQL, SQL Server and SQLite and
+false for MySQL, MariaDB and Oracle, which commit around every DDL statement;
+`ApplyPlan` takes its resumable, checkpointed path there. Oracle's dialect used
+to answer true, which nothing acted on while `ApplyPlan` decided by the
+dialect's name.
+
 PostgreSQL and SQLite take the `IdempotentDDL` default. MySQL and MariaDB
 implement it because they have no `IF NOT EXISTS` on `CREATE INDEX` (a
 duplicate index name, error 1061, counts as "exists"); SQL Server guards each
 `CREATE` with a lookup in `sys.tables` / `sys.indexes`; Oracle writes a plain
 `CREATE TABLE` and counts ORA-00955, ORA-01408 and ORA-02264 as "exists".
+
+For `ApplyPlan`, PostgreSQL implements `ColumnAlterer` only to read the name of
+the primary-key constraint it drops, and takes the standard statements
+otherwise; MySQL and MariaDB restate the column with `MODIFY COLUMN`; SQL Server
+treats a default as the named constraint it is there; Oracle writes one
+`MODIFY` with only what changes. MySQL, MariaDB (`DROP INDEX … ON`,
+`DROP FOREIGN KEY`, `DROP CHECK`) and SQL Server (`DROP INDEX … ON`) implement
+`ObjectDropper`. SQLite implements `TableRebuilder`: it has no `ALTER COLUMN`
+and no `ADD`/`DROP CONSTRAINT`, so a column change, a foreign key and a `CHECK`
+rebuild the table inside the plan's transaction. The rebuild reads SQLite's own
+catalog, so only an engine that keeps that catalog can answer true.
 
 ### Wrapping a built-in dialect
 
@@ -208,5 +232,15 @@ func (d cockroach) AutoIncrementColumn() (string, string) {
 func (d cockroach) IntrospectSchema(ctx context.Context, exec quark.Executor) (quark.Schema, error) {
     return d.Dialect.(quark.SchemaIntrospector).IntrospectSchema(ctx, exec)
 }
+func (d cockroach) AlterColumn(ctx context.Context, exec quarkdriver.Executor, c quarkdriver.ColumnChange) ([]string, error) {
+    return d.Dialect.(quarkdriver.ColumnAlterer).AlterColumn(ctx, exec, c)
+}
 ```
+
+Which interfaces each built-in implements is pinned by Quark's own tests. A
+wrapper of `quark.PostgreSQL()`, like the one above, forwards `ColumnTyper`,
+`AutoIncrementer`, `ColumnAlterer` and `SchemaIntrospector` — and
+`MigrationLocker` too, for the migrator's lock, which the example leaves out. A
+wrapper of `quark.SQLite()` forwards `ColumnTyper`, `AutoIncrementer`,
+`TableRebuilder` and `SchemaIntrospector`.
 

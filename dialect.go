@@ -106,7 +106,11 @@ type Dialect interface {
 	// E.g., PostgreSQL: ALTER TABLE "users" RENAME TO "accounts"
 	RenameTable(oldName, newName string) string
 
-	// SupportsTransactionalDDL indicates if the dialect supports DDL in transactions.
+	// SupportsTransactionalDDL indicates if the dialect supports DDL in
+	// transactions: whether a ROLLBACK undoes a CREATE, ALTER or DROP run
+	// inside the transaction. ApplyPlan wraps a plan in one transaction when
+	// it is true and takes its resumable, checkpointed path when it is false;
+	// Sync wraps its column changes in a transaction when it is true.
 	SupportsTransactionalDDL() bool
 
 	// LockSuffix returns the SQL fragments needed to attach a pessimistic
@@ -772,9 +776,13 @@ func (o *OracleDialect) RenameTable(oldName, newName string) string {
 	return fmt.Sprintf("ALTER TABLE %s RENAME TO %s", o.Quote(oldName), o.Quote(newName))
 }
 
+// SupportsTransactionalDDL returns false: Oracle commits implicitly before
+// and after every DDL statement, so a ROLLBACK does not undo one. It said
+// true until A11 Q2, and nothing acted on the answer — ApplyPlan decided by
+// the dialect's name, which put Oracle on the resumable path; since it asks
+// this method, the answer has to be the engine's.
 func (o *OracleDialect) SupportsTransactionalDDL() bool {
-	// Oracle supports transactional DDL
-	return true
+	return false
 }
 
 // MapColumnType translates a neutral column-type string into Oracle's

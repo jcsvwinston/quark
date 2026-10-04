@@ -91,9 +91,11 @@ err := client.Sync(ctx, quark.SyncOptions{DryRun: true}, &User{})
 
 `DryRun` logs the add, rename, and drop statements without executing them.
 `NoTransaction` disables the transactional DDL wrapping. That wrapping applies
-on PostgreSQL, SQL Server, SQLite, and Oracle; MySQL and MariaDB commit each DDL
-statement implicitly, so Quark runs their sync steps without a transaction
-anyway.
+where the dialect's `SupportsTransactionalDDL()` is true — PostgreSQL, SQL
+Server and SQLite; MySQL, MariaDB and Oracle commit each DDL statement
+implicitly, so Quark runs their sync steps without a transaction anyway.
+Oracle's dialect used to answer true, and `Sync` wrapped its steps in a
+transaction that could not roll them back.
 
 ### Renaming a column
 
@@ -310,13 +312,18 @@ result proposes nothing: the loop converges. A foreign key is matched by its
 columns and target, not by its name (SQLite keeps none), and an unspecified
 `ON DELETE` / `ON UPDATE` is the engine default, `NO ACTION`.
 
-How `ApplyPlan` recovers from a mid-plan failure depends on the engine:
+How `ApplyPlan` recovers from a mid-plan failure depends on the engine, as the
+dialect's `SupportsTransactionalDDL()` reports it:
 
 - **PostgreSQL, SQL Server, SQLite** — the apply is transactional, so a failure
   rolls the whole plan back.
 - **MySQL, MariaDB, Oracle** — DDL auto-commits, so the apply is **resumable**
   instead: re-running the same plan picks up from the first operation that
   hasn't been applied.
+
+A dialect of your own takes the path its `SupportsTransactionalDDL()` answers,
+and the statements of each operation are its answers to the optional interfaces
+listed in the [dialect API reference](../reference/api/dialects#what-the-schema-path-asks-a-dialect).
 
 A few changes are refused on purpose, so that drift stays visible instead of
 being silently mis-applied:

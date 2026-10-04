@@ -190,8 +190,8 @@ func controlsMigraciones() []control {
 			title:  "On SQLite the resumable checkpoint table is never created (ApplyPlan takes the transactional path)",
 			want:   absent,
 			note: "Measured here, on the one dialect this bench runs: after a successful ApplyPlan, " +
-				"quark_migration_state is not in sqlite_master. Read, not measured: supportsTransactionalDDL " +
-				"in migrate_execute.go puts PostgreSQL and SQL Server on the same path, so the checkpoint " +
+				"quark_migration_state is not in sqlite_master. Read, not measured: ApplyPlan asks " +
+				"Dialect.SupportsTransactionalDDL(), which is true for PostgreSQL and SQL Server too, so the checkpoint " +
 				"DDL written for those three dialects never runs there either — proving that needs a live " +
 				"engine. MySQL, MariaDB and Oracle take the other path and do exercise it, in " +
 				"internal/enginesuite.",

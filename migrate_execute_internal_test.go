@@ -5,30 +5,29 @@ package quark
 
 import "testing"
 
-// TestSupportsTransactionalDDL pins the dialect-classification
-// behind ApplyPlan's BEGIN/COMMIT wrapper. The list is empirical,
-// not aspirational — see the function godoc for the rationale per
-// dialect. A failure here means either a real change in support
-// or someone accidentally adding an unsupported engine to the tx
-// path (which would silently fail since the BEGIN/COMMIT would be
-// no-ops around implicit commits).
+// TestSupportsTransactionalDDL pins the answers behind ApplyPlan's
+// BEGIN/COMMIT wrapper, which asks Dialect.SupportsTransactionalDDL (A11 Q2;
+// before, a private table keyed on the dialect's name decided). The list is
+// empirical, not aspirational: PostgreSQL, SQL Server and SQLite roll DDL
+// back; MySQL, MariaDB and Oracle commit implicitly around it, so a
+// BEGIN/COMMIT around their DDL would be a no-op that looks like a safety
+// net. Oracle's method answered true until the method started to matter.
 func TestSupportsTransactionalDDL(t *testing.T) {
 	cases := []struct {
-		dialect string
+		dialect Dialect
 		want    bool
 	}{
-		{"postgres", true},
-		{"mssql", true},
-		{"sqlite", true},
-		{"mysql", false},
-		{"mariadb", false},
-		{"oracle", false},
-		{"unknown_dialect", false}, // default branch
+		{PostgreSQL(), true},
+		{MSSQL(), true},
+		{SQLite(), true},
+		{MySQL(), false},
+		{MariaDB(), false},
+		{Oracle(), false},
 	}
 	for _, tc := range cases {
-		t.Run(tc.dialect, func(t *testing.T) {
-			if got := supportsTransactionalDDL(tc.dialect); got != tc.want {
-				t.Errorf("supportsTransactionalDDL(%q) = %v, want %v", tc.dialect, got, tc.want)
+		t.Run(tc.dialect.Name(), func(t *testing.T) {
+			if got := tc.dialect.SupportsTransactionalDDL(); got != tc.want {
+				t.Errorf("%s.SupportsTransactionalDDL() = %v, want %v", tc.dialect.Name(), got, tc.want)
 			}
 		})
 	}

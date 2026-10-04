@@ -79,7 +79,11 @@ Migrate, PlanMigration, Sync and Quark's bookkeeping tables ask the dialect,
 through optional interfaces declared in `quarkdriver/schema.go` (ADR-0026: new
 contract is born in the leaf), for its column types (`ColumnTyper`), its
 auto-increment key (`AutoIncrementer`) and how it creates only what is missing
-(`IdempotentDDL`). The six built-ins implement them in `dialect_schema.go` by
+(`IdempotentDDL`); ApplyPlan asks `SupportsTransactionalDDL()`, and for its
+statements `ColumnAlterer`, `ObjectDropper` and `TableRebuilder` (SQLite's
+rebuild), implemented in `dialect_alter.go`. Oracle's
+`SupportsTransactionalDDL()` answered true until Q2 made it matter; it is
+false. The six built-ins implement them in `dialect_schema.go` by
 passing their own ENGINE constant to `internal/migrate/engines.go` — never by
 reading `Name()`, which a wrapper can change. A dialect that implements none
 gets the portable answers (`TestSchemaPathPortableDefaults`). A wrapper that

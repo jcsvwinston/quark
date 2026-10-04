@@ -330,11 +330,9 @@ func probeExternalDriverEndToEnd(t *testing.T, e *env) verdict {
 // participantRecorded is the set of battery steps DRV-04 records as diverging.
 // The probe compares the measured set with it exactly: a step that starts or
 // stops diverging is a change to the note, not only to the count.
-var participantRecorded = []string{
-	"ApplyPlan adds a foreign key",
-	"ApplyPlan alters a column",
-	"ApplyPlan undoes a plan that fails half-way",
-}
+// Empty since A11 Q2: no step depends on the name. A step that starts to is
+// a regression, and the probe reports it as partial.
+var participantRecorded = []string{}
 
 func probeFullParticipant(t *testing.T, e *env) verdict {
 	diverged := participantDivergences(t, e)

@@ -11,15 +11,17 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 // Executor is the common interface for *sql.DB and *sql.Tx.
 // It allows Query[T] to execute against either a raw connection or a transaction.
-type Executor interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}
+//
+// It is declared in quarkdriver, the dialect contract's leaf package
+// (ADR-0026), because a dialect's quarkdriver.ColumnAlterer reads the
+// catalog through it; this name is an alias of the same type.
+type Executor = quarkdriver.Executor
 
 // Tx wraps *sql.Tx and provides transactional query execution.
 // It shares dialect, guard, observers, and limits from the parent Client.

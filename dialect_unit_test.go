@@ -386,8 +386,10 @@ func TestOracleDialect_Full(t *testing.T) {
 	if !strings.Contains(d.RenameTable("a", "b"), "RENAME TO") {
 		t.Error("RenameTable")
 	}
-	if !d.SupportsTransactionalDDL() {
-		t.Error("SupportsTransactionalDDL")
+	// Oracle commits implicitly around every DDL statement: a ROLLBACK does
+	// not undo one, and ApplyPlan has to take the resumable path.
+	if d.SupportsTransactionalDDL() {
+		t.Error("Oracle SupportsTransactionalDDL should be false")
 	}
 	if u := d.UpsertSQL([]string{"id"}, []string{"name"}, 1); u != "" {
 		t.Errorf("Oracle UpsertSQL should return empty: %q", u)

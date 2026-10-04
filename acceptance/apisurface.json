@@ -222,6 +222,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MSSQLDialect).AlterColumn",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).AlterTableAddColumn",
       "kind": "method"
     },
@@ -273,6 +278,21 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).CurrentTimestamp",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MSSQLDialect).DropCheck",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MSSQLDialect).DropForeignKey",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MSSQLDialect).DropIndex",
       "kind": "method"
     },
     {
@@ -487,6 +507,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MySQLDialect).AlterColumn",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).AlterTableAddColumn",
       "kind": "method"
     },
@@ -538,6 +563,21 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).CurrentTimestamp",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MySQLDialect).DropCheck",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MySQLDialect).DropForeignKey",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MySQLDialect).DropIndex",
       "kind": "method"
     },
     {
@@ -628,6 +668,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).AcquireMigrationLock",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*OracleDialect).AlterColumn",
       "kind": "method"
     },
     {
@@ -788,6 +833,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).AcquireMigrationLock",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*PostgresDialect).AlterColumn",
       "kind": "method"
     },
     {
@@ -1417,6 +1467,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*SQLiteDialect).RebuildsTables",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).RenameColumn",
       "kind": "method"
     },
@@ -1818,21 +1873,6 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(EventBus).Publish",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Executor).ExecContext",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Executor).QueryContext",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Executor).QueryRowContext",
       "kind": "method"
     },
     {
@@ -3757,6 +3797,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(ColumnAlterer).AlterColumn",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ColumnKind).String",
       "kind": "method"
     },
@@ -3768,6 +3813,21 @@
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ColumnTyper).ColumnType",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Executor).ExecContext",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Executor).QueryContext",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Executor).QueryRowContext",
       "kind": "method"
     },
     {
@@ -3812,6 +3872,26 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(ObjectDropper).DropCheck",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(ObjectDropper).DropForeignKey",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(ObjectDropper).DropIndex",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(TableRebuilder).RebuildsTables",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "AutoIncrementer",
       "kind": "type"
     },
@@ -3824,6 +3904,16 @@
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Classifiers",
       "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ColumnAlterer",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ColumnChange",
+      "kind": "type"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
@@ -3853,6 +3943,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "EventPayload",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Executor",
       "kind": "type"
     },
     {
@@ -4017,6 +4112,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ObjectDropper",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ObjectIndex",
       "kind": "const"
     },
@@ -4048,6 +4148,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "SchemaObject",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "TableRebuilder",
       "kind": "type"
     },
     {
