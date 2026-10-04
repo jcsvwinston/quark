@@ -3,6 +3,11 @@
 
 package quarkdriver
 
+import (
+	"context"
+	"database/sql"
+)
+
 // This file is the schema half of the dialect contract: the questions Quark's
 // schema path — Migrate, PlanMigration, Sync, ApplyPlan and the bookkeeping
 // tables of the migrator and of Backfill — asks a dialect about the DDL its
@@ -204,4 +209,96 @@ type IdempotentDDL interface {
 	CreateTableIfNotExists(table, body string) string
 	CreateIndexIfNotExists(table, index string, columns []string, unique bool) string
 	IsAlreadyExists(object SchemaObject, err error) bool
+}
+
+// Executor is what Quark hands a dialect to read the catalog through: a
+// *sql.DB, a *sql.Tx or a *sql.Conn — under ApplyPlan, the plan's
+// transaction. Package quark names the same type quark.Executor.
+type Executor interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// ColumnChange is one in-place change to a column, as ApplyPlan asks a
+// ColumnAlterer to write it: what the column becomes, which of its facets
+// change, and whether it had a default before. At least one facet changes.
+type ColumnChange struct {
+	// Table and Column are unquoted; both have passed Quark's identifier
+	// validation.
+	Table  string
+	Column string
+	// Type is the column's type after the change, already through the
+	// dialect's ColumnTypeMapper when it has one.
+	Type string
+	// Nullable, Default and PrimaryKey are the column after the change. A
+	// nil Default means no default.
+	Nullable   bool
+	Default    *string
+	PrimaryKey bool
+	// The facets that change.
+	TypeChanged       bool
+	NullableChanged   bool
+	DefaultChanged    bool
+	PrimaryKeyChanged bool
+	// HadDefault reports whether the column had a default before the
+	// change — on SQL Server a default is a named constraint, and only a
+	// column that had one has one to drop.
+	HadDefault bool
+}
+
+// ColumnAlterer is the optional interface through which a dialect writes an
+// in-place change to a column — ApplyPlan's OpAlterColumn. AlterColumn
+// returns the statements, in order, that take the column to change.Type,
+// change.Nullable, change.Default and change.PrimaryKey for the facets that
+// change; exec reads the catalog when the engine names what it drops (SQL
+// Server's default constraints, the primary-key constraint of PostgreSQL and
+// SQL Server). Quark runs the statements on the same executor: under a
+// dialect with transactional DDL, the plan's transaction.
+//
+// A dialect that does not implement ColumnAlterer gets the SQL standard's
+// forms: its own Dialect.AlterTableAlterColumn for the type, ALTER COLUMN …
+// SET NOT NULL / DROP NOT NULL, SET DEFAULT / DROP DEFAULT, and ADD
+// CONSTRAINT pk_<table> PRIMARY KEY for a new key. Dropping a primary key
+// needs the constraint's name, which only the engine's catalog has, so
+// without a ColumnAlterer that one change returns ErrUnsupportedFeature.
+// PostgreSQL takes the standard forms and implements the interface for that
+// drop; MySQL and MariaDB (MODIFY COLUMN restates the whole column), SQL
+// Server and Oracle implement it whole. A TableRebuilder is never asked.
+type ColumnAlterer interface {
+	AlterColumn(ctx context.Context, exec Executor, change ColumnChange) ([]string, error)
+}
+
+// ObjectDropper is the optional interface through which a dialect writes the
+// statements that drop an index, a foreign key and a CHECK constraint by
+// name — ApplyPlan's OpDropIndex, OpDropForeignKey and OpDropCheck. Every
+// name is unquoted; the dialect quotes. Returning "" takes the default for
+// that statement.
+//
+// A dialect that does not implement ObjectDropper gets DROP INDEX <index>
+// and ALTER TABLE <table> DROP CONSTRAINT <name> for both constraints —
+// what PostgreSQL and Oracle write. MySQL and MariaDB (DROP INDEX … ON,
+// DROP FOREIGN KEY, DROP CHECK) and SQL Server (DROP INDEX … ON) implement
+// it.
+type ObjectDropper interface {
+	DropIndex(table, index string) string
+	DropForeignKey(table, constraint string) string
+	DropCheck(table, constraint string) string
+}
+
+// TableRebuilder is the optional interface of a dialect whose engine changes
+// a table by rebuilding it, because it has no ALTER COLUMN, no ADD CONSTRAINT
+// and no DROP CONSTRAINT: SQLite. When RebuildsTables reports true, ApplyPlan
+// changes a column and adds or drops a foreign key or a CHECK by the
+// procedure SQLite's manual documents — create the new table under a
+// temporary name, copy the rows, drop the old, rename, recreate the indexes
+// and triggers — inside the plan's transaction.
+//
+// The rebuild reads SQLite's catalog (sqlite_master and the table_info,
+// index_list and foreign_key_list pragmas), so only a dialect whose engine
+// keeps that catalog can answer true: SQLite itself, or an engine built on
+// it. A dialect that does not implement the interface gets the in-place
+// statements of ColumnAlterer and ObjectDropper, or their defaults.
+type TableRebuilder interface {
+	RebuildsTables() bool
 }

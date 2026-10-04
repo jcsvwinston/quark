@@ -59,6 +59,7 @@ var interfaceTypes = map[string]bool{
 	// las implementan los dialectos (sus métodos concretos caen en la regla
 	// de métodos de dialecto) y las consume el ORM, nunca una aplicación.
 	"ColumnTyper": true, "AutoIncrementer": true, "IdempotentDDL": true,
+	"ColumnAlterer": true, "ObjectDropper": true, "TableRebuilder": true,
 	"AfterCreateHook": true, "AfterUpdateHook": true, "AfterDeleteHook": true, "AfterFindHook": true,
 	"BeforeCreateHook": true, "BeforeUpdateHook": true, "BeforeDeleteHook": true, "BeforeFindHook": true,
 }

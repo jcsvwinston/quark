@@ -9,23 +9,30 @@ import (
 	"strings"
 
 	"github.com/jcsvwinston/quark/internal/migrate"
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 // ApplyPlan executes the operations in `plan` against the database
-// in the order they appear. It dispatches each op to the appropriate
-// per-dialect DDL — column ops via the `Dialect.AlterTable*` helpers,
-// index / FK / table ops via inline dispatch using the existing
-// `Client.CreateIndex` / `Client.AddForeignKey` where applicable.
+// in the order they appear. What each op writes is the dialect's answer
+// (A11 Q2) — the `Dialect.AlterTable*` helpers, and the optional
+// interfaces of quarkdriver: ColumnAlterer for an OpAlterColumn,
+// ObjectDropper for the drops, IdempotentDDL for an index, and
+// TableRebuilder for an engine that rebuilds a table instead of altering
+// it (SQLite). A dialect that implements none of them gets the SQL
+// standard's statements.
 //
-// **Transactional behaviour** (F3-4-tx):
+// **Transactional behaviour** (F3-4-tx): the dialect decides, through
+// [Dialect.SupportsTransactionalDDL] — never its name (A11 Q2).
 //
 //   - **PostgreSQL, MSSQL, SQLite** — DDL is transactional on these
-//     engines. ApplyPlan opens a BEGIN, runs all ops, and COMMITs.
+//     engines (SupportsTransactionalDDL is true). ApplyPlan opens a BEGIN,
+//     runs all ops, and COMMITs.
 //     On ANY failure the transaction is rolled back, leaving the
 //     schema in its pre-plan state. This is the safety net users
 //     should rely on when running migrations against production.
 //
-//   - **MySQL, MariaDB, Oracle** — DDL implicitly commits the
+//   - **MySQL, MariaDB, Oracle** (SupportsTransactionalDDL is
+//     false) — DDL implicitly commits the
 //     current transaction on every statement, so wrapping is
 //     pointless. Instead, ApplyPlan uses a **resumable** path
 //     backed by a `quark_migration_state` checkpoint table
@@ -70,62 +77,21 @@ import (
 //
 // Operation-specific caveats:
 //
-//   - **OpAlterColumn** today only emits DDL for the Type change
-//     via `Dialect.AlterTableAlterColumn`. Nullable and Default
-//     deltas are NOT emitted as DDL yet — they're logged as TODO
-//     and the column lands in the requested type but keeps its
-//     old nullable/default. F3-3-execute-alter follow-up will
-//     close this.
-//   - **OpDropForeignKey on SQLite** returns `ErrUnsupportedFeature`
-//     because SQLite doesn't support `ALTER TABLE DROP CONSTRAINT`;
-//     a real drop would require a full table rebuild via the
-//     12-step procedure documented in the SQLite manual. That
-//     belongs to F3-3-execute-sqlite-rebuild, a separate
-//     follow-up.
-//   - **OpDropCheck on SQLite** has the same limitation as
-//     OpDropForeignKey for the same reason — returns
-//     `ErrUnsupportedFeature`.
-//
-// All other ops work uniformly across the 4 CI dialects + SQLite
-// (for the supported subset).
+//   - **OpAlterColumn** changes the type, nullability, default and
+//     primary key in place (A8 S4). Dropping a primary key needs the
+//     constraint's name from the engine's catalog, so a dialect without
+//     a quarkdriver.ColumnAlterer gets ErrUnsupportedFeature for that
+//     one change. Renaming a column is not an ALTER COLUMN and is
+//     refused.
+//   - **On SQLite** (a quarkdriver.TableRebuilder) a column change and
+//     the constraint ops rebuild the table inside the plan's
+//     transaction; a CHECK the rebuild cannot read back makes it
+//     refuse with ErrUnsupportedFeature rather than lose the check.
 func (c *Client) ApplyPlan(ctx context.Context, plan Plan) error {
-	if supportsTransactionalDDL(c.dialect.Name()) {
+	if c.dialect.SupportsTransactionalDDL() {
 		return c.applyPlanTx(ctx, plan)
 	}
 	return c.applyPlanNoTx(ctx, plan)
-}
-
-// TODO(F3-4-resumable): elevate to `Dialect.SupportsTransactionalDDL() bool`
-// when the checkpoint path needs the same info — see TASKS.md
-// §F3-4-resumable. For now a private function is enough.
-//
-// supportsTransactionalDDL reports whether the named dialect can
-// run DDL inside a transaction with the usual all-or-nothing
-// semantics. The list is empirically driven, not aspirational:
-//
-//   - **postgres**: full transactional DDL — including ALTER TABLE,
-//     CREATE/DROP INDEX, ADD/DROP CONSTRAINT. ROLLBACK reverts every
-//     DDL since BEGIN. PG's signature feature.
-//   - **mssql**: most DDL is transactional. Notable exceptions
-//     (CREATE DATABASE, CREATE FULLTEXT INDEX) are outside Quark's
-//     migration surface.
-//   - **sqlite**: DDL is transactional EXCEPT for VACUUM and a few
-//     PRAGMA-driven cases. Our migration ops don't touch those.
-//   - **mysql / mariadb**: NO — every DDL implicitly commits the
-//     transaction. Wrapping is harmless but pointless.
-//   - **oracle**: NO — same implicit-commit behaviour as MySQL.
-//
-// The dialect-name check is intentional rather than a method on
-// the Dialect interface; F3-4-resumable will likely lift this to
-// the interface once it needs the same info for the checkpoint
-// path, but as a single private helper it's fine for now.
-func supportsTransactionalDDL(dialect string) bool {
-	switch dialect {
-	case "postgres", "mssql", "sqlite":
-		return true
-	default:
-		return false
-	}
 }
 
 // applyPlanTx wraps the op loop in BEGIN/COMMIT. On any error the
@@ -308,7 +274,7 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 			}
 		}
 		fk := o.ForeignKey
-		if c.dialect.Name() == "sqlite" {
+		if rebuildsTables(c.dialect) {
 			return c.sqliteAddForeignKey(ctx, exec, o.Table, fk)
 		}
 		return c.addForeignKeyOn(ctx, exec, o.Table, fk.Name, fk.Columns, fk.RefTable, fk.RefColumns, fk.OnDelete, fk.OnUpdate)
@@ -321,7 +287,7 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 				return fmt.Errorf("drop fk: %w", err)
 			}
 		}
-		if c.dialect.Name() == "sqlite" {
+		if rebuildsTables(c.dialect) {
 			return c.sqliteDropForeignKey(ctx, exec, o.Table, o.ForeignKey)
 		}
 		return c.dropForeignKey(ctx, exec, o.Table, o.ForeignKey)
@@ -332,7 +298,7 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 		if err := c.guard.ValidateIdentifier(o.Check.Name); err != nil {
 			return fmt.Errorf("add check: %w", err)
 		}
-		if c.dialect.Name() == "sqlite" {
+		if rebuildsTables(c.dialect) {
 			return c.sqliteAddCheck(ctx, exec, o.Table, o.Check)
 		}
 		return c.addCheck(ctx, exec, o.Table, o.Check.Name, o.Check.Expression)
@@ -343,7 +309,7 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 		if err := c.guard.ValidateIdentifier(o.Check); err != nil {
 			return fmt.Errorf("drop check: %w", err)
 		}
-		if c.dialect.Name() == "sqlite" {
+		if rebuildsTables(c.dialect) {
 			return c.sqliteDropCheck(ctx, exec, o.Table, o.Check)
 		}
 		return c.dropCheck(ctx, exec, o.Table, o.Check)
@@ -524,82 +490,64 @@ func (c *Client) foreignKeyClause(fk ForeignKey) (string, error) {
 	return clause, nil
 }
 
-// dropIndex renders the per-dialect DROP INDEX DDL. SQLite and PG
-// use `DROP INDEX <name>`; MySQL/MariaDB and MSSQL require the
-// table qualification `DROP INDEX <name> ON <table>`.
+// dropIndex drops an index by name, as the dialect writes it
+// (quarkdriver.ObjectDropper): DROP INDEX <name> by default — PostgreSQL,
+// SQLite, Oracle — and DROP INDEX <name> ON <table> on MySQL, MariaDB and
+// SQL Server.
 func (c *Client) dropIndex(ctx context.Context, exec Executor, table, index string) error {
-	var ddl string
-	switch c.dialect.Name() {
-	case "sqlite", "postgres":
-		ddl = fmt.Sprintf("DROP INDEX %s", c.dialect.Quote(index))
-	case "mysql", "mariadb", "mssql":
-		ddl = fmt.Sprintf("DROP INDEX %s ON %s", c.dialect.Quote(index), c.dialect.Quote(table))
-	case "oracle":
-		ddl = fmt.Sprintf("DROP INDEX %s", c.dialect.Quote(index))
-	default:
-		return fmt.Errorf("%w: dropIndex not implemented for dialect %s", ErrUnsupportedFeature, c.dialect.Name())
+	ddl := ""
+	if dr, ok := c.dialect.(quarkdriver.ObjectDropper); ok {
+		ddl = dr.DropIndex(table, index)
+	}
+	if ddl == "" {
+		ddl = "DROP INDEX " + c.dialect.Quote(index)
 	}
 	_, err := exec.ExecContext(ctx, ddl)
 	return err
 }
 
-// dropForeignKey renders the per-dialect DROP FK DDL. SQLite does
-// NOT support `ALTER TABLE DROP CONSTRAINT`; applyOne routes SQLite
-// to sqliteDropForeignKey, the table rebuild (A8 S4), and this
-// helper keeps refusing so no other caller mistakes it for one.
-//
-// PG / MSSQL use `ALTER TABLE ... DROP CONSTRAINT <name>`; MySQL /
-// MariaDB use `ALTER TABLE ... DROP FOREIGN KEY <name>`. Oracle
-// matches PG / MSSQL.
+// dropForeignKey drops a foreign key by name, as the dialect writes it
+// (quarkdriver.ObjectDropper): ALTER TABLE … DROP CONSTRAINT by default —
+// PostgreSQL, SQL Server, Oracle — and DROP FOREIGN KEY on MySQL and
+// MariaDB. A dialect that rebuilds its tables (SQLite) never gets here:
+// applyOne routes it to the rebuild.
 func (c *Client) dropForeignKey(ctx context.Context, exec Executor, table, fk string) error {
 	if fk == "" {
 		return fmt.Errorf("dropForeignKey: empty constraint name (SQLite inline FK?); cannot drop without rebuild")
 	}
-	var ddl string
-	switch c.dialect.Name() {
-	case "postgres", "mssql", "oracle":
-		ddl = fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", c.dialect.Quote(table), c.dialect.Quote(fk))
-	case "mysql", "mariadb":
-		ddl = fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s", c.dialect.Quote(table), c.dialect.Quote(fk))
-	case "sqlite":
-		return fmt.Errorf("%w: dropForeignKey on SQLite requires the 12-step table-rebuild procedure (F3-3-execute-sqlite-rebuild)", ErrUnsupportedFeature)
-	default:
-		return fmt.Errorf("%w: dropForeignKey not implemented for dialect %s", ErrUnsupportedFeature, c.dialect.Name())
+	ddl := ""
+	if dr, ok := c.dialect.(quarkdriver.ObjectDropper); ok {
+		ddl = dr.DropForeignKey(table, fk)
+	}
+	if ddl == "" {
+		ddl = dropConstraint(c.dialect, table, fk)
 	}
 	_, err := exec.ExecContext(ctx, ddl)
 	return err
 }
 
-// addCheck renders the per-dialect ADD CHECK DDL. PG / MSSQL /
-// Oracle: `ALTER TABLE ... ADD CONSTRAINT <name> CHECK (<expr>)`.
-// MySQL 8.0.16+ / MariaDB 10.2.1+ same. SQLite returns
-// `ErrUnsupportedFeature` for the same reason as drop FK (no
-// `ALTER TABLE ADD CONSTRAINT` — requires rebuild).
+// addCheck adds a CHECK constraint the SQL standard's way, which every
+// engine that alters a table in place accepts:
+// `ALTER TABLE ... ADD CONSTRAINT <name> CHECK (<expr>)` (MySQL 8.0.16+,
+// MariaDB 10.2.1+). A dialect that rebuilds its tables (SQLite) never gets
+// here: applyOne routes it to the rebuild.
 func (c *Client) addCheck(ctx context.Context, exec Executor, table, name, expression string) error {
-	if c.dialect.Name() == "sqlite" {
-		return fmt.Errorf("%w: addCheck on SQLite requires the 12-step table-rebuild procedure (F3-3-execute-sqlite-rebuild)", ErrUnsupportedFeature)
-	}
 	ddl := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s CHECK %s",
 		c.dialect.Quote(table), c.dialect.Quote(name), wrapExpressionInParens(expression))
 	_, err := exec.ExecContext(ctx, ddl)
 	return err
 }
 
-// dropCheck renders the per-dialect DROP CHECK DDL. PG / MSSQL /
-// Oracle: `ALTER TABLE ... DROP CONSTRAINT <name>`. MySQL 8.0.16+
-// uses `ALTER TABLE ... DROP CHECK <name>`; MariaDB 10.2.1+ does
-// too. SQLite returns `ErrUnsupportedFeature`.
+// dropCheck drops a CHECK constraint by name, as the dialect writes it
+// (quarkdriver.ObjectDropper): ALTER TABLE … DROP CONSTRAINT by default —
+// PostgreSQL, SQL Server, Oracle — and DROP CHECK on MySQL and MariaDB.
 func (c *Client) dropCheck(ctx context.Context, exec Executor, table, name string) error {
-	var ddl string
-	switch c.dialect.Name() {
-	case "postgres", "mssql", "oracle":
-		ddl = fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", c.dialect.Quote(table), c.dialect.Quote(name))
-	case "mysql", "mariadb":
-		ddl = fmt.Sprintf("ALTER TABLE %s DROP CHECK %s", c.dialect.Quote(table), c.dialect.Quote(name))
-	case "sqlite":
-		return fmt.Errorf("%w: dropCheck on SQLite requires the 12-step table-rebuild procedure (F3-3-execute-sqlite-rebuild)", ErrUnsupportedFeature)
-	default:
-		return fmt.Errorf("%w: dropCheck not implemented for dialect %s", ErrUnsupportedFeature, c.dialect.Name())
+	ddl := ""
+	if dr, ok := c.dialect.(quarkdriver.ObjectDropper); ok {
+		ddl = dr.DropCheck(table, name)
+	}
+	if ddl == "" {
+		ddl = dropConstraint(c.dialect, table, name)
 	}
 	_, err := exec.ExecContext(ctx, ddl)
 	return err

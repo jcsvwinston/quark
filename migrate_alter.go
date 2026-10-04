@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 // This file is the ALTER half of ApplyPlan (A8 S4, control MIG-07): what an
@@ -24,6 +26,10 @@ import (
 // nullable, default, primary key — are computed the way Diff computes them,
 // so a plan Diff produced is applied exactly and a hand-built op that changes
 // nothing is a no-op rather than a spurious statement.
+//
+// What it writes is the dialect's answer (A11 Q2): a quarkdriver.TableRebuilder
+// gets SQLite's table rebuild, a quarkdriver.ColumnAlterer writes its own
+// statements, and any other dialect gets the SQL standard's.
 func (c *Client) applyAlterColumn(ctx context.Context, exec Executor, o OpAlterColumn) error {
 	if err := c.guard.ValidateIdentifier(o.Table); err != nil {
 		return fmt.Errorf("alter column: %w", err)
@@ -39,7 +45,7 @@ func (c *Client) applyAlterColumn(ctx context.Context, exec Executor, o OpAlterC
 	if !d.any() {
 		return nil
 	}
-	if c.dialect.Name() == "sqlite" {
+	if rebuildsTables(c.dialect) {
 		return c.sqliteRebuild(ctx, exec, o.Table, func(t *Table) error {
 			for i := range t.Columns {
 				if t.Columns[i].Name == o.New.Name {
@@ -59,108 +65,85 @@ func (c *Client) applyAlterColumn(ctx context.Context, exec Executor, o OpAlterC
 			return fmt.Errorf("alter column %s.%s: %w", o.Table, o.New.Name, err)
 		}
 	}
-	if d.pk {
-		return c.alterPrimaryKey(ctx, exec, o.Table, o.New.Name, o.New.PrimaryKey)
-	}
 	return nil
 }
 
-// alterColumnStatements renders the per-engine ALTERs for the type,
-// nullable and default facets; the primary key is a separate step.
+// alterColumnStatements is the dialect's answer for an in-place change: its
+// quarkdriver.ColumnAlterer when it has one, the SQL standard's statements
+// otherwise.
 func (c *Client) alterColumnStatements(ctx context.Context, exec Executor, o OpAlterColumn, d colDelta) ([]string, error) {
-	table, col := c.dialect.Quote(o.Table), c.dialect.Quote(o.New.Name)
-	newType := c.mapColumnType(o.New.Type)
-	var stmts []string
-	switch c.dialect.Name() {
-	case "postgres":
-		if d.typ {
-			stmts = append(stmts, c.dialect.AlterTableAlterColumn(o.Table, o.New.Name, newType))
+	change := quarkdriver.ColumnChange{
+		Table:             o.Table,
+		Column:            o.New.Name,
+		Type:              c.mapColumnType(o.New.Type),
+		Nullable:          o.New.Nullable,
+		Default:           o.New.Default,
+		PrimaryKey:        o.New.PrimaryKey,
+		TypeChanged:       d.typ,
+		NullableChanged:   d.nullable,
+		DefaultChanged:    d.def,
+		PrimaryKeyChanged: d.pk,
+		HadDefault:        o.Old.Default != nil,
+	}
+	if a, ok := c.dialect.(quarkdriver.ColumnAlterer); ok {
+		return a.AlterColumn(ctx, exec, change)
+	}
+	return standardAlterColumn(c.dialect, change)
+}
+
+// rebuildsTables reports whether the dialect's engine changes a table by
+// rebuilding it (quarkdriver.TableRebuilder) — SQLite among the built-ins.
+func rebuildsTables(d Dialect) bool {
+	r, ok := d.(quarkdriver.TableRebuilder)
+	return ok && r.RebuildsTables()
+}
+
+// standardAlterColumn is what a dialect without a quarkdriver.ColumnAlterer
+// gets: the SQL standard's statements for each facet, and a named PRIMARY
+// KEY constraint for a new key. Dropping a key needs the constraint's name,
+// which only the engine's catalog knows.
+func standardAlterColumn(d Dialect, c quarkdriver.ColumnChange) ([]string, error) {
+	stmts := standardColumnFacets(d, c)
+	if c.PrimaryKeyChanged {
+		if !c.PrimaryKey {
+			return nil, fmt.Errorf("%w: dropping the primary key of %s needs the constraint's name from the engine's catalog, and dialect %s does not implement quarkdriver.ColumnAlterer",
+				ErrUnsupportedFeature, c.Table, d.Name())
 		}
-		if d.nullable {
-			if o.New.Nullable {
-				stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL", table, col))
-			} else {
-				stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET NOT NULL", table, col))
-			}
-		}
-		if d.def {
-			if o.New.Default == nil {
-				stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT", table, col))
-			} else {
-				stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s", table, col, *o.New.Default))
-			}
-		}
-	case "mysql", "mariadb":
-		if d.typ || d.nullable || d.def {
-			// MODIFY restates the whole definition: the type, the
-			// nullability and the default travel together or the ones left
-			// out are reset.
-			def := fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s %s", table, col, newType)
-			if o.New.Nullable {
-				def += " NULL"
-			} else {
-				def += " NOT NULL"
-			}
-			if o.New.Default != nil {
-				def += " DEFAULT " + *o.New.Default
-			}
-			stmts = append(stmts, def)
-		}
-	case "mssql":
-		if d.typ || d.nullable {
-			null := " NOT NULL"
-			if o.New.Nullable {
-				null = " NULL"
-			}
-			stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s %s%s", table, col, newType, null))
-		}
-		if d.def {
-			// A default is a named constraint on SQL Server: the old one is
-			// dropped by the name the catalog gives it, the new one gets a
-			// name of ours.
-			if o.Old.Default != nil {
-				// Only a column that HAD a default has a constraint to drop.
-				name, err := c.mssqlDefaultConstraintName(ctx, exec, o.Table, o.New.Name)
-				if err != nil {
-					return nil, err
-				}
-				if name != "" {
-					stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", table, c.dialect.Quote(name)))
-				}
-			}
-			if o.New.Default != nil {
-				stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s DEFAULT %s FOR %s",
-					table, c.dialect.Quote("DF_"+o.Table+"_"+o.New.Name), *o.New.Default, col))
-			}
-		}
-	case "oracle":
-		// MODIFY takes only what changes: restating NOT NULL on a column
-		// that already is one is ORA-01442.
-		var parts []string
-		if d.typ {
-			parts = append(parts, newType)
-		}
-		if d.def {
-			if o.New.Default == nil {
-				parts = append(parts, "DEFAULT NULL")
-			} else {
-				parts = append(parts, "DEFAULT "+*o.New.Default)
-			}
-		}
-		if d.nullable {
-			if o.New.Nullable {
-				parts = append(parts, "NULL")
-			} else {
-				parts = append(parts, "NOT NULL")
-			}
-		}
-		if len(parts) > 0 {
-			stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s MODIFY (%s %s)", table, col, strings.Join(parts, " ")))
-		}
-	default:
-		return nil, fmt.Errorf("%w: ALTER COLUMN not implemented for dialect %s", ErrUnsupportedFeature, c.dialect.Name())
+		stmts = append(stmts, addPrimaryKeyConstraint(d, c.Table, c.Column))
 	}
 	return stmts, nil
+}
+
+// standardColumnFacets writes the type, nullable and default facets the SQL
+// standard's way — PostgreSQL's: the dialect's own AlterTableAlterColumn for
+// the type, then SET/DROP NOT NULL and SET/DROP DEFAULT.
+func standardColumnFacets(d Dialect, c quarkdriver.ColumnChange) []string {
+	table, col := d.Quote(c.Table), d.Quote(c.Column)
+	var stmts []string
+	if c.TypeChanged {
+		stmts = append(stmts, d.AlterTableAlterColumn(c.Table, c.Column, c.Type))
+	}
+	if c.NullableChanged {
+		if c.Nullable {
+			stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL", table, col))
+		} else {
+			stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET NOT NULL", table, col))
+		}
+	}
+	if c.DefaultChanged {
+		if c.Default == nil {
+			stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT", table, col))
+		} else {
+			stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s", table, col, *c.Default))
+		}
+	}
+	return stmts
+}
+
+// addPrimaryKeyConstraint adds a single-column key as a constraint named
+// pk_<table>.
+func addPrimaryKeyConstraint(d Dialect, table, column string) string {
+	return fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s PRIMARY KEY (%s)", d.Quote(table), d.Quote("pk_"+table), d.Quote(column))
 }
 
 type colDelta struct{ typ, nullable, def, pk bool }
@@ -175,87 +158,6 @@ func columnDelta(old, cur Column) colDelta {
 		def:      !defaultsEqual(old.Default, cur.Default),
 		pk:       old.PrimaryKey != cur.PrimaryKey,
 	}
-}
-
-// alterPrimaryKey adds or drops a single-column PRIMARY KEY on the engines
-// that can do it in place. The constraint has a name on PostgreSQL and SQL
-// Server, read from the catalog; MySQL and Oracle address it by role.
-func (c *Client) alterPrimaryKey(ctx context.Context, exec Executor, table, column string, add bool) error {
-	qt, qc := c.dialect.Quote(table), c.dialect.Quote(column)
-	var stmt string
-	switch c.dialect.Name() {
-	case "postgres", "mssql":
-		if add {
-			stmt = fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s PRIMARY KEY (%s)", qt, c.dialect.Quote("pk_"+table), qc)
-		} else {
-			name, err := c.primaryKeyConstraintName(ctx, exec, table)
-			if err != nil {
-				return err
-			}
-			if name == "" {
-				return fmt.Errorf("alter column %s.%s: the catalog has no PRIMARY KEY constraint to drop", table, column)
-			}
-			stmt = fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", qt, c.dialect.Quote(name))
-		}
-	case "mysql", "mariadb", "oracle":
-		if add {
-			stmt = fmt.Sprintf("ALTER TABLE %s ADD PRIMARY KEY (%s)", qt, qc)
-		} else {
-			stmt = fmt.Sprintf("ALTER TABLE %s DROP PRIMARY KEY", qt)
-		}
-	default:
-		return fmt.Errorf("%w: primary-key change not implemented for dialect %s", ErrUnsupportedFeature, c.dialect.Name())
-	}
-	if _, err := exec.ExecContext(ctx, stmt); err != nil {
-		return fmt.Errorf("alter column %s.%s primary key: %w", table, column, err)
-	}
-	return nil
-}
-
-// primaryKeyConstraintName reads the name of a table's PRIMARY KEY
-// constraint on PostgreSQL and SQL Server; "" when there is none.
-func (c *Client) primaryKeyConstraintName(ctx context.Context, exec Executor, table string) (string, error) {
-	var q string
-	switch c.dialect.Name() {
-	case "postgres":
-		q = `SELECT conname FROM pg_constraint WHERE contype = 'p' AND conrelid = to_regclass($1)`
-	case "mssql":
-		q = `SELECT name FROM sys.key_constraints WHERE type = 'PK' AND parent_object_id = OBJECT_ID(@p1)`
-	default:
-		return "", nil
-	}
-	rows, err := exec.QueryContext(ctx, q, c.dialect.Quote(table))
-	if err != nil {
-		return "", fmt.Errorf("read the primary key constraint of %s: %w", table, err)
-	}
-	defer rows.Close()
-	name := ""
-	if rows.Next() {
-		if err := rows.Scan(&name); err != nil {
-			return "", err
-		}
-	}
-	return name, rows.Err()
-}
-
-// mssqlDefaultConstraintName reads the name of the DEFAULT constraint on a
-// column, or "" when the column has none.
-func (c *Client) mssqlDefaultConstraintName(ctx context.Context, exec Executor, table, column string) (string, error) {
-	rows, err := exec.QueryContext(ctx, `
-		SELECT dc.name FROM sys.default_constraints dc
-		  JOIN sys.columns col ON col.default_object_id = dc.object_id
-		 WHERE dc.parent_object_id = OBJECT_ID(@p1) AND col.name = @p2`, c.dialect.Quote(table), column)
-	if err != nil {
-		return "", fmt.Errorf("read the default constraint of %s.%s: %w", table, column, err)
-	}
-	defer rows.Close()
-	name := ""
-	if rows.Next() {
-		if err := rows.Scan(&name); err != nil {
-			return "", err
-		}
-	}
-	return name, rows.Err()
 }
 
 // ---------------------------------------------------------------------------

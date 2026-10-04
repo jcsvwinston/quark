@@ -71,6 +71,10 @@ func (d extliteDialect) AutoIncrementColumn() (string, string) {
 	return d.Dialect.(quarkdriver.AutoIncrementer).AutoIncrementColumn()
 }
 
+func (d extliteDialect) RebuildsTables() bool {
+	return d.Dialect.(quarkdriver.TableRebuilder).RebuildsTables()
+}
+
 var extliteOnce sync.Once
 
 // registerExtlite registers the extlite database/sql driver and dialect once
@@ -93,6 +97,9 @@ func registerExtlite(t *testing.T) {
 		"ColumnTyper":        func(d quark.Dialect) bool { _, ok := d.(quarkdriver.ColumnTyper); return ok },
 		"AutoIncrementer":    func(d quark.Dialect) bool { _, ok := d.(quarkdriver.AutoIncrementer); return ok },
 		"IdempotentDDL":      func(d quark.Dialect) bool { _, ok := d.(quarkdriver.IdempotentDDL); return ok },
+		"ColumnAlterer":      func(d quark.Dialect) bool { _, ok := d.(quarkdriver.ColumnAlterer); return ok },
+		"ObjectDropper":      func(d quark.Dialect) bool { _, ok := d.(quarkdriver.ObjectDropper); return ok },
+		"TableRebuilder":     func(d quark.Dialect) bool { _, ok := d.(quarkdriver.TableRebuilder); return ok },
 	} {
 		if has(inner) != has(wrapped) {
 			t.Fatalf("the extlite wrapper does not mirror SQLite's dialect on %s (sqlite %v, extlite %v): the battery would measure the wrapper, not the name",

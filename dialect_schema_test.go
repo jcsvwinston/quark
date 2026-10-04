@@ -289,3 +289,100 @@ func TestBuiltinsAnswerTheSchemaQuestions(t *testing.T) {
 		}
 	}
 }
+
+// --- ApplyPlan's questions (part 2) -----------------------------------------
+
+func (answeringDialect) AlterColumn(_ context.Context, _ quarkdriver.Executor, c quarkdriver.ColumnChange) ([]string, error) {
+	return []string{"CHANGE " + c.Table + "." + c.Column + " TO " + c.Type}, nil
+}
+
+func (answeringDialect) DropIndex(table, index string) string { return "UNMAKE INDEX " + index }
+func (answeringDialect) DropForeignKey(table, constraint string) string {
+	return "UNMAKE FK " + constraint
+}
+func (answeringDialect) DropCheck(table, constraint string) string {
+	return "UNMAKE CHECK " + constraint
+}
+
+// planOps is one op of each kind ApplyPlan asks the dialect about.
+func planOps() []Operation {
+	def := "0"
+	return []Operation{
+		OpAlterColumn{Table: "t", Old: Column{Name: "c", Type: "INTEGER", Nullable: true},
+			New: Column{Name: "c", Type: "BIGINT", Nullable: false, Default: &def}},
+		OpDropIndex{Table: "t", Index: "ix"},
+		OpAddForeignKey{Table: "t", ForeignKey: ForeignKey{Name: "fk", Columns: []string{"c"}, RefTable: "p", RefColumns: []string{"id"}}},
+		OpDropForeignKey{Table: "t", ForeignKey: "fk"},
+		OpAddCheck{Table: "t", Check: Check{Name: "ck", Expression: "c > 0"}},
+		OpDropCheck{Table: "t", Check: "ck"},
+	}
+}
+
+func TestApplyPlanAsksTheDialect(t *testing.T) {
+	got := recordSchema(t, answeringDialect{SQLite()}, func(ctx context.Context, c *Client) error {
+		return c.ApplyPlan(ctx, Plan{Ops: planOps()})
+	})
+	want := []string{
+		`CHANGE t.c TO BIGINT`,
+		`UNMAKE INDEX ix`,
+		`ALTER TABLE "t" ADD CONSTRAINT "fk" FOREIGN KEY ("c") REFERENCES "p" ("id")`,
+		`UNMAKE FK fk`,
+		`ALTER TABLE "t" ADD CONSTRAINT "ck" CHECK (c > 0)`,
+		`UNMAKE CHECK ck`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("ApplyPlan did not write the dialect's answers.\n got:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+func TestApplyPlanStandardStatements(t *testing.T) {
+	got := recordSchema(t, bareDialect{SQLite()}, func(ctx context.Context, c *Client) error {
+		return c.ApplyPlan(ctx, Plan{Ops: planOps()})
+	})
+	want := []string{
+		// The type through the dialect's own AlterTableAlterColumn — SQLite's
+		// is a comment, which is why SQLite is a TableRebuilder — then the
+		// standard facets.
+		SQLite().AlterTableAlterColumn("t", "c", "BIGINT"),
+		`ALTER TABLE "t" ALTER COLUMN "c" SET NOT NULL`,
+		`ALTER TABLE "t" ALTER COLUMN "c" SET DEFAULT 0`,
+		`DROP INDEX "ix"`,
+		`ALTER TABLE "t" ADD CONSTRAINT "fk" FOREIGN KEY ("c") REFERENCES "p" ("id")`,
+		`ALTER TABLE "t" DROP CONSTRAINT "fk"`,
+		`ALTER TABLE "t" ADD CONSTRAINT "ck" CHECK (c > 0)`,
+		`ALTER TABLE "t" DROP CONSTRAINT "ck"`,
+	}
+	for i := range want {
+		want[i] = strings.Join(strings.Fields(want[i]), " ")
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("a dialect that answers nothing did not get the standard statements.\n got:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+
+	// Dropping a key needs its constraint's name, which only the engine's
+	// catalog has: without a ColumnAlterer, the one refusal.
+	c := clientOf(t, bareDialect{SQLite()})
+	err := c.ApplyPlan(context.Background(), Plan{Ops: []Operation{OpAlterColumn{Table: "t",
+		Old: Column{Name: "id", Type: "BIGINT", PrimaryKey: true}, New: Column{Name: "id", Type: "BIGINT"}}}})
+	if !errors.Is(err, ErrUnsupportedFeature) {
+		t.Errorf("dropping a primary key without a ColumnAlterer: want ErrUnsupportedFeature, got %v", err)
+	}
+}
+
+func TestBuiltinsAnswerApplyPlansQuestions(t *testing.T) {
+	for _, tc := range []struct {
+		d                         Dialect
+		alterer, dropper, rebuild bool
+	}{
+		{PostgreSQL(), true, false, false}, {MySQL(), true, true, false}, {MariaDB(), true, true, false},
+		{SQLite(), false, false, true}, {MSSQL(), true, true, false}, {Oracle(), true, false, false},
+	} {
+		_, a := tc.d.(quarkdriver.ColumnAlterer)
+		_, dr := tc.d.(quarkdriver.ObjectDropper)
+		r := rebuildsTables(tc.d)
+		if a != tc.alterer || dr != tc.dropper || r != tc.rebuild {
+			t.Errorf("%s: ColumnAlterer %v ObjectDropper %v TableRebuilder %v, want %v %v %v",
+				tc.d.Name(), a, dr, r, tc.alterer, tc.dropper, tc.rebuild)
+		}
+	}
+}
