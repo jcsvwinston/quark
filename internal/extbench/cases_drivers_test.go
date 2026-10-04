@@ -1,0 +1,79 @@
+// Copyright 2026 jcsvwinston
+// SPDX-License-Identifier: Apache-2.0
+
+package extbench
+
+// The "drivers" family: shipping a database engine for Quark from outside
+// this repository. ADR-0023 moved the engines out of the library and gave the
+// classifier a leaf contract (quarkdriver); this family measures how far that
+// goes for a driver nobody in this repository writes — and the answer is that
+// the query path is open and the schema path is not.
+
+func controlsDrivers() []control {
+	return []control{
+		{
+			id:     "DRV-01",
+			family: "drivers",
+			title:  "RegisterDialect is safe to call while dialects are being resolved",
+			want:   absent,
+			note:   "Measured in a child process under -race: RegisterDialect writing while DetectDialect and DetectDialectByName read reports a DATA RACE. The dialect registry is a plain map with no lock; the other four registries are race-free under the same harness (CON-08). A driver that registers from init() is serialised by Go; what races is a registration after start-up — a test that registers its own dialect, a module loaded late — while quark.New, which calls DetectDialect, builds a client.",
+			probe:  probeDialectRegistryRace,
+		},
+		{
+			id:     "DRV-02",
+			family: "drivers",
+			title:  "A driver module outside this repository registers its dialect and its classifier without importing package quark",
+			want:   partial,
+			note:   "Measured with go list -deps on a driver module built standalone (GOWORK=off) as example.com/extdriver: the half that registers the classifier imports quarkdriver and not package quark. The half that registers the dialect cannot avoid it — RegisterDialect lives in package quark, and the Dialect interface names quark.LockOptions (in LockSuffix), so implementing it means importing the library: 208 packages against the classifier half's 163. The listener is already root-free (quarkdriver.ListenerFactory); the dialect is the one piece of a driver that is not.",
+			probe:  probeRegistrationWithoutRoot,
+		},
+		{
+			id:     "DRV-03",
+			family: "drivers",
+			title:  "A driver module outside this repository, built standalone against this tree, opens its engine by name, reads and writes, classifies its duplicate key and passes drivertest.Verify",
+			want:   present,
+			note:   "The fixture creates its table by hand: what Migrate writes for an engine name Quark does not know is DRV-04's subject, and the kit it passes checks classifiers only (DRV-05).",
+			probe:  probeExternalDriverEndToEnd,
+		},
+		{
+			id:     "DRV-04",
+			family: "drivers",
+			title:  "A dialect from outside is a full participant: SQLite's own dialect methods under another name behave as SQLite's do",
+			want:   partial,
+			note:   "Measured with a battery of 19 steps on two arms — the same engine and the same dialect methods, one named sqlite and one extlite. The 11 query steps agree (CRUD, upsert, batch, LIKE escaping, savepoints, the locking refusal, keyset pagination, classification): the query path follows the Dialect interface. All 8 schema steps diverge, because the migration code branches on Dialect.Name(). Migrate writes BIGINT PRIMARY KEY instead of INTEGER PRIMARY KEY AUTOINCREMENT, so the first insert leaves the key NULL and fails to scan it back; a second Migrate fails (CREATE TABLE without IF NOT EXISTS for a name it does not know); PlanMigration proposes six changes against SQLite's own table, because column types come from a table keyed on the dialect's name — a dialect has no say, and a TypeMapper overrides one Go type for every engine at once; Sync fails; and ApplyPlan refuses adding, dropping and altering a column and adding a foreign key with ErrUnsupportedFeature — it decides transactional DDL from the name and never calls Dialect.SupportsTransactionalDDL(), which the interface already requires every dialect to answer.",
+			probe:  probeFullParticipant,
+		},
+		{
+			id:     "DRV-05",
+			family: "drivers",
+			title:  "The conformance kit checks a driver's dialect: placeholders, quoting, upsert, limit and savepoints",
+			want:   absent,
+			note:   "Measured on the kit's type-checked API: no field of drivertest.Case and no function of drivertest takes a quark.Dialect, so a dialect that quotes identifiers unsafely or numbers its placeholders wrong passes the kit — it is never shown one. The kit checks the three classifier predicates and nothing else. When the kit gains a way to take a dialect, this probe stops and asks to be extended to run it against a dialect that is wrong on purpose.",
+			probe:  probeKitChecksDialect,
+		},
+		{
+			id:     "DRV-06",
+			family: "drivers",
+			title:  "Every driver module of this repository runs the conformance kit",
+			want:   partial,
+			note:   "Measured by running each driver module's tests against this tree (a go.work, as CI's driver lane builds) and looking for the kit's subtests: mssql, mysql, oracle and sqlite run drivertest.Verify; postgres does not. Its module registers no classifier by design — PostgreSQL errors are classified through the SQLState() method every PostgreSQL driver exposes (CON-07) — and the kit has nothing else to check, so the engine the kit never sees is PostgreSQL.",
+			probe:  probeEveryDriverRunsKit,
+		},
+		{
+			id:     "DRV-07",
+			family: "drivers",
+			title:  "A driver module outside this repository can run the engine conformance suite the in-repo engines run",
+			want:   absent,
+			note:   "Measured: the suite is internal/enginesuite, whose only non-test file is doc.go — SharedSuite and the per-engine suites live in its 100 _test.go files, which no importer can reach — and the go command refuses a module outside the repository that imports an internal package of quark (\"use of internal package … not allowed\"). An external driver can prove its classifier (DRV-03) and nothing about the SQL its dialect writes.",
+			probe:  probeEngineSuiteReachable,
+		},
+		{
+			id:     "DRV-08",
+			family: "drivers",
+			title:  "A driver template module builds standalone (GOWORK=off) and passes the kit",
+			want:   absent,
+			note:   "Measured over every go.mod of the repository: 11 modules — the library, the CLI, the five drivers, the acceptance harness, the benchmarks, the bug-bash harness and the engine suites — and no other module requires the library, so nothing is a template for a driver someone else writes. The nearest things are the five drivers, each one engine's module pinned to a published quark, and the fixture this bench builds for DRV-03, which lives in testdata.",
+			probe:  probeDriverTemplate,
+		},
+	}
+}
