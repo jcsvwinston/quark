@@ -525,7 +525,9 @@ quark.For[User](ctx, client).
 The condition applies to the relation's own query: it narrows which children
 load, and does not drop parents that end up with none. Repeated calls on the
 same relation AND together, and the relation is registered for preloading, so
-`PreloadWhere` alone is enough.
+`PreloadWhere` alone is enough. The operators are the ones `Where` takes, with
+the same values: `IN` and `NOT IN` with a `[]any`, `BETWEEN` with two values,
+`IS NULL` with none.
 
 ## Streaming large result sets
 

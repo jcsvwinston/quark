@@ -1373,7 +1373,16 @@ func (q *BaseQuery) checkColumnKnown(col string, allowAliases bool) error {
 
 // buildWhereClause recursively builds WHERE SQL from conditions,
 // handling AND/OR logic and grouped sub-conditions.
-func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []any, error) {
+//
+// It is THE renderer for a caller's conditions: SELECT, COUNT and the
+// aggregates use it, and so do the write paths through whereForWrite
+// (DeleteBy, UpdateMap, UpdateFields, the merge in buildUpdate) and the
+// PreloadWhere filters. Before QK-39 the write paths rendered each condition
+// themselves as `col OP ?` joined by AND, which dropped the NOT of WhereNot —
+// DeleteBy then deleted exactly the rows the caller excluded — and broke
+// Or groups, IN, BETWEEN, IS NULL and raw expressions. A condition has to
+// mean the same rows in every statement, so there is one renderer.
+func (q *BaseQuery) buildWhereClause(conds []condition, argIndex int) (string, []any, error) {
 	var parts []string
 	var args []any
 
@@ -1472,7 +1481,10 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 
 		switch cond.operator {
 		case "IN", "NOT IN":
-			values := cond.value.([]any)
+			values, ok := cond.value.([]any)
+			if !ok {
+				return "", nil, fmt.Errorf("%w: %s takes a []any of values, got %T", ErrInvalidQuery, cond.operator, cond.value)
+			}
 			placeholders := make([]string, len(values))
 			for j := range values {
 				placeholders[j] = q.dialect.Placeholder(argIndex)
@@ -1483,7 +1495,10 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 			condSQL.WriteString(strings.Join(placeholders, ", "))
 			condSQL.WriteString(")")
 		case "BETWEEN", "NOT BETWEEN":
-			values := cond.value.([]any)
+			values, ok := cond.value.([]any)
+			if !ok || len(values) < 2 {
+				return "", nil, fmt.Errorf("%w: %s takes a []any of two values, got %T", ErrInvalidQuery, cond.operator, cond.value)
+			}
 			condSQL.WriteString(q.dialect.Placeholder(argIndex))
 			condSQL.WriteString(" AND ")
 			condSQL.WriteString(q.dialect.Placeholder(argIndex + 1))
@@ -1502,6 +1517,30 @@ func (q *Query[T]) buildWhereClause(conds []condition, argIndex int) (string, []
 	}
 
 	return strings.Join(parts, ""), args, nil
+}
+
+// whereForWrite renders the query's conditions for an UPDATE or a DELETE
+// through buildWhereClause, so WhereNot, Or groups, IN, BETWEEN, IS NULL, the
+// escaped LIKE forms and WhereExpr select the same rows a SELECT with the same
+// conditions selects (QK-39). argIndex is the next placeholder index — after
+// the SET arguments and any key predicate the statement binds first — so the
+// numbered placeholders of PostgreSQL, SQL Server and Oracle continue in
+// order. The tenant predicate RowLevelSecurityClient injects is one of the
+// conditions, so it is rendered here as it is for a SELECT.
+//
+// The fragment comes back parenthesised: an Or group renders as `a OR (b)`
+// at the top level, and a statement that ANDs the fragment with its own
+// primary-key predicate must not let that OR escape it. It is "" when the
+// query has no conditions.
+func (q *BaseQuery) whereForWrite(argIndex int) (string, []any, error) {
+	if len(q.where) == 0 {
+		return "", nil, nil
+	}
+	frag, args, err := q.buildWhereClause(q.where, argIndex)
+	if err != nil {
+		return "", nil, err
+	}
+	return "(" + frag + ")", args, nil
 }
 
 // scanRow scans a single row into the entity.

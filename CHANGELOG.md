@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.2](https://github.com/jcsvwinston/quark/compare/v1.15.1...v1.15.2) (2026-10-04)
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.15.1 ([#429](https://github.com/jcsvwinston/quark/issues/429)) ([3993b3d](https://github.com/jcsvwinston/quark/commit/3993b3db6e9e611de1699e19b879890c9477f348))
+* **query:** DeleteBy, UpdateMap and UpdateFields honour WhereNot, Or groups, IN and BETWEEN the way List does — WhereNot no longer deletes the rows it excludes (QK-39) ([#428](https://github.com/jcsvwinston/quark/issues/428)) ([3b4a8dd](https://github.com/jcsvwinston/quark/commit/3b4a8dda8dd0585776a952164048d4b41e03b36a))
+
+## [1.15.1](https://github.com/jcsvwinston/quark/compare/v1.15.0...v1.15.1) (2026-10-04)
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.15.0 ([#423](https://github.com/jcsvwinston/quark/issues/423)) ([3fb2982](https://github.com/jcsvwinston/quark/commit/3fb29822eb49133a989222989964f31739e5f55d))
+
 ## [1.15.0](https://github.com/jcsvwinston/quark/compare/v1.14.0...v1.15.0) (2026-09-20)
 
 

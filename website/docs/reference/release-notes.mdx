@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.15.0** {/* x-release-please-version */} on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.15.2** {/* x-release-please-version */} on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade
@@ -20,6 +20,55 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.15.2
+
+A patch that fixes the rows that conditional writes touch — a defect present
+since the first release — and raises the sibling module floors.
+
+### Fixed
+
+**Writes with conditions now match the rows a read with the same conditions
+returns** ([#428](https://github.com/jcsvwinston/quark/pull/428)). Since the
+first release, `DeleteBy`, `UpdateMap` and `UpdateFields` rendered their own
+`WHERE` as `col OP ?` joined by `AND`, ignoring each condition's logic.
+`WhereNot` lost its `NOT`: `WhereNot("status", "=", "active").DeleteBy()` ran
+`DELETE … WHERE "status" = ?` and **deleted the rows it was meant to keep**, and
+`UpdateMap` and `UpdateFields` wrote them the same way. `Or` groups were joined
+with `AND`, and `IN`, `NOT IN`, `BETWEEN` and `NOT BETWEEN` failed with a
+driver error. The write paths now go through the same renderer as `List`,
+wrapped in parentheses after the key and tenant predicates; a test checks on
+SQLite and on the six-engine suite that each write touches exactly the rows
+`List` returns for the same conditions. `PreloadWhere` filters use the same
+renderer. If you call `DeleteBy`, `UpdateMap` or `UpdateFields` after
+`WhereNot`, check the data those calls touched; plain `Where` with comparison
+operators was not affected.
+
+**Module floors.** `cmd/quark` (v1.1.2) and the five `drivers/*` modules
+(v0.2.4) require `github.com/jcsvwinston/quark v1.15.1`
+([#429](https://github.com/jcsvwinston/quark/pull/429)).
+
+### Documentation
+
+The CRUD reference said `Update` merges the primary key with the query's
+`Where` clauses and showed `Where("tenant_id", …)` as a guard. It never did:
+`Update(entity)`, `UpdateBatch`, `Delete(entity)` and `HardDelete(entity)` write
+by key and ignore the query's conditions. The reference now says so; until that
+changes, use `UpdateFields` or `DeleteBy` when a condition must guard a write.
+
+## v1.15.1
+
+A patch with no change to the library: the CLI and the five driver modules
+raise their floor on the root to v1.15.0 and are released again.
+
+### Changed
+
+**Module floors.** `cmd/quark` (v1.1.1) and the five `drivers/*` modules
+(v0.2.3) require `github.com/jcsvwinston/quark v1.15.0` instead of v1.14.0
+([#423](https://github.com/jcsvwinston/quark/pull/423)). Go resolves the highest
+version in the graph, so an application that already required v1.15.0 builds
+the same code; `go install` of the CLI and a driver added on its own now start
+from v1.15.0 too.
 
 ## v1.15.0
 

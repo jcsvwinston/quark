@@ -1,5 +1,19 @@
 # Quark benchmark harness
 
+Two harnesses share this module:
+
+- **The engine bench** ([`./engines`](engines/)) — Quark against
+  `database/sql` over pgx and against pgx's native pool on a real
+  PostgreSQL 16, plus one MySQL read with and without a reused statement.
+  One control per operation with a recorded verdict and recorded ratios,
+  checked by `TestEngineBench`; a CI lane runs it on every pull request and
+  every push to main and publishes the table. This is the one that is kept
+  current. See [The engine bench](#the-engine-bench-engines) below.
+- **The peer comparison on in-memory SQLite** (this directory, `./gorm`,
+  `./ent`, `./sqlc`) — Quark against `database/sql`, GORM, ent and sqlc. Its
+  published figures were measured once, on 2026-05-27, against Quark v0.13,
+  and have not been re-measured since; the rest of this README describes it.
+
 A reproducible `go test -bench` harness that measures Quark's per-operation
 overhead against a hand-written `database/sql` baseline and against GORM, on
 the same model, schema, data, and operations.
@@ -207,3 +221,51 @@ mirroring `./gorm`, under the same driver-isolation constraint. This is the
 codegen-tier comparison against Quark's own generated path (F6-2/F6-3); the
 ≥3× gate it once fed has been retired (ADR-0017), so it is informational, not
 a v1.0 blocker.
+
+## The engine bench (`./engines`)
+
+Quark measured against the baselines a Go program on PostgreSQL actually has,
+on a real engine, as a meter with a verdict per operation:
+
+| Control | Operation | Judged against |
+| ------- | --------- | -------------- |
+| `PG-01` | InsertOne — one row, id back through `RETURNING` | `database/sql` and pgx |
+| `PG-02` | FindByPK | `database/sql` and pgx |
+| `PG-03` | List100 — `WHERE`, `ORDER BY`, `LIMIT 100` | `database/sql` |
+| `PG-04` | Preload100 — 100 parents and their 500 children | `database/sql` |
+| `PG-05` | InsertBatch1000 — one statement, 1000 ids back | `database/sql` |
+| `MY-01` | FindByPK on MySQL | `database/sql` per call, and with the statement reused |
+
+The target is a **proposal, not adopted**: quark within 15 % of every baseline
+a control names. The record is the CI runner's (the `Engine bench` workflow
+sets `QUARK_BENCH_REFERENCE=1`, and only there are the verdict and the ratio
+drift asserted); a laptop measures single-row ratios 10–20 % lower, so a local
+run reports them against the record without failing, and asserts only
+quark's allocations, which are the same on every machine. The recorded verdicts, ratios and what each distance is made
+of are in `engines/cases_test.go`, and the published page
+(`website/docs/reference/benchmarks.mdx`) carries them in a block that
+`TestEngineBenchPage` writes and checks.
+
+```bash
+# The bench, measured the way the page says (needs Docker; about two minutes):
+bash engines/run.sh /tmp/engine-bench        # writes bench-table.md and run.log
+
+# One arm under the profiler, in the same network namespace:
+bash engines/run.sh /tmp/prof -test.run '^$' \
+  -test.bench 'Postgres/List100/quark$' -test.cpuprofile /out/cpu.out
+go tool pprof -top /tmp/prof/engines.test /tmp/prof/cpu.out
+
+# The catalogue and the page block, no database:
+go test ./engines -run 'TestEngineBenchCatalogue|TestEngineBenchPage'
+QUARK_BENCH_PAGE=1 go test ./engines -run TestEngineBenchPage   # rewrite the block
+```
+
+If `make workspace` left a `go.work` at the repository root, run the `go`
+commands with `GOWORK=off`: this module resolves quark and the drivers through
+its own `replace` directives and is not part of that workspace (`run.sh`
+already does this).
+
+How it measures, and why the test can assert anything on a shared runner, is
+in the package documentation (`engines/doc.go`) and in the comments of
+`engines/bench_test.go` and `engines/measure_test.go`; the method is also on
+the published page.

@@ -524,6 +524,15 @@ jobs:
           go vet ./...
           go test -run=^$ -bench=. -benchtime=1x -count=1 ./...
 
+      # The engine bench's catalogue and its published block need no
+      # database: one control per operation, every recorded verdict allowed by
+      # its recorded ratios, and the block of reference/benchmarks.mdx equal to
+      # what cases_test.go records. They are deterministic, so they belong in a
+      # lane that gates; the measurement itself runs in engine-bench.yml.
+      - name: Engine bench catalogue and published block
+        working-directory: benchmarks
+        run: go test -count=1 -run '^(TestEngineBenchCatalogue|TestEngineBenchPage)$' -v ./engines
+
   # F0-8: per-engine integration matrix.
   # Spins up each engine and runs the SharedSuite against it. Docker is
   # pre-installed on ubuntu-latest runners. Each engine runs in parallel;
@@ -728,7 +737,10 @@ jobs:
   # every time one is added, renamed or split (the `integration` matrix alone
   # publishes one check name per engine). Adding a lane therefore means adding
   # its job id to the `needs:` list below — a lane that is not listed here does
-  # not gate a merge.
+  # not gate a merge. The engine bench, which measures time on a shared runner
+  # and must not be able to block a merge, is not a lane of this workflow at
+  # all: it has its own, engine-bench.yml, so that every job here is one the
+  # gate waits on.
   ci-required-gate:
     name: CI Required Gate
     runs-on: ubuntu-latest
