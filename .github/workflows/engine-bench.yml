@@ -45,6 +45,11 @@ jobs:
 
       - name: Measure quark against database/sql and pgx
         timeout-minutes: 20
+        env:
+          # This runner is the machine the record is taken on, so the time
+          # checks (verdict and ratio drift) are asserted here and only
+          # reported anywhere else; allocations are asserted everywhere.
+          QUARK_BENCH_REFERENCE: "1"
         run: bash benchmarks/engines/run.sh "$RUNNER_TEMP/engine-bench"
 
       - name: Publish the table

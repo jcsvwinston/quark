@@ -321,11 +321,35 @@ func TestEngineBench(t *testing.T) {
 	}
 }
 
+// onReference reports whether this run is on the machine the record was taken
+// on. The time checks are asserted there and only reported elsewhere; see
+// referenceEnv.
+func onReference() bool { return os.Getenv(referenceEnv) != "" }
+
+// referenceEnv marks the reference machine: the CI workflow sets it.
+//
+// A ratio is portable between machines only roughly, and that was measured:
+// the same code gave InsertOne 1.31 against database/sql on a CI runner
+// (Xeon, 4 vCPUs) and 1.12 on a laptop (Apple M4 Pro under Docker's VM), and
+// MySQL's FindByPK 1.57 against 1.23. A verdict on the limit therefore
+// belongs to a machine, and the bench records the CI runner's, because that
+// is where it runs on every change. Elsewhere the verdict and the drift are
+// printed in the table, marked, and do not fail the test: a laptop is for
+// comparing a change with itself, before and after, on the same machine.
+// Allocations do not depend on the machine and are asserted everywhere.
+const referenceEnv = "QUARK_BENCH_REFERENCE"
+
 func assertControl(t *testing.T, c control, js []judged) {
 	t.Helper()
+	fail := t.Errorf
+	if !onReference() {
+		fail = func(format string, args ...any) {
+			t.Logf("not the reference machine (%s unset): reported, not asserted.\n"+format, append([]any{referenceEnv}, args...)...)
+		}
+	}
 	vs := possible(outcomesOf(js))
 	if !slices.Contains(vs, c.want) {
-		t.Errorf("control %s (%s) measures %s, the bench records %s.\n\n%s\n"+
+		fail("control %s (%s) measures %s, the bench records %s.\n\n%s\n"+
 			"If the code just moved, that is the point: update the recorded\n"+
 			"verdict and ratios in cases_test.go in the same change, so the\n"+
 			"published page moves with the code instead of behind it.",
@@ -333,7 +357,7 @@ func assertControl(t *testing.T, c control, js []judged) {
 	}
 	for _, j := range js {
 		if j.drifted() {
-			t.Errorf("control %s (%s): quark ÷ %s measures %.2f, the bench records %.2f — a move of %+.0f %%, past the %.0f %% the bench tolerates.\n\n%s\n"+
+			fail("control %s (%s): quark ÷ %s measures %.2f, the bench records %.2f — a move of %+.0f %%, past the %.0f %% the bench tolerates.\n\n%s\n"+
 				"A move this size is the code, not the machine: record the new\n"+
 				"ratio in cases_test.go in the same change.",
 				c.id, c.op, j.base, j.ratio, j.recorded, 100*j.moved, 100*j.drift, describe(js))
@@ -408,6 +432,11 @@ func renderRun(rows []reportRow, cfg config, servers map[string]string) string {
 		}
 	}
 	fmt.Fprintf(&b, "Machine: %s. Engines: %s.\n\n", machine(), strings.Join(names, ", "))
+	if onReference() {
+		b.WriteString("This is the reference machine: verdicts, ratios and allocations are asserted against the record.\n\n")
+	} else {
+		fmt.Fprintf(&b, "Not the reference machine (%s unset): verdicts and ratios are compared with the record and marked ✗ where they differ, but only allocations are asserted.\n\n", referenceEnv)
+	}
 	fmt.Fprintf(&b, "Medians of %d rounds; a round is about %s of each arm, in blocks of %s interleaved across the arms. Target (proposed, not adopted): quark within %.0f %% of every baseline a control names. "+
 		"A ratio within its band of %.2f is on the threshold and its verdict is not asserted.\n\n",
 		cfg.rounds, cfg.sample, cfg.block, 100*(limit-1), limit)

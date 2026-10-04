@@ -30,8 +30,8 @@ func controls() []control {
 		{
 			id: "PG-01", engine: "postgres", op: "InsertOne",
 			title:   "Insert one row and read its generated id back",
-			targets: []target{{armSQL, 1.12}, {armPgx, 1.16}},
-			want:    partial,
+			targets: []target{{armSQL, 1.28}, {armPgx, 1.33}},
+			want:    absent,
 			allocs:  memory{86, 4425},
 			note: "Both ratios sit inside the band around the limit, so a single run cannot tell met from missed; the record is the verdict of the reference medians. " +
 				"Quark allocates 86 times and 4.4 KB per insert, against 21 times and 1.1 KB for database/sql and 13 times and 0.6 KB for pgx: the statement is built from the struct, " +
@@ -40,8 +40,8 @@ func controls() []control {
 		{
 			id: "PG-02", engine: "postgres", op: "FindByPK",
 			title:   "Select one row by primary key",
-			targets: []target{{armSQL, 1.10}, {armPgx, 1.13}},
-			want:    present,
+			targets: []target{{armSQL, 1.24}, {armPgx, 1.27}},
+			want:    absent,
 			allocs:  memory{74, 4830},
 			note: "On the threshold against both baselines: present by the reference medians, inside the band on every run measured. " +
 				"Find goes through the list path — the SELECT is assembled by the query builder (8 % of the client's CPU in a profile) and the row goes through the generic scanner — " +
@@ -50,7 +50,7 @@ func controls() []control {
 		{
 			id: "PG-03", engine: "postgres", op: "List100",
 			title:   "Select 100 rows with a WHERE, an ORDER BY and a LIMIT",
-			targets: []target{{armSQL, 1.30}},
+			targets: []target{{armSQL, 1.42}},
 			want:    absent,
 			allocs:  memory{576, 37000},
 			note: "About 30 % over database/sql. The largest single item: List serializes the whole result to JSON even when no cache is configured, and discards it — " +
@@ -60,7 +60,7 @@ func controls() []control {
 		{
 			id: "PG-04", engine: "postgres", op: "Preload100",
 			title:   "Select 100 parents and their 500 children",
-			targets: []target{{armSQL, 1.95}},
+			targets: []target{{armSQL, 2.01}},
 			want:    absent,
 			allocs:  memory{4757, 208500},
 			note: "About twice database/sql, and most of it is the shape of the children's query. The informational arm runs the hand-written program with the query Quark sends — " +
@@ -80,7 +80,7 @@ func controls() []control {
 		{
 			id: "MY-01", engine: "mysql", op: "FindByPK",
 			title:   "Select one row by primary key",
-			targets: []target{{armSQL, 1.20}, {armSQLStmt, 2.50}},
+			targets: []target{{armSQL, 1.50}, {armSQLStmt, 2.90}},
 			want:    absent,
 			allocs:  memory{69, 4470},
 			note: "Near the limit against a program that sends the query per call, and two and a half times one that prepares the statement once. " +

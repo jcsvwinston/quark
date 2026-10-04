@@ -34,8 +34,10 @@
 #
 # Writes OUT_DIR/bench-table.md (the table the CI lane publishes) and
 # OUT_DIR/run.log, and removes both containers on exit, whatever happened.
-# QUARK_BENCH_ROUNDS, QUARK_BENCH_SAMPLE and QUARK_BENCH_BLOCK pass through;
-# PG_IMAGE and MYSQL_IMAGE override the engines.
+# QUARK_BENCH_ROUNDS, QUARK_BENCH_SAMPLE and QUARK_BENCH_BLOCK pass through
+# to the bench, and so does QUARK_BENCH_REFERENCE, which the CI workflow sets
+# to have the time checks asserted; PG_IMAGE and MYSQL_IMAGE override the
+# engines.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -102,7 +104,7 @@ docker run --rm --network "container:$name-pg" \
   -e QUARK_BENCH_MYSQL_DSN="root:bench@tcp(127.0.0.1:3306)/bench?parseTime=true" \
   -e QUARK_BENCH_REQUIRE=postgres,mysql \
   -e QUARK_BENCH_OUT=/out \
-  -e QUARK_BENCH_ROUNDS -e QUARK_BENCH_SAMPLE -e QUARK_BENCH_BLOCK \
+  -e QUARK_BENCH_ROUNDS -e QUARK_BENCH_SAMPLE -e QUARK_BENCH_BLOCK -e QUARK_BENCH_REFERENCE \
   --entrypoint /out/engines.test \
   "$pg_image" "${test_flags[@]}" -test.timeout 20m 2>&1 | tee "$out/run.log"
 status="${PIPESTATUS[0]}"
