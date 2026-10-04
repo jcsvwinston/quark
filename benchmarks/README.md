@@ -237,7 +237,11 @@ on a real engine, as a meter with a verdict per operation:
 | `MY-01` | FindByPK on MySQL | `database/sql` per call, and with the statement reused |
 
 The target is a **proposal, not adopted**: quark within 15 % of every baseline
-a control names. The recorded verdicts, ratios and what each distance is made
+a control names. The record is the CI runner's (the `Engine bench` workflow
+sets `QUARK_BENCH_REFERENCE=1`, and only there are the verdict and the ratio
+drift asserted); a laptop measures single-row ratios 10–20 % lower, so a local
+run reports them against the record without failing, and asserts only
+quark's allocations, which are the same on every machine. The recorded verdicts, ratios and what each distance is made
 of are in `engines/cases_test.go`, and the published page
 (`website/docs/reference/benchmarks.mdx`) carries them in a block that
 `TestEngineBenchPage` writes and checks.

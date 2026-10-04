@@ -12,12 +12,16 @@
 // check their probes: closing a gap, or opening one, turns the test red and
 // asks for the record to move in the same change.
 //
-// What is recorded is a RATIO, never a time. Every round measures every arm
+// What is recorded for time is a RATIO, never a time. Every round measures every arm
 // of an operation back to back, in a rotating order, and the ratio of the
-// round is Quark's time over the baseline's time on the same machine a few
-// hundred milliseconds apart; the bench publishes the median over the rounds.
+// round is Quark's time over the baseline's on the same machine and in the
+// same stretch of wall clock; the bench publishes the median over the rounds.
 // A slower machine slows all arms together, so the ratio survives a change of
-// runner that an absolute number does not.
+// runner far better than a time does: across the CPU models GitHub's runners
+// drew, absolute times differed by 40–50 % and ratios by at most 16 %. Not
+// entirely, though, so the time checks are asserted only on the machine the
+// record was taken on — the CI runner — and allocations, which do not depend
+// on the machine at all, are asserted everywhere.
 //
 // The benchmarks themselves live in the _test.go files: run.sh starts the
 // engines and runs them the way the published page describes, and the

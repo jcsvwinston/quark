@@ -47,31 +47,32 @@ const limit = 1.15
 //
 // The run's own scatter is not enough, and that was measured, not assumed.
 // Within one run the per-round ratios agree closely — the median absolute
-// deviation is often under 0.03 — but WHOLE RUNS shift against each other:
-// six runs of the same code on the same machine put the median ratio of
-// MySQL's FindByPK anywhere between 1.10 and 1.40, each run tight around its
-// own value. Whatever moves a whole run (which core the client lands on,
-// what the rest of the machine is doing for that minute) is invisible from
-// inside it. The two floors below are what covers it, and they were sized
-// from those runs and from the CI runner's.
+// deviation is usually under 0.03 — but WHOLE RUNS shift against each other,
+// and nothing inside a run can see it. On the CI runner the shift follows the
+// CPU GitHub hands out: five runs on an AMD EPYC 7763 agreed within 2 %, while
+// a Xeon 8370C put MySQL's FindByPK 16 % higher and a Xeon 6973P put
+// InsertOne 8 % lower. On a busy laptop, eight runs put MySQL's FindByPK
+// anywhere between 1.10 and 1.40. The floors below are what covers that, and
+// they were sized from those runs.
 const (
 	// bandFloor is the narrowest half-width the band around the LIMIT can
 	// have: a ratio within ±0.10 of 1.15 is never called met or missed, it is
-	// "on the threshold" and the verdict is not asserted. Measured across six
-	// local runs: the single-row ratios spread by up to ±0.08 around their
-	// median from run to run.
+	// "on the threshold" and the verdict is not asserted. Measured: the
+	// single-row ratios spread by up to ±0.06 around their median across
+	// seven CI runs, and by up to ±0.08 across eight laptop runs.
 	bandFloor = 0.10
 	// bandMADs widens the band on a noisy run: the band is at least this many
 	// median absolute deviations of the per-round ratios.
 	bandMADs = 2.0
 	// driftFloor is the smallest relative move of a ratio, against the ratio
-	// the bench RECORDS, that the test reports as a change in the code. It has
-	// to absorb the shift between runs (up to ±13 % measured) and the
-	// difference between machines: the record is taken on one and checked on
-	// another, and the share of a round trip that is client CPU differs
-	// between an Apple core under Docker's VM and a CI runner's. A slowdown or
-	// a gain smaller than this is visible in the table, and the test does not
-	// fail on it.
+	// the bench RECORDS, that the test reports as a change in the code. It is
+	// asserted on the reference machine only (see referenceEnv), and it has
+	// to absorb the CPU models of that machine: across seven CI runs on three
+	// models the ratios moved by up to 16 % from their median. On the EPYC
+	// runner, 20 % of a single-row ratio is about 30 µs of quark's time per
+	// operation; a slowdown smaller than that is visible in the table, and the
+	// test does not fail on it — unless it allocates, which the next check
+	// sees.
 	driftFloor = 0.20
 	// allocTolerance is how far quark's allocations per operation may move
 	// from the recorded ones. Allocations do not depend on the machine — the
@@ -79,8 +80,8 @@ const (
 	// core and a CI runner, and from run to run they moved by under 2 % — so
 	// this tolerance can be tight where the time one cannot. It is what
 	// notices a regression too small for the clock: a second JSON
-	// serialisation of a 100-row list moved List100's ratio by 12 %, inside
-	// the drift floor, and its bytes per call by 26 %.
+	// serialization of a 100-row list moved List100's ratio by 12 %, inside
+	// the drift floor, and its bytes per call by 28 %.
 	allocTolerance = 0.05
 )
 
