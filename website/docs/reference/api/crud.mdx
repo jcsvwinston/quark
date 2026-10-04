@@ -141,12 +141,15 @@ rows, err := quark.For[User](ctx, client).WithoutAssociations().Update(&got)
 See [Relations — Update re-saves loaded associations](../../guides/relations#update-re-saves-loaded-associations--opt-out-with-withoutassociations).
 :::
 
-`Update` merges primary-key predicates with any existing query `Where` clauses:
+`Update` writes the entity by its primary key (and its version column, when
+the model has one). It does not apply the query's `Where` conditions: to update
+a row only when a condition holds, use `UpdateFields`, which ANDs the
+conditions with the key, or `UpdateMap`.
 
 ```go
 rows, err := quark.For[User](ctx, client).
     Where("tenant_id", "=", tenantID).
-    Update(user)
+    UpdateFields(&user, "name", "email")
 ```
 
 Hooks: `BeforeUpdate` and `AfterUpdate`.
@@ -213,7 +216,7 @@ Rules:
 | Listing the primary key column returns an error. | Overwriting the PK would corrupt the row's identity. |
 | Listing an unknown field returns an error. | Fail fast on typos. |
 | Empty `fields` returns an error. | An update with no SET clause is meaningless. |
-| Existing `Where()` predicates are merged with the PK predicate. | Same behaviour as `Update`. |
+| Existing `Where()` conditions are ANDed with the PK predicate. | The row is written only when a `List` with the same conditions would return it. |
 
 Hooks: `BeforeUpdate` and `AfterUpdate` run, just like `Update`.
 
@@ -243,6 +246,12 @@ Rules:
 
 `UpdateMap` is the preferred API for explicit zero values, admin bulk changes,
 and computed updates that do not require loading a full entity.
+
+The rows `UpdateMap`, `UpdateFields` and `DeleteBy` write are the rows `List`
+returns for the same conditions. `WhereNot`, `Or` groups, `IN`, `BETWEEN`,
+`IS NULL`, the escaped `LIKE` forms and `WhereExpr` mean the same thing in an
+`UPDATE` or a `DELETE` as in a `SELECT`. One difference stays: these writes do
+not add the soft-delete scope (`deleted_at IS NULL`) that reads add.
 
 ## Delete
 
@@ -285,7 +294,9 @@ rows, err := quark.For[User](ctx, client).HardDelete(&User{ID: 42})
 
 ### `DeleteBy() (int64, error)`
 
-Hard-deletes rows matching the current `Where` conditions.
+Hard-deletes the rows `List` returns for the current `Where` conditions —
+`WhereNot` included: `WhereNot("status", "=", "active").DeleteBy()` removes the
+rows whose status is not `active`.
 
 ```go
 rows, err := quark.For[User](ctx, client).

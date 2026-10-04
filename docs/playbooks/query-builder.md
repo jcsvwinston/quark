@@ -108,6 +108,25 @@ Cualquier vez que metas `fmt.Sprintf` en la generación de SQL final, los valore
 
 ADR 0002 prohíbe reflect adicional en hot paths sin discusión previa.
 
+### A second renderer for a caller's conditions
+
+Before QK-39 the write paths — `hardDeleteWhere` (DeleteBy), `buildUpdateMap`
+(UpdateMap), `UpdateFields` and the merge in `buildUpdate` — and the
+PreloadWhere loader rendered `q.where` themselves, as `col OP ?` joined by
+AND. That renderer ignored `cond.logic`, so **WhereNot lost its NOT** and
+`WhereNot("status", "=", "active").DeleteBy()` deleted the active rows; Or
+groups, IN, BETWEEN, IS NULL and WhereExpr failed there. Every caller
+condition now goes through `buildWhereClause` (writes via `whereForWrite`,
+which parenthesises the fragment so an Or group cannot escape the key
+predicate). **Never render `q.where` anywhere else.** Regression:
+`write_where_test.go` (root: each write path touches exactly the rows a
+SELECT returns, and those are the rows a Go predicate names) and
+`internal/enginesuite/write_where_test.go` (`WriteWhereParity`, six engines).
+
+`Update(entity)` (via `saveAny`) and `UpdateBatch` build a fresh query for the
+row and do not apply the caller's `Where` at all; that is a separate gap,
+tracked on its own.
+
 ### `List()` con resultado truncado silenciosamente
 
 `List()` aplica un cap implícito de 100 filas si el caller no llamó a `Limit()` (`query_exec.go:149`). **Esto trunca sin error.** Si introduces una API similar (`AllWhere`, `FetchAll`), o expón el cap o devuelve error si se rebasa.
@@ -147,6 +166,7 @@ Bifurcación por back-fill de PK (Finding G): cuando el PK es auto-generado, los
 - `n_fixes_test.go` — bugs N1-N5 retroalimentados por auditoría externa (Oracle MERGE alias, INSERT ALL, MSSQL composite PK, ORA-01791, ORA-00979).
 - `p0_fixes_test.go` — bugs P0 históricos (Paginate immutability, MaxWhereConditions, MaxJoins, etc.).
 - `composite_pk_test.go` — composite PKs en los 6 motores.
+- `write_where_test.go` and `internal/enginesuite/write_where_test.go` — the write paths and PreloadWhere select the same rows as a SELECT with the same conditions (QK-39).
 
 Cualquier cambio en `Query[T]` debe pasar la suite completa, no sólo SQLite.
 

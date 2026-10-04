@@ -939,26 +939,16 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		argIndex++
 	}
 
-	// Merge any additional Where() conditions in the same way Update does.
-	for _, cond := range q.where {
+	// The caller's Where() conditions narrow the key predicate, rendered by
+	// the same renderer as a SELECT (QK-39).
+	whereSQL, whereArgs, err := q.whereForWrite(argIndex)
+	if err != nil {
+		return 0, err
+	}
+	if whereSQL != "" {
 		sqlBuf.WriteString(" AND ")
-		if err := q.guard.ValidateIdentifier(cond.column); err != nil {
-			return 0, err
-		}
-		if err := q.guard.ValidateOperator(cond.operator); err != nil {
-			return 0, err
-		}
-		if err := checkOperatorDialect(q.dialect, cond.operator); err != nil {
-			return 0, err
-		}
-		sqlBuf.WriteString(q.dialect.Quote(cond.column))
-		sqlBuf.WriteString(" ")
-		sqlBuf.WriteString(cond.operator)
-		sqlBuf.WriteString(" ")
-		sqlBuf.WriteString(q.dialect.Placeholder(argIndex))
-		sqlBuf.WriteString(likeTail(cond, q.dialect))
-		args = append(args, cond.value)
-		argIndex++
+		sqlBuf.WriteString(whereSQL)
+		args = append(args, whereArgs...)
 	}
 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
@@ -1171,28 +1161,16 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 		argIndex++
 	}
 
-	// Merge any additional Where() conditions
-	for _, cond := range q.where {
+	// Merge any additional Where() conditions, rendered by the same
+	// renderer as a SELECT (QK-39).
+	whereSQL, whereArgs, err := q.whereForWrite(argIndex)
+	if err != nil {
+		return "", nil, err
+	}
+	if whereSQL != "" {
 		sql.WriteString(" AND ")
-
-		if err := q.guard.ValidateIdentifier(cond.column); err != nil {
-			return "", nil, err
-		}
-		if err := q.guard.ValidateOperator(cond.operator); err != nil {
-			return "", nil, err
-		}
-		if err := checkOperatorDialect(q.dialect, cond.operator); err != nil {
-			return "", nil, err
-		}
-
-		sql.WriteString(q.dialect.Quote(cond.column))
-		sql.WriteString(" ")
-		sql.WriteString(cond.operator)
-		sql.WriteString(" ")
-		sql.WriteString(q.dialect.Placeholder(argIndex))
-		sql.WriteString(likeTail(cond, q.dialect))
-		args = append(args, cond.value)
-		argIndex++
+		sql.WriteString(whereSQL)
+		args = append(args, whereArgs...)
 	}
 
 	return sql.String(), args, nil
@@ -1254,33 +1232,16 @@ func (q *BaseQuery) buildUpdateMap(data map[string]any) (string, []any, error) {
 	sql.WriteString(" SET ")
 	sql.WriteString(strings.Join(setClauses, ", "))
 
-	// WHERE clause from query conditions
-	if len(q.where) > 0 {
+	// WHERE clause from query conditions, rendered by the same renderer as
+	// a SELECT (QK-39); its placeholders continue after the SET arguments.
+	whereSQL, whereArgs, err := q.whereForWrite(argIndex)
+	if err != nil {
+		return "", nil, err
+	}
+	if whereSQL != "" {
 		sql.WriteString(" WHERE ")
-		for i, cond := range q.where {
-			if i > 0 {
-				sql.WriteString(" AND ")
-			}
-
-			if err := q.guard.ValidateIdentifier(cond.column); err != nil {
-				return "", nil, err
-			}
-			if err := q.guard.ValidateOperator(cond.operator); err != nil {
-				return "", nil, err
-			}
-			if err := checkOperatorDialect(q.dialect, cond.operator); err != nil {
-				return "", nil, err
-			}
-
-			sql.WriteString(q.dialect.Quote(cond.column))
-			sql.WriteString(" ")
-			sql.WriteString(cond.operator)
-			sql.WriteString(" ")
-			sql.WriteString(q.dialect.Placeholder(argIndex))
-			sql.WriteString(likeTail(cond, q.dialect))
-			args = append(args, cond.value)
-			argIndex++
-		}
+		sql.WriteString(whereSQL)
+		args = append(args, whereArgs...)
 	}
 
 	return sql.String(), args, nil
@@ -1557,39 +1518,21 @@ func (q *Query[T]) hardDeleteByPK(pkValue any) (int64, error) {
 // hardDeleteWhere performs a hard delete with WHERE conditions.
 func (q *Query[T]) hardDeleteWhere() (int64, error) {
 	var sql strings.Builder
-	var args []any
-	argIndex := 1
 
 	sql.WriteString("DELETE FROM ")
 	sql.WriteString(q.fullTableName())
 
-	// WHERE clause
-	if len(q.where) > 0 {
+	// WHERE clause, rendered by the same renderer as a SELECT (QK-39): the
+	// rows DeleteBy removes are the rows List returns for the same
+	// conditions. Before, WhereNot lost its NOT here, and DeleteBy removed
+	// the rows the caller had excluded.
+	whereSQL, args, err := q.whereForWrite(1)
+	if err != nil {
+		return 0, err
+	}
+	if whereSQL != "" {
 		sql.WriteString(" WHERE ")
-		for i, cond := range q.where {
-			if i > 0 {
-				sql.WriteString(" AND ")
-			}
-
-			if err := q.guard.ValidateIdentifier(cond.column); err != nil {
-				return 0, err
-			}
-			if err := q.guard.ValidateOperator(cond.operator); err != nil {
-				return 0, err
-			}
-			if err := checkOperatorDialect(q.dialect, cond.operator); err != nil {
-				return 0, err
-			}
-
-			sql.WriteString(q.dialect.Quote(cond.column))
-			sql.WriteString(" ")
-			sql.WriteString(cond.operator)
-			sql.WriteString(" ")
-			sql.WriteString(q.dialect.Placeholder(argIndex))
-			sql.WriteString(likeTail(cond, q.dialect))
-			args = append(args, cond.value)
-			argIndex++
-		}
+		sql.WriteString(whereSQL)
 	}
 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)

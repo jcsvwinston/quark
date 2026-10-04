@@ -104,22 +104,33 @@ func (q *BaseQuery) loadStandard(parents reflect.Value, ownerMeta *ModelMeta, re
 			args = append(args, q.tenantID)
 		}
 		// Per-relation filters from PreloadWhere. They narrow which children
-		// load; they never drop a parent that ends up with none.
-		for _, cond := range q.preloadConds[relName] {
-			if err := q.guard.ValidateIdentifier(cond.column); err != nil {
+		// load; they never drop a parent that ends up with none. They are
+		// rendered by buildWhereClause, the renderer of every other caller
+		// condition (QK-39), over a query scoped to the RELATED model — its
+		// table and metadata, no joins — so IN, BETWEEN and the column check
+		// read the relation's columns, not the parent's.
+		if conds := q.preloadConds[relName]; len(conds) > 0 {
+			rq := &BaseQuery{
+				client:  q.client,
+				ctx:     q.ctx,
+				dialect: q.dialect,
+				guard:   q.guard,
+				table:   relModel.Table,
+				meta:    relModel,
+			}
+			// This loader always upper-cased the operator, so `is null`
+			// keeps meaning IS NULL here.
+			norm := make([]condition, len(conds))
+			for i, c := range conds {
+				c.operator = strings.ToUpper(strings.TrimSpace(c.operator))
+				norm[i] = c
+			}
+			frag, condArgs, err := rq.buildWhereClause(norm, len(args)+1)
+			if err != nil {
 				return err
 			}
-			if err := q.guard.ValidateOperator(cond.operator); err != nil {
-				return err
-			}
-			op := strings.ToUpper(strings.TrimSpace(cond.operator))
-			if op == "IS NULL" || op == "IS NOT NULL" {
-				whereClauses = append(whereClauses, fmt.Sprintf("%s %s", q.dialect.Quote(cond.column), op))
-				continue
-			}
-			whereClauses = append(whereClauses, fmt.Sprintf("%s %s %s",
-				q.dialect.Quote(cond.column), op, q.dialect.Placeholder(len(args)+1)))
-			args = append(args, cond.value)
+			whereClauses = append(whereClauses, "("+frag+")")
+			args = append(args, condArgs...)
 		}
 
 		query := fmt.Sprintf("SELECT * FROM %s WHERE %s",
