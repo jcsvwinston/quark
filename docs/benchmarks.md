@@ -10,7 +10,7 @@
   standalone module with two measurements: the engine bench
   ([`benchmarks/engines`](../benchmarks/engines/doc.go)), Quark against
   `database/sql` and pgx on a real PostgreSQL with a recorded verdict per
-  operation and a CI lane (`engine-bench`) that runs it on every change; and
+  operation and a CI workflow (`engine-bench.yml`) that runs it on every change; and
   the older `go test -bench` comparison of Quark, raw `database/sql`, GORM,
   ent and sqlc on in-memory SQLite, whose published figures date from
   2026-05-27.

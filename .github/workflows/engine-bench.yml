@@ -1,0 +1,66 @@
+name: Engine bench
+
+# Quark against database/sql (over pgx) and pgx's native pool on a real
+# PostgreSQL 16, and one MySQL read with and without a reused statement, with
+# a recorded verdict per operation (benchmarks/engines). run.sh starts both
+# engines in one network namespace and runs the bench's test binary inside it,
+# the same way on a laptop and here.
+#
+# It reports; it does not gate. It measures time on a shared runner, and
+# although it compares medians of interleaved ratios with tolerances sized
+# from repeated runs, a job that measures the machine must not be able to
+# block a merge. That is why it is a workflow of its own rather than a lane of
+# ci.yml: every job of ci.yml is one the required gate waits on, and the
+# enterprise bench checks that it stays so. What IS deterministic about the
+# bench — its catalogue and the block it writes into the published page —
+# runs in ci.yml's benchmarks lane, which gates.
+#
+# It runs on every pull request and every push to main, and publishes its
+# table as the job summary and as an artifact, so a change that moves a ratio
+# is visible where it is reviewed and the figures on main stay current.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# The job only reads the tree and uploads an artifact of its own.
+permissions:
+  contents: read
+
+jobs:
+  engine-bench:
+    name: Engine bench (PostgreSQL, MySQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: benchmarks/go.mod
+          cache: true
+
+      - name: Measure quark against database/sql and pgx
+        timeout-minutes: 20
+        run: bash benchmarks/engines/run.sh "$RUNNER_TEMP/engine-bench"
+
+      - name: Publish the table
+        if: always()
+        run: |
+          table="$RUNNER_TEMP/engine-bench/bench-table.md"
+          if [ -f "$table" ]; then
+            cat "$table" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The engine bench wrote no table; the measure step's log says why." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the table and the log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: engine-bench
+          path: ${{ runner.temp }}/engine-bench/
+          if-no-files-found: warn
