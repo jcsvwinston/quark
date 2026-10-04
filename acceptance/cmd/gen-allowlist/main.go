@@ -54,7 +54,11 @@ var interfaceTypes = map[string]bool{
 	"CacheStore": true, "CacheLocker": true, "ClientProvider": true, "ColumnTypeMapper": true,
 	"SchemaIntrospector": true, "MigrationLock": true, "MigrationLocker": true,
 	"Expr": true, "Operation": true, "Result": true, "Row": true, "PoolOption": true,
-	"ShardKeyer":      true,
+	"ShardKeyer": true,
+	// Las preguntas del camino de esquema al dialecto (A11 Q2, quarkdriver):
+	// las implementan los dialectos (sus métodos concretos caen en la regla
+	// de métodos de dialecto) y las consume el ORM, nunca una aplicación.
+	"ColumnTyper": true, "AutoIncrementer": true, "IdempotentDDL": true,
 	"AfterCreateHook": true, "AfterUpdateHook": true, "AfterDeleteHook": true, "AfterFindHook": true,
 	"BeforeCreateHook": true, "BeforeUpdateHook": true, "BeforeDeleteHook": true, "BeforeFindHook": true,
 }
@@ -100,6 +104,12 @@ var manualReasons = map[string]string{
 	"github.com/jcsvwinston/quark/quarkdriver.RegisterListener":     reasonDriverContract,
 	"github.com/jcsvwinston/quark/quarkdriver.MustRegisterListener": reasonDriverContract,
 	"github.com/jcsvwinston/quark/quarkdriver.LookupListener":       reasonDriverContract,
+
+	// El enum de kinds de columna del contrato de dialecto (A11 Q2): String
+	// sirve a los mensajes y a los tests de quien escribe un dialecto; el ORM
+	// no lo llama en el camino de una aplicación. Lo fija
+	// internal/migrate/classify_test.go.
+	"github.com/jcsvwinston/quark/quarkdriver.(ColumnKind).String": "contrato de dialecto (A11 Q2): String del enum ColumnKind, para mensajes y tests del autor de un dialecto; no es un entry point de aplicación (denominador S7-coverage)",
 
 	// El kit de conformidad recibe *testing.T: sólo es invocable desde un
 	// test, y lo ejecutan los cinco módulos de driver en los suyos.
