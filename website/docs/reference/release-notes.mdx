@@ -23,18 +23,17 @@ Full commit-level detail lives in the
 
 ## v1.15.1
 
-<!-- TODO: una frase honesta de qué es este release (patch/minor y de qué). -->
+A patch with no change to the library: the CLI and the five driver modules
+raise their floor on the root to v1.15.0 and are released again.
 
 ### Changed
 
-<!-- TODO: redacta desde el CHANGELOG (bullets abajo son el material crudo,
-     no la prosa final): -->
-
-<!--
-### Fixed
-
-* **deps:** raise the sibling module floors to quark v1.15.0 ([#423](https://github.com/jcsvwinston/quark/issues/423)) ([3fb2982](https://github.com/jcsvwinston/quark/commit/3fb29822eb49133a989222989964f31739e5f55d))
--->
+**Module floors.** `cmd/quark` (v1.1.1) and the five `drivers/*` modules
+(v0.2.3) require `github.com/jcsvwinston/quark v1.15.0` instead of v1.14.0
+([#423](https://github.com/jcsvwinston/quark/pull/423)). Go resolves the highest
+version in the graph, so an application that already required v1.15.0 builds
+the same code; `go install` of the CLI and a driver added on its own now start
+from v1.15.0 too.
 
 ## v1.15.0
 
