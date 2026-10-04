@@ -6,6 +6,7 @@ package quark
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jcsvwinston/quark/internal/guard"
 )
@@ -965,8 +966,24 @@ func (m *MariaDBDialect) UpsertSQL(conflictCols, updateCols []string, argOffset 
 	return m.MySQLDialect.UpsertSQL(conflictCols, updateCols, argOffset)
 }
 
-// customDialectRegistry holds user-registered dialects
-var customDialectRegistry = make(map[string]Dialect)
+// customDialectRegistry holds user-registered dialects. customDialectMu
+// guards it: a registration can happen after start-up — a test registering
+// its own dialect, a module that registers late — while another goroutine
+// resolves a dialect through [DetectDialect] (which [New] calls). Before the
+// lock, that was a data race on a plain map (A11 bench, control DRV-01), and
+// a concurrent write could end the process with "concurrent map writes".
+var (
+	customDialectMu       sync.RWMutex
+	customDialectRegistry = make(map[string]Dialect)
+)
+
+// lookupCustomDialect reads the registry under its read lock.
+func lookupCustomDialect(name string) (Dialect, bool) {
+	customDialectMu.RLock()
+	defer customDialectMu.RUnlock()
+	d, ok := customDialectRegistry[name]
+	return d, ok
+}
 
 // RegisterDialect allows developers to register custom database dialects.
 // This enables support for proprietary or non-standard databases.
@@ -975,17 +992,28 @@ var customDialectRegistry = make(map[string]Dialect)
 //
 //	quark.RegisterDialect("cockroach", myCockroachDialect)
 //
-// The registered dialect can then be used with:
+// A client opened with that driver name resolves it through the registry:
 //
-//	client, err := quark.New(db, quark.WithDialect(quark.DetectDialectByName("cockroach")))
+//	client, err := quark.New("cockroach", dsn)
+//
+// and a pool opened under another driver name takes it explicitly:
+//
+//	d, _ := quark.DetectDialectByName("cockroach")
+//	client, err := quark.NewWithDB("pgx", db, quark.WithDialect(d))
+//
+// RegisterDialect is safe to call concurrently with itself, [DetectDialect]
+// and [DetectDialectByName]. Registering a name again replaces the dialect
+// registered under it.
 func RegisterDialect(name string, d Dialect) {
+	customDialectMu.Lock()
+	defer customDialectMu.Unlock()
 	customDialectRegistry[name] = d
 }
 
 // DetectDialect attempts to auto-detect the dialect from a driver name.
 func DetectDialect(driverName string) (Dialect, error) {
 	// First check custom registry
-	if d, ok := customDialectRegistry[driverName]; ok {
+	if d, ok := lookupCustomDialect(driverName); ok {
 		return d, nil
 	}
 
@@ -1011,7 +1039,7 @@ func DetectDialect(driverName string) (Dialect, error) {
 // including custom ones. This is useful when you know the exact dialect name.
 func DetectDialectByName(name string) (Dialect, error) {
 	// First check custom registry
-	if d, ok := customDialectRegistry[name]; ok {
+	if d, ok := lookupCustomDialect(name); ok {
 		return d, nil
 	}
 

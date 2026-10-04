@@ -15,8 +15,8 @@ func controlsDrivers() []control {
 			id:     "DRV-01",
 			family: "drivers",
 			title:  "RegisterDialect is safe to call while dialects are being resolved",
-			want:   absent,
-			note:   "Measured in a child process under -race: RegisterDialect writing while DetectDialect and DetectDialectByName read reports a DATA RACE. The dialect registry is a plain map with no lock; the other four registries are race-free under the same harness (CON-08). A driver that registers from init() is serialised by Go; what races is a registration after start-up — a test that registers its own dialect, a module loaded late — while quark.New, which calls DetectDialect, builds a client.",
+			want:   present,
+			note:   "Measured in a child process under -race: RegisterDialect writing while DetectDialect and DetectDialectByName read is clean since A11 Q1, which put the registry behind a sync.RWMutex — the same guard the other four registries already had (CON-08). Before it, the registry was a plain map and the detector reported a DATA RACE: a driver that registers from init() is serialised by Go, but a registration after start-up (a test registering its own dialect, a module loaded late) raced with quark.New, which calls DetectDialect. Removing the lock turns this control back to absent.",
 			probe:  probeDialectRegistryRace,
 		},
 		{

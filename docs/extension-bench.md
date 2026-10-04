@@ -43,8 +43,9 @@ the suite red with "this one moved, update the verdict".
    savepoints reach neither; `CreateBatch` skips the observer; `client.Exec`
    and `client.RawQuery` skip the middleware. OpenTelemetry and Orbit's SQL
    feed are both middlewares.
-3. **`RegisterDialect` races** (`DRV-01`); the other four registries do not
-   (`CON-08`).
+3. **`RegisterDialect` raced** (`DRV-01`); the other four registries did not
+   (`CON-08`). Closed in A11 `Q1`: the dialect registry is behind a
+   `sync.RWMutex` like the other four, and `DRV-01` is present.
 4. **The conformance kit never sees a dialect** (`DRV-05`), the engine suite
    is unreachable from outside the repository (`DRV-07`), and PostgreSQL is
    the one in-repo driver that does not run the kit (`DRV-06`).
@@ -92,7 +93,7 @@ arms is behaviour keyed on the dialect's name.
 
 ## The result
 
-**5 of 22 controls present. 7 partial. 10 absent.**
+**6 of 22 controls present. 7 partial. 9 absent.**
 
 ### contract — 4 present · 3 partial · 1 absent
 
@@ -107,11 +108,11 @@ arms is behaviour keyed on the dialect's name.
 | `CON-07` | Every method Quark calls on a caller's type has an exported interface to implement and assert against | **partial** | Measured: three conventions Quark honours have no exported interface in quark or quarkdriver — a model's TableName() string, a model's Validate(context.Context) error, and an error's SQLState() string, which classifies any driver's error by its PostgreSQL code. Each was exercised: the table took the name, the validation error aborted the insert, a 23505 classified as a unique violation and a 40P01 as a deadlock. None has a name a third party can write `var _ quark.X = (*T)(nil)` against; Quark asserts them against an interface in an internal package (internal/schema.TableNamer) and two anonymous ones (validator.go, db_errors.go). The hooks of CON-03 show the shape the other three lack. |
 | `CON-08` | The global registries other than the dialect's — classifiers, listener factories, type mappers, generated scanners and binders — are race-free under the race detector | **present** | — |
 
-### drivers — 1 present · 3 partial · 4 absent
+### drivers — 2 present · 3 partial · 3 absent
 
 | id | control | verdict | what is missing |
 |---|---|---|---|
-| `DRV-01` | RegisterDialect is safe to call while dialects are being resolved | **absent** | Measured in a child process under -race: RegisterDialect writing while DetectDialect and DetectDialectByName read reports a DATA RACE. The dialect registry is a plain map with no lock; the other four registries are race-free under the same harness (CON-08). A driver that registers from init() is serialised by Go; what races is a registration after start-up — a test that registers its own dialect, a module loaded late — while quark.New, which calls DetectDialect, builds a client. |
+| `DRV-01` | RegisterDialect is safe to call while dialects are being resolved | **present** | Measured in a child process under -race: RegisterDialect writing while DetectDialect and DetectDialectByName read is clean since A11 Q1, which put the registry behind a sync.RWMutex — the same guard the other four registries already had (CON-08). Before it, the registry was a plain map and the detector reported a DATA RACE: a driver that registers from init() is serialised by Go, but a registration after start-up (a test registering its own dialect, a module loaded late) raced with quark.New, which calls DetectDialect. Removing the lock turns this control back to absent. |
 | `DRV-02` | A driver module outside this repository registers its dialect and its classifier without importing package quark | **partial** | Measured with go list -deps on a driver module built standalone (GOWORK=off) as example.com/extdriver: the half that registers the classifier imports quarkdriver and not package quark. The half that registers the dialect cannot avoid it — RegisterDialect lives in package quark, and the Dialect interface names quark.LockOptions (in LockSuffix), so implementing it means importing the library: 208 packages against the classifier half's 163. The listener is already root-free (quarkdriver.ListenerFactory); the dialect is the one piece of a driver that is not. |
 | `DRV-03` | A driver module outside this repository, built standalone against this tree, opens its engine by name, reads and writes, classifies its duplicate key and passes drivertest.Verify | **present** | The fixture creates its table by hand: what Migrate writes for an engine name Quark does not know is DRV-04's subject, and the kit it passes checks classifiers only (DRV-05). |
 | `DRV-04` | A dialect from outside is a full participant: SQLite's own dialect methods under another name behave as SQLite's do | **partial** | Measured with a battery of 19 steps on two arms — the same engine and the same dialect methods, one named sqlite and one extlite. The 11 query steps agree (CRUD, upsert, batch, LIKE escaping, savepoints, the locking refusal, keyset pagination, classification): the query path follows the Dialect interface. All 8 schema steps diverge, because the migration code branches on Dialect.Name(). Migrate writes BIGINT PRIMARY KEY instead of INTEGER PRIMARY KEY AUTOINCREMENT, so the first insert leaves the key NULL and fails to scan it back; a second Migrate fails (CREATE TABLE without IF NOT EXISTS for a name it does not know); PlanMigration proposes six changes against SQLite's own table, because column types come from a table keyed on the dialect's name — a dialect has no say, and a TypeMapper overrides one Go type for every engine at once; Sync fails; and ApplyPlan refuses adding, dropping and altering a column and adding a foreign key with ErrUnsupportedFeature — it decides transactional DDL from the name and never calls Dialect.SupportsTransactionalDDL(), which the interface already requires every dialect to answer. |

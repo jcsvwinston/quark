@@ -84,7 +84,10 @@ client, err := quark.New("customdb", dsn, quark.WithDialect(dialect))
 ```
 
 `DetectDialectByName` looks up a registered dialect by name and returns
-`(Dialect, error)`. Use `RegisterDialect` once at init time.
+`(Dialect, error)`. Register from an `init` function when you can. The registry
+is safe for concurrent use, so a registration made later — in a test, or by a
+package loaded after start-up — does not race with clients being built.
+Registering a name again replaces the dialect registered under it.
 
 The dialect interface covers SQL generation, placeholder formatting, identifier
 quoting, and schema DDL.
