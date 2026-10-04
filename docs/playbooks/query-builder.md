@@ -108,6 +108,19 @@ Cualquier vez que metas `fmt.Sprintf` en la generación de SQL final, los valore
 
 ADR 0002 prohíbe reflect adicional en hot paths sin discusión previa.
 
+### Asserting a caller's value to a concrete type
+
+`Where(col, op, value any)` hands the builder whatever the caller had at hand.
+The IN / NOT IN / BETWEEN operand used to be read with `cond.value.([]any)` and
+no `ok`, so `Where("id", "IN", []string{...})` ended the goroutine with a panic
+(QK-33, closed in A11 Q1). The operand now goes through `listOperand`
+(`query_exec.go`): `[]any` keeps its assertion, any other slice or array is read
+by reflection — only on that path, which used to panic — and a byte slice, a
+scalar or `nil` is refused with `ErrInvalidQuery`. **Never assert a value that
+came from the caller without `ok`;** refuse what is not the expected shape with
+`ErrInvalidQuery` instead. Regression: `in_operand_test.go` (root) and
+`internal/enginesuite/in_typed_slices_test.go` (six engines).
+
 ### A second renderer for a caller's conditions
 
 Before QK-39 the write paths — `hardDeleteWhere` (DeleteBy), `buildUpdateMap`
@@ -166,6 +179,7 @@ Bifurcación por back-fill de PK (Finding G): cuando el PK es auto-generado, los
 - `n_fixes_test.go` — bugs N1-N5 retroalimentados por auditoría externa (Oracle MERGE alias, INSERT ALL, MSSQL composite PK, ORA-01791, ORA-00979).
 - `p0_fixes_test.go` — bugs P0 históricos (Paginate immutability, MaxWhereConditions, MaxJoins, etc.).
 - `composite_pk_test.go` — composite PKs en los 6 motores.
+- `in_operand_test.go` and `internal/enginesuite/in_typed_slices_test.go` — the IN / BETWEEN operand as any slice or array, the empty list meaning what `[]any{}` means, and what is refused (QK-33).
 - `write_where_test.go` and `internal/enginesuite/write_where_test.go` — the write paths and PreloadWhere select the same rows as a SELECT with the same conditions (QK-39).
 
 Cualquier cambio en `Query[T]` debe pasar la suite completa, no sólo SQLite.

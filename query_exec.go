@@ -1475,15 +1475,20 @@ func (q *BaseQuery) buildWhereClause(conds []condition, argIndex int) (string, [
 		} else {
 			condSQL.WriteString(quotedCol)
 		}
+		// The guard accepts the operator in any case and with surrounding
+		// spaces; the switch below and the statement use the form it
+		// validated, so `in` expands its list like `IN` does instead of
+		// reaching the engine as `in ?`.
+		op := strings.ToUpper(strings.TrimSpace(cond.operator))
 		condSQL.WriteString(" ")
-		condSQL.WriteString(cond.operator)
+		condSQL.WriteString(op)
 		condSQL.WriteString(" ")
 
-		switch cond.operator {
+		switch op {
 		case "IN", "NOT IN":
-			values, ok := cond.value.([]any)
-			if !ok {
-				return "", nil, fmt.Errorf("%w: %s takes a []any of values, got %T", ErrInvalidQuery, cond.operator, cond.value)
+			values, err := listOperand(op, cond.value)
+			if err != nil {
+				return "", nil, err
 			}
 			placeholders := make([]string, len(values))
 			for j := range values {
@@ -1495,9 +1500,15 @@ func (q *BaseQuery) buildWhereClause(conds []condition, argIndex int) (string, [
 			condSQL.WriteString(strings.Join(placeholders, ", "))
 			condSQL.WriteString(")")
 		case "BETWEEN", "NOT BETWEEN":
-			values, ok := cond.value.([]any)
-			if !ok || len(values) < 2 {
-				return "", nil, fmt.Errorf("%w: %s takes a []any of two values, got %T", ErrInvalidQuery, cond.operator, cond.value)
+			values, err := listOperand(op, cond.value)
+			if err != nil {
+				return "", nil, err
+			}
+			// More than two values keeps binding the first two, as it always
+			// did: refusing them would change what a call that works today
+			// does, which QADR-0010 leaves to the major.
+			if len(values) < 2 {
+				return "", nil, fmt.Errorf("%w: %s takes two values, got %d", ErrInvalidQuery, op, len(values))
 			}
 			condSQL.WriteString(q.dialect.Placeholder(argIndex))
 			condSQL.WriteString(" AND ")
@@ -1517,6 +1528,43 @@ func (q *BaseQuery) buildWhereClause(conds []condition, argIndex int) (string, [
 	}
 
 	return strings.Join(parts, ""), args, nil
+}
+
+// listOperand returns the values of the list operand of IN, NOT IN, BETWEEN
+// and NOT BETWEEN (QK-33). A []any — the form WhereIn and WhereBetween
+// store — is used as it is. Any other slice or array is read element by
+// element: []string, []int64, a slice of UUIDs, a named slice type, a [2]int.
+// Before this, the operand was asserted to []any with no check, so
+// Where(col, "IN", []string{...}) ended the goroutine with a panic.
+//
+// The one slice that is not a list is a slice or array of bytes — []byte,
+// json.RawMessage, net.IP, a UUID's [16]byte — because database/sql binds it
+// as ONE value; a single value, nil included, is refused with
+// ErrInvalidQuery rather than guessed at. An empty list keeps the meaning a
+// []any{} always had: the builder emits `IN ()`, which SQLite reads as
+// matching nothing and the other engines reject.
+//
+// Reflection runs only for an operand that is not a []any, which is the
+// path that used to panic; WhereIn, WhereInOf and the typed In keep the
+// assertion.
+func listOperand(op string, v any) ([]any, error) {
+	if vs, ok := v.([]any); ok {
+		return vs, nil
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return nil, fmt.Errorf("%w: %s takes a list of values, and %T is a single value to database/sql (a byte string); wrap it: []any{v}", ErrInvalidQuery, op, v)
+		}
+	default:
+		return nil, fmt.Errorf("%w: %s takes a slice or an array of values, got %T", ErrInvalidQuery, op, v)
+	}
+	out := make([]any, rv.Len())
+	for i := range out {
+		out[i] = rv.Index(i).Interface()
+	}
+	return out, nil
 }
 
 // whereForWrite renders the query's conditions for an UPDATE or a DELETE

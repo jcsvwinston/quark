@@ -158,6 +158,25 @@ ids := []int64{1, 2, 3}
 users, err := quark.WhereInOf(quark.For[User](ctx, client), "id", ids).List()
 ```
 
+`Where` with `IN` or `NOT IN` takes the slice as it is, whatever its element
+type: `[]string`, `[]int64`, a slice of UUIDs, a named slice type such as
+`type IDs []int64`, or an array. `BETWEEN` and `NOT BETWEEN` take their two
+bounds the same way:
+
+```go
+users, err := quark.For[User](ctx, client).
+    Where("role", "IN", []string{"admin", "editor"}).
+    Where("age", "BETWEEN", [2]int{18, 65}).
+    List()
+```
+
+A byte slice (`[]byte`, `json.RawMessage`, `net.IP`) and a bare UUID are single
+values to `database/sql`, not lists: passing one, or any other value that is
+not a slice, returns `ErrInvalidQuery` before any SQL runs. To match a single
+value, use `=`, or wrap it: `[]any{v}`. `BETWEEN` with fewer than two values
+returns `ErrInvalidQuery` too. An empty slice of any type behaves like an
+empty `[]any`, so the advice above about `IN ()` applies to it.
+
 `DeleteBatchOf` does the same for [`DeleteBatch`](/docs/guides/batch-operations).
 
 ### Negation and OR groups
