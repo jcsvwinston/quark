@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.1](https://github.com/jcsvwinston/quark/compare/v1.15.0...v1.15.1) (2026-10-04)
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.15.0 ([#423](https://github.com/jcsvwinston/quark/issues/423)) ([3fb2982](https://github.com/jcsvwinston/quark/commit/3fb29822eb49133a989222989964f31739e5f55d))
+
 ## [1.15.0](https://github.com/jcsvwinston/quark/compare/v1.14.0...v1.15.0) (2026-09-20)
 
 

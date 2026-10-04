@@ -6,7 +6,7 @@ description: What changed in each Quark release, and what to check before upgrad
 
 # Release Notes
 
-Quark is **v1.15.0** {/* x-release-please-version */} on the stable `v1.x` line. `v1.x` keeps API compatibility;
+Quark is **v1.15.1** {/* x-release-please-version */} on the stable `v1.x` line. `v1.x` keeps API compatibility;
 breaking changes go to `v2.x`.
 
 Every release since v0.10.0 — including all of `v1.x` — is a drop-in upgrade
@@ -20,6 +20,20 @@ is still the one to follow if you are coming from v0.8 or earlier.
 Full commit-level detail lives in the
 [CHANGELOG](https://github.com/jcsvwinston/quark/blob/main/CHANGELOG.md) and on
 [GitHub Releases](https://github.com/jcsvwinston/quark/releases).
+
+## v1.15.1
+
+A patch with no change to the library: the CLI and the five driver modules
+raise their floor on the root to v1.15.0 and are released again.
+
+### Changed
+
+**Module floors.** `cmd/quark` (v1.1.1) and the five `drivers/*` modules
+(v0.2.3) require `github.com/jcsvwinston/quark v1.15.0` instead of v1.14.0
+([#423](https://github.com/jcsvwinston/quark/pull/423)). Go resolves the highest
+version in the graph, so an application that already required v1.15.0 builds
+the same code; `go install` of the CLI and a driver added on its own now start
+from v1.15.0 too.
 
 ## v1.15.0
 
