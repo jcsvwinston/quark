@@ -15,9 +15,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jcsvwinston/quark"
 
-	// The driver module an application imports; it registers pgx's stdlib
-	// driver under the name "pgx", which database/sql and quark both open.
-	_ "github.com/jcsvwinston/quark/drivers/postgres"
+	// pgx's database/sql driver, registered as "pgx" — exactly what the
+	// quark/drivers/postgres module imports, and all it imports. The bench
+	// names the engine library rather than the driver module on purpose: a
+	// driver module requires the library at the floor the release train raises,
+	// so depending on one would leave this module's go.mod stale after every
+	// raise and the smoke lane red until someone tidied it.
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // The data set: 1000 users with 5 posts each, read by FindByPK, List100 and

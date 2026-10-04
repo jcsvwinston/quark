@@ -12,10 +12,9 @@ toolchain go1.26.6
 require (
 	entgo.io/ent v0.14.6
 	github.com/glebarez/sqlite v1.11.0
+	github.com/go-sql-driver/mysql v1.10.1
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/jcsvwinston/quark v1.15.0
-	github.com/jcsvwinston/quark/drivers/mysql v0.1.3
-	github.com/jcsvwinston/quark/drivers/postgres v0.1.3
+	github.com/jcsvwinston/quark v0.10.0
 	gorm.io/gorm v1.31.2
 	modernc.org/sqlite v1.58.0
 )
@@ -37,7 +36,6 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.4 // indirect
-	github.com/go-sql-driver/mysql v1.10.1 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/hcl/v2 v2.18.1 // indirect
@@ -77,12 +75,5 @@ require (
 )
 
 replace github.com/jcsvwinston/quark => ../
-
-// The engine bench (./engines) imports the driver modules an application
-// imports; they resolve to this tree like the library does, so the bench
-// measures the code of the pull request, not a published release.
-replace github.com/jcsvwinston/quark/drivers/postgres => ../drivers/postgres
-
-replace github.com/jcsvwinston/quark/drivers/mysql => ../drivers/mysql
 
 tool entgo.io/ent/cmd/ent

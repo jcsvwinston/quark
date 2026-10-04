@@ -11,9 +11,11 @@ import (
 
 	"github.com/jcsvwinston/quark"
 
-	// The driver module an application imports for MySQL; it brings in
-	// go-sql-driver/mysql, which registers "mysql".
-	_ "github.com/jcsvwinston/quark/drivers/mysql"
+	// go-sql-driver/mysql, registered as "mysql". The quark/drivers/mysql
+	// module imports it and adds an error classifier, which quark consults
+	// only when a statement fails — never on the path measured here. Named
+	// directly for the reason given next to the pgx import.
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // MySQL is measured on ONE operation, FindByPK, because that is where the
