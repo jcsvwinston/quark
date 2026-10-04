@@ -72,7 +72,7 @@ func controlsDrivers() []control {
 			family: "drivers",
 			title:  "A driver template module builds standalone (GOWORK=off) and passes the kit",
 			want:   absent,
-			note:   "Measured over every go.mod of the repository: 11 modules — the library, the CLI, the five drivers, the acceptance harness, the benchmarks, the bug-bash harness and the engine suites — and no other module requires the library, so nothing is a template for a driver someone else writes. The nearest things are the five drivers, each one engine's module pinned to a published quark, and the fixture this bench builds for DRV-03, which lives in testdata.",
+			note:   "Measured over every go.mod of the repository: 12 modules — the library, the CLI, the five drivers, the acceptance harness, the benchmarks, the bug-bash harness, the engine suites and the integration fixtures — and no other module requires the library, so nothing is a template for a driver someone else writes. The nearest things are the five drivers, each one engine's module pinned to a published quark, and the fixture this bench builds for DRV-03, which lives in testdata.",
 			probe:  probeDriverTemplate,
 		},
 	}

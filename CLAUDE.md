@@ -27,6 +27,7 @@ quark/
 ├── cmd/quark/                   ← el CLI, MÓDULO PROPIO (ADR-0024), tags cmd/quark/vX.Y.Z
 ├── drivers/                     ← un módulo por motor (ADR-0023)
 ├── internal/enginesuite/        ← las suites por motor, MÓDULO PROPIO sin publicar (ADR-0024)
+├── internal/integrations/       ← fixtures de integración (net/http, chi, Echo, Gin), MÓDULO PROPIO sin publicar; la guía de frameworks se comprueba contra ellas (A11)
 ├── acceptance/                  ← arnés de aceptación cross-engine, MÓDULO PROPIO sin publicar (ADR-0024)
 ├── docs/                        ← markdown fuente (ROADMAP, ARCHITECTURE, ANALISIS_MADUREZ…)
 ├── website/                     ← sitio Docusaurus publicado en GitHub Pages del repo quark (jcsvwinston.github.io/quark/) vía .github/workflows/deploy.yml

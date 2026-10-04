@@ -10,9 +10,12 @@ package extbench
 // checks them).
 //
 // An integration exists, for this bench, when a module of the repository
-// requires the framework directly and its tests pass standalone. Nothing
-// else compiles against a framework: a code block in a guide is text, and a
-// module that requires the framework only indirectly never imports it.
+// requires the framework directly, the packages of it that import the
+// framework pass their tests standalone, and one of those tests holds the
+// frameworks guide's section to that code. Nothing else compiles against a
+// framework: a code block in a guide is text until a test compares it with
+// code that builds, and a module that requires the framework only
+// indirectly never imports it.
 
 import (
 	"go/ast"
@@ -32,9 +35,11 @@ type framework struct {
 	initArg string // the `quark init --with` value that would write it
 }
 
+// Echo is measured at v5, its current major (v5.0.0, January 2026); v4 still
+// receives releases, and the guide says what changes on it.
 var frameworks = map[string]framework{
 	"chi":     {name: "chi", module: "github.com/go-chi/chi/v5", initArg: "chi"},
-	"echo":    {name: "Echo", module: "github.com/labstack/echo/v4", initArg: "echo"},
+	"echo":    {name: "Echo", module: "github.com/labstack/echo/v5", initArg: "echo"},
 	"gin":     {name: "Gin", module: "github.com/gin-gonic/gin", initArg: "gin"},
 	"grpc":    {name: "gRPC", module: "google.golang.org/grpc", initArg: "grpc"},
 	"nucleus": {name: "Nucleus", module: "github.com/jcsvwinston/nucleus", initArg: "nucleus"},
@@ -98,6 +103,35 @@ func guideSection(t *testing.T, e *env, fw framework) (code string, describesExa
 	return "", false
 }
 
+// guideTest is the test a fixture package runs to hold its section of the
+// frameworks guide to its code (internal/integrations/guide). The bench asks
+// for it by name, the way DRV-08 asks for the kit's subtest: a fixture whose
+// tests pass while nothing compares the page with the code would leave the
+// page free to drift again.
+const guideTest = "TestGuideMatchesFixture"
+
+// importers returns the packages of the module in dir that import module
+// (or a package under it) from their code or their tests.
+func importers(t *testing.T, dir, module string) ([]string, error) {
+	t.Helper()
+	out, err := goRun(t, dir, []string{"GOWORK=off"}, "list", "-f",
+		"{{.ImportPath}}\t{{join .Imports \" \"}} {{join .TestImports \" \"}} {{join .XTestImports \" \"}}", "./...")
+	if err != nil {
+		return nil, &goError{"go list", out, err}
+	}
+	var pkgs []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		pkg, imports, _ := strings.Cut(line, "\t")
+		for _, imp := range strings.Fields(imports) {
+			if imp == module || strings.HasPrefix(imp, module+"/") {
+				pkgs = append(pkgs, pkg)
+				break
+			}
+		}
+	}
+	return pkgs, nil
+}
+
 func integrationProbe(key string) func(t *testing.T, e *env) verdict {
 	return func(t *testing.T, e *env) verdict {
 		fw := frameworks[key]
@@ -113,18 +147,28 @@ func integrationProbe(key string) func(t *testing.T, e *env) verdict {
 			return absent
 		}
 		childProbe(t)
-		passing := 0
 		for _, m := range mods {
-			out, err := goRun(t, filepath.Join(e.root, m), []string{"GOWORK=off"}, "test", "-count=1", "./...")
-			t.Logf("%s standalone: err=%v", m, err)
+			dir := filepath.Join(e.root, m)
+			pkgs, err := importers(t, dir, fw.module)
+			if err != nil {
+				t.Logf("%s: %v", m, err)
+				continue
+			}
+			if len(pkgs) == 0 {
+				t.Logf("%s requires %s and no package of it imports it", m, fw.module)
+				continue
+			}
+			out, err := goRun(t, dir, []string{"GOWORK=off"}, append([]string{"test", "-count=1", "-json"}, pkgs...)...)
+			run := parseTestJSON(out)
+			held := run.action[guideTest] == "pass"
+			t.Logf("%s standalone, the packages importing %s %v: err=%v; %s passed: %v", m, fw.module, pkgs, err, guideTest, held)
 			if err != nil {
 				t.Logf("%s", out)
 				continue
 			}
-			passing++
-		}
-		if passing > 0 {
-			return present
+			if held {
+				return present
+			}
 		}
 		return partial
 	}

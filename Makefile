@@ -4,14 +4,20 @@
 #
 # El árbol son varios módulos de Go (ADR-0023, ADR-0024): la biblioteca en la
 # raíz, el CLI en cmd/quark, los cinco drivers, las suites por motor en
-# internal/enginesuite y los ejemplos. `go build ./...` desde la raíz sólo ve
-# el primero, así que los targets de aquí entran en cada módulo.
+# internal/enginesuite, las fixtures de integración en internal/integrations y
+# los arneses. `go build ./...` desde la raíz sólo ve el primero, así que los
+# targets de aquí entran en cada módulo.
 
 .DEFAULT_GOAL := help
 
-# Los módulos que se construyen y testean junto a la raíz. Los ejemplos
-# runnable no están: los cubre la lane "Examples (own modules)" de CI.
+# Los módulos que se construyen y testean junto a la raíz.
 NESTED_MODULES := cmd/quark internal/enginesuite acceptance
+
+# Las fixtures de integración (chi, Echo, Gin…) se comprueban SIN workspace,
+# como las corre la lane "Integration fixtures" de CI y como las mide el banco
+# de extensibilidad: su go.mod reemplaza quark por este árbol, y meterlas en el
+# go.work subiría las dependencias de los frameworks a todos los módulos de él.
+FIXTURE_MODULES := internal/integrations
 
 .PHONY: help check lint test test-race test-all fuzz docs-guards regen superapp oracle-up workspace
 
@@ -44,11 +50,13 @@ check: workspace lint docs-guards ## Las lanes baratas de CI: vet+gofmt, guards 
 	cd cmd/quark && GOOS=linux GOARCH=arm64 go build ./...
 	go test ./... -count=1 -timeout 5m
 	@for m in $(NESTED_MODULES); do echo "== go test $$m"; (cd $$m && go test ./... -count=1 -timeout 15m) || exit 1; done
+	@for m in $(FIXTURE_MODULES); do echo "== go test $$m (sin workspace)"; (cd $$m && GOWORK=off go mod tidy -diff && GOWORK=off go test ./... -count=1 -timeout 10m) || exit 1; done
 	@echo "check OK — lanes caras aparte: make test-race, make test-all, make superapp"
 
 lint: workspace ## go vet + gofmt (lo que corre la lane Lint de CI)
 	go vet ./...
 	@for m in $(NESTED_MODULES); do echo "== go vet $$m"; (cd $$m && go vet ./...) || exit 1; done
+	@for m in $(FIXTURE_MODULES); do echo "== go vet $$m (sin workspace)"; (cd $$m && GOWORK=off go vet ./...) || exit 1; done
 	@fmt=$$(gofmt -l .); if [ -n "$$fmt" ]; then echo "gofmt:"; echo "$$fmt"; exit 1; fi
 
 docs-guards: ## Los guards de docs de CI (voz de producto, deriva, archivo, marcadores, lint)
@@ -58,9 +66,10 @@ docs-guards: ## Los guards de docs de CI (voz de producto, deriva, archivo, marc
 	bash scripts/ci/check_versioned_docs_markers.sh
 	bash scripts/lint-docs.sh
 
-test: workspace ## Tests de la biblioteca y de las suites por motor (los de Redis se saltan sin QUARK_TEST_REDIS_ADDR)
+test: workspace ## Tests de la biblioteca, de las suites por motor y de las fixtures de integración (los de Redis se saltan sin QUARK_TEST_REDIS_ADDR)
 	go test ./... -count=1 -timeout 5m
 	cd internal/enginesuite && go test ./... -count=1 -timeout 15m
+	cd internal/integrations && GOWORK=off go test ./... -count=1 -timeout 10m
 
 test-race: workspace ## La lane -race de CI (~5 min)
 	go test -race -short -count=1 -timeout 15m ./...

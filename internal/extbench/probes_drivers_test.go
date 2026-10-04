@@ -513,7 +513,7 @@ func probeEngineSuiteReachable(t *testing.T, e *env) verdict {
 // template, by their directory.
 var knownModules = map[string]bool{
 	".": true, "acceptance": true, "benchmarks": true, "bugbash": true,
-	"cmd/quark": true, "internal/enginesuite": true,
+	"cmd/quark": true, "internal/enginesuite": true, "internal/integrations": true,
 	"drivers/mssql": true, "drivers/mysql": true, "drivers/oracle": true,
 	"drivers/postgres": true, "drivers/sqlite": true,
 }

@@ -66,6 +66,7 @@
         "acceptance",
         "bugbash",
         "benchmarks",
+        "internal/integrations",
         "TASKS.md"
       ],
       "extra-files": [

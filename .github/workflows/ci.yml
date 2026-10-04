@@ -498,6 +498,41 @@ jobs:
           # it or it stops covering what it was added for.
           (cd internal/enginesuite && go test -race -short -count=1 -timeout 20m ./...)
 
+  # The integration fixtures (internal/integrations) are a module of their
+  # own, never published. They serve Quark from net/http, chi, Echo and Gin
+  # and drive each over HTTP against SQLite, and each fixture package also
+  # holds its section of the frameworks guide to its code: a block on that
+  # page that stops being the fixture's code fails here. The root
+  # `go test ./...` reaches them only through the extension bench, whose INT
+  # probes run the packages that import a framework; this lane tidies, vets
+  # and tests the whole module. With no workspace — the module's replace
+  # directives point Quark at this tree, as the probes run it — and a module
+  # whose go.mod or go.sum a tidy would change does not stand on its own.
+  integrations:
+    name: Integration fixtures (own module)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: internal/integrations/go.sum
+
+      - name: Tidy, vet and test the fixtures standalone
+        working-directory: internal/integrations
+        env:
+          GOWORK: "off"
+        run: |
+          set -euo pipefail
+          if ! go mod tidy -diff; then
+            echo "::error::internal/integrations/go.mod or go.sum is not tidy on its own (run: cd internal/integrations && GOWORK=off go mod tidy)" >&2
+            exit 1
+          fi
+          go vet ./...
+          go test ./... -count=1 -timeout 10m
+
   # F6-8: the benchmark harness is its own module (separate go.mod with a
   # local `replace` directive), so the root `go test ./...` above does not
   # build it. This job compiles and smoke-runs it to keep it from rotting.
@@ -761,6 +796,7 @@ jobs:
       - test
       - race
       - benchmarks
+      - integrations
       - integration
       - superapp
 
