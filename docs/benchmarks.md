@@ -7,15 +7,20 @@
 - **Published results + methodology:**
   [`website/docs/reference/benchmarks.mdx`](../website/docs/reference/benchmarks.mdx)
 - **The reproducible harness:** [`benchmarks/`](../benchmarks/README.md) — a
-  standalone module with `go test -bench` functions comparing Quark, raw
-  `database/sql`, GORM, ent, and sqlc on the same model, schema, and
-  operations.
+  standalone module with two measurements: the engine bench
+  ([`benchmarks/engines`](../benchmarks/engines/doc.go)), Quark against
+  `database/sql` and pgx on a real PostgreSQL with a recorded verdict per
+  operation and a CI lane (`engine-bench`) that runs it on every change; and
+  the older `go test -bench` comparison of Quark, raw `database/sql`, GORM,
+  ent and sqlc on in-memory SQLite, whose published figures date from
+  2026-05-27.
 
 ## Run it
 
 ```bash
 cd benchmarks
-go test -run=^$ -bench=. -benchmem ./...
+bash engines/run.sh /tmp/engine-bench           # the engine bench (Docker)
+go test -run=^$ -bench=. -benchmem ./...        # the SQLite comparison
 ```
 
 ## Status

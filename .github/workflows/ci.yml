@@ -524,6 +524,61 @@ jobs:
           go vet ./...
           go test -run=^$ -bench=. -benchtime=1x -count=1 ./...
 
+      # The engine bench's catalogue and its published block need no
+      # database: one control per operation, every recorded verdict allowed by
+      # its recorded ratios, and the block of reference/benchmarks.mdx equal to
+      # what cases_test.go records. They are deterministic, so they belong in a
+      # lane that gates; the measurement itself runs in `engine-bench` below.
+      - name: Engine bench catalogue and published block
+        working-directory: benchmarks
+        run: go test -count=1 -run '^(TestEngineBenchCatalogue|TestEngineBenchPage)$' -v ./engines
+
+  # The engine bench: quark against database/sql (over pgx) and pgx's native
+  # pool on a real PostgreSQL 16, and one MySQL read with and without a reused
+  # statement, with a recorded verdict per operation (benchmarks/engines).
+  # run.sh starts both engines in one network namespace and runs the bench's
+  # test binary inside it, the same way on a laptop and here.
+  #
+  # NOT in the required gate, on purpose. It measures time on a shared runner,
+  # and although it compares ratios of interleaved samples with tolerances
+  # sized from repeated runs, a lane that measures the machine must not be
+  # able to block a merge. It runs on every pull request and every push to
+  # main, and publishes its table as the step summary and as an artifact, so
+  # a change that moves a ratio is visible where it is reviewed.
+  engine-bench:
+    name: Engine bench (PostgreSQL, MySQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: benchmarks/go.mod
+          cache: true
+
+      - name: Measure quark against database/sql and pgx
+        timeout-minutes: 20
+        run: bash benchmarks/engines/run.sh "$RUNNER_TEMP/engine-bench"
+
+      - name: Publish the table
+        if: always()
+        run: |
+          table="$RUNNER_TEMP/engine-bench/bench-table.md"
+          if [ -f "$table" ]; then
+            cat "$table" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The engine bench wrote no table; the measure step's log says why." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the table and the log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: engine-bench
+          path: ${{ runner.temp }}/engine-bench/
+          if-no-files-found: warn
+
   # F0-8: per-engine integration matrix.
   # Spins up each engine and runs the SharedSuite against it. Docker is
   # pre-installed on ubuntu-latest runners. Each engine runs in parallel;
@@ -728,7 +783,8 @@ jobs:
   # every time one is added, renamed or split (the `integration` matrix alone
   # publishes one check name per engine). Adding a lane therefore means adding
   # its job id to the `needs:` list below — a lane that is not listed here does
-  # not gate a merge.
+  # not gate a merge. `engine-bench` is the one lane left out deliberately: it
+  # measures time on a shared runner (see its comment).
   ci-required-gate:
     name: CI Required Gate
     runs-on: ubuntu-latest

@@ -1,0 +1,27 @@
+// Copyright 2026 jcsvwinston
+// SPDX-License-Identifier: Apache-2.0
+
+// Package engines is the engine bench: Quark measured against the two
+// baselines a Go program on PostgreSQL actually has — database/sql over pgx,
+// and pgx's native pool — on a real PostgreSQL, plus one MySQL read measured
+// with and without a reused prepared statement.
+//
+// It is a meter, not a leaderboard. Each operation is one control with a
+// RECORDED verdict and RECORDED ratios, and TestEngineBench checks a fresh
+// measurement against both, the way the other benches of this repository
+// check their probes: closing a gap, or opening one, turns the test red and
+// asks for the record to move in the same change.
+//
+// What is recorded is a RATIO, never a time. Every round measures every arm
+// of an operation back to back, in a rotating order, and the ratio of the
+// round is Quark's time over the baseline's time on the same machine a few
+// hundred milliseconds apart; the bench publishes the median over the rounds.
+// A slower machine slows all arms together, so the ratio survives a change of
+// runner that an absolute number does not.
+//
+// The benchmarks themselves live in the _test.go files: run.sh starts the
+// engines and runs them the way the published page describes, and the
+// ordinary `go test -bench` entry points (BenchmarkPostgres, BenchmarkMySQL)
+// share the same operations for profiling. Without a DSN everything skips,
+// so `go test ./...` in this module stays offline.
+package engines
