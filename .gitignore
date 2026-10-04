@@ -60,3 +60,4 @@ acceptance/REPORTS/
 # Superapp workload run artifacts (informes/métricas/logs regenerables)
 examples/superapp/REPORTS/
 internal/enterprisebench/bench-table.md
+internal/extbench/bench-table.md
