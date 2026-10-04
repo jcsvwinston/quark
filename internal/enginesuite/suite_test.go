@@ -40,6 +40,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("QueryBuilder", func(t *testing.T) {
 		testQueryBuilder(ctx, t, client)
 	})
+	t.Run("WriteWhereParity", func(t *testing.T) {
+		testWriteWhereParity(ctx, t, client)
+	})
 	t.Run("LikeEscape", func(t *testing.T) {
 		testLikeEscape(ctx, t, client)
 	})
