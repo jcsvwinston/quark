@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 // migrationStateTableName is the name of the catalog-side state
@@ -44,94 +46,44 @@ func (p Plan) Hash() string {
 }
 
 // ensureMigrationStateTable creates `quark_migration_state` if it
-// doesn't already exist. Idempotent — uses each dialect's
-// CREATE TABLE IF NOT EXISTS (MSSQL uses an IF NOT EXISTS guard
-// since it doesn't support the keyword). Called by the resumable
-// ApplyPlan path before any op is applied; on engines that
-// support transactional DDL (PG, MSSQL, SQLite) the resumable
-// path isn't used, so this function isn't invoked there.
+// doesn't already exist. Idempotent — the dialect says how its engine
+// creates a table only when it is missing (quarkdriver.IdempotentDDL:
+// CREATE TABLE IF NOT EXISTS by default, a sys.tables guard on SQL
+// Server, ORA-00955 swallowed on Oracle). Called by the resumable
+// ApplyPlan path before any op is applied; on engines that support
+// transactional DDL (PG, MSSQL, SQLite) the resumable path isn't used,
+// so this function isn't invoked there.
 //
 // Schema rationale:
 //   - `plan_hash CHAR(64)` — sha256 hex digest of the plan.
 //     Joined with `op_index` it's the primary key.
-//   - `op_index INT` — position of the op in the plan (0-based).
-//   - `op_string TEXT` — the op's String() rendering at the time
-//     of recording, kept for debugging post-mortem. NOT used in
-//     resume logic.
-//   - `applied_at TIMESTAMP` — when the op landed. For audit.
+//   - `op_index` — position of the op in the plan (0-based); the
+//     dialect's 32-bit integer.
+//   - `op_string` — the op's String() rendering at the time of
+//     recording, kept for debugging post-mortem; the dialect's
+//     unbounded text (TEXT, NVARCHAR(MAX), CLOB). NOT used in resume
+//     logic.
+//   - `applied_at` — when the op landed, the dialect's time type. For
+//     audit.
+//
+// One template for every engine, with the types asked of the dialect
+// (quarkdriver.ColumnTyper); before A11 Q2 there was one copy per
+// dialect name and a dialect under any other name got
+// ErrUnsupportedFeature here.
 //
 // The table is filtered out of `IntrospectSchema` by the existing
 // `quark_*` exclusion (per `dialect_introspection.go`), so it
 // never appears in user plans.
 func (c *Client) ensureMigrationStateTable(ctx context.Context, exec Executor) error {
-	// Schema-text rendering varies per dialect for CHAR length,
-	// TIMESTAMP keyword, and IF NOT EXISTS support. Kept inline
-	// per-dialect rather than via Dialect interface methods
-	// because this is the only place migrate_state.go needs DDL
-	// and the surface is tiny (one CREATE statement per engine).
-	var ddl string
-	switch c.dialect.Name() {
-	case "mysql", "mariadb":
-		ddl = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			plan_hash CHAR(64) NOT NULL,
-			op_index INT NOT NULL,
-			op_string TEXT NOT NULL,
-			applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (plan_hash, op_index)
-		)`, c.dialect.Quote(migrationStateTableName))
-	case "mssql":
-		// MSSQL has no `CREATE TABLE IF NOT EXISTS` — use the
-		// sys.tables guard, same pattern as `migrator.go` uses for
-		// its own CREATE TABLE on this dialect. Reached when a
-		// caller manually opts MSSQL into the resumable path (it
-		// shouldn't normally because supportsTransactionalDDL
-		// returns true for MSSQL); kept explicit so a future
-		// refactor that changes that classification doesn't emit
-		// invalid DDL.
-		ddl = fmt.Sprintf(`IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '%s')
-			CREATE TABLE %s (
-				plan_hash CHAR(64) NOT NULL,
-				op_index INT NOT NULL,
-				op_string NVARCHAR(MAX) NOT NULL,
-				applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-				PRIMARY KEY (plan_hash, op_index)
-			)`, migrationStateTableName, c.dialect.Quote(migrationStateTableName))
-	case "postgres", "sqlite":
-		// Same reasoning as MSSQL — these dialects use the tx
-		// wrapper and don't normally reach this path, but the case
-		// is here explicitly so a refactor doesn't fall to the
-		// `default` and silently emit unsupported DDL.
-		ddl = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			plan_hash CHAR(64) NOT NULL,
-			op_index INT NOT NULL,
-			op_string TEXT NOT NULL,
-			applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (plan_hash, op_index)
-		)`, c.dialect.Quote(migrationStateTableName))
-	case "oracle":
-		// Oracle has no CREATE TABLE IF NOT EXISTS — use the
-		// "create and ignore ORA-00955" pattern that Migrate already
-		// uses for its own CREATE TABLE.
-		ddl = fmt.Sprintf(`CREATE TABLE %s (
-			plan_hash CHAR(64) NOT NULL,
-			op_index NUMBER(10) NOT NULL,
-			op_string CLOB NOT NULL,
-			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-			CONSTRAINT pk_%s PRIMARY KEY (plan_hash, op_index)
-		)`, c.dialect.Quote(migrationStateTableName), migrationStateTableName)
-	default:
-		// Unknown dialect — fail loud rather than guess. The known
-		// engines all have explicit cases above; landing here means
-		// a new engine was added without updating this function.
-		return fmt.Errorf("%w: ensureMigrationStateTable not implemented for dialect %s",
-			ErrUnsupportedFeature, c.dialect.Name())
-	}
-	_, err := exec.ExecContext(ctx, ddl)
-	if err != nil {
-		// Oracle: ORA-00955 = table already exists. Idempotent.
-		if c.dialect.Name() == "oracle" && strings.Contains(err.Error(), "ORA-00955") {
-			return nil
-		}
+	types := c.schemaTypes()
+	body := strings.Join([]string{
+		"plan_hash CHAR(64) NOT NULL",
+		"op_index " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindInt32}) + " NOT NULL",
+		"op_string " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindText}) + " NOT NULL",
+		"applied_at " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindTime}) + " DEFAULT CURRENT_TIMESTAMP NOT NULL",
+		"PRIMARY KEY (plan_hash, op_index)",
+	}, ",\n  ")
+	if err := c.createTableIfNotExists(ctx, exec, migrationStateTableName, body); err != nil {
 		return fmt.Errorf("ensureMigrationStateTable: %w", err)
 	}
 	return nil

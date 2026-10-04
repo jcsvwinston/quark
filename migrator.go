@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/jcsvwinston/quark/internal/migrate"
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 // Migrate creates tables for the given models if they don't exist.
@@ -57,6 +58,10 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 		}
 	}
 
+	// The column types, the auto-increment key and the boolean literal are
+	// the dialect's answers (quarkdriver.ColumnTyper, AutoIncrementer), never
+	// a table keyed on its name (A11 Q2).
+	types := c.schemaTypes()
 	var columns []string
 	for _, field := range meta.Fields {
 		if field.Column == "" {
@@ -66,7 +71,7 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 		// For composite PKs, never mark individual columns as PRIMARY KEY —
 		// we'll append a table-level constraint below instead.
 		isPK := field.IsPK && !meta.HasCompositePK
-		colDef := c.dialect.Quote(field.Column) + " " + migrate.SQLTypeWithOpts(c.dialect.Name(), field.Type, migrate.TypeOptions{
+		colDef := c.dialect.Quote(field.Column) + " " + migrate.ColumnSQL(types, field.Type, migrate.TypeOptions{
 			Size:      field.Size,
 			Precision: field.Precision,
 			Scale:     field.Scale,
@@ -84,7 +89,7 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 		if field.Default != "" {
 			def := field.Default
 			if migrate.IsBoolColumn(field.Type) {
-				def = migrate.NormalizeBoolDefault(c.dialect.Name(), def)
+				def = migrate.NormalizeBoolDefaultWith(types.BoolLiteral, def)
 			}
 			colDef += " DEFAULT " + def
 		}
@@ -114,37 +119,8 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 		return fmt.Errorf("no database columns found for model %s", t.Name())
 	}
 
-	var query string
-	switch c.dialect.Name() {
-	case "mysql", "mariadb", "postgres", "sqlite":
-		query = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n  %s\n);",
-			c.dialect.Quote(meta.Table),
-			strings.Join(columns, ",\n  "),
-		)
-	case "mssql":
-		query = fmt.Sprintf(`IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '%s') 
-		CREATE TABLE %s (
-			%s
-		);`, meta.Table, c.dialect.Quote(meta.Table), strings.Join(columns, ",\n  "))
-	case "oracle":
-		query = fmt.Sprintf("CREATE TABLE %s (\n  %s\n)",
-			c.dialect.Quote(meta.Table),
-			strings.Join(columns, ",\n  "),
-		)
-	default:
-		query = fmt.Sprintf("CREATE TABLE %s (\n  %s\n)",
-			c.dialect.Quote(meta.Table),
-			strings.Join(columns, ",\n  "),
-		)
-	}
-
-	_, err := c.db.ExecContext(ctx, query)
-	if err != nil {
-		if !(c.dialect.Name() == "oracle" && strings.Contains(err.Error(), "ORA-00955")) {
-			return fmt.Errorf("failed to create table %s: %w", meta.Table, err)
-		}
-		// ORA-00955: the table already exists. The indexes below are
-		// idempotent on every engine, so they still run.
+	if err := c.createTableIfNotExists(ctx, c.db, meta.Table, strings.Join(columns, ",\n  ")); err != nil {
+		return fmt.Errorf("failed to create table %s: %w", meta.Table, err)
 	}
 
 	// The indexes the model declares (quark:"index"), created after the
@@ -215,40 +191,13 @@ func (c *Client) createIndexOn(ctx context.Context, exec Executor, table, indexN
 	if len(columns) == 0 {
 		return fmt.Errorf("CreateIndex: at least one column required")
 	}
-	quotedCols := make([]string, len(columns))
-	for i, col := range columns {
-		quotedCols[i] = c.dialect.Quote(col)
-	}
-	uniqueKW := ""
-	if unique {
-		uniqueKW = "UNIQUE "
-	}
-
-	var query string
-	switch c.dialect.Name() {
-	case "mssql":
-		query = fmt.Sprintf("IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = '%s') CREATE %sINDEX %s ON %s (%s)",
-			indexName, uniqueKW, c.dialect.Quote(indexName), c.dialect.Quote(table), strings.Join(quotedCols, ", "))
-	case "mysql", "mariadb":
-		// MySQL/MariaDB do not support IF NOT EXISTS on CREATE INDEX;
-		// use CREATE INDEX directly and ignore "Duplicate key name" (1061).
-		query = fmt.Sprintf("CREATE %sINDEX %s ON %s (%s)",
-			uniqueKW, c.dialect.Quote(indexName), c.dialect.Quote(table), strings.Join(quotedCols, ", "))
-	default:
-		query = fmt.Sprintf("CREATE %sINDEX IF NOT EXISTS %s ON %s (%s)",
-			uniqueKW, c.dialect.Quote(indexName), c.dialect.Quote(table), strings.Join(quotedCols, ", "))
-	}
-
-	_, err := exec.ExecContext(ctx, query)
-	if err != nil {
-		errStr := err.Error()
-		// Oracle: index already exists
-		if c.dialect.Name() == "oracle" && strings.Contains(errStr, "ORA-01408") {
-			return nil
-		}
-		// MySQL/MariaDB: Duplicate key name (error 1061)
-		if (c.dialect.Name() == "mysql" || c.dialect.Name() == "mariadb") &&
-			strings.Contains(errStr, "1061") {
+	// How the engine creates an index only when it is missing is the
+	// dialect's answer (quarkdriver.IdempotentDDL): IF NOT EXISTS by default,
+	// a sys.indexes guard on SQL Server, a plain CREATE whose "already
+	// exists" error counts as success on MySQL and MariaDB.
+	query := migrate.CreateIndexIfNotExists(c.dialect, table, indexName, columns, unique)
+	if _, err := exec.ExecContext(ctx, query); err != nil {
+		if migrate.IsAlreadyExists(c.dialect, quarkdriver.ObjectIndex, err) {
 			return nil
 		}
 		return fmt.Errorf("CreateIndex %s: %w", indexName, err)
@@ -304,7 +253,7 @@ func (c *Client) addForeignKeyOn(ctx context.Context, exec Executor, table, cons
 
 	_, err := exec.ExecContext(ctx, query)
 	if err != nil {
-		if c.dialect.Name() == "oracle" && strings.Contains(err.Error(), "ORA-02264") {
+		if migrate.IsAlreadyExists(c.dialect, quarkdriver.ObjectConstraint, err) {
 			return nil // already exists
 		}
 		return fmt.Errorf("AddForeignKey %s: %w", constraintName, err)
@@ -328,14 +277,15 @@ func (c *Client) createJoinTables(ctx context.Context, model any) error {
 		return nil
 	}
 
+	types := c.schemaTypes()
 	for _, rel := range meta.Relations {
 		if rel.Type != "many_to_many" || rel.JoinTable == "" {
 			continue
 		}
 
 		// Determine SQL types for FK columns (using int64 for simple auto-migration)
-		thisFKType := migrate.SQLType(c.dialect.Name(), reflect.TypeOf(int64(0)), false)
-		refFKType := migrate.SQLType(c.dialect.Name(), reflect.TypeOf(int64(0)), false)
+		thisFKType := types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindInt64})
+		refFKType := thisFKType
 
 		// Build join table columns
 		columns := []string{
@@ -347,39 +297,29 @@ func (c *Client) createJoinTables(ctx context.Context, model any) error {
 		pkConstraint := fmt.Sprintf("PRIMARY KEY (%s, %s)", c.dialect.Quote(rel.JoinFK), c.dialect.Quote(rel.JoinRefFK))
 		columns = append(columns, pkConstraint)
 
-		// Build CREATE TABLE query
-		var query string
-		switch c.dialect.Name() {
-		case "mysql", "mariadb", "postgres", "sqlite":
-			query = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n  %s\n);",
-				c.dialect.Quote(rel.JoinTable),
-				strings.Join(columns, ",\n  "),
-			)
-		case "mssql":
-			query = fmt.Sprintf(`IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '%s')
-			CREATE TABLE %s (
-				%s
-			);`, rel.JoinTable, c.dialect.Quote(rel.JoinTable), strings.Join(columns, ",\n				"))
-		case "oracle":
-			query = fmt.Sprintf("CREATE TABLE %s (\n  %s\n)",
-				c.dialect.Quote(rel.JoinTable),
-				strings.Join(columns, ",\n  "),
-			)
-		default:
-			query = fmt.Sprintf("CREATE TABLE %s (\n  %s\n)",
-				c.dialect.Quote(rel.JoinTable),
-				strings.Join(columns, ",\n  "),
-			)
-		}
-
-		_, err := c.db.ExecContext(ctx, query)
-		if err != nil {
-			if c.dialect.Name() == "oracle" && strings.Contains(err.Error(), "ORA-00955") {
-				continue
-			}
+		if err := c.createTableIfNotExists(ctx, c.db, rel.JoinTable, strings.Join(columns, ",\n  ")); err != nil {
 			return fmt.Errorf("failed to create join table %s: %w", rel.JoinTable, err)
 		}
 	}
 
+	return nil
+}
+
+// schemaTypes is the column-type pipeline answered by this client's dialect:
+// its quarkdriver.ColumnTyper and quarkdriver.AutoIncrementer when it
+// implements them, the portable answers when it does not.
+func (c *Client) schemaTypes() migrate.Asker {
+	return migrate.DialectAsker(c.dialect)
+}
+
+// createTableIfNotExists creates table with body unless it exists, the way
+// the dialect does that (quarkdriver.IdempotentDDL): CREATE TABLE IF NOT
+// EXISTS by default, a guard on sys.tables on SQL Server, a plain CREATE
+// whose ORA-00955 counts as success on Oracle.
+func (c *Client) createTableIfNotExists(ctx context.Context, exec Executor, table, body string) error {
+	_, err := exec.ExecContext(ctx, migrate.CreateTableIfNotExists(c.dialect, table, body))
+	if err != nil && !migrate.IsAlreadyExists(c.dialect, quarkdriver.ObjectTable, err) {
+		return err
+	}
 	return nil
 }

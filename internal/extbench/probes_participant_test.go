@@ -8,8 +8,9 @@ package extbench
 //
 // extlite is SQLite under another name. Its database/sql driver is modernc's,
 // registered a second time; its dialect forwards every Dialect method — and
-// every optional dialect interface SQLite's dialect implements — to
-// quark.SQLite(), and changes exactly one thing: Name() answers "extlite".
+// every optional dialect interface SQLite's dialect implements, the schema
+// questions of quarkdriver included — to quark.SQLite(), and changes exactly
+// one thing: Name() answers "extlite".
 //
 // So any difference between the two arms is behaviour that lives in Quark's
 // own code, keyed on a dialect's NAME, instead of behind the Dialect
@@ -35,6 +36,7 @@ import (
 	"time"
 
 	"github.com/jcsvwinston/quark"
+	"github.com/jcsvwinston/quark/quarkdriver"
 
 	moderncsqlite "modernc.org/sqlite"
 )
@@ -47,11 +49,26 @@ type extliteDialect struct{ quark.Dialect }
 
 func (extliteDialect) Name() string { return extliteName }
 
-// IntrospectSchema forwards the one optional interface SQLite's dialect
+// The methods below forward the optional interfaces SQLite's dialect
 // implements (asserted in registerExtlite), so the battery measures the name
-// and nothing else.
+// and nothing else. Embedding the Dialect interface promotes its methods and
+// no others: a wrapper that renames a dialect has to forward these by hand,
+// as a third party's would.
+
 func (d extliteDialect) IntrospectSchema(ctx context.Context, exec quark.Executor) (quark.Schema, error) {
 	return d.Dialect.(quark.SchemaIntrospector).IntrospectSchema(ctx, exec)
+}
+
+func (d extliteDialect) ColumnType(s quarkdriver.ColumnSpec) string {
+	return d.Dialect.(quarkdriver.ColumnTyper).ColumnType(s)
+}
+
+func (d extliteDialect) BoolLiteral(v bool) string {
+	return d.Dialect.(quarkdriver.ColumnTyper).BoolLiteral(v)
+}
+
+func (d extliteDialect) AutoIncrementColumn() (string, string) {
+	return d.Dialect.(quarkdriver.AutoIncrementer).AutoIncrementColumn()
 }
 
 var extliteOnce sync.Once
@@ -73,6 +90,9 @@ func registerExtlite(t *testing.T) {
 		"SchemaIntrospector": func(d quark.Dialect) bool { _, ok := d.(quark.SchemaIntrospector); return ok },
 		"ColumnTypeMapper":   func(d quark.Dialect) bool { _, ok := d.(quark.ColumnTypeMapper); return ok },
 		"MigrationLocker":    func(d quark.Dialect) bool { _, ok := d.(quark.MigrationLocker); return ok },
+		"ColumnTyper":        func(d quark.Dialect) bool { _, ok := d.(quarkdriver.ColumnTyper); return ok },
+		"AutoIncrementer":    func(d quark.Dialect) bool { _, ok := d.(quarkdriver.AutoIncrementer); return ok },
+		"IdempotentDDL":      func(d quark.Dialect) bool { _, ok := d.(quarkdriver.IdempotentDDL); return ok },
 	} {
 		if has(inner) != has(wrapped) {
 			t.Fatalf("the extlite wrapper does not mirror SQLite's dialect on %s (sqlite %v, extlite %v): the battery would measure the wrapper, not the name",
@@ -257,6 +277,32 @@ func partBattery() []partStep {
 				Name: "fk_part_parent", Columns: []string{"parent_id"},
 				RefTable: "part_parents", RefColumns: []string{"id"},
 			}})
+		}},
+
+		// An ApplyPlan whose second op fails must leave the table as it was
+		// on an engine whose DDL is transactional — SQLite's — and the
+		// dialect says whether it is (SupportsTransactionalDDL). The other
+		// ApplyPlan steps cannot see that: an op that succeeds succeeds on
+		// the resumable path too, which writes a checkpoint table instead
+		// of rolling back.
+		{name: "ApplyPlan undoes a plan that fails half-way", canonical: true, run: func(ctx context.Context, c *quark.Client) string {
+			err := c.ApplyPlan(ctx, quark.Plan{Ops: []quark.Operation{
+				quark.OpAddColumn{Table: "part_rows", Column: quark.Column{Name: "half", Type: "TEXT", Nullable: true}},
+				quark.OpDropColumn{Table: "part_rows", Column: "no_such_column"},
+			}})
+			s, ierr := c.IntrospectSchema(ctx)
+			if ierr != nil {
+				return "introspect: " + errClass(ierr)
+			}
+			kept := false
+			for _, t := range s.Tables {
+				for _, col := range t.Columns {
+					if t.Name == "part_rows" && col.Name == "half" {
+						kept = true
+					}
+				}
+			}
+			return fmt.Sprintf("%s first-op-kept=%v", errClass(err), kept)
 		}},
 
 		// --- the query path, on the same table ------------------------------

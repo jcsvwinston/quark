@@ -894,7 +894,7 @@ func probeTiposRichBuiltins(t *testing.T, e *env) verdict {
 
 	builtins := tiposDDL(t, c, "tipos_builtins")
 	if col := tiposColumnType(t, builtins, "ttl"); col != "BIGINT" {
-		t.Errorf("time.Duration should take the shipped mapper's BIGINT, got %q", col)
+		t.Errorf("time.Duration should take the 64-bit integer, BIGINT, got %q", col)
 		return partial
 	}
 	if col := tiposColumnType(t, builtins, "blob"); col != "BLOB" {

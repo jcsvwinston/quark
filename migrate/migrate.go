@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jcsvwinston/quark"
+	imigrate "github.com/jcsvwinston/quark/internal/migrate"
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 type Migration struct {
@@ -220,44 +222,24 @@ func (m *Migrator) revertDown(ctx context.Context, id string, migration *Migrati
 }
 
 func (m *Migrator) Init(ctx context.Context) error {
-	// The bookkeeping table DDL is dialect-specific: SQL Server has no
-	// CREATE TABLE IF NOT EXISTS (and TIMESTAMP there means rowversion, not a
-	// datetime), and Oracle has neither IF NOT EXISTS nor that TIMESTAMP default
-	// spelling. Same per-dialect shape as the backfill state table. Run via Raw
-	// (like GetApplied) so the SQL Server existence guard isn't rejected by the
-	// raw-query validator.
-	name := m.client.Dialect().Quote(m.tableName)
-	var ddl string
-	switch m.client.Dialect().Name() {
-	case "mssql":
-		// The sys.tables.name comparison uses the bare table name (a string
-		// literal), not the quoted identifier — sys.tables stores names without
-		// the delimiters Quote() would add. tableName is the hardcoded
-		// "quark_migrations", so there is no injection surface here.
-		ddl = fmt.Sprintf(`IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '%s')
-			CREATE TABLE %s (
-				id NVARCHAR(255) NOT NULL PRIMARY KEY,
-				name NVARCHAR(255),
-				applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-			)`, m.tableName, name)
-	case "oracle":
-		ddl = fmt.Sprintf(`CREATE TABLE %s (
-			id VARCHAR2(255) NOT NULL,
-			name VARCHAR2(255),
-			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-			CONSTRAINT pk_%s PRIMARY KEY (id)
-		)`, name, m.tableName)
-	default: // postgres, mysql, mariadb, sqlite
-		ddl = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			id VARCHAR(255) PRIMARY KEY,
-			name VARCHAR(255),
-			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`, name)
-	}
-	if _, err := m.client.Raw().ExecContext(ctx, ddl); err != nil {
-		// Oracle has no IF NOT EXISTS; ORA-00955 (name already used) means the
-		// table is already there, which is the idempotent success case.
-		if m.client.Dialect().Name() == "oracle" && strings.Contains(err.Error(), "ORA-00955") {
+	// The bookkeeping table is one template whose types and conditional
+	// create are the dialect's answers (quarkdriver.ColumnTyper,
+	// quarkdriver.IdempotentDDL): SQL Server guards the CREATE with
+	// sys.tables, Oracle's ORA-00955 counts as "already there", and the
+	// others say CREATE TABLE IF NOT EXISTS. Run via Raw (like GetApplied)
+	// so the SQL Server existence guard isn't rejected by the raw-query
+	// validator. tableName is the hardcoded "quark_migrations", so there is
+	// no injection surface in the guard's string literal.
+	d := m.client.Dialect()
+	types := imigrate.DialectAsker(d)
+	str := types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindString, Size: 255})
+	body := strings.Join([]string{
+		"id " + str + " NOT NULL PRIMARY KEY",
+		"name " + str,
+		"applied_at " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindTime}) + " DEFAULT CURRENT_TIMESTAMP NOT NULL",
+	}, ",\n  ")
+	if _, err := m.client.Raw().ExecContext(ctx, imigrate.CreateTableIfNotExists(d, m.tableName, body)); err != nil {
+		if imigrate.IsAlreadyExists(d, quarkdriver.ObjectTable, err) {
 			return nil
 		}
 		return err

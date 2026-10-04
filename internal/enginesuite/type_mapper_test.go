@@ -17,9 +17,9 @@ func testTypeMapper(ctx context.Context, t *testing.T, baseClient *quark.Client)
 	t.Helper()
 
 	t.Run("DurationMapsToBigInt", func(t *testing.T) {
-		// time.Duration is registered by Quark in package init; the migrate
-		// layer must emit BIGINT (or NUMBER(19) on Oracle) instead of TEXT
-		// fallback.
+		// time.Duration is an int64 count of nanoseconds; the migrate layer
+		// must emit the dialect's 64-bit integer (BIGINT, or NUMBER(19) on
+		// Oracle) instead of the TEXT fallback.
 		type Job struct {
 			ID      int64         `db:"id" pk:"true"`
 			Timeout time.Duration `db:"timeout"`
