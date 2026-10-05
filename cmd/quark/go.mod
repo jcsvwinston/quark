@@ -20,7 +20,7 @@ go 1.25.7
 
 require (
 	github.com/fatih/color v1.19.0
-	github.com/jcsvwinston/quark v1.15.1
+	github.com/jcsvwinston/quark v1.15.2
 	github.com/jcsvwinston/quark/drivers/mssql v0.2.0
 	github.com/jcsvwinston/quark/drivers/mysql v0.2.0
 	github.com/jcsvwinston/quark/drivers/oracle v0.2.0
