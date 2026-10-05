@@ -2,15 +2,15 @@
 
 ## Supported Versions
 
-Quark is **v1.15.2** <!-- x-release-please-version --> — stable under SemVer. Security fixes land on `main` and
+Quark is **v1.16.0** <!-- x-release-please-version --> — stable under SemVer. Security fixes land on `main` and
 on the latest two tagged minors; older tags are not patched. Upgrade to the
 current tag for security updates.
 
 | Version | Supported |
 |---------|-----------|
 | `main` | ✅ |
+| `v1.16.x` | ✅ |
 | `v1.15.x` | ✅ |
-| `v1.14.x` | ✅ |
 | Older tags | ❌ — please upgrade |
 
 The two minors above are the ones the sentence over the table resolves to
