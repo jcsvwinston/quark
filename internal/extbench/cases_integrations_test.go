@@ -38,16 +38,14 @@ func controlsIntegrations() []control {
 			id:     "INT-04",
 			family: "integrations",
 			title:  "gRPC: a module of the repository serves Quark behind a gRPC service, its tests pass standalone, and they hold the guide's gRPC section to that code",
-			want:   absent,
-			note:   "Measured: no module of the repository requires google.golang.org/grpc directly — the acceptance harness and the engine suites carry it only as an indirect requirement, which no package of theirs imports — and the frameworks guide has no gRPC section. Of the five integrations it is the only one with no text to start from.",
+			want:   present,
 			probe:  probeIntegrationGRPC,
 		},
 		{
 			id:     "INT-05",
 			family: "integrations",
 			title:  "Nucleus: a module of the repository serves Quark from a Nucleus module, its tests pass standalone, and they hold the guide's Nucleus section to that code",
-			want:   absent,
-			note:   "Measured: no module of the repository requires github.com/jcsvwinston/nucleus. The library does not depend on Nucleus by decision (QADR-0001, QADR-0006), so the fixture has to be a module of its own that requires both — the shape of the acceptance harness — or live on Nucleus's side. The guide's Nucleus section shows 6 lines and points at quark init --with nucleus, whose output nothing in this repository compiles (INT-06).",
+			want:   present,
 			probe:  probeIntegrationNucleus,
 		},
 		{
@@ -55,7 +53,7 @@ func controlsIntegrations() []control {
 			family: "integrations",
 			title:  "quark init --with writes each official integration, and what it writes is compiled by a module of the repository",
 			want:   partial,
-			note:   "Measured on the CLI's flag validation — the CLI is a module of its own (ADR-0024) the bench cannot import, so it reads the initWithTargets literal the validation consults, with go/parser: --with accepts nucleus and refuses chi, echo, gin and grpc. What --with nucleus writes is source for a framework no module of this repository requires, so nothing here compiles it.",
+			note:   "Measured on the CLI's flag validation — the CLI is a module of its own (ADR-0024) the bench cannot import, so it reads the initWithTargets literal the validation consults, with go/parser: --with accepts nucleus and refuses chi, echo, gin and grpc. What --with nucleus writes is still built by nothing. Since A11 Q9 a module of the repository requires Nucleus — internal/integrations, whose Nucleus fixture is written by hand in the shape the template writes — and this probe counts a module that requires the framework as compiling the target's output, so it no longer lists nucleus as uncompiled; that check has to read the template's output itself before it can say so.",
 			probe:  probeInitWith,
 		},
 	}

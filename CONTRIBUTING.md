@@ -124,7 +124,7 @@ go test ./... -run TestSQLite
 ```bash
 go test ./...                                  # the library's own tests
 cd internal/enginesuite && go test ./...       # the engine suites, on SQLite
-cd internal/integrations && GOWORK=off go test ./...  # net/http, chi, Echo and Gin fixtures, and the frameworks guide checked against them
+cd internal/integrations && GOWORK=off go test ./...  # net/http, chi, Echo, Gin, gRPC and Nucleus fixtures, and the frameworks guide checked against them
 ```
 
 The engine suites live in a module of their own so that the drivers and the

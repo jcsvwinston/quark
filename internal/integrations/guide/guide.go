@@ -5,10 +5,11 @@
 //
 // The guide (website/docs/guides/frameworks.mdx) used to show code that
 // compiled nowhere: it pointed the reader at runnable examples that had left
-// the tree, and nothing noticed. Here every Go block of a section is checked
-// against the package that section describes, line for line, by a test of
-// that package — so a block edited on the page and not in the code, or the
-// other way round, fails the fixture's own run.
+// the tree, and nothing noticed. Here every Go block of a section — and every
+// protobuf block, for the service definition the gRPC section shows — is
+// checked against the package that section describes, line for line, by a
+// test of that package: a block edited on the page and not in the code, or
+// the other way round, fails the fixture's own run.
 //
 // The comparison is exact up to indentation. The page indents with four
 // spaces and gofmt with tabs, so leading tabs count as four spaces; and a
@@ -33,13 +34,13 @@ const Page = "website/docs/guides/frameworks.mdx"
 
 var (
 	headingRE = regexp.MustCompile(`(?m)^## `)
-	goBlockRE = regexp.MustCompile("(?ms)^```go\n(.*?)^```")
+	blockRE   = regexp.MustCompile("(?ms)^```(?:go|protobuf)\n(.*?)^```")
 )
 
 // Check fails t unless the section of the guide under the level-two heading
-// "## <heading>" shows at least one Go block, and every Go block it shows is
-// code of the given files (paths relative to the test's package directory).
-// heading "" names the text above the first level-two heading.
+// "## <heading>" shows at least one Go or protobuf block, and every such
+// block is code of the given files (paths relative to the test's package
+// directory). heading "" names the text above the first level-two heading.
 func Check(t testing.TB, heading string, files ...string) {
 	t.Helper()
 	raw, err := read()
@@ -52,7 +53,7 @@ func Check(t testing.TB, heading string, files ...string) {
 	}
 	blocks := Blocks(section)
 	if len(blocks) == 0 {
-		t.Fatalf("the section %q of %s shows no Go block, so there is nothing to hold to this fixture", "## "+heading, Page)
+		t.Fatalf("the section %q of %s shows no Go or protobuf block, so there is nothing to hold to this fixture", "## "+heading, Page)
 	}
 
 	var source []string
@@ -67,7 +68,7 @@ func Check(t testing.TB, heading string, files ...string) {
 
 	for i, block := range blocks {
 		if msg := match(normalize(block), source); msg != "" {
-			t.Errorf("Go block %d of the section %q of %s is not code of %s: %s",
+			t.Errorf("block %d of the section %q of %s is not code of %s: %s",
 				i+1, "## "+heading, Page, strings.Join(files, ", "), msg)
 		}
 	}
@@ -88,10 +89,11 @@ func Section(raw, heading string) (string, bool) {
 	return "", false
 }
 
-// Blocks returns the bodies of the ```go fences of a section, in order.
+// Blocks returns the bodies of the ```go and ```protobuf fences of a
+// section, in order.
 func Blocks(section string) []string {
 	var out []string
-	for _, m := range goBlockRE.FindAllStringSubmatch(section, -1) {
+	for _, m := range blockRE.FindAllStringSubmatch(section, -1) {
 		out = append(out, m[1])
 	}
 	return out

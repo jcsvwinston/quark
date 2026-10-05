@@ -13,7 +13,7 @@
 # Los módulos que se construyen y testean junto a la raíz.
 NESTED_MODULES := cmd/quark internal/enginesuite acceptance
 
-# Las fixtures de integración (chi, Echo, Gin…) se comprueban SIN workspace,
+# Las fixtures de integración (chi, Echo, Gin, gRPC, Nucleus) se comprueban SIN workspace,
 # como las corre la lane "Integration fixtures" de CI y como las mide el banco
 # de extensibilidad: su go.mod reemplaza quark por este árbol, y meterlas en el
 # go.work subiría las dependencias de los frameworks a todos los módulos de él.

@@ -1,7 +1,7 @@
 ---
 sidebar_position: 12
 title: Web Frameworks
-description: Use Quark from net/http, chi, Echo, Gin and Nucleus — one client per process, the request context per query, one transaction per request, and Quark's error classification turned into status codes.
+description: Use Quark from net/http, chi, Echo, Gin, gRPC and Nucleus — one client per process, the request context per query, one transaction per request, and Quark's error classification turned into status codes.
 ---
 
 # Using Quark from a web framework
@@ -30,11 +30,11 @@ whichever one you use:
    and silently turns every 409 below into a 500. See
    [Pick a driver](installation#pick-a-driver).
 
-The Go in the net/http, chi, Echo and Gin sections is not a sketch. Each of
-them is a package in the
+The code on this page is not a sketch. Each section is a package in the
 [Quark repository](https://github.com/jcsvwinston/quark/tree/main/internal/integrations)
-that CI builds against that framework and tests over HTTP on SQLite, and the
-test fails when a block on this page stops matching the package's code.
+that CI builds against that framework and tests over the network on SQLite,
+and the test fails when a block on this page stops matching the package's
+code.
 
 ## What every section serves
 
@@ -465,46 +465,251 @@ func answerErrors(c *gin.Context) {
 }
 ```
 
+## gRPC
+
+A gRPC method receives the call's context as its first argument — the one
+gRPC cancels when the client goes away or the call's deadline passes — so
+there is nothing to extract: hand it to `quark.For`. The service is the
+notes API in protobuf:
+
+```protobuf
+// Notes serves the notes API over gRPC.
+service Notes {
+  rpc List(ListRequest) returns (NoteList);
+  rpc Get(GetRequest) returns (Note);
+  rpc Create(Draft) returns (Note);
+  // Import creates every draft in one transaction: all of them, or none.
+  rpc Import(ImportRequest) returns (NoteList);
+}
+```
+
+The methods return Quark's errors as they come, and one unary interceptor
+gives each its status code — the gRPC counterpart of Echo's error handler:
+
+```go
+// NewServer registers the notes service on a gRPC server whose interceptor
+// maps Quark's errors to status codes. opts come first, so an interceptor
+// the caller passes runs outside that one.
+func NewServer(client *quark.Client, opts ...grpc.ServerOption) *grpc.Server {
+    srv := grpc.NewServer(append(opts, grpc.ChainUnaryInterceptor(quarkStatus))...)
+    notespb.RegisterNotesServer(srv, &service{client: client})
+    return srv
+}
+
+type service struct {
+    notespb.UnimplementedNotesServer
+    client *quark.Client
+}
+```
+
+```go
+func (s *service) Create(ctx context.Context, d *notespb.Draft) (*notespb.Note, error) {
+    n, err := notes.Draft{Title: d.GetTitle(), Body: d.GetBody()}.Note()
+    if err == nil {
+        err = quark.For[notes.Note](ctx, s.client).Create(&n)
+    }
+    if err != nil {
+        return nil, err
+    }
+    return toNote(n), nil
+}
+
+func (s *service) Import(ctx context.Context, req *notespb.ImportRequest) (*notespb.NoteList, error) {
+    if len(req.GetDrafts()) == 0 {
+        return nil, status.Error(codes.InvalidArgument, "no notes to import")
+    }
+    created := make([]notes.Note, 0, len(req.GetDrafts()))
+    err := s.client.Tx(ctx, func(tx *quark.Tx) error {
+        for _, d := range req.GetDrafts() {
+            n, err := notes.Draft{Title: d.GetTitle(), Body: d.GetBody()}.Note()
+            if err == nil {
+                err = quark.ForTx[notes.Note](ctx, tx).Create(&n)
+            }
+            if err != nil {
+                return err // rolls back every note written before it
+            }
+            created = append(created, n)
+        }
+        return nil
+    })
+    if err != nil {
+        return nil, err
+    }
+    return toList(created), nil
+}
+```
+
+```go
+// Code is the gRPC code for an error a method meets: the same
+// classification notes.Status turns into an HTTP status.
+func Code(err error) codes.Code {
+    switch {
+    case errors.Is(err, notes.ErrNoTitle):
+        return codes.InvalidArgument
+    case errors.Is(err, quark.ErrNotFound):
+        return codes.NotFound
+    case quark.IsUniqueViolation(err):
+        return codes.AlreadyExists
+    case errors.Is(err, quark.ErrTimeout):
+        return codes.DeadlineExceeded
+    default:
+        return codes.Internal
+    }
+}
+
+// quarkStatus gives an error a method returns its code, unless it already
+// carries one. The message is the code's name: a driver's text can name
+// tables and columns, and it belongs in a log, not on the wire.
+func quarkStatus(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+    resp, err := handler(ctx, req)
+    if err == nil {
+        return resp, nil
+    }
+    if _, ok := status.FromError(err); ok {
+        return nil, err
+    }
+    code := Code(err)
+    return nil, status.Error(code, code.String())
+}
+```
+
+`List` and `Get` follow the same shape. The fixture's test serves this on a
+loopback listener and calls it through the generated client: the same
+requests as the HTTP sections, answered with `AlreadyExists`, `NotFound`,
+`InvalidArgument` and `DeadlineExceeded` where they answer 409, 404, 400
+and 504.
+
 ## Nucleus
 
 Nucleus applications are built from modules, and a Quark-backed feature is
-a module that wraps the client. The CLI writes that module for you:
-
-```bash
-quark init --dialect sqlite --with nucleus
-```
-
-adds `internal/<app>/module.go` to the plain `init` layout: a
-`nucleus.Module[struct{}]` whose `OnStart` registers and migrates the
-model, whose `Routes` serve `GET`/`POST /api/notes` through
-`quark.For[Note](c.Request.Context(), client)`, and which declares its own
-access rules — Nucleus denies by default, so a route without a policy row
-answers 403 even when it is registered. The file blank-imports the driver
-module for the dialect you chose, and reads are open to anonymous callers;
-the `create` row is a development default, scope it to a role before the
-service faces a network.
-
-Quark has no dependency on Nucleus — it is the data layer the framework
-sits on — so `init` writes the module as source, adds a minimal
-`nucleus.yml` (the default database, pointing at the same one `.quark.yml`
-names, plus host, port and `env: development`; an existing file is kept),
-and leaves `main.go` to you. Mount the module where the application is
-built:
+a module that wraps the client. The application builds the client and
+mounts the module —
+`nucleus.New().FromConfigFile("nucleus.yml").Mount(notes.Module(client))`:
 
 ```go
-client, err := quark.New("sqlite", dsn)
-// ...
-app, err := nucleus.New().
-    FromConfigFile("nucleus.yml").
-    Mount(shop.Module(client)).
-    Build()
+// Module returns the notes feature as a Nucleus module wrapping client. The
+// application builds the client and mounts the module; the module owns its
+// schema (migrated in OnStart), its routes and its access rules.
+func Module(client *quark.Client) nucleus.ModuleSpec {
+    return nucleus.Module[struct{}]{
+        Name: "notes",
+
+        // Nucleus denies by default: a route without a policy row answers
+        // 403 even when it is registered. These rows open the routes to
+        // anonymous callers; scope them to a role before the service faces
+        // a network. A deny row in the host's policy file overrides them.
+        Policies: []nucleus.PolicyRule{
+            {Subject: "anonymous", Object: "/notes", Action: "read"},
+            {Subject: "anonymous", Object: "/notes/*", Action: "read"},
+            {Subject: "anonymous", Object: "/notes", Action: "create"},
+            {Subject: "anonymous", Object: "/notes/*", Action: "create"},
+        },
+
+        // A JSON API carries no browser session, so CSRF does not apply.
+        CSRFExempt: []string{"/notes"},
+
+        OnStart: func(ctx context.Context, _ nucleus.Runtime, _ struct{}) error {
+            return client.Migrate(ctx, &notes.Note{})
+        },
+
+        Routes: func(r nucleus.Router, _ struct{}) {
+            r.Get("/notes", func(c *nucleus.Context) error {
+                list, err := quark.For[notes.Note](c.Request.Context(), client).OrderBy("id", "DESC").Limit(100).List()
+                if err != nil {
+                    return fail(err)
+                }
+                return c.JSON(http.StatusOK, list)
+            })
+
+            r.Get("/notes/{id}", func(c *nucleus.Context) error {
+                id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+                if err != nil {
+                    return nerrors.BadRequest("the id is a number")
+                }
+                n, err := quark.For[notes.Note](c.Request.Context(), client).Find(id)
+                if err != nil {
+                    return fail(err)
+                }
+                return c.JSON(http.StatusOK, n)
+            })
+
+            r.Post("/notes", func(c *nucleus.Context) error {
+                var d notes.Draft
+                if err := c.BindJSON(&d); err != nil {
+                    return err
+                }
+                n, err := d.Note()
+                if err == nil {
+                    err = quark.For[notes.Note](c.Request.Context(), client).Create(&n)
+                }
+                if err != nil {
+                    return fail(err)
+                }
+                return c.JSON(http.StatusCreated, n)
+            })
+
+            r.Post("/notes/import", func(c *nucleus.Context) error {
+                // BindJSON validates what it decodes as a struct, and a list
+                // is not one: it answers 400 to any JSON array. A list body
+                // is decoded with encoding/json.
+                var drafts []notes.Draft
+                if err := json.NewDecoder(c.Request.Body).Decode(&drafts); err != nil || len(drafts) == 0 {
+                    return nerrors.BadRequest("the body is a JSON list of notes")
+                }
+                ctx := c.Request.Context()
+                created := make([]notes.Note, 0, len(drafts))
+                err := client.Tx(ctx, func(tx *quark.Tx) error {
+                    for _, d := range drafts {
+                        n, err := d.Note()
+                        if err == nil {
+                            err = quark.ForTx[notes.Note](ctx, tx).Create(&n)
+                        }
+                        if err != nil {
+                            return err // rolls back every note written before it
+                        }
+                        created = append(created, n)
+                    }
+                    return nil
+                })
+                if err != nil {
+                    return fail(err)
+                }
+                return c.JSON(http.StatusCreated, created)
+            })
+        },
+    }.Build()
+}
 ```
 
-For a whole application generated around this seam — configuration, policy
-file, migrations, the admin panel — start from the Nucleus side instead:
-`nucleus new <app> --with quark` writes the application and the same module
-shape. The `init` flag is for adding a Quark feature to a Nucleus project you
-already have, or for keeping the data layer in a repository of its own.
+Handlers read the context from `c.Request.Context()` and return errors;
+Nucleus's error handler writes them, and `fail` gives a Quark error the
+status `notes.Status` decides:
+
+```go
+// fail is the Nucleus error for err, carrying the status notes.Status gives
+// it. The message names the status, not the error: a driver's text can name
+// tables and columns, and it belongs in a log, not in a response.
+func fail(err error) error {
+    status := notes.Status(err)
+    return &nerrors.DomainError{
+        Code:       strings.ToUpper(strings.ReplaceAll(http.StatusText(status), " ", "_")),
+        Message:    http.StatusText(status),
+        StatusCode: status,
+    }
+}
+```
+
+The CLI writes this shape for you:
+`quark init --dialect sqlite --with nucleus` adds `internal/<app>/module.go`
+to the plain `init` layout — a module like this one serving
+`GET`/`POST /api/notes`, with the driver module for your dialect
+blank-imported — and a minimal `nucleus.yml`
+(the default database, pointing at the same one `.quark.yml` names, plus
+host, port and `env: development`; an existing file is kept). Quark has no
+dependency on Nucleus, so `init` writes the module as source and leaves
+`main.go` to you. For a whole application generated around this seam —
+configuration, policy file, migrations, the admin panel — start from the
+Nucleus side instead: `nucleus new <app> --with quark`.
 
 ## Testing handlers
 
@@ -522,9 +727,12 @@ func Client(t *testing.T) *quark.Client {
 }
 ```
 
-then serves the router with `httptest.NewServer` and sends it real requests:
-an empty list, a created note, the taken title as 409, a missing title as
-400, a missing note as 404, an import that commits and two that roll back.
+then serves the router with `httptest.NewServer` — the Nucleus module is
+mounted on an application booted in-process with `nucleustest.Start`, so
+authorization, CSRF and Nucleus's error handler are in the path — and sends
+it real requests: an empty list, a created note, the taken title as 409, a
+missing title as 400, a missing note as 404, an import that commits and two
+that roll back.
 The last request proves that the handler queries with the request's
 context. It is served through a wrapper that gives every request a deadline
 that has already passed, the way a timeout middleware would:
@@ -543,5 +751,7 @@ func Expired(h http.Handler) http.Handler {
 ```
 
 and it has to come back 504. A handler that queried with
-`context.Background()` would answer 200. For the transaction-per-test
-isolation pattern, see [Testing](testing).
+`context.Background()` would answer 200. On Nucleus the wrapper is
+application middleware (`Use`), and on gRPC a unary interceptor that does
+the same to the call's context. For the transaction-per-test isolation
+pattern, see [Testing](testing).

@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package integrations holds Quark served from the routers and servers it is
-// used with — net/http, chi, Echo and Gin — as tested fixtures.
+// used with — net/http, chi, Echo, Gin, gRPC and Nucleus — as tested
+// fixtures.
 //
 // A fixture here is a package that builds a small notes API on a
-// *quark.Client and a test that drives it over HTTP against SQLite. They are
+// *quark.Client and a test that drives it over the network against SQLite
+// (HTTP, or gRPC through the generated client). They are
 // not examples: there is no main to run and nothing to copy a directory from.
 // They exist so that the code the frameworks guide
 // (website/docs/guides/frameworks.mdx) shows is code a build checks. Every
@@ -16,13 +18,15 @@
 // It is a module of its own for the reason the engine suites and the
 // acceptance harness are (ADR-0024): the frameworks it requires must never
 // reach the library's go.mod, and an application that imports Quark must not
-// find chi, Echo or Gin in its build list. Nothing publishes it — the local
+// find chi, Echo, Gin, gRPC or Nucleus in its build list — the library does
+// not depend on Nucleus at all, by decision; a module nothing publishes may. Nothing publishes it — the local
 // replace directives point every Quark requirement back into this tree — and
 // it sits under internal/ so that Go itself refuses an import of it from
 // outside the repository: it is unpublishable by construction, which is also
 // how the suite's release tooling recognises a module it must not release.
 //
-// What every fixture serves, and answers the same way (see notestest):
+// What every HTTP fixture serves, and answers the same way (see notestest;
+// the gRPC service has the same four methods and answers with codes):
 //
 //	GET  /notes          the newest hundred notes
 //	GET  /notes/{id}     one note, or 404

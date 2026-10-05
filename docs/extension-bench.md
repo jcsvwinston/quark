@@ -66,6 +66,14 @@ closing a gap turns the suite red with "this one moved, update the verdict".
    `*quark.Client` and pass one HTTP battery against SQLite; each package's
    `TestGuideMatchesFixture` fails when a Go block of its section of the guide
    is not, line for line, its code, and the bench asks for that test by name.
+   *A11 Q9* added gRPC (the same API as a service, codes mapped from Quark's
+   errors by one interceptor, the guide's protobuf block held to the
+   `.proto`) and Nucleus (a module wrapping the client, mounted on an
+   application booted in-process): `INT-04`, `INT-05`. The fixtures module is
+   the one module of the repository that requires Nucleus; the library still
+   does not. Writing the Nucleus fixture found that Nucleus's `BindJSON`
+   answered 400 to any JSON array (NU-107, fixed in nucleus#591): it
+   validated what it decoded as a struct.
 6. **The API surface CI freezes records names, not signatures** (`CON-02`),
    and three conventions Quark calls on a caller's type — `TableName()`,
    `Validate(ctx)`, `SQLState()` — have no exported interface (`CON-07`).
@@ -106,7 +114,7 @@ arms is behaviour keyed on the dialect's name.
 
 ## The result
 
-**10 of 22 controls present. 6 partial. 6 absent.**
+**12 of 22 controls present. 6 partial. 4 absent.**
 
 ### contract — 4 present · 3 partial · 1 absent
 
@@ -134,13 +142,13 @@ arms is behaviour keyed on the dialect's name.
 | `DRV-07` | A driver module outside this repository can run the engine conformance suite the in-repo engines run | **absent** | Measured: the suite is internal/enginesuite, whose only non-test file is doc.go — SharedSuite and the per-engine suites live in its 100 _test.go files, which no importer can reach — and the go command refuses a module outside the repository that imports an internal package of quark ("use of internal package … not allowed"). An external driver can prove its classifier (DRV-03) and nothing about the SQL its dialect writes. |
 | `DRV-08` | A driver template module builds standalone (GOWORK=off) and passes the kit | **absent** | Measured over every go.mod of the repository: 12 modules — the library, the CLI, the five drivers, the acceptance harness, the benchmarks, the bug-bash harness, the engine suites and the integration fixtures — and no other module requires the library, so nothing is a template for a driver someone else writes. The nearest things are the five drivers, each one engine's module pinned to a published quark, and the fixture this bench builds for DRV-03, which lives in testdata. |
 
-### integrations — 3 present · 1 partial · 2 absent
+### integrations — 5 present · 1 partial · 0 absent
 
 | id | control | verdict | what is missing |
 |---|---|---|---|
 | `INT-01` | chi: a module of the repository serves Quark behind a chi router, its tests pass standalone, and they hold the guide's chi section to that code | **present** | — |
 | `INT-02` | Echo: a module of the repository serves Quark behind an Echo server, its tests pass standalone, and they hold the guide's Echo section to that code | **present** | — |
 | `INT-03` | Gin: a module of the repository serves Quark behind a Gin engine, its tests pass standalone, and they hold the guide's Gin section to that code | **present** | — |
-| `INT-04` | gRPC: a module of the repository serves Quark behind a gRPC service, its tests pass standalone, and they hold the guide's gRPC section to that code | **absent** | Measured: no module of the repository requires google.golang.org/grpc directly — the acceptance harness and the engine suites carry it only as an indirect requirement, which no package of theirs imports — and the frameworks guide has no gRPC section. Of the five integrations it is the only one with no text to start from. |
-| `INT-05` | Nucleus: a module of the repository serves Quark from a Nucleus module, its tests pass standalone, and they hold the guide's Nucleus section to that code | **absent** | Measured: no module of the repository requires github.com/jcsvwinston/nucleus. The library does not depend on Nucleus by decision (QADR-0001, QADR-0006), so the fixture has to be a module of its own that requires both — the shape of the acceptance harness — or live on Nucleus's side. The guide's Nucleus section shows 6 lines and points at quark init --with nucleus, whose output nothing in this repository compiles (INT-06). |
-| `INT-06` | quark init --with writes each official integration, and what it writes is compiled by a module of the repository | **partial** | Measured on the CLI's flag validation — the CLI is a module of its own (ADR-0024) the bench cannot import, so it reads the initWithTargets literal the validation consults, with go/parser: --with accepts nucleus and refuses chi, echo, gin and grpc. What --with nucleus writes is source for a framework no module of this repository requires, so nothing here compiles it. |
+| `INT-04` | gRPC: a module of the repository serves Quark behind a gRPC service, its tests pass standalone, and they hold the guide's gRPC section to that code | **present** | — |
+| `INT-05` | Nucleus: a module of the repository serves Quark from a Nucleus module, its tests pass standalone, and they hold the guide's Nucleus section to that code | **present** | — |
+| `INT-06` | quark init --with writes each official integration, and what it writes is compiled by a module of the repository | **partial** | Measured on the CLI's flag validation — the CLI is a module of its own (ADR-0024) the bench cannot import, so it reads the initWithTargets literal the validation consults, with go/parser: --with accepts nucleus and refuses chi, echo, gin and grpc. What --with nucleus writes is still built by nothing. Since A11 Q9 a module of the repository requires Nucleus — internal/integrations, whose Nucleus fixture is written by hand in the shape the template writes — and this probe counts a module that requires the framework as compiling the target's output, so it no longer lists nucleus as uncompiled; that check has to read the template's output itself before it can say so. |
