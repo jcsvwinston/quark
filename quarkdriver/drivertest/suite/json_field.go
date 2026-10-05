@@ -1,8 +1,9 @@
-package enginesuite
+package suite
 
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -134,4 +135,27 @@ func testJSONField(ctx context.Context, t *testing.T, baseClient *quark.Client) 
 			t.Errorf("Settings update round-trip: %+v", got.Settings.V)
 		}
 	})
+}
+
+// opTouchesTable reports whether an Operation's String() format
+// references the given table name. Used by the round-trip test
+// to scope assertions to a specific fixture rather than the whole
+// (shared, polluted) database.
+//
+// We tokenize Op.String() on whitespace + `.` + `(` + `,` and check
+// for an exact-token match against `table`. A naive
+// `strings.Contains` would false-positive on `plan_fixtures` vs
+// `plan_fixtures_archive` or similar substring relationships —
+// uncommon today but the kind of latent fragility a token check
+// eliminates outright.
+func opTouchesTable(op quark.Operation, table string) bool {
+	sep := func(r rune) bool {
+		return r == ' ' || r == '.' || r == '(' || r == ',' || r == ')'
+	}
+	for _, tok := range strings.FieldsFunc(op.String(), sep) {
+		if tok == table {
+			return true
+		}
+	}
+	return false
 }

@@ -48,6 +48,9 @@ var inScope = []string{
 	// inventario sin que nadie los hubiera quitado.
 	"github.com/jcsvwinston/quark/quarkdriver",
 	"github.com/jcsvwinston/quark/quarkdriver/drivertest",
+	// La suite de motor pública (A11 Q4): un módulo de driver de terceros la
+	// importa y la corre contra su motor.
+	"github.com/jcsvwinston/quark/quarkdriver/drivertest/suite",
 }
 
 const loadMode = packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps

@@ -28,5 +28,6 @@ func TestSuiteMySQL(t *testing.T) {
 	}
 	defer client.Close()
 
+	runConformance(t, client, "mysql")
 	SharedSuite(t, client)
 }

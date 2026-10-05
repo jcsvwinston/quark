@@ -65,9 +65,10 @@ WARN listando los campos zero-value que está saltando, para que la trampa
 sea visible en runtime.
 
 Cobertura conjunta:
-- `testUpdateZeroValues` (`update_zero_values_test.go`) — 6 subtests para
+- `testUpdateZeroValues` (`quarkdriver/drivertest/suite/update_zero_values.go`,
+  en la suite de motor pública desde A11 Q4) — 6 subtests para
   `UpdateFields` y la trampa de `Update`.
-- `testDirtyTracking` (`dirty_track_test.go`) — 5 subtests para `Track()` +
+- `testDirtyTracking` (`quarkdriver/drivertest/suite/dirty_track.go`) — 5 subtests para `Track()` +
   `Tracked.Save`: writes-zero-when-changed, no-change-no-SQL, snapshot
   refresh, list-returns-tracked-slice, PK-never-mutated.
 

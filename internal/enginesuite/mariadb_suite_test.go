@@ -40,6 +40,7 @@ func TestSuiteMariaDB(t *testing.T) {
 		t.Fatalf("MariaDB not reachable (%v): this lane declares the engine, so an engine that does not answer is a failure, not a skip (QK-31)", err)
 	}
 
+	runConformance(t, client, "mysql")
 	SharedSuite(t, client)
 }
 

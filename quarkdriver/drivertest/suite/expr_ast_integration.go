@@ -1,7 +1,7 @@
 // Copyright 2026 jcsvwinston
 // SPDX-License-Identifier: Apache-2.0
 
-package enginesuite
+package suite
 
 import (
 	"context"
@@ -54,7 +54,7 @@ func (m *exprCapturingMiddleware) snapshot() []string {
 }
 
 // testExprAST is the Phase-2 deliverable for the composable expression AST.
-// Runs against the SharedSuite so all six dialects pick it up once their
+// Runs in the engine suite so all six dialects pick it up once their
 // containers are wired in. SQLite is the proven path; the AST itself is
 // dialect-agnostic by design.
 func testExprAST(ctx context.Context, t *testing.T, baseClient *quark.Client) {

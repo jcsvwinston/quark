@@ -1,4 +1,4 @@
-package enginesuite
+package suite
 
 import (
 	"context"
@@ -136,15 +136,15 @@ func testUpdateZeroValues(ctx context.Context, t *testing.T, baseClient *quark.C
 		// Hooks run on UpdateFields just like on Update. A regression that
 		// silently skipped them would not be caught by the other subtests.
 		dropTable(baseClient, "hooked_users")
-		if err := baseClient.Migrate(ctx, &HookedUser{}); err != nil {
+		if err := baseClient.Migrate(ctx, &hookedUser{}); err != nil {
 			t.Fatalf("migrate hooked: %v", err)
 		}
 		t.Cleanup(func() { dropTable(baseClient, "hooked_users") })
 
 		hookUserBefore = 0
 		hookUserAfter = 0
-		u := &HookedUser{Name: "Dora", Active: true}
-		if err := quark.For[HookedUser](ctx, baseClient).Create(u); err != nil {
+		u := &hookedUser{Name: "Dora", Active: true}
+		if err := quark.For[hookedUser](ctx, baseClient).Create(u); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 
@@ -152,7 +152,7 @@ func testUpdateZeroValues(ctx context.Context, t *testing.T, baseClient *quark.C
 		hookUserBefore = 0
 		hookUserAfter = 0
 		u.Active = false
-		if _, err := quark.For[HookedUser](ctx, baseClient).UpdateFields(u, "active"); err != nil {
+		if _, err := quark.For[hookedUser](ctx, baseClient).UpdateFields(u, "active"); err != nil {
 			t.Fatalf("UpdateFields: %v", err)
 		}
 		if hookUserBefore != 1 {
@@ -164,25 +164,27 @@ func testUpdateZeroValues(ctx context.Context, t *testing.T, baseClient *quark.C
 	})
 }
 
-// HookedUser implements BeforeUpdateHook and AfterUpdateHook to verify that
+// hookedUser implements BeforeUpdateHook and AfterUpdateHook to verify that
 // UpdateFields runs the same hooks Update runs.
-type HookedUser struct {
+type hookedUser struct {
 	ID     int64  `db:"id" pk:"true"`
 	Name   string `db:"name"`
 	Active bool   `db:"active"`
 }
+
+func (hookedUser) TableName() string { return "hooked_users" }
 
 var (
 	hookUserBefore int
 	hookUserAfter  int
 )
 
-func (u *HookedUser) BeforeUpdate(ctx context.Context) error {
+func (u *hookedUser) BeforeUpdate(ctx context.Context) error {
 	hookUserBefore++
 	return nil
 }
 
-func (u *HookedUser) AfterUpdate(ctx context.Context) error {
+func (u *hookedUser) AfterUpdate(ctx context.Context) error {
 	hookUserAfter++
 	return nil
 }

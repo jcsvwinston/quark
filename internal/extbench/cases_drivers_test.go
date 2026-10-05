@@ -8,8 +8,10 @@ package extbench
 // classifier a leaf contract (quarkdriver); this family measures how far that
 // goes for a driver nobody in this repository writes. The bench found the
 // query path open and the schema path keyed on the dialect's name (A11 Q2
-// closed that), and the dialect contract in package quark (A11 Q3 moved it to
-// quarkdriver).
+// closed that), the dialect contract in package quark (A11 Q3 moved it to
+// quarkdriver), and a kit that never saw a dialect and an engine suite no
+// module outside the repository could reach (A11 Q4: drivertest.VerifyDialect
+// and quarkdriver/drivertest/suite).
 
 func controlsDrivers() []control {
 	return []control{
@@ -34,7 +36,7 @@ func controlsDrivers() []control {
 			family: "drivers",
 			title:  "A driver module outside this repository, built standalone against this tree, opens its engine by name, reads and writes, classifies its duplicate key and passes drivertest.Verify",
 			want:   present,
-			note:   "The dialect the fixture registers is its own, written against quarkdriver alone (DRV-02); the end-to-end test also takes a row lock its engine refuses — quarkdriver.ErrUnsupportedFeature from the dialect, matched as quark.ErrUnsupportedFeature — and reads the table back through the dialect's SchemaIntrospector as a quark.Schema. The fixture creates its table by hand: what Migrate writes for an engine name Quark does not know is DRV-04's subject, and the kit it passes checks classifiers only (DRV-05).",
+			note:   "The dialect the fixture registers is its own, written against quarkdriver alone (DRV-02); the end-to-end test also takes a row lock its engine refuses — quarkdriver.ErrUnsupportedFeature from the dialect, matched as quark.ErrUnsupportedFeature — and reads the table back through the dialect's SchemaIntrospector as a quark.Schema. Since A11 Q4 the same module also runs the dialect kit against its dialect (DRV-05) and the public engine suite against its engine (DRV-07); its dialect gained the AutoIncrementer and TableRebuilder its engine needs and an introspector that reads indexes and foreign keys, which is what the kit asked of it.",
 			probe:  probeExternalDriverEndToEnd,
 		},
 		{
@@ -49,24 +51,24 @@ func controlsDrivers() []control {
 			id:     "DRV-05",
 			family: "drivers",
 			title:  "The conformance kit checks a driver's dialect: placeholders, quoting, upsert, limit and savepoints",
-			want:   absent,
-			note:   "Measured on the kit's type-checked API: no field of drivertest.Case and no function of drivertest takes a Dialect, so a dialect that quotes identifiers unsafely or numbers its placeholders wrong passes the kit — it is never shown one. The kit checks the three classifier predicates and nothing else. When the kit gains a way to take a dialect, this probe stops and asks to be extended to run it against a dialect that is wrong on purpose.",
+			want:   present,
+			note:   "Measured by running the kit from the fixture driver built standalone (GOWORK=off): drivertest.VerifyDialect takes the dialect and a live *sql.DB the driver's test opens, and checks every method of quarkdriver.Dialect and every optional interface the dialect implements (skipping, with the reason logged, the ones it does not), on queries and on the schema path — Migrate, PlanMigration, ApplyPlan, Sync, IntrospectSchema, savepoints, row locks, the migration lock — judged by what the engine then holds or refuses, never by the text of a statement. The fixture's own dialect passes with the engine half run; six dialects wrong on purpose each fail, and the failing subtest names the method: placeholders that all bind the first value (engine/Placeholder), quoting that does not escape the quote character (engine/Quote), an upsert that ignores the columns to update (engine/UpsertSQL), LIMIT and OFFSET swapped (engine/LimitOffset), a SavepointDialect whose rollback releases (engine/SavepointDialect), and an AutoIncrementer whose key the engine does not number (engine/AutoIncrementer). The six built-in dialects pass it against their engines in the engine suites; it found two of them wrong — MariaDB dropped a CHECK with MySQL's DROP CHECK (Error 1064) and SQL Server accepted a shared lock that skips locked rows, which the engine refuses (error 650) — both fixed in the same change. A kit that stops catching any one of the six turns this control partial.",
 			probe:  probeKitChecksDialect,
 		},
 		{
 			id:     "DRV-06",
 			family: "drivers",
 			title:  "Every driver module of this repository runs the conformance kit",
-			want:   partial,
-			note:   "Measured by running each driver module's tests against this tree (a go.work, as CI's driver lane builds) and looking for the kit's subtests: mssql, mysql, oracle and sqlite run drivertest.Verify; postgres does not. Its module registers no classifier by design — PostgreSQL errors are classified through the SQLState() method every PostgreSQL driver exposes (CON-07) — and the kit has nothing else to check, so the engine the kit never sees is PostgreSQL.",
+			want:   present,
+			note:   "Measured by running each driver module's tests against this tree (a go.work, as CI's driver lane builds) and looking for the kits' subtests: all five run the dialect kit (drivertest.VerifyDialect on the built-in dialect their driver serves — MySQL's module both MySQL's and MariaDB's), and the four that register a classifier also run drivertest.Verify; postgres registers none by design (CON-07), and the dialect kit is what it runs now. The kit's engine half needs a server: in this bench only SQLite's runs (in memory), and the other modules log that they had no DSN. CI's driver lane gives postgres, mysql and mariadb a server each (services), the oracle lane runs the oracle module's kit against its Oracle, and SQL Server's dialect is held to the same kit in the mssql lane through internal/enginesuite. The standalone lane vets those test files out (-tags pinnedquark) until the release train raises the modules' floor to a quark that has the kit.",
 			probe:  probeEveryDriverRunsKit,
 		},
 		{
 			id:     "DRV-07",
 			family: "drivers",
 			title:  "A driver module outside this repository can run the engine conformance suite the in-repo engines run",
-			want:   absent,
-			note:   "Measured: the suite is internal/enginesuite, whose only non-test file is doc.go — SharedSuite and the per-engine suites live in its 100 _test.go files, which no importer can reach — and the go command refuses a module outside the repository that imports an internal package of quark (\"use of internal package … not allowed\"). An external driver can prove its classifier (DRV-03) and nothing about the SQL its dialect writes.",
+			want:   present,
+			note:   "Measured from the fixture driver built standalone (GOWORK=off): it imports quarkdriver/drivertest/suite, whose graph is 165 packages against the library's 160 — no container library, no engine driver, no Redis or OpenTelemetry — and its TestEngineSuite passes suite.Run's 43 subtests on its own engine. internal/enginesuite's TestSuiteSQLite runs the same suite.Run, with the same 43 subtests, and so do the five integration lanes (TestSuite<Engine>/EngineSuite). The 43 are the engine-generic subtests of the shared suite, moved out of internal/enginesuite unchanged but for a portable DROP TABLE; the 29 that stay there branch on a built-in engine's name, start a container, need Redis or an OpenTelemetry collector, or touch the tenancy paths — and the dialect kit (DRV-05) is the engine-agnostic form of their dialect half.",
 			probe:  probeEngineSuiteReachable,
 		},
 		{

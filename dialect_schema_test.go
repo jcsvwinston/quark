@@ -386,3 +386,16 @@ func TestBuiltinsAnswerApplyPlansQuestions(t *testing.T) {
 		}
 	}
 }
+
+// TestDropCheckMariaDB: MariaDB has no DROP CHECK — it drops a CHECK as the
+// constraint it is — while MySQL 8.0.16+ keeps DROP CHECK. The MySQL spelling
+// MariaDB inherited was Error 1064 on MariaDB 11.4, found by the dialect
+// kit's ObjectDropper check (drivertest.VerifyDialect, A11 Q4).
+func TestDropCheckMariaDB(t *testing.T) {
+	if got, want := MySQL().(quarkdriver.ObjectDropper).DropCheck("t", "ck"), "ALTER TABLE `t` DROP CHECK `ck`"; got != want {
+		t.Errorf("MySQL DropCheck = %q, want %q", got, want)
+	}
+	if got, want := MariaDB().(quarkdriver.ObjectDropper).DropCheck("t", "ck"), "ALTER TABLE `t` DROP CONSTRAINT `ck`"; got != want {
+		t.Errorf("MariaDB DropCheck = %q, want %q", got, want)
+	}
+}

@@ -427,6 +427,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MariaDBDialect).DropCheck",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).HistoryBetween",
       "kind": "method"
     },
@@ -4315,7 +4320,27 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
+      "name": "DialectCase",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
+      "name": "Routines",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
       "name": "Verify",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
+      "name": "VerifyDialect",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest/suite",
+      "name": "Run",
       "kind": "func"
     },
     {

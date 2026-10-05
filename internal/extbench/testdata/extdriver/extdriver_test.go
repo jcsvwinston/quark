@@ -5,13 +5,16 @@ package extdriver_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
 	"github.com/jcsvwinston/quark/quarkdriver/drivertest"
+	"github.com/jcsvwinston/quark/quarkdriver/drivertest/suite"
 
 	_ "example.com/extdriver"
+	"example.com/extdriver/dialect"
 	"example.com/extdriver/errs"
 )
 
@@ -66,6 +69,35 @@ func TestConformance(t *testing.T) {
 		Classifier: errs.Classifier,
 		Unique:     uniqueErr(t),
 	})
+}
+
+// TestDialectConformance runs the dialect kit against the fixture's own
+// dialect, on the engine the driver registers, with foreign keys enforced so
+// the kit's foreign-key checks are judged by the engine and not only by the
+// catalog.
+func TestDialectConformance(t *testing.T) {
+	db, err := sql.Open(errs.Engine, "file:dialect_kit?mode=memory&cache=shared&_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	drivertest.VerifyDialect(t, drivertest.DialectCase{
+		Dialect:    dialect.New(errs.Engine),
+		DB:         db,
+		DriverName: errs.Engine,
+	})
+}
+
+// TestEngineSuite runs the engine suite the in-repo engines run
+// (internal/enginesuite calls the same suite.Run on all six), on the engine
+// this driver registers, opened by name.
+func TestEngineSuite(t *testing.T) {
+	c, err := quark.New(errs.Engine, "file:engine_suite?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("quark.New(%q): %v", errs.Engine, err)
+	}
+	defer c.Close()
+	suite.Run(t, c)
 }
 
 func TestEndToEnd(t *testing.T) {

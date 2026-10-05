@@ -1,7 +1,7 @@
 // Copyright 2026 jcsvwinston
 // SPDX-License-Identifier: Apache-2.0
 
-package enginesuite
+package suite
 
 import (
 	"context"
@@ -22,7 +22,7 @@ type arrayDoc struct {
 }
 
 // testArray exercises the Array[T] wrapper through Migrate → Create →
-// Find → Update on every dialect that the SharedSuite covers. The same
+// Find → Update on every dialect the engine suite runs on. The same
 // JSON-shaped column type backs all engines (`jsonColumnType` in
 // internal/migrate); this test pins the round-trip on each one,
 // including MSSQL once Value() binds the payload as NVARCHAR.

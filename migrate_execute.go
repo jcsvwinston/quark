@@ -540,7 +540,7 @@ func (c *Client) addCheck(ctx context.Context, exec Executor, table, name, expre
 
 // dropCheck drops a CHECK constraint by name, as the dialect writes it
 // (quarkdriver.ObjectDropper): ALTER TABLE … DROP CONSTRAINT by default —
-// PostgreSQL, SQL Server, Oracle — and DROP CHECK on MySQL and MariaDB.
+// PostgreSQL, SQL Server, Oracle, MariaDB — and DROP CHECK on MySQL.
 func (c *Client) dropCheck(ctx context.Context, exec Executor, table, name string) error {
 	ddl := ""
 	if dr, ok := c.dialect.(quarkdriver.ObjectDropper); ok {

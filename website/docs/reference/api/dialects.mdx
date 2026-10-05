@@ -272,9 +272,9 @@ For `ApplyPlan`, PostgreSQL implements `ColumnAlterer` only to read the name of
 the primary-key constraint it drops, and takes the standard statements
 otherwise; MySQL and MariaDB restate the column with `MODIFY COLUMN`; SQL Server
 treats a default as the named constraint it is there; Oracle writes one
-`MODIFY` with only what changes. MySQL, MariaDB (`DROP INDEX … ON`,
-`DROP FOREIGN KEY`, `DROP CHECK`) and SQL Server (`DROP INDEX … ON`) implement
-`ObjectDropper`. SQLite implements `TableRebuilder`: it has no `ALTER COLUMN`
+`MODIFY` with only what changes. MySQL (`DROP INDEX … ON`, `DROP FOREIGN KEY`,
+`DROP CHECK`), MariaDB (the same, with `DROP CONSTRAINT` for a `CHECK`: it has
+no `DROP CHECK`) and SQL Server (`DROP INDEX … ON`) implement `ObjectDropper`. SQLite implements `TableRebuilder`: it has no `ALTER COLUMN`
 and no `ADD`/`DROP CONSTRAINT`, so a column change, a foreign key and a `CHECK`
 rebuild the table inside the plan's transaction. The rebuild reads SQLite's own
 catalog, so only an engine that keeps that catalog can answer true.
@@ -316,3 +316,75 @@ wrapper of `quark.PostgreSQL()`, like the one above, forwards `ColumnTyper`,
 wrapper of `quark.SQLite()` forwards `ColumnTyper`, `AutoIncrementer`,
 `TableRebuilder` and `SchemaIntrospector`.
 
+
+## Checking a dialect
+
+`github.com/jcsvwinston/quark/quarkdriver/drivertest` is the conformance kit a
+driver module runs from its own tests. `VerifyDialect` checks a dialect against
+a live engine the test opens — every method of `Dialect` and every optional
+interface the dialect implements, through Quark's queries and its schema path —
+and judges each one by what the engine then holds or refuses, not by the text
+of a statement:
+
+```go
+func TestDialectConformance(t *testing.T) {
+    dsn := os.Getenv("EXTSQL_TEST_DSN")
+    if dsn == "" {
+        t.Skip("EXTSQL_TEST_DSN not set")
+    }
+    db, err := sql.Open("extsql", dsn)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer db.Close()
+    drivertest.VerifyDialect(t, drivertest.DialectCase{
+        Dialect:    extsql.Dialect(),
+        DB:         db,
+        DriverName: "extsql",
+    })
+}
+```
+
+| `DialectCase` field | What it is for |
+| --- | --- |
+| `Dialect` | The dialect under test. Required. |
+| `DB` | A pool on a live engine of the dialect's kind, with more than one connection. The kit creates and drops tables named `qk_kit_*`. `nil` runs only the checks that need no engine, and logs that the rest were skipped. |
+| `DriverName` | The `database/sql` name `DB` was opened with. When set, the kit also checks that `quark.NewWithDB(DriverName, DB)` resolves this dialect without `WithDialect` — that the driver registered it under its name. |
+| `Routines` | A function and a procedure the test created on the engine, for `BuildRoutineQuery` and `BuildProcedureCall`. `nil` skips those two checks. |
+
+The subtests are named after the member of the contract they check —
+`engine/Placeholder`, `engine/UpsertSQL`, `engine/ColumnTyper/KindTime`,
+`engine/ObjectDropper/DropCheck` — so a failure names the method to fix. An
+optional interface the dialect does not implement is logged with the default
+Quark uses instead, and the check exercises that default: a dialect that leaves
+out `AutoIncrementer` on an engine without SQL-standard identity columns fails
+`engine/AutoIncrementer`, not a test somewhere downstream. A wrapper that forgot
+to forward an interface of the built-in it embeds shows up the same way: as the
+check that needed it failing, or logged as skipped.
+
+The six built-in dialects run the kit against their engines in Quark's own CI,
+and the kit found two of them wrong before it shipped: MariaDB dropped a `CHECK`
+with MySQL's `DROP CHECK`, and SQL Server accepted a shared lock that skips
+locked rows, which the engine refuses.
+
+`github.com/jcsvwinston/quark/quarkdriver/drivertest/suite` is the engine
+suite: the checks the six built-in engines run on a whole `*quark.Client` —
+CRUD, the query builder, transactions and savepoints, hooks, soft deletes,
+locking, preloads and joins, subqueries and window functions, batch writes,
+JSON and arrays, time zones, `Sync` and reversible migrations:
+
+```go
+func TestEngineSuite(t *testing.T) {
+    client, err := quark.New("extsql", os.Getenv("EXTSQL_TEST_DSN"))
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer client.Close()
+    suite.Run(t, client)
+}
+```
+
+Both packages import Quark and the standard library only: running them adds no
+driver and no container library to the module's dependencies. They grow with
+the contract — a release that adds an optional interface adds its check — so a
+driver that pins a newer Quark may meet a check it did not run before.

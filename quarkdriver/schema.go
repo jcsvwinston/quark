@@ -277,9 +277,9 @@ type ColumnAlterer interface {
 //
 // A dialect that does not implement ObjectDropper gets DROP INDEX <index>
 // and ALTER TABLE <table> DROP CONSTRAINT <name> for both constraints —
-// what PostgreSQL and Oracle write. MySQL and MariaDB (DROP INDEX … ON,
-// DROP FOREIGN KEY, DROP CHECK) and SQL Server (DROP INDEX … ON) implement
-// it.
+// what PostgreSQL and Oracle write. MySQL (DROP INDEX … ON, DROP FOREIGN
+// KEY, DROP CHECK), MariaDB (the same, but DROP CONSTRAINT for a CHECK) and
+// SQL Server (DROP INDEX … ON) implement it.
 type ObjectDropper interface {
 	DropIndex(table, index string) string
 	DropForeignKey(table, constraint string) string
