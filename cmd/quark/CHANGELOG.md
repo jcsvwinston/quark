@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/jcsvwinston/quark/compare/cmd/quark/v1.1.2...cmd/quark/v1.2.0) (2026-10-05)
+
+
+### Added
+
+* **cli:** quark init --with chi, echo, gin and grpc scaffolds what the tested fixtures run, compiled in CI (A11 Q10) ([#438](https://github.com/jcsvwinston/quark/issues/438)) ([822bcd3](https://github.com/jcsvwinston/quark/commit/822bcd3db62234e80202afd05c4eac1a7752e734))
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.15.2 ([#439](https://github.com/jcsvwinston/quark/issues/439)) ([5db2724](https://github.com/jcsvwinston/quark/commit/5db2724031879f1ee4947f6bd3c5fd8bf2ba8209))
+
 ## [1.1.2](https://github.com/jcsvwinston/quark/compare/cmd/quark/v1.1.1...cmd/quark/v1.1.2) (2026-10-04)
 
 
