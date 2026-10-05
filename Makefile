@@ -43,7 +43,8 @@ check: workspace lint docs-guards ## Las lanes baratas de CI: vet+gofmt, guards 
 	bash scripts/ci/check_action_pins.sh
 	cd acceptance && go run ./cmd/gen-apisurface && go run ./cmd/gen-allowlist
 	@git diff --quiet acceptance/apisurface.json acceptance/allowlist.json || \
-		{ echo "apisurface/allowlist rancios: commitea la regeneración (make regen)"; exit 1; }
+		{ git --no-pager diff -U3 acceptance/apisurface.json acceptance/allowlist.json | head -n 400; \
+		  echo "apisurface/allowlist rancios: commitea la regeneración (make regen)"; exit 1; }
 	CGO_ENABLED=0 go build ./...
 	GOOS=linux GOARCH=arm64 go build ./...
 	cd cmd/quark && CGO_ENABLED=0 go build ./...

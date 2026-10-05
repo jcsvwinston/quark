@@ -154,6 +154,14 @@ wording changes between driver releases.
 Both also walk the wrapping chain, so an error you have wrapped yourself
 still classifies.
 
+On PostgreSQL the code comes from the `SQLState() string` method that both
+pgx and lib/pq errors have — the interface `quarkdriver.SQLStater`. Quark reads
+any error in the chain that implements it as a PostgreSQL SQLSTATE (`23505` is
+a unique violation, `40P01` a deadlock). Every other engine's errors are
+recognised by the driver module you import, which registers a
+`quarkdriver.Classifier`; see the [extension contract](../extension-contract)
+for both.
+
 `IsDeadlock` is for callers driving their own retry loop. If you build the
 client with [`WithDeadlockRetry`](/docs/reference/api/client), quark already
 re-runs the victim transaction for you and you will not see the error at all.

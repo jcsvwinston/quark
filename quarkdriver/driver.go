@@ -84,6 +84,31 @@ type Classifier struct {
 	TransientConn func(error) bool
 }
 
+// SQLStater is implemented by a driver error that reports a PostgreSQL
+// SQLSTATE:
+//
+//	SQLState() string
+//
+// It is the one classification path that needs no registered Classifier.
+// Quark finds an SQLStater anywhere in an error's Unwrap chain (errors.As) and
+// reads its code as PostgreSQL's: 23505 is a unique violation and 40P01 a
+// deadlock, answered from the code alone without consulting the registered
+// classifiers; class 08 and 57P01–57P03 are a transient connection failure,
+// and 55P03 is a migration lock that timed out. Both PostgreSQL drivers Quark
+// documents — pgx (*pgconn.PgError) and lib/pq (*pq.Error) — implement it,
+// which is why drivers/postgres registers no Classifier.
+//
+// A driver for another engine should not implement SQLState with codes of its
+// own: Quark would read them as PostgreSQL's. Register a Classifier instead.
+//
+// Quark asserts against this type, so a driver module can check its error
+// type at compile time:
+//
+//	var _ quarkdriver.SQLStater = (*Error)(nil)
+type SQLStater interface {
+	SQLState() string
+}
+
 var (
 	mu          sync.RWMutex
 	classifiers = map[string]Classifier{}

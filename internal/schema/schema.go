@@ -224,7 +224,10 @@ func GetModelMetaByType(t reflect.Type) *ModelMeta {
 	return actual.(*ModelMeta)
 }
 
-// TableNamer interface for custom table names.
+// TableNamer is implemented by a model that names its own table. Package
+// quark exports it as quark.TableNamer, an alias of this type, so the
+// interface an application asserts against is the one computeModelMeta
+// asserts below.
 type TableNamer interface {
 	TableName() string
 }
@@ -233,8 +236,9 @@ type TableNamer interface {
 func computeModelMeta(t reflect.Type) *ModelMeta {
 	tableName := ToSnakeCase(Pluralize(t.Name()))
 
-	// Check if type implements TableName() string
-	// We create a zero value of the type to check for methods
+	// A model that implements TableNamer (quark.TableNamer) names its table.
+	// The zero value is a *T, so a method on the value or on the pointer
+	// receiver both count.
 	zero := reflect.New(t).Interface()
 	if tn, ok := zero.(TableNamer); ok {
 		tableName = tn.TableName()

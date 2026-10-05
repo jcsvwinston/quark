@@ -6,7 +6,8 @@ from the driver name, so most applications never touch this API.
 
 You need it in two cases — overriding a mis-detected dialect, and registering a
 dialect of your own. See [Dialects](../dialects) for the engine-by-engine
-support table.
+support table, and the [extension contract](../extension-contract) for every
+interface of the dialect contract with its proposed stability.
 
 ## Built-In Constructors
 
@@ -200,6 +201,12 @@ name is how a dialect is registered and found, not what it can do.
 A dialect that does not implement one gets the default in the table: a
 portable spelling where one exists, or `ErrUnsupportedFeature` where none does.
 It never gets DDL chosen for another engine's name.
+
+`ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`, `ColumnAlterer`,
+`ObjectDropper` and `TableRebuilder` are proposed as **experimental** in the
+[extension contract](../extension-contract): no `v1` release breaks them, but
+no engine outside Quark has implemented them yet, and under the proposal `v2`
+could change their shape without a deprecation period.
 
 | Interface | Asked for | Default when not implemented |
 | --- | --- | --- |

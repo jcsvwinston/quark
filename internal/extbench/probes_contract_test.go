@@ -167,36 +167,91 @@ func docPages(t *testing.T, e *env) map[string]string {
 
 var backticked = regexp.MustCompile("`([A-Za-z_][A-Za-z0-9_.]*)`")
 
-// stabilityRows returns, for one page, the symbols that a markdown table with
-// a "stability" column declares — one per row, the first backticked name of
-// the row's first cell.
-func stabilityRows(page string) []string {
-	var rows []string
-	inTable := false
+// stabilityRow is one row of a markdown table with a "stability" column: the
+// symbol its first cell names (the first backticked name in it), and the
+// values of its stability and extension-point columns, lower-cased and
+// stripped of markup.
+type stabilityRow struct {
+	symbol    string
+	stability string
+	extension string
+}
+
+// stabilityTables returns, for one page, every markdown table whose header
+// has a "stability" column, as its rows. A table may also carry a column
+// whose header starts with "extension"; a row's extension value is its first
+// word.
+func stabilityTables(page string) [][]stabilityRow {
+	var tables [][]stabilityRow
+	var current []stabilityRow
+	inTable, stabCol, extCol := false, -1, -1
+	flush := func() {
+		if inTable {
+			tables = append(tables, current)
+		}
+		current, inTable, stabCol, extCol = nil, false, -1, -1
+	}
+	clean := func(cell string) string {
+		cell = strings.NewReplacer("*", "", "`", "", "_", " ").Replace(strings.TrimSpace(cell))
+		return strings.ToLower(strings.TrimSpace(cell))
+	}
+	header := false
 	for _, line := range strings.Split(page, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "|") {
-			inTable = false
+			flush()
+			header = false
 			continue
 		}
 		cells := strings.Split(strings.Trim(trimmed, "|"), "|")
-		if !inTable {
-			for _, c := range cells {
-				if strings.EqualFold(strings.TrimSpace(c), "stability") {
-					inTable = true
+		if !inTable && !header {
+			header = true
+			for i, c := range cells {
+				switch h := clean(c); {
+				case h == "stability":
+					stabCol = i
+				case strings.HasPrefix(h, "extension"):
+					extCol = i
 				}
+			}
+			if stabCol >= 0 {
+				inTable = true
 			}
 			continue
 		}
-		if m := backticked.FindStringSubmatch(cells[0]); m != nil {
-			rows = append(rows, m[1])
+		if !inTable || strings.Trim(trimmed, "|-: ") == "" {
+			continue // a table without a stability column, or the separator row
 		}
+		m := backticked.FindStringSubmatch(cells[0])
+		if m == nil {
+			continue
+		}
+		row := stabilityRow{symbol: m[1]}
+		if stabCol < len(cells) {
+			row.stability = clean(cells[stabCol])
+		}
+		if extCol >= 0 && extCol < len(cells) {
+			if f := strings.Fields(clean(cells[extCol])); len(f) > 0 {
+				row.extension = strings.Trim(f[0], ".,;:—-")
+			}
+		}
+		current = append(current, row)
 	}
-	return rows
+	flush()
+	return tables
 }
 
+// The values a contract row may carry. What each one promises is the page's
+// to say (website/docs/reference/extension-contract.mdx); the probe holds the
+// vocabulary fixed, so a row cannot invent a fourth stability nobody defined.
+var (
+	stabilityValues = map[string]bool{"stable": true, "experimental": true, "internal-use": true}
+	extensionValues = map[string]bool{"yes": true, "no": true}
+)
+
 func probeContractPage(t *testing.T, e *env) verdict {
-	census := implementable(e.loadAPI(t))
+	api := e.loadAPI(t)
+	census := implementable(api)
 	if len(census) == 0 {
 		t.Fatal("the census of implementable types is empty: the probe is broken, not the contract")
 	}
@@ -206,23 +261,38 @@ func probeContractPage(t *testing.T, e *env) verdict {
 		known[c.qualified()] = c
 	}
 	// A page may name a type by its alias in package quark — quark.Dialect
-	// for quarkdriver.Dialect since A11 Q3 — and that is the same type: a
-	// stability row naming it declares the census entry, it does not dangle.
-	for alias, target := range censusAliases(e.loadAPI(t)) {
+	// for quarkdriver.Dialect since A11 Q3, the name acceptance/apisurface.json
+	// records as alias_of — and that is the same type: a row naming it
+	// declares the census entry, it does not dangle.
+	for alias, target := range censusAliases(api) {
 		if c, ok := known[target]; ok {
 			known[alias] = c
 		}
 	}
 
-	declared := map[string]bool{} // census entries a stability row declares
-	dangling := 0                 // rows naming nothing in the census
+	// The contract is ONE table: the tables with a stability column that
+	// name at least one census type. Anything else with a stability column
+	// (a CLI page, a feature matrix) is not about these types.
+	type contractTable struct {
+		page string
+		rows []stabilityRow
+	}
+	var tables []contractTable
 	bestPage, bestMentions := "", 0
-	for path, page := range docPages(t, e) {
-		for _, sym := range stabilityRows(page) {
-			if c, ok := known[sym]; ok {
-				declared[c.qualified()] = true
-			} else {
-				dangling++
+	pages := docPages(t, e)
+	paths := make([]string, 0, len(pages))
+	for path := range pages {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		page := pages[path]
+		for _, rows := range stabilityTables(page) {
+			for _, r := range rows {
+				if _, ok := known[r.symbol]; ok {
+					tables = append(tables, contractTable{path, rows})
+					break
+				}
 			}
 		}
 		mentioned := map[string]bool{}
@@ -236,17 +306,47 @@ func probeContractPage(t *testing.T, e *env) verdict {
 		}
 	}
 
+	declared := map[string]int{} // census entry → rows declaring it
+	var dangling, badValue []string
+	for _, tb := range tables {
+		for _, r := range tb.rows {
+			c, ok := known[r.symbol]
+			if !ok {
+				dangling = append(dangling, r.symbol)
+				continue
+			}
+			declared[c.qualified()]++
+			if !stabilityValues[r.stability] || !extensionValues[r.extension] {
+				badValue = append(badValue, fmt.Sprintf("%s (stability %q, extension point %q)", r.symbol, r.stability, r.extension))
+			}
+		}
+	}
+	var missing, twice []string
+	for _, c := range census {
+		switch declared[c.qualified()] {
+		case 0:
+			missing = append(missing, c.qualified())
+		case 1:
+		default:
+			twice = append(twice, c.qualified())
+		}
+	}
+
 	kinds := map[string]int{}
 	for _, c := range census {
 		kinds[c.kind]++
 	}
 	t.Logf("census: %d implementable types (%d interfaces, %d function types, %d records of functions)",
 		len(census), kinds["interface"], kinds["func"], kinds["record"])
-	t.Logf("declared with a stability on some page: %d of %d (%d rows name nothing in the census)", len(declared), len(census), dangling)
+	for _, tb := range tables {
+		t.Logf("contract table on %s: %d rows", tb.page, len(tb.rows))
+	}
+	t.Logf("declared: %d of %d; not declared: %v; declared twice: %v; rows naming nothing in the census: %v; rows with a value outside the vocabulary: %v",
+		len(declared), len(census), missing, twice, dangling, badValue)
 	t.Logf("the page that names the most of them: %s, with %d of %d", bestPage, bestMentions, len(census))
 
 	switch {
-	case len(declared) == len(census) && dangling == 0:
+	case len(tables) == 1 && len(missing) == 0 && len(twice) == 0 && len(dangling) == 0 && len(badValue) == 0:
 		return present
 	case len(declared) > 0:
 		return partial
@@ -256,74 +356,185 @@ func probeContractPage(t *testing.T, e *env) verdict {
 }
 
 // --- CON-02 -------------------------------------------------------------------
+//
+// The freeze is acceptance/apisurface.json, which CI regenerates and diffs on
+// every pull request. Since A11 Q6 every func, method and type in it carries
+// a "sig", so the question is no longer whether a member is NAMED there but
+// whether the file records the shape the compiler sees for every member a
+// third-party implementation depends on: then any change to one — a
+// parameter's type, a result added, a predicate added to a record of
+// functions — moves the file, and the freshness check fails with the diff.
+//
+// The probe renders the expected shape from the compiler's export data by
+// the generator's rules (acceptance/cmd/gen-apisurface: qualifier, funcSig,
+// typeSig). The generator lives in a module this one cannot import, so the
+// rules are written twice; a difference between the two renderings shows up
+// here as a member whose recorded sig is not the compiler's, with both
+// printed.
+
+const surfaceModule = "github.com/jcsvwinston/quark"
+
+func surfaceQualifier(self string) types.Qualifier {
+	return func(p *types.Package) string {
+		switch path := p.Path(); {
+		case path == self:
+			return ""
+		case path == surfaceModule:
+			return "quark"
+		case strings.HasPrefix(path, surfaceModule+"/"):
+			return strings.TrimPrefix(path, surfaceModule+"/")
+		default:
+			return p.Name()
+		}
+	}
+}
+
+func surfaceTuple(t *types.Tuple, variadic bool, q types.Qualifier) []string {
+	out := make([]string, 0, t.Len())
+	for i := 0; i < t.Len(); i++ {
+		typ := t.At(i).Type()
+		if sl, ok := typ.(*types.Slice); ok && variadic && i == t.Len()-1 {
+			out = append(out, "..."+types.TypeString(sl.Elem(), q))
+			continue
+		}
+		out = append(out, types.TypeString(typ, q))
+	}
+	return out
+}
+
+func surfaceSigBody(sig *types.Signature, q types.Qualifier) string {
+	s := "(" + strings.Join(surfaceTuple(sig.Params(), sig.Variadic(), q), ", ") + ")"
+	switch res := surfaceTuple(sig.Results(), false, q); len(res) {
+	case 0:
+	case 1:
+		s += " " + res[0]
+	default:
+		s += " (" + strings.Join(res, ", ") + ")"
+	}
+	return s
+}
+
+func surfaceTypeParams(tps *types.TypeParamList, q types.Qualifier) string {
+	if tps == nil || tps.Len() == 0 {
+		return ""
+	}
+	parts := make([]string, tps.Len())
+	for i := 0; i < tps.Len(); i++ {
+		parts[i] = tps.At(i).Obj().Name() + " " + types.TypeString(tps.At(i).Constraint(), q)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func surfaceFuncSig(sig *types.Signature, q types.Qualifier) string {
+	return "func" + surfaceTypeParams(sig.TypeParams(), q) + surfaceSigBody(sig, q)
+}
+
+// frozenShape returns, for one census entry, the symbols of apisurface.json
+// that fix what an implementation depends on, each with the sig the compiler
+// says it should carry: an interface's methods (or, for an alias of an
+// internal interface, the alias's own entry, which spells them out), a
+// function type's signature, a record's fields.
+func frozenShape(a *apiTypes, c censusEntry) map[string]string {
+	tn := a.lookup(c.pkg, c.name).(*types.TypeName)
+	q := surfaceQualifier(c.pkg)
+	prefix := ""
+	if tn.IsAlias() {
+		prefix = "= "
+	}
+	tparams := ""
+	if named, ok := tn.Type().(*types.Named); ok && named.TypeParams().Len() > 0 {
+		tparams = surfaceTypeParams(named.TypeParams(), q) + " "
+	}
+	out := map[string]string{}
+	switch u := tn.Type().Underlying().(type) {
+	case *types.Interface:
+		var methods []string
+		for i := 0; i < u.NumMethods(); i++ {
+			m := u.Method(i)
+			sig := m.Type().(*types.Signature)
+			if tn.IsAlias() {
+				methods = append(methods, m.Name()+surfaceSigBody(sig, q))
+			} else {
+				out[fmt.Sprintf("(%s).%s", c.name, m.Name())] = surfaceFuncSig(sig, q)
+			}
+		}
+		if tn.IsAlias() {
+			out[c.name] = "= interface{" + strings.Join(methods, "; ") + "}"
+		}
+	case *types.Signature:
+		out[c.name] = tparams + prefix + surfaceFuncSig(u, q)
+	case *types.Struct:
+		var fields []string
+		for i := 0; i < u.NumFields(); i++ {
+			if f := u.Field(i); f.Exported() {
+				fields = append(fields, f.Name()+" "+types.TypeString(f.Type(), q))
+			}
+		}
+		out[c.name] = tparams + prefix + "struct{" + strings.Join(fields, "; ") + "}"
+	}
+	return out
+}
 
 func probeSurfaceFreeze(t *testing.T, e *env) verdict {
-	census := implementable(e.loadAPI(t))
+	api := e.loadAPI(t)
+	census := implementable(api)
 	raw, err := os.ReadFile(filepath.Join(e.root, "acceptance", "apisurface.json"))
 	if err != nil {
 		t.Fatalf("read the frozen surface: %v", err)
 	}
 	var surface struct {
-		Symbols []map[string]any `json:"symbols"`
+		Symbols []struct {
+			Pkg  string `json:"pkg"`
+			Name string `json:"name"`
+			Sig  string `json:"sig"`
+		} `json:"symbols"`
 	}
 	if err := json.Unmarshal(raw, &surface); err != nil {
 		t.Fatalf("parse apisurface.json: %v", err)
 	}
-	recorded := map[string]bool{}
-	fields := map[string]bool{}
+	recorded := map[string]string{} // "pkg name" → sig
 	for _, s := range surface.Symbols {
-		recorded[fmt.Sprint(s["pkg"])+" "+fmt.Sprint(s["name"])] = true
-		for k := range s {
-			fields[k] = true
-		}
+		recorded[s.Pkg+" "+s.Name] = s.Sig
 	}
 
-	// What a third party's code depends on: an interface's methods, a
-	// record's fields, a function type itself.
-	var total, named int
-	var missing []string
+	var total, named, frozen int
+	var notNamed, drifted []string
 	for _, c := range census {
-		var keys []string
-		switch c.kind {
-		case "interface":
-			for _, m := range c.members {
-				keys = append(keys, fmt.Sprintf("(%s).%s", c.name, m))
-			}
-		case "record":
-			for _, f := range c.members {
-				keys = append(keys, c.name+"."+f)
-			}
-		case "func":
-			keys = append(keys, c.name)
+		shape := frozenShape(api, c)
+		keys := make([]string, 0, len(shape))
+		for k := range shape {
+			keys = append(keys, k)
 		}
+		sort.Strings(keys)
 		for _, k := range keys {
 			total++
-			if recorded[c.pkg+" "+k] {
+			got, ok := recorded[c.pkg+" "+k]
+			switch {
+			case !ok:
+				notNamed = append(notNamed, c.qual+"."+k)
+			case got != shape[k]:
 				named++
-			} else {
-				missing = append(missing, c.qual+"."+k)
+				drifted = append(drifted, fmt.Sprintf("%s.%s: the file records %q, the compiler has %q", c.qual, k, got, shape[k]))
+			default:
+				named++
+				frozen++
 			}
 		}
 	}
-	var fieldList []string
-	for f := range fields {
-		fieldList = append(fieldList, f)
+	t.Logf("symbols that fix what a third-party implementation depends on: %d; in apisurface.json by name: %d; with the compiler's signature: %d", total, named, frozen)
+	if len(notNamed) > 0 {
+		t.Logf("not in the file: %v", notNamed)
 	}
-	sort.Strings(fieldList)
-	// alias_of names the type an alias points at (A11 Q3): it ties a moved
-	// type's name to its members, and fixes no parameter, so it is not a
-	// signature.
-	carriesSignature := false
-	for _, f := range fieldList {
-		if f != "pkg" && f != "name" && f != "kind" && f != "alias_of" {
-			carriesSignature = true
+	for i, d := range drifted {
+		if i == 10 {
+			t.Logf("… and %d more", len(drifted)-10)
+			break
 		}
+		t.Logf("drifted: %s", d)
 	}
-	t.Logf("members a third party depends on: %d; recorded by name in apisurface.json: %d; not recorded: %v", total, named, missing)
-	t.Logf("an entry of apisurface.json carries %v — a signature change leaves it byte-identical: %v", fieldList, !carriesSignature)
 
 	switch {
-	case named == total && carriesSignature:
+	case total > 0 && frozen == total:
 		return present
 	case named > 0:
 		return partial

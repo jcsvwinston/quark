@@ -62,6 +62,12 @@ var interfaceTypes = map[string]bool{
 	"ColumnAlterer": true, "ObjectDropper": true, "TableRebuilder": true,
 	"AfterCreateHook": true, "AfterUpdateHook": true, "AfterDeleteHook": true, "AfterFindHook": true,
 	"BeforeCreateHook": true, "BeforeUpdateHook": true, "BeforeDeleteHook": true, "BeforeFindHook": true,
+	// The interfaces that name a convention Quark calls on a caller's type
+	// (A11 Q6, CON-07): a model's Validate, a driver error's SQLState. The
+	// domain's models and the drivers' errors implement them; Quark calls
+	// them. quark.TableNamer is an alias of an internal interface and lists
+	// no method symbol of its own.
+	"Validator": true, "SQLStater": true,
 }
 
 // recvType extrae el nombre del tipo receptor de un símbolo método:

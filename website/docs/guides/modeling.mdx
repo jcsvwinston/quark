@@ -41,6 +41,8 @@ When the table already exists under another name, implement `TableName()`:
 func (Product) TableName() string {
     return "catalog_products"
 }
+
+var _ quark.TableNamer = Product{} // fails to compile if the method is misspelt
 ```
 
 Quark parses and caches a struct's metadata the first time it sees the type, so
@@ -281,6 +283,8 @@ func (m *Member) Validate(ctx context.Context) error {
     }
     return nil
 }
+
+var _ quark.Validator = (*Member)(nil)
 ```
 
 ## Automatic timestamps
