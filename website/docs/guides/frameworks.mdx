@@ -36,6 +36,13 @@ that CI builds against that framework and tests over the network on SQLite,
 and the test fails when a block on this page stops matching the package's
 code.
 
+`quark init --with <framework>` starts a project from the same packages, for
+chi, Echo, Gin, gRPC and Nucleus: it writes the section's package as
+`internal/<app>`, the shared `notes` package as `internal/notes`, and a
+`go.mod` that requires the framework at the version CI tests them with.
+Each section below says what it writes; [CLI](cli#with-a-framework) has the
+details.
+
 ## What every section serves
 
 Every section serves the same four routes over the same model, from a
@@ -270,6 +277,10 @@ r.Get("/notes/{id}", func(w http.ResponseWriter, r *http.Request) {
 The other three routes are the net/http handlers, registered with `r.Get`
 and `r.Post`; `writeJSON` and `writeError` are the same two functions.
 
+`quark init --dialect sqlite --with chi` writes this package as
+`internal/<app>/chi.go` and a `cmd/<app>-server/main.go` that opens the one
+client, migrates the model and serves `NewRouter(client)` on `:8080`.
+
 ## Echo
 
 Echo wraps the request: the context is `c.Request().Context()`. Handlers
@@ -366,6 +377,10 @@ of `*echo.Context`, the error handler is `func(err error, c echo.Context)`
 and delegates to `e.DefaultHTTPErrorHandler(err, c)`, and
 `echo.NewHTTPError(status).SetInternal(err)` takes the place of `Wrap`. The
 Quark calls do not change.
+
+`quark init --dialect sqlite --with echo` writes this package, for Echo v5,
+as `internal/<app>/echo.go`, and a `cmd/<app>-server/main.go` that serves
+`NewServer(client)` on `:8080`.
 
 ## Gin
 
@@ -464,6 +479,10 @@ func answerErrors(c *gin.Context) {
     }
 }
 ```
+
+`quark init --dialect sqlite --with gin` writes this package as
+`internal/<app>/gin.go`, and a `cmd/<app>-server/main.go` that serves
+`NewEngine(client)` on `:8080`.
 
 ## gRPC
 
@@ -578,6 +597,13 @@ loopback listener and calls it through the generated client: the same
 requests as the HTTP sections, answered with `AlreadyExists`, `NotFound`,
 `InvalidArgument` and `DeadlineExceeded` where they answer 409, 404, 400
 and 504.
+
+`quark init --dialect sqlite --with grpc` writes this package as
+`internal/<app>/grpc.go` and the service as `internal/<app>/notespb`: the
+`.proto`, the code generated from it, and the `buf.gen.yaml` that regenerates
+it. The descriptor in the generated code names the project's Go package, as
+`buf generate` would write it for the project. A `cmd/<app>-server/main.go`
+serves `NewServer(client)` on `:50051`.
 
 ## Nucleus
 
@@ -699,15 +725,13 @@ func fail(err error) error {
 }
 ```
 
-The CLI writes this shape for you:
-`quark init --dialect sqlite --with nucleus` adds `internal/<app>/module.go`
-to the plain `init` layout — a module like this one serving
-`GET`/`POST /api/notes`, with the driver module for your dialect
-blank-imported — and a minimal `nucleus.yml`
-(the default database, pointing at the same one `.quark.yml` names, plus
-host, port and `env: development`; an existing file is kept). Quark has no
-dependency on Nucleus, so `init` writes the module as source and leaves
-`main.go` to you. For a whole application generated around this seam —
+`quark init --dialect sqlite --with nucleus` writes this module as
+`internal/<app>/module.go`, with the driver module for your dialect
+blank-imported, and a minimal `nucleus.yml` (the default database, pointing
+at the same one `.quark.yml` names, plus host, port and
+`env: development`; an existing file is kept). Quark has no dependency on
+Nucleus, and `main.go` stays yours: build the client and mount the module
+with the line above. For a whole application generated around this seam —
 configuration, policy file, migrations, the admin panel — start from the
 Nucleus side instead: `nucleus new <app> --with quark`.
 

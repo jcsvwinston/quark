@@ -85,9 +85,13 @@ test-all: workspace ## Matriz completa: exporta los QUARK_TEST_*_DSN de los moto
 superapp: workspace ## Aceptación del superapp con gate estricto en sqlite (all-engines: ~45 min con 6 contenedores, ver ci.yml)
 	cd acceptance && go run . -engines=sqlite -gate=strict
 
-regen: ## Regenera apisurface.json y allowlist.json EN ESTE ORDEN (allowlist lee apisurface)
+regen: workspace ## Regenera apisurface.json y allowlist.json EN ESTE ORDEN (allowlist lee apisurface) y las copias de las fixtures que escribe `quark init --with`
 	cd acceptance && go run ./cmd/gen-apisurface
 	cd acceptance && go run ./cmd/gen-allowlist
+	@# `quark init --with` escribe copias byte a byte de internal/integrations
+	@# (cmd/quark/commands/templates/integrations); TestInitWithTemplatesAreTheFixtures
+	@# falla en `make check` cuando una copia y su fixture difieren.
+	cd cmd/quark && QUARK_SYNC_TEMPLATES=1 go test ./commands -run '^TestInitWithTemplatesAreTheFixtures$$' -count=1
 
 oracle-up: ## Arranca el Oracle de la matriz con el mismo bootstrap que CI (readiness + GRANT DBMS_LOCK)
 	bash scripts/ci/oracle-up.sh

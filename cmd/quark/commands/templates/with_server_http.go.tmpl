@@ -1,0 +1,72 @@
+// Command {{.Project}}-server serves the notes API of internal/{{.Package}} with
+// {{.Framework}}, scaffolded by 'quark init --with {{.Target}}'. It opens the
+// process's one *quark.Client, creates the notes table when it is missing,
+// and serves until it is interrupted:
+//
+//	go run ./cmd/{{.Project}}-server
+//
+// The database is the one .quark.yml was written with; set
+// QUARK_DATABASE_DEFAULT_DSN to point at another — the variable the
+// migration runner in cmd/{{.Project}} reads too. ADDR sets the listen address
+// ({{.Addr}} by default).
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/jcsvwinston/quark"
+
+	"{{.Module}}/internal/{{.Package}}"
+	"{{.Module}}/internal/notes"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, env("ADDR", "{{.Addr}}"), env("QUARK_DATABASE_DEFAULT_DSN", {{printf "%q" .DSN}}))
+	stop()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run opens the client, migrates the model and serves the API on addr until
+// ctx is done.
+func run(ctx context.Context, addr, dsn string) error {
+	client, err := quark.New({{printf "%q" .Driver}}, dsn)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := client.Migrate(ctx, &notes.Note{}); err != nil {
+		return err
+	}
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           {{.Package}}.{{.Constructor}}(client),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		_ = srv.Shutdown(context.WithoutCancel(ctx))
+	}()
+	log.Printf("serving the notes API on %s", addr)
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func env(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

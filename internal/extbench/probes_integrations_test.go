@@ -15,9 +15,12 @@ package extbench
 // frameworks guide's section to that code. Nothing else compiles against a
 // framework: a code block in a guide is text until a test compares it with
 // code that builds, and a module that requires the framework only
-// indirectly never imports it.
+// indirectly never imports it. What `quark init --with` writes counts by the
+// same rule (INT-06): once the CLI's build test has written the project for
+// that target and built, vetted and tested it against this tree.
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -43,14 +46,6 @@ var frameworks = map[string]framework{
 	"gin":     {name: "Gin", module: "github.com/gin-gonic/gin", initArg: "gin"},
 	"grpc":    {name: "gRPC", module: "google.golang.org/grpc", initArg: "grpc"},
 	"nucleus": {name: "Nucleus", module: "github.com/jcsvwinston/nucleus", initArg: "nucleus"},
-}
-
-// directRequirers returns the modules of the repository whose go.mod
-// requires module directly (not `// indirect`).
-func directRequirers(t *testing.T, e *env, module string) []string {
-	t.Helper()
-	direct, _ := requirers(t, e, module)
-	return direct
 }
 
 // requirers returns the modules of the repository whose go.mod requires
@@ -217,29 +212,141 @@ func initWithTargets(t *testing.T, e *env) []string {
 	return targets
 }
 
+// initWithBuildTest is the CLI's test that runs `quark init --with <target>`
+// for every target into a project of its own, points every Quark module the
+// project requires at this tree with a replace, and runs go mod tidy, go
+// build, go vet and go test over it with no workspace
+// (cmd/quark/commands/init_with_test.go). Its subtest for a target passes
+// only when what init wrote compiles; the bench asks for it by name, the way
+// INT-01…INT-05 ask for TestGuideMatchesFixture.
+const initWithBuildTest = "TestInitWithBuilds"
+
+// cliModules are the modules the CLI is built from in this tree: the CLI
+// itself, the library and the five drivers it links.
+var cliModules = []string{".", "cmd/quark", "drivers/mssql", "drivers/mysql", "drivers/oracle", "drivers/postgres", "drivers/sqlite"}
+
+// cliWorkspace writes a go.work that builds the CLI against THIS tree — what
+// scripts/ci/link_workspace.sh writes for CI's CLI lane — and returns its
+// path. The CLI requires the library and the drivers by version, and cannot
+// carry a replace (`go install` refuses one), so the workspace replaces each
+// version a member requires of another member with that member's directory.
+func cliWorkspace(t *testing.T, e *env) string {
+	t.Helper()
+	type mod struct {
+		path, dir, goVersion string
+		requires             [][2]string
+	}
+	var mods []mod
+	for _, rel := range cliModules {
+		dir := filepath.Join(e.root, rel)
+		raw, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := mod{dir: dir}
+		inBlock := false
+		for _, line := range strings.Split(string(raw), "\n") {
+			line = strings.TrimSpace(strings.SplitN(line, "//", 2)[0])
+			f := strings.Fields(line)
+			switch {
+			case len(f) == 2 && f[0] == "module":
+				m.path = f[1]
+			case len(f) == 2 && f[0] == "go":
+				m.goVersion = f[1]
+			case line == "require (":
+				inBlock = true
+			case line == ")":
+				inBlock = false
+			case inBlock && len(f) == 2:
+				m.requires = append(m.requires, [2]string{f[0], f[1]})
+			case len(f) == 3 && f[0] == "require":
+				m.requires = append(m.requires, [2]string{f[1], f[2]})
+			}
+		}
+		mods = append(mods, m)
+	}
+	goVersion := ""
+	var b strings.Builder
+	b.WriteString("use (\n")
+	member := map[string]string{}
+	for _, m := range mods {
+		member[m.path] = m.dir
+		b.WriteString("\t" + m.dir + "\n")
+		if goVersion == "" || versionLess(goVersion, m.goVersion) {
+			goVersion = m.goVersion
+		}
+	}
+	b.WriteString(")\n")
+	seen := map[[2]string]bool{}
+	for _, m := range mods {
+		for _, r := range m.requires {
+			if dir, ok := member[r[0]]; ok && !seen[r] {
+				seen[r] = true
+				fmt.Fprintf(&b, "\nreplace %s %s => %s\n", r[0], r[1], dir)
+			}
+		}
+	}
+	work := filepath.Join(t.TempDir(), "go.work")
+	if err := os.WriteFile(work, []byte("go "+goVersion+"\n\n"+b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return work
+}
+
+// versionLess compares two go directives ("1.25.7" < "1.26").
+func versionLess(a, b string) bool {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(as) || i < len(bs); i++ {
+		var x, y int
+		if i < len(as) {
+			x, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			y, _ = strconv.Atoi(bs[i])
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return false
+}
+
+// probeInitWith counts a target once the CLI accepts it AND what it writes
+// compiles: the CLI's own build test, run against this tree, passed the
+// target's subtest. A target the flag accepts whose output nothing builds
+// is text a guide hands the reader, which is what INT-01…INT-05 exist to
+// rule out.
 func probeInitWith(t *testing.T, e *env) verdict {
 	accepted := map[string]bool{}
 	for _, target := range initWithTargets(t, e) {
 		accepted[target] = true
 	}
+	childProbe(t)
+	dir := filepath.Join(e.root, "cmd", "quark")
+	out, err := goRun(t, dir, []string{"GOWORK=" + cliWorkspace(t, e)},
+		"test", "-count=1", "-json", "-run", "^"+initWithBuildTest+"$", "./commands")
+	run := parseTestJSON(out)
+	if run.action[initWithBuildTest] == "" {
+		t.Fatalf("the CLI's %s did not run (%v):\n%s", initWithBuildTest, err, out)
+	}
 	var yes, no, uncompiled []string
 	for _, key := range []string{"chi", "echo", "gin", "grpc", "nucleus"} {
-		if !accepted[frameworks[key].initArg] {
+		arg := frameworks[key].initArg
+		if !accepted[arg] {
 			no = append(no, key)
 			continue
 		}
 		yes = append(yes, key)
-		// What --with writes is source text for a framework this module
-		// does not require; it is checked only where a module compiles it.
-		if len(directRequirers(t, e, frameworks[key].module)) == 0 {
+		if sub := initWithBuildTest + "/" + arg; run.action[sub] != "pass" {
 			uncompiled = append(uncompiled, key)
+			t.Logf("%s: %s\n%s", sub, run.action[sub], run.output[sub])
 		}
 	}
-	t.Logf("quark init --with accepts %v and refuses %v; accepted targets whose output no module of the repository compiles: %v", yes, no, uncompiled)
+	t.Logf("quark init --with accepts %v and refuses %v; accepted targets whose output did not build, vet and test against this tree (%s): %v", yes, no, initWithBuildTest, uncompiled)
 	switch {
 	case len(no) == 0 && len(uncompiled) == 0:
 		return present
-	case len(yes) > 0:
+	case len(yes) > len(uncompiled):
 		return partial
 	default:
 		return absent

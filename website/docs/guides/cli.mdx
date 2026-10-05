@@ -75,37 +75,67 @@ Next steps:
 The runner is what runs migrations and seeders — the standalone `quark` binary
 cannot (see [below](#embedding-the-same-operations-in-your-own-binary)).
 
-### With Nucleus
+### With a framework
 
 ```bash
-quark init --dialect sqlite --with nucleus
+quark init --dialect sqlite --with chi    # or echo, gin, grpc, nucleus
 ```
 
-`--with nucleus` adds two files to the layout above. `internal/<app>/module.go`
-is a Nucleus module that wraps the Quark client — an example model, `OnStart`
-registering and migrating it, `GET`/`POST /api/notes` routes, the module's own
-access rules and CSRF exemption, and the driver module for the chosen dialect
-blank-imported so a duplicate key answers 409. `nucleus.yml` is the minimum
-`FromConfigFile` needs to boot: the default database (the same one `.quark.yml`
-names, in the URL form Nucleus reads — `sqlite://myapp.db`, `postgres://…`,
-`mysql://…`), `host`, `port` and `env: development`. Neither file is
-overwritten if it exists. The runner and the rest of the layout are unchanged.
-The next steps then add the Nucleus dependency and the mount line:
+`--with` adds the code of one section of [Web Frameworks](frameworks) to the
+layout above: the framework's package as `internal/<app>`, the `notes` model
+and its error-to-status mapping as `internal/notes`, and the driver module of
+the chosen dialect blank-imported, so a duplicate key answers 409 (or
+`AlreadyExists`). It is not a template written beside the guide: the CLI
+carries copies of the packages CI builds against each framework and tests
+over the network, and changes only their package name, their doc comment
+and their import paths.
+
+| `--with` | writes | serve it with |
+| --- | --- | --- |
+| `chi` | `internal/<app>/chi.go` | `go run ./cmd/<app>-server` (`:8080`) |
+| `echo` | `internal/<app>/echo.go` (Echo v5) | `go run ./cmd/<app>-server` (`:8080`) |
+| `gin` | `internal/<app>/gin.go` | `go run ./cmd/<app>-server` (`:8080`) |
+| `grpc` | `internal/<app>/grpc.go` and the service in `internal/<app>/notespb` (`.proto`, generated code, `buf.gen.yaml`) | `go run ./cmd/<app>-server` (`:50051`) |
+| `nucleus` | `internal/<app>/module.go`, a Nucleus module, and `nucleus.yml` | the mount line in your `main.go` |
+
+`cmd/<app>-server/main.go` opens the process's one client on the database
+`.quark.yml` was written with (`QUARK_DATABASE_DEFAULT_DSN` points it at
+another, as it does for the runner), migrates the model, and serves until it
+is interrupted; `ADDR` changes the listen address. `nucleus.yml` is the
+minimum `FromConfigFile` needs to boot: the default database (the same one
+`.quark.yml` names, in the URL form Nucleus reads — `sqlite://myapp.db`,
+`postgres://…`, `mysql://…`), `host`, `port` and `env: development`. No file
+that exists is overwritten, and the runner and the rest of the layout are
+unchanged.
+
+`init` also writes the requirements into `go.mod`: the framework at the
+version CI tests these packages with, and `github.com/jcsvwinston/quark` and
+`github.com/jcsvwinston/quark/cmd/quark` at the versions the `quark` binary
+you ran was built from. A requirement the `go.mod` already has is kept at its
+version; a development build of the CLI has no release to pin and leaves the
+two Quark modules to `go mod tidy`, which resolves their latest release. The
+next steps then start with one command instead of the `go get`s:
 
 ```text
-  3. go get github.com/jcsvwinston/nucleus@latest # the host framework of internal/shop
-  4. In main: client, err := quark.New("sqlite", dsn) and nucleus.New().FromConfigFile("nucleus.yml").Mount(shop.Module(client))
+  2. go mod tidy   # fetches what go.mod requires, and the sqlite driver module
+  3. go run ./cmd/shop-server   # serves internal/shop with chi on :8080; QUARK_DATABASE_DEFAULT_DSN picks the database
+```
+
+For Nucleus, `main.go` is the host application's, so step 3 is the mount
+line instead:
+
+```text
+  3. In main: client, err := quark.New("sqlite", dsn) and nucleus.New().FromConfigFile("nucleus.yml").Mount(shop.Module(client))
      nucleus.yml is written here and names the .quark.yml database; edit both if you change it.
      For the whole application generated around this module (config, policy file, admin panel):
        nucleus new shop --with quark
 ```
 
-Quark has no dependency on Nucleus — it is the data layer the framework sits
-on — so the module is written as source and `main.go` stays yours;
-`nucleus new <app> --with quark` is the path when you want the whole
-application generated. An unknown `--with` target fails before anything is
-written, like an unknown dialect. See [Web Frameworks](frameworks#nucleus) for
-the module's shape.
+Quark has no dependency on any of these frameworks: the CLI writes their code
+as text, and the build that checks it runs in Quark's CI, where each target is
+scaffolded into a project of its own and built, vetted and tested. `--with`
+takes one framework per project, and an unknown one fails before anything is
+written, like an unknown dialect.
 
 ## Migrations from the CLI
 

@@ -1,0 +1,67 @@
+// Command {{.Project}}-server serves the notes service of internal/{{.Package}}
+// over gRPC, scaffolded by 'quark init --with grpc'. It opens the process's
+// one *quark.Client, creates the notes table when it is missing, and serves
+// until it is interrupted:
+//
+//	go run ./cmd/{{.Project}}-server
+//
+// The database is the one .quark.yml was written with; set
+// QUARK_DATABASE_DEFAULT_DSN to point at another — the variable the
+// migration runner in cmd/{{.Project}} reads too. ADDR sets the listen address
+// ({{.Addr}} by default).
+package main
+
+import (
+	"context"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/jcsvwinston/quark"
+
+	"{{.Module}}/internal/{{.Package}}"
+	"{{.Module}}/internal/notes"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, env("ADDR", "{{.Addr}}"), env("QUARK_DATABASE_DEFAULT_DSN", {{printf "%q" .DSN}}))
+	stop()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run opens the client, migrates the model and serves the service on addr
+// until ctx is done; then it lets the calls in flight finish.
+func run(ctx context.Context, addr, dsn string) error {
+	client, err := quark.New({{printf "%q" .Driver}}, dsn)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := client.Migrate(ctx, &notes.Note{}); err != nil {
+		return err
+	}
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	srv := {{.Package}}.{{.Constructor}}(client)
+	go func() {
+		<-ctx.Done()
+		srv.GracefulStop()
+	}()
+	log.Printf("serving the notes service on %s", ln.Addr())
+	return srv.Serve(ln)
+}
+
+func env(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

@@ -1,0 +1,45 @@
+// Copyright 2026 jcsvwinston
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package notes.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/jcsvwinston/quark/internal/integrations/withgrpc/notespb";
+
+// Notes serves the notes API over gRPC.
+service Notes {
+  rpc List(ListRequest) returns (NoteList);
+  rpc Get(GetRequest) returns (Note);
+  rpc Create(Draft) returns (Note);
+  // Import creates every draft in one transaction: all of them, or none.
+  rpc Import(ImportRequest) returns (NoteList);
+}
+
+message Note {
+  int64 id = 1;
+  string title = 2;
+  string body = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message Draft {
+  string title = 1;
+  string body = 2;
+}
+
+message ListRequest {}
+
+message GetRequest {
+  int64 id = 1;
+}
+
+message ImportRequest {
+  repeated Draft drafts = 1;
+}
+
+message NoteList {
+  repeated Note notes = 1;
+}

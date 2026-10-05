@@ -73,7 +73,20 @@ closing a gap turns the suite red with "this one moved, update the verdict".
    the one module of the repository that requires Nucleus; the library still
    does not. Writing the Nucleus fixture found that Nucleus's `BindJSON`
    answered 400 to any JSON array (NU-107, fixed in nucleus#591): it
-   validated what it decoded as a struct.
+   validated what it decoded as a struct. *A11 Q10* made `quark init --with`
+   write those packages for chi, Echo, Gin, gRPC and Nucleus, each beside
+   `internal/notes` and, for the first four, a server main; before it `--with`
+   knew Nucleus alone, and what it wrote — a module of its own shape, not the
+   fixture's — was built by nothing (it did compile, against Nucleus v1.30.1,
+   when this session first built it). The CLI now embeds byte-for-byte copies
+   of the fixtures, which a CLI test compares with them, and `INT-06` runs the
+   CLI test that writes a project per target and builds, vets and tests it
+   against this tree. Building the gRPC scaffold found the one rewrite a
+   string substitution gets wrong: the generated code embeds the fixture's
+   `go_package` in a length-prefixed descriptor, and replacing the path in
+   the text compiles and then panics when the protobuf runtime loads it. The
+   CLI re-encodes the descriptor, and the build test reads it back through
+   the protobuf runtime.
 6. **The API surface CI freezes records names, not signatures** (`CON-02`),
    and three conventions Quark calls on a caller's type — `TableName()`,
    `Validate(ctx)`, `SQLState()` — have no exported interface (`CON-07`).
@@ -131,7 +144,7 @@ dialect's name.
 
 ## The result
 
-**13 of 22 controls present. 5 partial. 4 absent.**
+**14 of 22 controls present. 4 partial. 4 absent.**
 
 ### contract — 4 present · 3 partial · 1 absent
 
@@ -159,7 +172,7 @@ dialect's name.
 | `DRV-07` | A driver module outside this repository can run the engine conformance suite the in-repo engines run | **absent** | Measured: the suite is internal/enginesuite, whose only non-test file is doc.go — SharedSuite and the per-engine suites live in its 100 _test.go files, which no importer can reach — and the go command refuses a module outside the repository that imports an internal package of quark ("use of internal package … not allowed"). An external driver can prove its classifier (DRV-03) and nothing about the SQL its dialect writes. |
 | `DRV-08` | A driver template module builds standalone (GOWORK=off) and passes the kit | **absent** | Measured over every go.mod of the repository: 12 modules — the library, the CLI, the five drivers, the acceptance harness, the benchmarks, the bug-bash harness, the engine suites and the integration fixtures — and no other module requires the library, so nothing is a template for a driver someone else writes. The nearest things are the five drivers, each one engine's module pinned to a published quark, and the fixture this bench builds for DRV-03, which lives in testdata. |
 
-### integrations — 5 present · 1 partial · 0 absent
+### integrations — 6 present · 0 partial · 0 absent
 
 | id | control | verdict | what is missing |
 |---|---|---|---|
@@ -168,4 +181,4 @@ dialect's name.
 | `INT-03` | Gin: a module of the repository serves Quark behind a Gin engine, its tests pass standalone, and they hold the guide's Gin section to that code | **present** | — |
 | `INT-04` | gRPC: a module of the repository serves Quark behind a gRPC service, its tests pass standalone, and they hold the guide's gRPC section to that code | **present** | — |
 | `INT-05` | Nucleus: a module of the repository serves Quark from a Nucleus module, its tests pass standalone, and they hold the guide's Nucleus section to that code | **present** | — |
-| `INT-06` | quark init --with writes each official integration, and what it writes is compiled by a module of the repository | **partial** | Measured on the CLI's flag validation — the CLI is a module of its own (ADR-0024) the bench cannot import, so it reads the initWithTargets literal the validation consults, with go/parser: --with accepts nucleus and refuses chi, echo, gin and grpc. What --with nucleus writes is still built by nothing. Since A11 Q9 a module of the repository requires Nucleus — internal/integrations, whose Nucleus fixture is written by hand in the shape the template writes — and this probe counts a module that requires the framework as compiling the target's output, so it no longer lists nucleus as uncompiled; that check has to read the template's output itself before it can say so. |
+| `INT-06` | quark init --with writes each official integration — chi, Echo, Gin, gRPC and Nucleus — and what it writes builds, vets and tests in a project of its own against this tree | **present** | Measured by running the CLI's TestInitWithBuilds against this tree (the CLI is a module of its own that the bench cannot import, so it runs the module's test through a workspace, as CI's CLI lane does), after reading the initWithTargets literal the flag's validation consults: --with accepts all five, and for each the test writes a project with `quark init --with <target>`, replaces every Quark module it requires with this tree, and runs go mod tidy, go build, go vet and go test with no workspace — a dialect per target, so the driver rewrite compiles for every engine module. What init writes is the fixture's code (A11 Q10): the CLI embeds byte-for-byte copies of internal/integrations, a CLI test fails when a copy and its fixture differ, and init changes only the package clause and its doc comment, the import paths and the driver module, beside a server main for chi, Echo, Gin and gRPC. Before A11 Q10 --with accepted nucleus alone and what it wrote was built by nothing; a probe that counted a module requiring the framework as compiling the template's output said less than that. Breaking one copy turns its subtest red and this control to partial. |

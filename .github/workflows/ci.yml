@@ -355,6 +355,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          # TestInitWithBuilds builds what `quark init --with` writes for
+          # chi, Echo, Gin, gRPC and Nucleus, so the frameworks the fixtures
+          # require are this lane's dependencies too.
+          cache-dependency-path: |
+            go.sum
+            cmd/quark/go.sum
+            internal/integrations/go.sum
 
       # The CLI requires the library and the five driver modules by version.
       # A `replace` would be the obvious way to point them at this tree, and

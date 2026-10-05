@@ -1,0 +1,14 @@
+# Regenerates notes.pb.go and notes_grpc.pb.go from notes.proto:
+#
+#   cd internal/integrations/withgrpc/notespb && buf generate
+#
+# The plugins run through `go run` at pinned versions, so nothing has to be
+# installed but buf; the protobuf runtime they target is the one go.mod pins.
+version: v2
+plugins:
+  - local: ["go", "run", "google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12"]
+    out: .
+    opt: paths=source_relative
+  - local: ["go", "run", "google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2"]
+    out: .
+    opt: paths=source_relative
