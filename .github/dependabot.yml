@@ -1,7 +1,8 @@
 # Dependency update proposals, weekly, grouped so a Monday brings one pull
 # request per family of modules rather than one per module and one per
-# dependency. Quark is eleven Go modules — the library at the root, the CLI,
-# the five driver modules and four local harnesses — so each family is listed
+# dependency. Quark is twelve Go modules — the library at the root, the CLI,
+# the five driver modules, four local harnesses and the integration
+# fixtures — so each family is listed
 # on its own, with the reason for every `ignore` written next to it. Every go.mod in the tree has an entry here, and
 # the lint job fails if one appears without it.
 version: 2
@@ -107,6 +108,26 @@ updates:
       # requires resolves from the proxy and ages normally — the engine
       # libraries underneath (modernc.org/sqlite, jackc/pgx/v5, go-mssqldb,
       # golang.org/x/crypto).
+      - dependency-name: github.com/jcsvwinston/quark
+      - dependency-name: github.com/jcsvwinston/quark/drivers/*
+
+  # The integration fixtures: Quark served from net/http, chi, Echo and Gin,
+  # never published, with the frameworks guide checked against them. Kept
+  # apart from the harnesses because what ages here is the frameworks
+  # themselves — a bump is a new chi, Echo or Gin that the fixtures, and the
+  # guide's code with them, are then built and tested against before it
+  # merges.
+  - package-ecosystem: gomod
+    directories:
+      - /internal/integrations
+    schedule:
+      interval: weekly
+    groups:
+      integration-fixtures:
+        patterns: ["*"]
+    ignore:
+      # Replaced by this tree in the module's go.mod, as in the acceptance
+      # harness: their versions are never resolved.
       - dependency-name: github.com/jcsvwinston/quark
       - dependency-name: github.com/jcsvwinston/quark/drivers/*
 

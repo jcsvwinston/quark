@@ -75,7 +75,8 @@ docs: add comparison table justifications
 ```
 
 > **Version-neutral scopes:** PRs that only touch the test-harness areas
-> (`acceptance/`, `bugbash/`, `benchmarks/`, `TASKS.md`) must use the
+> (`acceptance/`, `bugbash/`, `benchmarks/`, `internal/integrations/`,
+> `TASKS.md`) must use the
 > `test` or `chore` types — a `feat`/`fix` there bumps the library version and
 > enters the library CHANGELOG, which records library-level changes only.
 > (`release-please-config.json` also lists these paths under `exclude-paths`
@@ -102,7 +103,8 @@ go mod download
 
 The repository is several Go modules, not one: the library at the root, the
 CLI under `cmd/quark`, the five driver modules under `drivers/`, the engine
-suites under `internal/enginesuite`, and the harnesses and examples. A
+suites under `internal/enginesuite`, the framework fixtures under
+`internal/integrations`, and the harnesses. A
 `go test ./...` at the root reaches the first of those only — `make check`
 walks the rest, and the sections below say which directory each command runs
 in.
@@ -122,13 +124,14 @@ go test ./... -run TestSQLite
 ```bash
 go test ./...                                  # the library's own tests
 cd internal/enginesuite && go test ./...       # the engine suites, on SQLite
+cd internal/integrations && GOWORK=off go test ./...  # net/http, chi, Echo and Gin fixtures, and the frameworks guide checked against them
 ```
 
 The engine suites live in a module of their own so that the drivers and the
 container modules they need stay out of the library's `go.mod`
 ([ADR-0024](docs/adr/0024-cli-en-modulo-propio.md)). The test names did not
 change with the move, so every `-run` filter below still says what it said —
-it is the directory you run it from that moved. `make test` runs both.
+it is the directory you run it from that moved. `make test` runs all three.
 
 ### PostgreSQL
 

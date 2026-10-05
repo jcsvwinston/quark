@@ -1,7 +1,7 @@
 ---
 sidebar_position: 12
 title: Web Frameworks
-description: Use Quark from net/http, chi, Echo, Gin and Nucleus — one client per process, the request context per query, and the driver module linked so a duplicate key becomes a 409.
+description: Use Quark from net/http, chi, Echo, Gin and Nucleus — one client per process, the request context per query, one transaction per request, and Quark's error classification turned into status codes.
 ---
 
 # Using Quark from a web framework
@@ -16,15 +16,38 @@ whichever one you use:
 2. Open every query with the **request's context** —
    `quark.For[Note](ctx, client)` — so a cancelled request or a deadline
    reaches the database instead of leaving the query running.
-3. Blank-import the **driver module** for your engine
+3. When a request writes more than once, give it **one transaction**:
+   `client.Tx` with the request's context, every write through
+   `quark.ForTx`, and the response written after `Tx` returns, so a client
+   never reads a 201 for writes that were rolled back.
+4. Turn a failed call into a status with Quark's **error classification**
+   — `quark.ErrNotFound`, `quark.IsUniqueViolation`, `quark.ErrTimeout` —
+   never with the driver's message text.
+5. Blank-import the **driver module** for your engine
    (`_ "github.com/jcsvwinston/quark/drivers/sqlite"`). It registers the
    `database/sql` driver and the error classifier behind
    `quark.IsUniqueViolation`; importing the bare driver boots just the same
-   and silently turns the 409 below into a 500. See
+   and silently turns every 409 below into a 500. See
    [Pick a driver](installation#pick-a-driver).
 
-Each section below serves the same two routes over this model, so the only
-thing that changes between them is the framework's own idiom:
+The Go in the net/http, chi, Echo and Gin sections is not a sketch. Each of
+them is a package in the
+[Quark repository](https://github.com/jcsvwinston/quark/tree/main/internal/integrations)
+that CI builds against that framework and tests over HTTP on SQLite, and the
+test fails when a block on this page stops matching the package's code.
+
+## What every section serves
+
+Every section serves the same four routes over the same model, from a
+package `notes` the sections share, so the only thing that changes between
+them is the framework's own idiom:
+
+| Route | Answers |
+| --- | --- |
+| `GET /notes` | the newest hundred notes |
+| `GET /notes/{id}` | one note; 404 when there is none, 400 when the id is not a number |
+| `POST /notes` | 201 and the created note; 400 without a title; 409 when the title is taken |
+| `POST /notes/import` | several notes in one transaction: 201 and all of them, or nothing written and the status of the first failure |
 
 ```go
 type Note struct {
@@ -33,137 +56,413 @@ type Note struct {
     Body      string    `db:"body" json:"body"`
     CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
+
+// Draft is what a client sends. The server owns the id and the timestamp.
+type Draft struct {
+    Title string `json:"title"`
+    Body  string `json:"body"`
+}
+
+// ErrNoTitle is the one way a draft can be invalid.
+var ErrNoTitle = errors.New("a note needs a title")
+
+// Note turns a draft into the row to insert.
+func (d Draft) Note() (Note, error) {
+    if strings.TrimSpace(d.Title) == "" {
+        return Note{}, ErrNoTitle
+    }
+    return Note{Title: d.Title, Body: d.Body, CreatedAt: time.Now().UTC()}, nil
+}
 ```
 
-Titles are unique on purpose: the POST handler has a duplicate to classify.
+Titles are unique on purpose: creating a note with a taken title gives the
+handler a duplicate key to classify.
+
+One function decides the status of every failure a handler meets — its own
+validation, or an error Quark returned:
+
+```go
+// Status is the HTTP status for an error a handler meets: its own
+// validation, or one Quark returned.
+func Status(err error) int {
+    switch {
+    case errors.Is(err, ErrNoTitle):
+        return http.StatusBadRequest
+    case errors.Is(err, quark.ErrNotFound):
+        return http.StatusNotFound
+    case quark.IsUniqueViolation(err):
+        return http.StatusConflict
+    case errors.Is(err, quark.ErrTimeout):
+        return http.StatusGatewayTimeout
+    default:
+        return http.StatusInternalServerError
+    }
+}
+```
+
+Quark matches driver error codes, not messages, so this switch does not
+change with the engine or with the server's language — as long as the
+engine's driver module is linked.
 
 ## net/http
 
-The standard library is enough. The request context is `r.Context()`:
+The standard library is enough. A process opens its one client at startup,
+migrates, and hands the client to the handlers:
 
 ```go
-client, err := quark.New("sqlite", "notes.db")
-if err != nil {
-    log.Fatal(err)
-}
-defer client.Close()
-if err := client.Migrate(context.Background(), &Note{}); err != nil {
-    log.Fatal(err)
-}
-
-mux := http.NewServeMux()
-mux.HandleFunc("GET /notes", func(w http.ResponseWriter, r *http.Request) {
-    notes, err := quark.For[Note](r.Context(), client).OrderBy("id", "DESC").Limit(100).List()
+// Serve opens the process's one client, migrates the model and serves the
+// notes API on ln until ctx is done.
+func Serve(ctx context.Context, ln net.Listener, dsn string) error {
+    client, err := quark.New("sqlite", dsn)
     if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
+        return err
     }
-    w.Header().Set("Content-Type", "application/json")
-    _ = json.NewEncoder(w).Encode(notes)
-})
-mux.HandleFunc("POST /notes", func(w http.ResponseWriter, r *http.Request) {
-    var n Note
-    if err := json.NewDecoder(r.Body).Decode(&n); err != nil || n.Title == "" {
-        http.Error(w, "title is required", http.StatusBadRequest)
-        return
+    defer client.Close()
+    if err := client.Migrate(ctx, &notes.Note{}); err != nil {
+        return err
     }
-    if err := quark.For[Note](r.Context(), client).Create(&n); err != nil {
-        if quark.IsUniqueViolation(err) {
-            http.Error(w, "a note with that title already exists", http.StatusConflict)
+
+    srv := &http.Server{Handler: NewMux(client)}
+    go func() {
+        <-ctx.Done()
+        _ = srv.Shutdown(context.WithoutCancel(ctx))
+    }()
+    if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+        return err
+    }
+    return nil
+}
+```
+
+The request context is `r.Context()`, and Go's `ServeMux` reads the id from
+the path with `r.PathValue`:
+
+```go
+// NewMux wires the handlers on the client it is given, so a test can hand
+// it a throwaway database.
+func NewMux(client *quark.Client) *http.ServeMux {
+    mux := http.NewServeMux()
+
+    mux.HandleFunc("GET /notes", func(w http.ResponseWriter, r *http.Request) {
+        list, err := quark.For[notes.Note](r.Context(), client).OrderBy("id", "DESC").Limit(100).List()
+        if err != nil {
+            writeError(w, err)
             return
         }
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    w.WriteHeader(http.StatusCreated)
-    _ = json.NewEncoder(w).Encode(n)
-})
-log.Fatal(http.ListenAndServe(":8080", mux))
+        writeJSON(w, http.StatusOK, list)
+    })
+
+    mux.HandleFunc("GET /notes/{id}", func(w http.ResponseWriter, r *http.Request) {
+        id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+        if err != nil {
+            writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the id is a number"})
+            return
+        }
+        n, err := quark.For[notes.Note](r.Context(), client).Find(id)
+        if err != nil {
+            writeError(w, err)
+            return
+        }
+        writeJSON(w, http.StatusOK, n)
+    })
+
+    mux.HandleFunc("POST /notes", func(w http.ResponseWriter, r *http.Request) {
+        var d notes.Draft
+        if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+            writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the body is a JSON note"})
+            return
+        }
+        n, err := d.Note()
+        if err == nil {
+            err = quark.For[notes.Note](r.Context(), client).Create(&n)
+        }
+        if err != nil {
+            writeError(w, err)
+            return
+        }
+        writeJSON(w, http.StatusCreated, n)
+    })
+
+    mux.HandleFunc("POST /notes/import", func(w http.ResponseWriter, r *http.Request) {
+        var drafts []notes.Draft
+        if err := json.NewDecoder(r.Body).Decode(&drafts); err != nil || len(drafts) == 0 {
+            writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the body is a JSON list of notes"})
+            return
+        }
+        created := make([]notes.Note, 0, len(drafts))
+        err := client.Tx(r.Context(), func(tx *quark.Tx) error {
+            for _, d := range drafts {
+                n, err := d.Note()
+                if err == nil {
+                    err = quark.ForTx[notes.Note](r.Context(), tx).Create(&n)
+                }
+                if err != nil {
+                    return err // rolls back every note written before it
+                }
+                created = append(created, n)
+            }
+            return nil
+        })
+        if err != nil {
+            writeError(w, err)
+            return
+        }
+        writeJSON(w, http.StatusCreated, created)
+    })
+
+    return mux
+}
+```
+
+The import route is the transaction-per-request pattern. Every write goes
+through the `*quark.Tx` that `client.Tx` hands the function, the first
+failure returns from it and rolls back everything written before, and the
+handler answers only after `Tx` has committed or rolled back. A middleware
+that opens a transaction around the whole handler and commits after it
+returns looks shorter, but by then the handler has already written its 201,
+and a commit that fails cannot take it back.
+
+```go
+// writeError answers with the status notes.Status gives err. The body names
+// the status, not the error: a driver's message can name tables and
+// columns, and it belongs in a log, not in a response.
+func writeError(w http.ResponseWriter, err error) {
+    status := notes.Status(err)
+    writeJSON(w, status, map[string]string{"error": http.StatusText(status)})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(status)
+    _ = json.NewEncoder(w).Encode(v)
+}
 ```
 
 ## chi
 
-chi handlers are plain `http.HandlerFunc`s, so the snippet above works
-unchanged inside `r.Get` / `r.Post`. The example wires the router in a
-`newRouter(client) http.Handler` function so the test can hand it a
-throwaway database:
+chi handlers are plain `http.HandlerFunc`s, so the net/http handlers above
+work unchanged inside `r.Get` and `r.Post`, and the request context is
+still `r.Context()`. What chi adds is the router and its middleware:
 
 ```go
 r := chi.NewRouter()
 r.Use(middleware.Recoverer)
-r.Get("/notes", func(w http.ResponseWriter, r *http.Request) {
-    notes, err := quark.For[Note](r.Context(), client).OrderBy("id", "DESC").Limit(100).List()
-    // ...
-})
-r.Post("/notes", func(w http.ResponseWriter, r *http.Request) {
-    // ... quark.For[Note](r.Context(), client).Create(&n)
+```
+
+and a path parameter is read with `chi.URLParam`:
+
+```go
+r.Get("/notes/{id}", func(w http.ResponseWriter, r *http.Request) {
+    id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+    if err != nil {
+        writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the id is a number"})
+        return
+    }
+    n, err := quark.For[notes.Note](r.Context(), client).Find(id)
+    if err != nil {
+        writeError(w, err)
+        return
+    }
+    writeJSON(w, http.StatusOK, n)
 })
 ```
+
+The other three routes are the net/http handlers, registered with `r.Get`
+and `r.Post`; `writeJSON` and `writeError` are the same two functions.
 
 ## Echo
 
-Echo wraps the request: the context is `c.Request().Context()`, and
-returning an error from a handler lets Echo's error handler answer. The
-example builds the server in `newServer(client) *echo.Echo`:
+Echo wraps the request: the context is `c.Request().Context()`. Handlers
+return their errors, and Echo passes every one of them to a single
+`HTTPErrorHandler` — the one place to map Quark's errors to a status:
 
 ```go
-e := echo.New()
-e.Use(middleware.Recover())
-e.GET("/notes", func(c echo.Context) error {
-    notes, err := quark.For[Note](c.Request().Context(), client).OrderBy("id", "DESC").Limit(100).List()
-    if err != nil {
-        return err
-    }
-    return c.JSON(http.StatusOK, notes)
-})
-e.POST("/notes", func(c echo.Context) error {
-    var n Note
-    if err := c.Bind(&n); err != nil || n.Title == "" {
-        return c.JSON(http.StatusBadRequest, map[string]string{"error": "title is required"})
-    }
-    if err := quark.For[Note](c.Request().Context(), client).Create(&n); err != nil {
-        if quark.IsUniqueViolation(err) {
-            return c.JSON(http.StatusConflict, map[string]string{"error": "a note with that title already exists"})
+// NewServer wires the handlers on the client it is given, so a test can
+// hand it a throwaway database.
+func NewServer(client *quark.Client) *echo.Echo {
+    e := echo.New()
+    e.Use(middleware.Recover())
+
+    // Handlers return Quark's errors as they come; this decides their
+    // status. An error that already carries one — Echo's own, from a failed
+    // bind or path parameter — keeps it.
+    e.HTTPErrorHandler = func(c *echo.Context, err error) {
+        if echo.StatusCode(err) == 0 {
+            err = echo.NewHTTPError(notes.Status(err), "").Wrap(err)
         }
-        return err
+        echo.DefaultHTTPErrorHandler(false)(c, err)
     }
-    return c.JSON(http.StatusCreated, n)
-})
+
+    e.GET("/notes", func(c *echo.Context) error {
+        list, err := quark.For[notes.Note](c.Request().Context(), client).OrderBy("id", "DESC").Limit(100).List()
+        if err != nil {
+            return err
+        }
+        return c.JSON(http.StatusOK, list)
+    })
+
+    e.GET("/notes/:id", func(c *echo.Context) error {
+        id, err := echo.PathParam[int64](c, "id")
+        if err != nil {
+            return err
+        }
+        n, err := quark.For[notes.Note](c.Request().Context(), client).Find(id)
+        if err != nil {
+            return err
+        }
+        return c.JSON(http.StatusOK, n)
+    })
+
+    e.POST("/notes", func(c *echo.Context) error {
+        var d notes.Draft
+        if err := c.Bind(&d); err != nil {
+            return err
+        }
+        n, err := d.Note()
+        if err != nil {
+            return err
+        }
+        if err := quark.For[notes.Note](c.Request().Context(), client).Create(&n); err != nil {
+            return err
+        }
+        return c.JSON(http.StatusCreated, n)
+    })
+
+    e.POST("/notes/import", func(c *echo.Context) error {
+        var drafts []notes.Draft
+        if err := c.Bind(&drafts); err != nil {
+            return err
+        }
+        if len(drafts) == 0 {
+            return echo.NewHTTPError(http.StatusBadRequest, "the body is a JSON list of notes")
+        }
+        ctx := c.Request().Context()
+        created := make([]notes.Note, 0, len(drafts))
+        err := client.Tx(ctx, func(tx *quark.Tx) error {
+            for _, d := range drafts {
+                n, err := d.Note()
+                if err == nil {
+                    err = quark.ForTx[notes.Note](ctx, tx).Create(&n)
+                }
+                if err != nil {
+                    return err // rolls back every note written before it
+                }
+                created = append(created, n)
+            }
+            return nil
+        })
+        if err != nil {
+            return err
+        }
+        return c.JSON(http.StatusCreated, created)
+    })
+
+    return e
+}
 ```
+
+This is Echo v5. On v4 the handlers take the `echo.Context` interface instead
+of `*echo.Context`, the error handler is `func(err error, c echo.Context)`
+and delegates to `e.DefaultHTTPErrorHandler(err, c)`, and
+`echo.NewHTTPError(status).SetInternal(err)` takes the place of `Wrap`. The
+Quark calls do not change.
 
 ## Gin
 
 In Gin the request is the `c.Request` field, so the context is
-`c.Request.Context()`. The example builds the engine in
-`newEngine(client) *gin.Engine`:
+`c.Request.Context()`. A handler records a failed Quark call with `c.Error`
+and returns; one middleware answers for it after the handler has run:
 
 ```go
-r := gin.New()
-r.Use(gin.Recovery())
-r.GET("/notes", func(c *gin.Context) {
-    notes, err := quark.For[Note](c.Request.Context(), client).OrderBy("id", "DESC").Limit(100).List()
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
-    }
-    c.JSON(http.StatusOK, notes)
-})
-r.POST("/notes", func(c *gin.Context) {
-    var n Note
-    if err := c.ShouldBindJSON(&n); err != nil || n.Title == "" {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "title is required"})
-        return
-    }
-    if err := quark.For[Note](c.Request.Context(), client).Create(&n); err != nil {
-        if quark.IsUniqueViolation(err) {
-            c.JSON(http.StatusConflict, gin.H{"error": "a note with that title already exists"})
+// NewEngine wires the handlers on the client it is given, so a test can
+// hand it a throwaway database.
+func NewEngine(client *quark.Client) *gin.Engine {
+    r := gin.New()
+    r.Use(gin.Recovery(), answerErrors)
+
+    r.GET("/notes", func(c *gin.Context) {
+        list, err := quark.For[notes.Note](c.Request.Context(), client).OrderBy("id", "DESC").Limit(100).List()
+        if err != nil {
+            _ = c.Error(err)
             return
         }
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
+        c.JSON(http.StatusOK, list)
+    })
+
+    r.GET("/notes/:id", func(c *gin.Context) {
+        id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+        if err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "the id is a number"})
+            return
+        }
+        n, err := quark.For[notes.Note](c.Request.Context(), client).Find(id)
+        if err != nil {
+            _ = c.Error(err)
+            return
+        }
+        c.JSON(http.StatusOK, n)
+    })
+
+    r.POST("/notes", func(c *gin.Context) {
+        var d notes.Draft
+        if err := c.ShouldBindJSON(&d); err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "the body is a JSON note"})
+            return
+        }
+        n, err := d.Note()
+        if err == nil {
+            err = quark.For[notes.Note](c.Request.Context(), client).Create(&n)
+        }
+        if err != nil {
+            _ = c.Error(err)
+            return
+        }
+        c.JSON(http.StatusCreated, n)
+    })
+
+    r.POST("/notes/import", func(c *gin.Context) {
+        var drafts []notes.Draft
+        if err := c.ShouldBindJSON(&drafts); err != nil || len(drafts) == 0 {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "the body is a JSON list of notes"})
+            return
+        }
+        ctx := c.Request.Context()
+        created := make([]notes.Note, 0, len(drafts))
+        err := client.Tx(ctx, func(tx *quark.Tx) error {
+            for _, d := range drafts {
+                n, err := d.Note()
+                if err == nil {
+                    err = quark.ForTx[notes.Note](ctx, tx).Create(&n)
+                }
+                if err != nil {
+                    return err // rolls back every note written before it
+                }
+                created = append(created, n)
+            }
+            return nil
+        })
+        if err != nil {
+            _ = c.Error(err)
+            return
+        }
+        c.JSON(http.StatusCreated, created)
+    })
+
+    return r
+}
+```
+
+```go
+// answerErrors runs the handler, then answers for the last error it
+// recorded with the status notes.Status gives it — unless the handler
+// already wrote a response.
+func answerErrors(c *gin.Context) {
+    c.Next()
+    if last := c.Errors.Last(); last != nil && !c.Writer.Written() {
+        status := notes.Status(last.Err)
+        c.JSON(status, gin.H{"error": http.StatusText(status)})
     }
-    c.JSON(http.StatusCreated, n)
-})
+}
 ```
 
 ## Nucleus
@@ -209,8 +508,40 @@ already have, or for keeping the data layer in a repository of its own.
 
 ## Testing handlers
 
-Every example ships a `main_test.go` that needs no server: it builds a client
-on a temporary SQLite file, migrates the model, and drives the router with
-`httptest.NewRecorder` — empty list, created note, duplicate title as 409,
-missing title as 400. For the transaction-per-test isolation pattern and the
-`quarktest` kit, see [Testing](testing).
+Each package's test needs no running service. It builds a client on a
+temporary SQLite file with the [`quarktest`](testing) kit:
+
+```go
+// Client returns a client on a fresh SQLite file with the notes table
+// migrated — what a fixture's router is built on in a test.
+func Client(t *testing.T) *quark.Client {
+    t.Helper()
+    client := quarktest.SQLite(t)
+    quarktest.Migrate(t, client, &notes.Note{})
+    return client
+}
+```
+
+then serves the router with `httptest.NewServer` and sends it real requests:
+an empty list, a created note, the taken title as 409, a missing title as
+400, a missing note as 404, an import that commits and two that roll back.
+The last request proves that the handler queries with the request's
+context. It is served through a wrapper that gives every request a deadline
+that has already passed, the way a timeout middleware would:
+
+```go
+// Expired wraps h so that every request reaches it with a deadline that has
+// already passed — what a timeout middleware hands a handler whose time is
+// up.
+func Expired(h http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(-time.Second))
+        defer cancel()
+        h.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+```
+
+and it has to come back 504. A handler that queried with
+`context.Background()` would answer 200. For the transaction-per-test
+isolation pattern, see [Testing](testing).
