@@ -111,12 +111,12 @@ updates:
       - dependency-name: github.com/jcsvwinston/quark
       - dependency-name: github.com/jcsvwinston/quark/drivers/*
 
-  # The integration fixtures: Quark served from net/http, chi, Echo and Gin,
-  # never published, with the frameworks guide checked against them. Kept
-  # apart from the harnesses because what ages here is the frameworks
-  # themselves — a bump is a new chi, Echo or Gin that the fixtures, and the
-  # guide's code with them, are then built and tested against before it
-  # merges.
+  # The integration fixtures: Quark served from net/http, chi, Echo, Gin,
+  # gRPC and Nucleus, never published, with the frameworks guide checked
+  # against them. Kept apart from the harnesses because what ages here is the
+  # frameworks themselves — a bump is a new chi, Echo, Gin or gRPC that the
+  # fixtures, and the guide's code with them, are then built and tested
+  # against before it merges.
   - package-ecosystem: gomod
     directories:
       - /internal/integrations
@@ -130,6 +130,9 @@ updates:
       # harness: their versions are never resolved.
       - dependency-name: github.com/jcsvwinston/quark
       - dependency-name: github.com/jcsvwinston/quark/drivers/*
+      # A sibling suite module: its requirement is a floor raised by hand,
+      # not by a bot, like every require of a suite module in this file.
+      - dependency-name: github.com/jcsvwinston/nucleus
 
   # Grouped for the same reason as the modules above: without a group this
   # ecosystem opens one pull request per action, and the workflows here use

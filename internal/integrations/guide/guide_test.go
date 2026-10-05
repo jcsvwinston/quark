@@ -36,12 +36,15 @@ func TestMatch(t *testing.T) {
 }
 
 func TestSection(t *testing.T) {
-	page := "# T\n\nintro\n\n## chi\n\n```go\na()\n```\n\n## Echo\n\n```go\nb()\n```\n```bash\nc\n```\n"
+	page := "# T\n\nintro\n\n## chi\n\n```go\na()\n```\n\n## Echo\n\n```go\nb()\n```\n```bash\nc\n```\n\n## gRPC\n\n```protobuf\nservice S {}\n```\n"
 	if s, ok := Section(page, "chi"); !ok || len(Blocks(s)) != 1 || Blocks(s)[0] != "a()\n" {
 		t.Fatalf("chi section: %q %v", s, ok)
 	}
 	if s, _ := Section(page, "Echo"); len(Blocks(s)) != 1 {
 		t.Fatalf("Echo section has one Go block and one bash block, got Go blocks %q", Blocks(s))
+	}
+	if s, _ := Section(page, "gRPC"); len(Blocks(s)) != 1 || Blocks(s)[0] != "service S {}\n" {
+		t.Fatalf("gRPC section shows one protobuf block, got %q", Blocks(s))
 	}
 	if _, ok := Section(page, "Gin"); ok {
 		t.Fatal("a heading the page does not have was found")

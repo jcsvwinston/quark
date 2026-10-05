@@ -499,8 +499,9 @@ jobs:
           (cd internal/enginesuite && go test -race -short -count=1 -timeout 20m ./...)
 
   # The integration fixtures (internal/integrations) are a module of their
-  # own, never published. They serve Quark from net/http, chi, Echo and Gin
-  # and drive each over HTTP against SQLite, and each fixture package also
+  # own, never published. They serve Quark from net/http, chi, Echo, Gin,
+  # gRPC and Nucleus and drive each over the network against SQLite (the
+  # Nucleus one boots an application in-process), and each fixture package also
   # holds its section of the frameworks guide to its code: a block on that
   # page that stops being the fixture's code fails here. The root
   # `go test ./...` reaches them only through the extension bench, whose INT
