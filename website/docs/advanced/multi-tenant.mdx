@@ -73,15 +73,15 @@ acme := WithTenant(ctx, "acme")
 doc := Document{Title: "Invoice 1001"}
 quark.For[Document](acme, router).Create(&doc)
 fmt.Println(doc.TenantID)
-// => acme   (writes inherit the tenant; a zero tenant field is filled in)
+// => acme   (writes store the resolved tenant, whatever the field held)
 
 docs, _ := quark.For[Document](acme, router).List()
 // docs contains only acme's rows — even though the query never names tenant_id
 ```
 
-`Or()` groups inherit the predicate too. SQL parses `A AND B OR C` as
-`(A AND B) OR C`, so an OR branch needs its own `tenant_id = ?` to stay isolated.
-Quark adds it for you:
+`Or()` groups cannot escape it. SQL parses `A AND B OR C` as `(A AND B) OR C`,
+so Quark ANDs the tenant predicate with your conditions as a whole, and the
+OR group carries its own copy as well:
 
 ```go
 quark.For[Document](acme, router).
@@ -90,8 +90,30 @@ quark.For[Document](acme, router).
         return q.Where("status", "=", "published")
     }).
     List()
-// WHERE tenant_id = ? AND status = ? OR (tenant_id = ? AND status = ?)
+// WHERE tenant_id = ? AND (status = ? OR (tenant_id = ? AND status = ?))
 ```
+
+Reads and writes by key carry it too, so an id taken from a request cannot
+reach another tenant's row:
+
+- `Find(id)` ANDs the key with the tenant predicate (and any `Where` of yours):
+  another tenant's id is `ErrNotFound`.
+- `Update`, `UpdateFields`, `UpdateBatch`, `Delete`, `HardDelete`,
+  `DeleteBatch` and `Restore` do the same: the write reports zero rows and
+  changes nothing. The associations `Update` re-saves carry the predicate when
+  their model has the tenant column. See
+  [CRUD — Guarding a write by key](/docs/reference/api/crud#guarding-a-write-by-key-with-where).
+- `Create`, `CreateBatch` and the updates by entity write the resolved tenant
+  into the tenant column, whatever the entity carried; a different value is
+  replaced and logged (`quark.tenant.foreign_value_replaced`), so a row cannot
+  be planted in another tenant or moved into one.
+
+Two writes are not confined this way. `UpdateMap` writes what its map says,
+the tenant column included: do not put the tenant column in it. `Upsert` and
+`UpsertBatch` insert under the resolved tenant, but their update branch
+applies to whichever row holds the conflicting key, in any tenant: under this
+strategy, make the conflict columns include the tenant column (a unique key on
+`(tenant_id, …)`), or use `Create` and `Update`.
 
 Remember the boundary: this is client-side scoping, so `client.Raw()` and
 `client.Exec()` aren't filtered. When that bypass risk matters and you're on

@@ -31,6 +31,13 @@ type condition struct {
 	// (e.g. JSON path components). The fragment uses '?' as a neutral
 	// bind marker that buildWhereClause substitutes for the dialect's
 	// placeholder syntax at the correct argIndex.
+
+	// scope marks a condition Quark adds to confine the query, not one the
+	// caller wrote: the tenant predicate of RowLevelSecurityClient. A
+	// statement renders its scopes first and ANDs them with the caller's
+	// conditions as ONE parenthesised expression (scopedConditions), so an
+	// Or group the caller wrote cannot take a row outside them (QK-41).
+	scope bool
 }
 
 // order represents an ORDER BY clause.
@@ -387,11 +394,13 @@ func (q *Query[T]) WhereBetween(column string, start, end any) *Query[T] {
 //
 // When the parent has an active RowLevelSecurityClient tenantID, the tenant predicate
 // is pre-injected into the returned where slice so any group built on top of it
-// inherits the isolation filter. This pre-injection is intentionally redundant
-// with the one in client.go's For[T] constructor: the constructor protects the
-// outer query, and this protects the OR/group sub-clause. Removing either side
-// re-opens the precedence leak (`A AND B OR C` parses as `(A AND B) OR C`), so
-// keep both.
+// inherits the isolation filter. Since QK-41 the isolation no longer depends
+// on this copy: every statement ANDs its scopes with the caller's conditions
+// as one parenthesised expression (scopedConditions), so an Or group cannot
+// escape the tenant whatever it carries. The copy stays as a second line of
+// defence — before QK-41 it was the only thing keeping the group inside the
+// tenant, since `tenant AND a OR (b)` parses as `(tenant AND a) OR (b)` — and
+// it costs one bound predicate.
 //
 // Internal helper. Not part of the public API.
 func (b *BaseQuery) cloneForGroup() BaseQuery {
@@ -429,6 +438,7 @@ func (b *BaseQuery) cloneForGroup() BaseQuery {
 			operator: "=",
 			value:    c.tenantID,
 			logic:    "AND",
+			scope:    true,
 		}}
 	}
 	return c
@@ -447,8 +457,12 @@ func (b *BaseQuery) cloneForGroup() BaseQuery {
 //
 // Generates: WHERE "active" = $1 OR ("role" = $2 AND "role" = $3)
 //
-// Under the RowLevelSecurityClient tenant strategy the OR group inherits the parent's
-// tenant_id predicate so it cannot escape isolation via SQL operator precedence.
+// The scopes Quark adds — the soft-delete filter on reads, the tenant
+// predicate of RowLevelSecurityClient — are ANDed with the caller's
+// conditions as a whole, Or groups included: on a soft-delete model the
+// example above reads WHERE "deleted_at" IS NULL AND ("active" = $1 OR (…)).
+// Under RowLevelSecurityClient the OR group also carries the tenant predicate
+// itself.
 func (q *Query[T]) Or(fn func(*Query[T]) *Query[T]) *Query[T] {
 	blank := &Query[T]{BaseQuery: q.cloneForGroup()}
 	result := fn(blank)

@@ -45,14 +45,17 @@ func controlsRls() []control {
 		{
 			id:     "RLS-03",
 			family: "rls",
-			title:  "RowLevelSecurityClient scopes the five builder paths; Find/Update/Delete by primary key emit no tenant predicate, and Create keeps a foreign one",
-			want:   partial,
-			note: "The injected predicate survives List, Where, Or, UpdateMap and DeleteBy, " +
-				"and is dropped by every path that addresses a row by primary key: Find " +
-				"overwrites the condition slice, Update(entity) and Delete(entity) build " +
-				"their WHERE from the key alone. Create keeps a tenant id the caller " +
-				"supplied, so a row can be written under a foreign tenant. This is the only " +
-				"row-level option outside PostgreSQL.",
+			title:  "RowLevelSecurityClient scopes the five builder paths and the four that address a row by key: Find, Update and Delete bind the tenant predicate, and Create stores the resolved tenant",
+			want:   present,
+			note: "Closed at A11 Q11 (QK-42, with QK-40 and QK-41 in the same change). Until then " +
+				"the predicate survived List, Where, Or, UpdateMap and DeleteBy and was dropped by " +
+				"every path that addresses a row by key: Find replaced the condition slice, " +
+				"Update(entity) and Delete(entity) built their WHERE from the key alone, and Create " +
+				"kept a tenant id the caller supplied. Find now ANDs the key with the query's " +
+				"conditions and another tenant's id is ErrNotFound; the writes by key AND them too " +
+				"and report zero rows; inserts and updates write the resolved tenant into the tenant " +
+				"column. Re-measured there: the probe reads each direct path positively instead of " +
+				"reading a leak's absence. This is the only row-level option outside PostgreSQL.",
 			probe: probeRlsClientPredicatePKPaths,
 		},
 		{

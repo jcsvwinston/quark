@@ -606,12 +606,15 @@ func applyTenantConfinement(q *BaseQuery, router *TenantRouter, client *Client, 
 	case RowLevelSecurityClient:
 		q.tenantID = tenantID
 		q.tenantCol = router.config.TenantColumn
-		// Pre-inject the RLS WHERE condition
+		// Pre-inject the RLS WHERE condition, marked as a scope: every
+		// statement ANDs it with the caller's conditions as a whole rather
+		// than letting an Or group the caller adds escape it (QK-41).
 		q.where = ownedAppend(q.where, condition{
 			column:   router.config.TenantColumn,
 			operator: "=",
 			value:    tenantID,
 			logic:    "AND",
+			scope:    true,
 		})
 	case RowLevelSecurityNative:
 		// PostgreSQL-only: the engine itself enforces isolation

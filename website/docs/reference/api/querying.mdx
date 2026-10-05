@@ -64,7 +64,17 @@ item, err := quark.For[OrderItem](ctx, client).
     First()
 ```
 
-Soft-delete filters and tenant filters still apply.
+`Find` ANDs the key with the query's conditions: the soft-delete filter, the
+tenant predicate under `RowLevelSecurityClient`, and any `Where` you added. A
+row they exclude — another tenant's included — is `ErrNotFound`, the same
+answer as a key that does not exist:
+
+```go
+doc, err := quark.For[Document](ctx, router).Find(id) // id from the request
+if errors.Is(err, quark.ErrNotFound) {
+    // no document with that id in this tenant
+}
+```
 
 ## List
 

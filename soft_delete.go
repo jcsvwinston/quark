@@ -73,7 +73,8 @@ func (q *BaseQuery) softDeletePredicate() *condition {
 // Restore implicitly scopes to currently-trashed rows (deleted_at IS NOT
 // NULL): a Restore on a row that was never deleted is a 0-row no-op rather
 // than a corrupting NULL-write. Useful as the inverse of Delete in admin
-// flows.
+// flows. The query's conditions — its Where calls, and the tenant predicate
+// under RowLevelSecurityClient — are ANDed with the key (QK-40).
 //
 // Phase-1 F1-5. Returns ErrInvalidModel when the model has no deleted_at.
 func (q *Query[T]) Restore(entity *T) (int64, error) {
@@ -106,16 +107,19 @@ func (q *Query[T]) Restore(entity *T) (int64, error) {
 	sqlBuf.WriteString(q.dialect.Quote("deleted_at"))
 	sqlBuf.WriteString(" IS NOT NULL")
 
-	if q.tenantID != "" && q.tenantCol != "" {
-		sqlBuf.WriteString(" AND ")
-		sqlBuf.WriteString(q.dialect.Quote(q.tenantCol))
-		sqlBuf.WriteString(" = ")
-		sqlBuf.WriteString(q.dialect.Placeholder(2))
-	}
-
+	// The query's conditions narrow the key, as they do for every write by
+	// key (QK-40). Under RowLevelSecurityClient the tenant predicate is one
+	// of them; it used to be written here by hand, and the caller's own
+	// Where was dropped.
 	args := []any{pkVal}
-	if q.tenantID != "" && q.tenantCol != "" {
-		args = append(args, q.tenantID)
+	whereSQL, whereArgs, err := q.whereForWrite(2)
+	if err != nil {
+		return 0, err
+	}
+	if whereSQL != "" {
+		sqlBuf.WriteString(" AND ")
+		sqlBuf.WriteString(whereSQL)
+		args = append(args, whereArgs...)
 	}
 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
