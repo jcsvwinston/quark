@@ -59,16 +59,20 @@ const (
 	// have: a ratio within ±0.10 of 1.15 is never called met or missed, it is
 	// "on the threshold" and the verdict is not asserted. Measured: the
 	// single-row ratios spread by up to ±0.06 around their median across
-	// seven CI runs, and by up to ±0.08 across eight laptop runs.
+	// seven CI runs on 2026-10-04, and by up to ±0.08 across eight laptop
+	// runs; across the ten CI runs of 2026-10-05, on five CPU models, by up
+	// to 0.14, all of it one model (an EPYC 9V45 put FindByPK at 1.10
+	// against a median of 1.24).
 	bandFloor = 0.10
 	// bandMADs widens the band on a noisy run: the band is at least this many
 	// median absolute deviations of the per-round ratios.
 	bandMADs = 2.0
 	// driftFloor is the smallest relative move of a ratio, against the ratio
 	// the bench RECORDS, that the test reports as a change in the code. It is
-	// asserted on the reference machine only (see referenceEnv), and it has
-	// to absorb the CPU models of that machine: across seven CI runs on three
-	// models the ratios moved by up to 16 % from their median. On the EPYC
+	// asserted on the reference machine only, on the CPU models the record
+	// was taken on (see referenceEnv), and it has to absorb the differences
+	// between those models: across the ten runs of the record, on five
+	// models, the ratios moved by up to 16 % from their median. On the EPYC
 	// runner, 20 % of a single-row ratio is about 30 µs of quark's time per
 	// operation; a slowdown smaller than that is visible in the table, and the
 	// test does not fail on it — unless it allocates, which the next check
@@ -256,6 +260,9 @@ func TestEngineBenchCatalogue(t *testing.T) {
 			t.Errorf("%s records %s, but its recorded ratios allow only %v", c.id, c.want, vs)
 		}
 	}
+	if len(referenceCPUs) == 0 {
+		t.Errorf("the record names no CPU model: the time checks would never be asserted (see referenceEnv)")
+	}
 	for key := range ops {
 		if _, ok := seenOp[key]; !ok {
 			t.Errorf("operation %s has no control: an operation the bench measures and never judges is a number nobody reads", key)
@@ -327,6 +334,23 @@ func TestEngineBench(t *testing.T) {
 // referenceEnv.
 func onReference() bool { return os.Getenv(referenceEnv) != "" }
 
+// timeAsserted reports whether this run asserts the time checks — the verdict
+// and the drift of every ratio — and, when it does not, why. It does on the
+// reference machine with a CPU the record was taken on (referenceCPUs), and
+// nowhere else; allocations are asserted on every run regardless (QK-47).
+func timeAsserted() (bool, string) {
+	if !onReference() {
+		return false, fmt.Sprintf("not on the reference machine (%s unset)", referenceEnv)
+	}
+	if cpu := cpuModel(); !slices.Contains(referenceCPUs, cpu) {
+		if cpu == "" {
+			cpu = "a CPU this run could not name"
+		}
+		return false, fmt.Sprintf("on the reference machine, but on %s, which no reference run drew (the record was taken on %s)", cpu, strings.Join(referenceCPUs, ", "))
+	}
+	return true, ""
+}
+
 // referenceEnv marks the reference machine: the CI workflow sets it.
 //
 // A ratio is portable between machines only roughly, and that was measured:
@@ -338,14 +362,26 @@ func onReference() bool { return os.Getenv(referenceEnv) != "" }
 // printed in the table, marked, and do not fail the test: a laptop is for
 // comparing a change with itself, before and after, on the same machine.
 // Allocations do not depend on the machine and are asserted everywhere.
+//
+// The CI runner is itself more than one machine: GitHub draws its CPU from a
+// pool, and the CPU moves whole runs. Across 34 runs on 2026-10-04 and 05,
+// before the record of 2026-10-05, the runs on one model agreed within 3 %
+// (22 on an AMD EPYC 7763, 7 on an EPYC 9V74), while from one model to
+// another List100 moved by up to 24 % and MySQL's FindByPK by up to 20 %,
+// with the same allocations — enough to fail the drift check on a model no
+// reference run had drawn, with nothing changed in the code (QK-47). So the time checks are
+// asserted only on the models the record names (referenceCPUs); on any other
+// they are reported like a laptop's, and the allocation check, which no CPU
+// moves, still asserts. To make the time checks bite on a new model, take
+// reference runs on it and add it to the record.
 const referenceEnv = "QUARK_BENCH_REFERENCE"
 
 func assertControl(t *testing.T, c control, js []judged) {
 	t.Helper()
 	fail := t.Errorf
-	if !onReference() {
+	if ok, why := timeAsserted(); !ok {
 		fail = func(format string, args ...any) {
-			t.Logf("not the reference machine (%s unset): reported, not asserted.\n"+format, append([]any{referenceEnv}, args...)...)
+			t.Logf("%s: reported, not asserted.\n"+format, append([]any{why}, args...)...)
 		}
 	}
 	vs := possible(outcomesOf(js))
@@ -433,10 +469,10 @@ func renderRun(rows []reportRow, cfg config, servers map[string]string) string {
 		}
 	}
 	fmt.Fprintf(&b, "Machine: %s. Engines: %s.\n\n", machine(), strings.Join(names, ", "))
-	if onReference() {
-		b.WriteString("This is the reference machine: verdicts, ratios and allocations are asserted against the record.\n\n")
+	if ok, why := timeAsserted(); ok {
+		b.WriteString("This is the reference machine, on a CPU the record was taken on: verdicts, ratios and allocations are asserted against the record.\n\n")
 	} else {
-		fmt.Fprintf(&b, "Not the reference machine (%s unset): verdicts and ratios are compared with the record and marked ✗ where they differ, but only allocations are asserted.\n\n", referenceEnv)
+		fmt.Fprintf(&b, "This run is %s: verdicts and ratios are compared with the record and marked ✗ where they differ, but only allocations are asserted.\n\n", why)
 	}
 	fmt.Fprintf(&b, "Medians of %d rounds; a round is about %s of each arm, in blocks of %s interleaved across the arms. Target (proposed, not adopted): quark within %.0f %% of every baseline a control names. "+
 		"A ratio within its band of %.2f is on the threshold and its verdict is not asserted.\n\n",

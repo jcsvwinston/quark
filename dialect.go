@@ -5,6 +5,7 @@ package quark
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jcsvwinston/quark/internal/guard"
@@ -22,6 +23,26 @@ import (
 // quark.WithDialect(quark.PostgreSQL()) and a driver module implements the
 // interface without importing package quark.
 type Dialect = quarkdriver.Dialect
+
+// writePlaceholder writes d's placeholder for index into sb. For the
+// numbered placeholders of the built-in dialects it formats the number in
+// place, with no string per call: a 1000-row batch of four columns writes
+// 4000 of them (QK-36). Any other dialect — one registered by a driver
+// module, or a type that wraps a built-in one — answers through its own
+// Placeholder, as before.
+func writePlaceholder(sb *strings.Builder, d Dialect, index int) {
+	var buf [24]byte
+	switch d := d.(type) {
+	case *PostgresDialect:
+		sb.Write(d.appendPlaceholder(buf[:0], index))
+	case *MSSQLDialect:
+		sb.Write(d.appendPlaceholder(buf[:0], index))
+	case *OracleDialect:
+		sb.Write(d.appendPlaceholder(buf[:0], index))
+	default:
+		sb.WriteString(d.Placeholder(index))
+	}
+}
 
 // baseDialect provides common functionality for all dialects.
 type baseDialect struct {
@@ -44,8 +65,18 @@ func PostgreSQL() Dialect {
 	}
 }
 
+// Placeholder returns "$index". It is called once per bound parameter, so
+// it formats the number with strconv into a stack buffer rather than through
+// fmt, which cost 13 % of a 1000-row batch's CPU (QK-36); the statement
+// builders that write one placeholder per value skip even this string, see
+// writePlaceholder.
 func (p *PostgresDialect) Placeholder(index int) string {
-	return fmt.Sprintf("$%d", index)
+	var b [24]byte
+	return string(p.appendPlaceholder(b[:0], index))
+}
+
+func (p *PostgresDialect) appendPlaceholder(b []byte, index int) []byte {
+	return strconv.AppendInt(append(b, '$'), int64(index), 10)
 }
 
 func (p *PostgresDialect) Placeholders(n int) []string {
@@ -459,8 +490,15 @@ func MSSQL() Dialect {
 	}
 }
 
+// Placeholder returns "@pindex", without fmt for the reason given on
+// PostgresDialect.Placeholder.
 func (m *MSSQLDialect) Placeholder(index int) string {
-	return fmt.Sprintf("@p%d", index)
+	var b [24]byte
+	return string(m.appendPlaceholder(b[:0], index))
+}
+
+func (m *MSSQLDialect) appendPlaceholder(b []byte, index int) []byte {
+	return strconv.AppendInt(append(b, '@', 'p'), int64(index), 10)
 }
 
 func (m *MSSQLDialect) Placeholders(n int) []string {
@@ -576,8 +614,15 @@ func Oracle() Dialect {
 	}
 }
 
+// Placeholder returns ":index", without fmt for the reason given on
+// PostgresDialect.Placeholder.
 func (o *OracleDialect) Placeholder(index int) string {
-	return fmt.Sprintf(":%d", index)
+	var b [24]byte
+	return string(o.appendPlaceholder(b[:0], index))
+}
+
+func (o *OracleDialect) appendPlaceholder(b []byte, index int) []byte {
+	return strconv.AppendInt(append(b, ':'), int64(index), 10)
 }
 
 func (o *OracleDialect) Placeholders(n int) []string {

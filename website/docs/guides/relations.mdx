@@ -84,6 +84,18 @@ cap is sized for Oracle's 1000-element `IN` ceiling and SQL Server's roughly
 2100 bind parameters. Tenant predicates and polymorphic discriminators are
 re-applied on every chunk.
 
+On PostgreSQL each chunk is selected with `fk = ANY($1)` and one array
+parameter instead of an `IN` list of one placeholder per key: the statement is
+the same for any number of keys, and on the
+[engine bench](../reference/benchmarks) the same hand-written preload of
+100 parents took 1.5 to 1.7 times as long with the `IN` list as with the
+array. The array is bound as its text form
+(`{1,2,3}`, `{"a","b"}`), which `pgx`, `lib/pq` and `pq` all pass through and
+the server reads as an array of the column's type. Keys of any integer type or
+of a string type take this form; a key type that implements `driver.Valuer`
+(a UUID type, for instance), or any other kind, keeps the `IN` list, and so
+does every other engine.
+
 ## Belongs to
 
 Use `belongs_to` when the current model holds the foreign key. On a recursive
@@ -219,7 +231,7 @@ type Post struct {
 `polymorphic:"poly_type:post"` reads as: `poly_type` is the discriminator column
 on `comments`, `post` is this parent's discriminator value, and `join:"polyable_id"`
 is the parent-ID column. `Preload("Comments")` then loads comments where
-`poly_type = 'post' AND polyable_id IN (...)`:
+`poly_type = 'post' AND polyable_id IN (...)` (`= ANY(...)` on PostgreSQL):
 
 ```go
 posts, err := quark.For[Post](ctx, client).Preload("Comments").List()

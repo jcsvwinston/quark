@@ -13,10 +13,12 @@ import (
 	"github.com/jcsvwinston/quark"
 )
 
-// chunkCountingMiddleware counts SELECT statements that contain " IN (".
-// Used because the eager-loading paths run their SQL through executeQuery
-// which doesn't fire observer events itself — middleware sees every SELECT
-// the package emits, including the Preload's per-chunk IN(...) loads.
+// chunkCountingMiddleware counts the SELECT statements that select a chunk
+// of keys: " IN (" on every engine, and " = ANY(" on PostgreSQL, where a
+// preload binds the chunk as one array parameter (QK-35). Used because the
+// eager-loading paths run their SQL through executeQuery which doesn't fire
+// observer events itself — middleware sees every SELECT the package emits,
+// including the Preload's per-chunk loads.
 type chunkCountingMiddleware struct {
 	quark.BaseMiddleware
 	mu      sync.Mutex
@@ -25,7 +27,7 @@ type chunkCountingMiddleware struct {
 
 func (m *chunkCountingMiddleware) WrapQuery(next quark.QueryFunc) quark.QueryFunc {
 	return func(ctx context.Context, exec quark.Executor, sqlStr string, args []any) (*sql.Rows, error) {
-		if strings.Contains(sqlStr, " IN (") {
+		if strings.Contains(sqlStr, " IN (") || strings.Contains(sqlStr, " = ANY(") {
 			m.mu.Lock()
 			m.preload = append(m.preload, sqlStr)
 			m.mu.Unlock()

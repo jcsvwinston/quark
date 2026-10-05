@@ -165,7 +165,7 @@ const (
 	armPgx   = "pgx"
 	armQuark = "quark"
 	// armSQLInList is informational: no control is judged against it.
-	armSQLInList = "database/sql, quark's IN list"
+	armSQLInList = "database/sql, IN list"
 )
 
 const (
@@ -175,8 +175,10 @@ const (
 	pgPostsSQL  = `SELECT id, user_id, title FROM bench_posts WHERE user_id = ANY($1)`
 )
 
-// pgPostsInList is the children's query in the shape quark's preload sends
-// on PostgreSQL: every column, and one placeholder per parent.
+// pgPostsInList is the children's query in the shape quark's preload sent
+// on PostgreSQL until it bound the keys as one array (QK-35), and still sends
+// for keys it cannot write as one: every column, and one placeholder per
+// parent.
 var pgPostsInList = func() string {
 	var b strings.Builder
 	b.WriteString(`SELECT * FROM "bench_posts" WHERE "user_id" IN (`)
@@ -414,11 +416,11 @@ func pgOperations() []*operation {
 						return wantN(scanPosts(prows, out, idx))(listN * postsPerUser)
 					}
 				}},
-				// Not a baseline: database/sql sending the children's query in
-				// the shape quark sends it — SELECT * and an IN list of 100
-				// placeholders — so the table separates what the query's shape
-				// costs on the server from what quark's mapping costs in the
-				// client.
+				// Not a baseline: database/sql sending the children's query as
+				// SELECT * and an IN list of 100 placeholders — the shape quark
+				// sent before it bound the keys as one array (QK-35) — so the
+				// table keeps showing what that shape costs on the server
+				// against = ANY($1).
 				{armSQLInList, func(tb testing.TB, dsn string) stepFunc {
 					db := openPgSQL(tb, dsn)
 					return func(ctx context.Context, i int) error {

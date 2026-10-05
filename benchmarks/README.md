@@ -238,10 +238,14 @@ on a real engine, as a meter with a verdict per operation:
 
 The target is a **proposal, not adopted**: quark within 15 % of every baseline
 a control names. The record is the CI runner's (the `Engine bench` workflow
-sets `QUARK_BENCH_REFERENCE=1`, and only there are the verdict and the ratio
-drift asserted); a laptop measures single-row ratios 10–20 % lower, so a local
-run reports them against the record without failing, and asserts only
-quark's allocations, which are the same on every machine. The recorded verdicts, ratios and what each distance is made
+sets `QUARK_BENCH_REFERENCE=1`), and the verdict and the ratio drift are
+asserted only there, and only on a CPU model the record was taken on
+(`referenceCPUs` in `engines/cases_test.go`): GitHub draws the runner's CPU
+from a pool, and a model no reference run drew moved ratios by up to 24 % with
+the code unchanged. A laptop measures single-row ratios 10–20 % lower, so a
+local run — or a runner on another CPU — reports them against the record
+without failing, and asserts only quark's allocations, which are the same on
+every machine. The recorded verdicts, ratios and what each distance is made
 of are in `engines/cases_test.go`, and the published page
 (`website/docs/reference/benchmarks.mdx`) carries them in a block that
 `TestEngineBenchPage` writes and checks.

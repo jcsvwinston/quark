@@ -66,14 +66,25 @@ func dsnFor(tb testing.TB, e engine) string {
 // which machine a published run came from.
 func machine() string {
 	desc := fmt.Sprintf("%s/%s, %d CPUs, %s", runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), runtime.Version())
-	if raw, err := os.ReadFile("/proc/cpuinfo"); err == nil {
-		for _, line := range strings.Split(string(raw), "\n") {
-			if k, v, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(k) == "model name" {
-				return strings.TrimSpace(v) + ", " + desc
-			}
-		}
+	if cpu := cpuModel(); cpu != "" {
+		return cpu + ", " + desc
 	}
 	return desc
+}
+
+// cpuModel is the CPU's model name as Linux reports it in /proc/cpuinfo, or
+// "" where there is none to read.
+func cpuModel() string {
+	raw, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if k, v, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(k) == "model name" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func mustOpen(tb testing.TB, driver, dsn string) *sql.DB {

@@ -30,6 +30,7 @@ require (
 	github.com/jcsvwinston/quark/drivers/oracle v0.1.3
 	github.com/jcsvwinston/quark/drivers/postgres v0.1.3
 	github.com/jcsvwinston/quark/drivers/sqlite v0.1.3
+	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/microsoft/go-mssqldb v1.11.0
 	github.com/sijms/go-ora/v2 v2.9.0
