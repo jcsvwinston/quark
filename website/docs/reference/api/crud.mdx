@@ -50,6 +50,7 @@ Behavior:
 | Associations | Recursively saves `belongs_to`, main entity, `has_one`, `has_many`, then many-to-many links. |
 | Primary key | Writes back integer PKs when the dialect supports `RETURNING` or last-insert ID. |
 | Cache | Invalidates the model table tag after successful write execution. |
+| Tenant | Under `RowLevelSecurityClient` the tenant column is set to the resolved tenant, whatever the entity carried. A different value is replaced, not written, and logged (`quark.tenant.foreign_value_replaced`). The same holds for `Update`, `UpdateFields`, `UpdateBatch`, `CreateBatch` and the insert branch of the upserts. |
 
 The entity must be a non-nil pointer to a struct.
 
@@ -141,16 +142,50 @@ rows, err := quark.For[User](ctx, client).WithoutAssociations().Update(&got)
 See [Relations — Update re-saves loaded associations](../../guides/relations#update-re-saves-loaded-associations--opt-out-with-withoutassociations).
 :::
 
+### Guarding a write by key with `Where`
+
 `Update` writes the entity by its primary key (and its version column, when
-the model has one). It does not apply the query's `Where` conditions: to update
-a row only when a condition holds, use `UpdateFields`, which ANDs the
-conditions with the key, or `UpdateMap`.
+the model has one), ANDed with the query's `Where` conditions. The conditions
+can only narrow which row is written: the row is written when a `List` with
+the same conditions would return it, and left alone otherwise. Use them to
+check, in the same statement, that the row an id names is one the caller may
+write:
 
 ```go
-rows, err := quark.For[User](ctx, client).
-    Where("tenant_id", "=", tenantID).
-    UpdateFields(&user, "name", "email")
+// id comes from the request; the row is written only if it is the caller's.
+doc := Document{ID: id, Title: input.Title}
+rows, err := quark.For[Document](ctx, client).
+    Where("owner_id", "=", userID).
+    Update(&doc)
+if err != nil {
+    return err
+}
+if rows == 0 {
+    return ErrNotFound // no document with that id belongs to userID
+}
+// emitted: UPDATE "documents" SET "title" = $1 WHERE "id" = $2 AND ("owner_id" = $3)
 ```
+
+The same holds for every write that addresses a row by key: `Update`,
+[`UpdateFields`](#updatefields), [`UpdateBatch`](#updatebatch),
+[`Delete`](#delete), [`HardDelete`](#delete),
+[`DeleteBatch`](#delete) and `Restore`. Under the
+`RowLevelSecurityClient` tenant strategy the tenant predicate is one of the
+conditions, so these writes never touch another tenant's row.
+
+When no row with the key satisfies the conditions:
+
+| Outcome | Why |
+| --- | --- |
+| Nothing is written, and `(0, nil)` is returned. | The same answer `UpdateMap` and `DeleteBy` give when their conditions match nothing; check the count. |
+| `AfterUpdate` / `AfterDelete` do not run, no audit row is written, no event is emitted. | Nothing happened. `BeforeUpdate` / `BeforeDelete` have already run: they run before the statement. |
+| Loaded associations are not written either. | `Update` checks the row before writing a `belongs_to` association, which it writes ahead of the entity's row. |
+| A versioned model returns `(0, nil)`, not `ErrStaleEntity`. | `ErrStaleEntity` means the row satisfies the conditions and its version moved. |
+
+The answer does not say whether the row exists outside the conditions: a row
+of another tenant and a row that does not exist look the same. An entity
+whose key is zero is inserted, as before; the conditions do not apply to an
+insert.
 
 Hooks: `BeforeUpdate` and `AfterUpdate`.
 
@@ -216,7 +251,7 @@ Rules:
 | Listing the primary key column returns an error. | Overwriting the PK would corrupt the row's identity. |
 | Listing an unknown field returns an error. | Fail fast on typos. |
 | Empty `fields` returns an error. | An update with no SET clause is meaningless. |
-| Existing `Where()` conditions are ANDed with the PK predicate. | The row is written only when a `List` with the same conditions would return it. |
+| Existing `Where()` conditions are ANDed with the PK predicate. | The row is written only when a `List` with the same conditions would return it; see [Guarding a write by key](#guarding-a-write-by-key-with-where). |
 
 Hooks: `BeforeUpdate` and `AfterUpdate` run, just like `Update`.
 
@@ -253,6 +288,18 @@ returns for the same conditions. `WhereNot`, `Or` groups, `IN`, `BETWEEN`,
 `UPDATE` or a `DELETE` as in a `SELECT`. One difference stays: these writes do
 not add the soft-delete scope (`deleted_at IS NULL`) that reads add.
 
+The scopes Quark adds — the soft-delete filter on reads and on `Delete`, the
+tenant predicate of `RowLevelSecurityClient` on everything — are ANDed with
+your conditions as a whole, `Or` groups included:
+
+```go
+quark.For[User](ctx, client).
+    Where("name", "=", "a").
+    Or(func(q *quark.Query[User]) *quark.Query[User] { return q.Where("name", "=", "b") }).
+    List()
+// WHERE "deleted_at" IS NULL AND ("name" = $1 OR ("name" = $2))
+```
+
 ## Delete
 
 ### `Delete(entity *T) (int64, error)`
@@ -282,6 +329,19 @@ WHERE id = ? AND deleted_at IS NULL
 If the model does not have `deleted_at`, `Delete` performs a hard delete by
 primary key.
 
+The query's `Where` conditions are ANDed with the key, as for `Update`: when no
+row with the key satisfies them, nothing is deleted, `(0, nil)` is returned and
+`AfterDelete`, the audit row and the event are skipped. See
+[Guarding a write by key](#guarding-a-write-by-key-with-where).
+
+```go
+rows, err := quark.For[Document](ctx, client).
+    Where("owner_id", "=", userID).
+    Delete(&Document{ID: id})
+// emitted: UPDATE "documents" SET "deleted_at" = CURRENT_TIMESTAMP
+//          WHERE "id" = $1 AND "deleted_at" IS NULL AND ("owner_id" = $2)
+```
+
 Hooks: `BeforeDelete` and `AfterDelete`.
 
 ### `HardDelete(entity *T) (int64, error)`
@@ -291,6 +351,8 @@ Permanently deletes one entity by primary key even when soft delete is enabled.
 ```go
 rows, err := quark.For[User](ctx, client).HardDelete(&User{ID: 42})
 ```
+
+The query's `Where` conditions are ANDed with the key, as for `Delete`.
 
 ### `DeleteBy() (int64, error)`
 
@@ -324,6 +386,9 @@ rows, err := quark.For[User](ctx, client).DeleteBatch(ids)
 
 The method chunks IDs in groups of 1000 so the generated `IN` list remains
 inside supported dialect limits. Empty input returns `(0, nil)`.
+
+The query's `Where` conditions are ANDed with the ids: an id whose row does not
+satisfy them is not deleted, and the count says how many were.
 
 ## Upsert
 
@@ -410,8 +475,12 @@ ptrs := []*User{&users[0], &users[1]}
 err := quark.For[User](ctx, client).UpdateBatch(ptrs)
 ```
 
-Each row uses the same partial-update semantics as `Update`. If any row fails,
-the transaction rolls back.
+Each row uses the same partial-update semantics as `Update`, the query's
+`Where` conditions included: an entity whose row does not satisfy them is not
+written, the way an entity whose key does not exist is not written.
+`UpdateBatch` returns no count, so when you need to know which rows were
+written, call `Update` per entity. If any row fails, the transaction rolls
+back.
 
 `UpdateBatch` returns `nil` for empty input.
 

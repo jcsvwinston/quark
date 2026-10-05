@@ -136,9 +136,59 @@ predicate). **Never render `q.where` anywhere else.** Regression:
 SELECT returns, and those are the rows a Go predicate names) and
 `internal/enginesuite/write_where_test.go` (`WriteWhereParity`, six engines).
 
-`Update(entity)` (via `saveAny`) and `UpdateBatch` build a fresh query for the
-row and do not apply the caller's `Where` at all; that is a separate gap,
-tracked on its own.
+### Writes by key AND the caller's conditions with the key
+
+Before QK-40, `Update(entity)` (via `saveAny`), `UpdateBatch`, `Delete`,
+`HardDelete`, `DeleteBatch` and `Restore` wrote by the key alone: the query
+each one built for the row carried none of the caller's conditions — and
+none of the tenant predicate RowLevelSecurityClient injects — so an id from
+a request wrote another tenant's row. Each now ANDs `whereForWrite` with its
+key predicate; `saveAny` takes the condition list as a parameter (the query's
+own for the entity Update was called with, `tenantScopeFor` for an
+association, nil for an insert) so the caller's conditions never reach a
+related table.
+
+When no row with the key satisfies the conditions, the write reports (0, nil)
+and runs no After hook, audit row or event. Two places need a probe
+(`keyPassesWhere`, a `SELECT COUNT(*)` by key and conditions on the primary):
+a guarded UPDATE that affected zero rows — on a versioned model that is
+`ErrStaleEntity` only when the row passes the conditions, and on MySQL and
+MariaDB rows-affected counts changed rows, so "matched, nothing changed"
+must not read as "excluded" — and an Update with a loaded belongs_to, which
+is written before the entity's row. The probe sees only rows the conditions
+let the caller see, so it cannot tell another tenant's row from a missing
+one. Regression: `where_guard_test.go` and
+`internal/enginesuite/where_guard_test.go` (`WhereGuards`).
+
+### Reads by key stay inside the tenant
+
+Before QK-42, `Find(id)` assigned `q.where = [key]` on its receiver: the
+tenant predicate went with the caller's conditions, so `Find` under
+RowLevelSecurityClient read another tenant's row by id, and the same query
+object listed without its tenant afterwards. `Find` now appends the key to
+the conditions for the call only, and `First` puts its limit back when it
+returns — restored rather than set on a copy, because a copy of the query is
+a 632-byte allocation on every `Find`, and the engine bench (PG-02, MY-01)
+holds Find's allocations to 5 % of the record. `ensureTenantID`
+stamps the resolved tenant on every insert and update by entity instead of
+filling an empty field only — an entity carrying another tenant's id was
+inserted under it, and an Update moved the row. A foreign value is replaced
+and logged (`quark.tenant.foreign_value_replaced`). `UpdateMap` still writes
+its map verbatim. The A8 bench control `RLS-03` reads all four direct paths
+positively and records **present**.
+
+### Scopes AND with the caller's whole expression
+
+The soft-delete filter and the tenant predicate are scopes. Before QK-41
+they were prepended to `q.where`, and a top-level Or group escaped them:
+`"deleted_at" IS NULL AND "name" = ? OR ("name" = ?)` returned the trashed
+row. `scopedConditions` renders the scopes first and the caller's
+conditions as one parenthesised group; the tenant condition is marked
+`scope: true` where it is injected (`applyTenantConfinement`,
+`cloneForGroup`). A query with no scope renders exactly as before. A bare
+`Or(...)` with nothing before it now means its group alone, as it does
+without scopes. **Render a statement's WHERE through `scopedConditions` (or
+`whereForWrite`), never by prepending to `q.where`.**
 
 ### `List()` con resultado truncado silenciosamente
 
@@ -181,6 +231,7 @@ Bifurcación por back-fill de PK (Finding G): cuando el PK es auto-generado, los
 - `composite_pk_test.go` — composite PKs en los 6 motores.
 - `in_operand_test.go` and `internal/enginesuite/in_typed_slices_test.go` — the IN / BETWEEN operand as any slice or array, the empty list meaning what `[]any{}` means, and what is refused (QK-33).
 - `write_where_test.go` and `internal/enginesuite/write_where_test.go` — the write paths and PreloadWhere select the same rows as a SELECT with the same conditions (QK-39).
+- `where_guard_test.go` and `internal/enginesuite/where_guard_test.go` — reads by key stay inside the tenant and inserts/updates store the resolved tenant (QK-42); the writes by key honour the query's conditions and the tenant, report nothing when excluded, keep `ErrStaleEntity` for real conflicts (QK-40); the scopes AND with the caller's whole expression (QK-41).
 
 Cualquier cambio en `Query[T]` debe pasar la suite completa, no sólo SQLite.
 

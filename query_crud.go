@@ -6,6 +6,7 @@ package quark
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -258,25 +259,47 @@ func setPKValue(v reflect.Value, pk pkMeta, id int64) {
 	}
 }
 
-// ensureTenantID populates the tenant field if RLS is active and the field is zero.
+// ensureTenantID stamps the resolved tenant on the entity's tenant field
+// under RowLevelSecurityClient, before an INSERT or an UPDATE is built.
+//
+// It used to fill the field only when it was empty, so an entity that
+// arrived carrying another tenant's id — from a request body, say — was
+// inserted under that tenant, and an Update wrote it into the tenant column
+// and moved the row out (QK-42). The router's tenant now wins, as it does
+// for every other statement the query runs, and a foreign value is logged
+// (event quark.tenant.foreign_value_replaced) rather than written.
 func (q *BaseQuery) ensureTenantID(v reflect.Value) {
-	if q.tenantID == "" || q.tenantCol == "" {
+	if q.tenantID == "" || q.tenantCol == "" || q.meta == nil {
 		return
 	}
-
-	if q.meta != nil {
-		if fm, ok := q.meta.FieldByCol[q.tenantCol]; ok {
-			field := v.Field(fm.Index)
-			if field.Kind() == reflect.String && isZeroValue(field) {
-				field.SetString(q.tenantID)
-			}
-		}
+	fm, ok := q.meta.FieldByCol[strings.ToLower(q.tenantCol)]
+	if !ok {
+		return
 	}
+	field := v.Field(fm.Index)
+	if field.Kind() != reflect.String || !field.CanSet() {
+		return
+	}
+	if cur := field.String(); cur != "" && cur != q.tenantID && q.client != nil && q.client.logger != nil {
+		q.client.logger.Warn("the entity carried another tenant's id in the tenant column; RowLevelSecurityClient writes the resolved tenant instead",
+			"event", "quark.tenant.foreign_value_replaced",
+			"table", q.table,
+			"column", q.tenantCol,
+		)
+	}
+	field.SetString(q.tenantID)
 }
 
 // saveAny persists an arbitrary struct to the database using its metadata.
 // It handles recursive saving of associations if they are present.
-func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUpdate bool) (int64, error) {
+//
+// where is the condition list an UPDATE of this entity ANDs with its key
+// (QK-40): the query's own conditions for the entity Update was called with,
+// the tenant scope for an association (tenantScopeFor), nil for an insert.
+// When the entity is updated and no row with its key satisfies where,
+// nothing is written — not its row, not its associations — and saveAny
+// returns errExcludedByWhere.
+func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUpdate bool, where []condition) (int64, error) {
 	v := reflect.ValueOf(entity)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
 		return 0, fmt.Errorf("entity must be a non-nil pointer")
@@ -298,6 +321,46 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 			}
 		} else if isZeroPKValue(elem.Field(meta.PK.Index)) {
 			actualUpdate = false
+		}
+	}
+
+	// The query that writes the entity's own row. Built before the
+	// associations so a guarded update can ask it first whether the row
+	// passes the conditions (QK-40).
+	dq := &BaseQuery{
+		client:    q.client,
+		ctx:       ctx,
+		dialect:   q.dialect,
+		guard:     q.guard,
+		table:     meta.Table,
+		pk:        meta.PK,
+		exec:      exec,
+		meta:      meta,
+		tenantID:  q.tenantID,
+		tenantCol: q.tenantCol,
+		// schema must propagate so SchemaPerTenant writes hit the tenant's
+		// schema, not the default search_path. Reads already honour q.schema
+		// via fullTableName; without this, INSERT/UPDATE diverged from SELECT
+		// and rows landed in the wrong schema (BB-8).
+		schema: q.schema,
+		// The conditions the UPDATE ANDs with the key (QK-40). Before, dq was
+		// built with none, and Update wrote by the key alone whatever the
+		// caller's Where said — another tenant's row included.
+		where: where,
+		err:   q.err,
+	}
+	guarded := actualUpdate && len(where) > 0
+
+	// A belongs_to association is written BEFORE the entity's row, so the
+	// UPDATE's own WHERE comes too late to keep it from being rewritten when
+	// the conditions exclude the row. Ask first, only in that case.
+	if guarded && !q.skipAssociations && hasLoadedBelongsTo(meta, elem) {
+		passes, err := dq.keyPassesWhere(ctx, dq.pkValueOf(elem))
+		if err != nil {
+			return 0, err
+		}
+		if !passes {
+			return 0, errExcludedByWhere
 		}
 	}
 
@@ -334,7 +397,10 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 					err:       q.err,
 				}
 
-				if _, err := sq.saveAny(ctx, exec, relatedVal.Interface(), actualUpdate); err != nil {
+				// The association is a by-key write of its own: it carries the
+				// tenant scope when its model has the tenant column, and a row
+				// of another tenant is left alone rather than rewritten.
+				if _, err := sq.saveAny(ctx, exec, relatedVal.Interface(), actualUpdate, q.tenantScopeFor(relMetaFromType(rel.RefType))); err != nil && !errors.Is(err, errExcludedByWhere) {
 					return 0, err
 				}
 				// Set foreign key on parent
@@ -351,26 +417,7 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		}
 	}
 
-	// 2. Save the main entity using a dynamic query
-	dq := &BaseQuery{
-		client:    q.client,
-		ctx:       ctx,
-		dialect:   q.dialect,
-		guard:     q.guard,
-		table:     meta.Table,
-		pk:        meta.PK,
-		exec:      exec,
-		meta:      meta,
-		tenantID:  q.tenantID,
-		tenantCol: q.tenantCol,
-		// schema must propagate so SchemaPerTenant writes hit the tenant's
-		// schema, not the default search_path. Reads already honour q.schema
-		// via fullTableName; without this, INSERT/UPDATE diverged from SELECT
-		// and rows landed in the wrong schema (BB-8).
-		schema: q.schema,
-		err:    q.err,
-	}
-
+	// 2. Save the main entity through dq.
 	rowsAffected := int64(0)
 	if actualUpdate {
 		sqlStr, args, err := dq.buildUpdate(elem)
@@ -384,6 +431,21 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 			return 0, err
 		}
 		rowsAffected, _ = res.RowsAffected()
+
+		// A guarded UPDATE that touched nothing: either no row with the key
+		// satisfies the conditions — then nothing was written and nothing
+		// more is (QK-40) — or the row passes them and something else held
+		// the write back: the version predicate below, or, on MySQL and
+		// MariaDB, values that were already there.
+		if rowsAffected == 0 && guarded {
+			passes, err := dq.keyPassesWhere(ctx, dq.pkValueOf(elem))
+			if err != nil {
+				return 0, err
+			}
+			if !passes {
+				return 0, errExcludedByWhere
+			}
+		}
 
 		// Optimistic locking: zero rows-affected when the model carries a
 		// version column means the version predicate didn't match — another
@@ -558,7 +620,7 @@ func (q *Query[T]) Create(entity *T) error {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	if _, err := q.saveAny(ctx, q.exec, entity, false); err != nil {
+	if _, err := q.saveAny(ctx, q.exec, entity, false, nil); err != nil {
 		return err
 	}
 
@@ -707,8 +769,15 @@ func (q *BaseQuery) scanReturning(row *sql.Row, v reflect.Value) error {
 // notice the silent skip; skipped nil pointers/slices/maps are the expected
 // "absent" case and do not warn.
 //
-// Any Where() conditions are merged into the WHERE clause alongside the PK.
-// Returns the number of rows affected.
+// The query's conditions — its Where calls, and the tenant predicate under
+// RowLevelSecurityClient — are ANDed with the key, so they can only narrow
+// which row is written (QK-40): Where("tenant_id", "=", t).Update(&e) writes
+// e's row only when it belongs to t. When no row with the key satisfies them,
+// Update writes nothing, returns (0, nil), and runs no AfterUpdate hook,
+// audit entry or event. On a model with a version column, ErrStaleEntity
+// means the row satisfies the conditions and its version moved. An entity
+// whose key is zero is inserted, as before; the conditions do not apply to
+// an insert. Returns the number of rows affected.
 //
 // CAUTION — recursive association save (AQ-03): Update recursively saves
 // every loaded association, exactly like Create. An entity read with
@@ -768,7 +837,13 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	rowsAffected, err := q.saveAny(ctx, q.exec, entity, true)
+	rowsAffected, err := q.saveAny(ctx, q.exec, entity, true, q.where)
+	if errors.Is(err, errExcludedByWhere) {
+		// No row with the key satisfies the conditions: nothing was
+		// written, so there is nothing for an After hook, the audit log or
+		// the event bus to report (QK-40).
+		return 0, nil
+	}
 	if err != nil {
 		return rowsAffected, err
 	}
@@ -808,6 +883,10 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 //	user := User{ID: 42, Active: false}
 //	rows, err := quark.For[User](ctx, client).UpdateFields(&user, "active")
 //	// emitted: UPDATE "users" SET "active" = $1 WHERE "id" = $2  args=[false, 42]
+//
+// The query's conditions are ANDed with the key, as in Update: when no row
+// with the key satisfies them, UpdateFields writes nothing, returns (0, nil)
+// and runs no AfterUpdate hook, audit entry or event (QK-40).
 //
 // Returns the number of rows affected.
 func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
@@ -966,6 +1045,20 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 	rowsAffected := int64(0)
 	if result != nil {
 		rowsAffected, _ = result.RowsAffected()
+	}
+
+	// Nothing written under conditions: when no row with the key satisfies
+	// them, report zero rows and run no After hook, audit entry or event
+	// (QK-40). Before, a versioned model reported ErrStaleEntity here — a
+	// version conflict — for a row the caller's own Where had left out.
+	if rowsAffected == 0 && len(q.where) > 0 {
+		passes, err := q.keyPassesWhere(ctx, q.pkValueOf(v))
+		if err != nil {
+			return 0, fmt.Errorf("UpdateFields failed: %w", err)
+		}
+		if !passes {
+			return 0, nil
+		}
 	}
 
 	// Optimistic locking: stale → ErrStaleEntity. Otherwise bump in memory.
@@ -1284,6 +1377,11 @@ func isWarnableZero(v reflect.Value) bool {
 
 // Delete performs a soft delete by setting deleted_at = NOW().
 // If the model doesn't have deleted_at field, performs hard delete.
+//
+// The query's conditions — its Where calls, and the tenant predicate under
+// RowLevelSecurityClient — are ANDed with the key (QK-40): when no row with
+// the key satisfies them, Delete removes nothing, returns (0, nil), and runs
+// no AfterDelete hook, audit entry or event.
 // Returns the number of rows affected.
 func (q *Query[T]) Delete(entity *T) (int64, error) {
 	if q.err != nil {
@@ -1314,16 +1412,7 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 		}
 	}
 
-	var pkValue any
-	if q.meta != nil && q.meta.HasCompositePK {
-		vals := make([]any, len(q.meta.CompositePK))
-		for j, cpk := range q.meta.CompositePK {
-			vals[j] = v.Field(cpk.Index).Interface()
-		}
-		pkValue = vals
-	} else {
-		pkValue = getPKValue(v, q.pk)
-	}
+	pkValue := q.pkValueOf(v)
 
 	var rows int64
 	var err error
@@ -1331,6 +1420,13 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 		rows, err = q.softDelete(pkValue)
 	} else {
 		rows, err = q.hardDeleteByPK(pkValue)
+	}
+
+	// Under conditions, a delete that removed nothing found no row with the
+	// key that satisfies them: nothing happened, so nothing is reported to
+	// the hooks, the audit log or the event bus (QK-40).
+	if err == nil && rows == 0 && len(q.where) > 0 {
+		return 0, nil
 	}
 
 	if err == nil {
@@ -1368,6 +1464,10 @@ func (q *Query[T]) DeleteBy() (int64, error) {
 }
 
 // HardDelete permanently deletes the entity by its primary key.
+//
+// The query's conditions are ANDed with the key, as in Delete: when no row
+// with the key satisfies them, HardDelete removes nothing, returns (0, nil),
+// and runs no AfterDelete hook, audit entry or event (QK-40).
 func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	if q.err != nil {
 		return 0, q.err
@@ -1387,18 +1487,13 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	}
 
 	v := reflect.ValueOf(entity).Elem()
-	var pkValue any
-	if q.meta != nil && q.meta.HasCompositePK {
-		vals := make([]any, len(q.meta.CompositePK))
-		for j, cpk := range q.meta.CompositePK {
-			vals[j] = v.Field(cpk.Index).Interface()
-		}
-		pkValue = vals
-	} else {
-		pkValue = getPKValue(v, q.pk)
-	}
+	pkValue := q.pkValueOf(v)
 
 	rows, err := q.hardDeleteByPK(pkValue)
+	if err == nil && rows == 0 && len(q.where) > 0 {
+		// Nothing removed under conditions: nothing to report (QK-40).
+		return 0, nil
+	}
 	if err == nil {
 		if hook, ok := any(entity).(AfterDeleteHook); ok {
 			if hErr := q.queueOrRunAfterHook(func() error { return hook.AfterDelete(q.ctx) }); hErr != nil {
@@ -1416,10 +1511,10 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	return rows, err
 }
 
-// softDelete performs a soft delete (sets deleted_at = NOW()).
+// softDelete performs a soft delete (sets deleted_at = NOW()) of the row with
+// the key, ANDed with the query's conditions (QK-40).
 func (q *Query[T]) softDelete(pkValue any) (int64, error) {
 	var sql strings.Builder
-	var args []any
 
 	sql.WriteString("UPDATE ")
 	sql.WriteString(q.fullTableName())
@@ -1429,28 +1524,23 @@ func (q *Query[T]) softDelete(pkValue any) (int64, error) {
 	sql.WriteString(q.dialect.CurrentTimestamp())
 	sql.WriteString(" WHERE ")
 
-	if q.meta != nil && q.meta.HasCompositePK {
-		pkVals, _ := pkValue.([]any)
-		for j, cpk := range q.meta.CompositePK {
-			if j > 0 {
-				sql.WriteString(" AND ")
-			}
-			sql.WriteString(q.dialect.Quote(cpk.Column))
-			sql.WriteString(" = ")
-			sql.WriteString(q.dialect.Placeholder(j + 1))
-			args = append(args, pkVals[j])
-		}
-	} else {
-		sql.WriteString(q.dialect.Quote(q.pk.Column))
-		sql.WriteString(" = ")
-		sql.WriteString(q.dialect.Placeholder(1))
-		args = append(args, pkValue)
-	}
+	keySQL, args := q.keyWhere(pkValue, 1)
+	sql.WriteString(keySQL)
 
 	// Add deleted_at IS NULL to ensure we don't update already deleted rows
 	sql.WriteString(" AND ")
 	sql.WriteString(q.dialect.Quote("deleted_at"))
 	sql.WriteString(" IS NULL")
+
+	whereSQL, whereArgs, err := q.whereForWrite(len(args) + 1)
+	if err != nil {
+		return 0, err
+	}
+	if whereSQL != "" {
+		sql.WriteString(" AND ")
+		sql.WriteString(whereSQL)
+		args = append(args, whereArgs...)
+	}
 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
@@ -1469,33 +1559,28 @@ func (q *Query[T]) softDelete(pkValue any) (int64, error) {
 	return rowsAffected, nil
 }
 
-// hardDeleteByPK performs a hard delete by primary key (single or composite).
+// hardDeleteByPK performs a hard delete by primary key (single or composite),
+// ANDed with the query's conditions (QK-40).
 // For single-PK models pass the pk value; for composite PKs pass a []any of values
 // in the same order as ModelMeta.CompositePK.
 func (q *Query[T]) hardDeleteByPK(pkValue any) (int64, error) {
 	var sql strings.Builder
-	var args []any
 
 	sql.WriteString("DELETE FROM ")
 	sql.WriteString(q.fullTableName())
 	sql.WriteString(" WHERE ")
 
-	if q.meta != nil && q.meta.HasCompositePK {
-		pkVals, _ := pkValue.([]any)
-		for j, cpk := range q.meta.CompositePK {
-			if j > 0 {
-				sql.WriteString(" AND ")
-			}
-			sql.WriteString(q.dialect.Quote(cpk.Column))
-			sql.WriteString(" = ")
-			sql.WriteString(q.dialect.Placeholder(j + 1))
-			args = append(args, pkVals[j])
-		}
-	} else {
-		sql.WriteString(q.dialect.Quote(q.pk.Column))
-		sql.WriteString(" = ")
-		sql.WriteString(q.dialect.Placeholder(1))
-		args = append(args, pkValue)
+	keySQL, args := q.keyWhere(pkValue, 1)
+	sql.WriteString(keySQL)
+
+	whereSQL, whereArgs, err := q.whereForWrite(len(args) + 1)
+	if err != nil {
+		return 0, err
+	}
+	if whereSQL != "" {
+		sql.WriteString(" AND ")
+		sql.WriteString(whereSQL)
+		args = append(args, whereArgs...)
 	}
 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
@@ -1573,7 +1658,7 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 				reflect.Indirect(relatedVal).Field(fm.Index).Set(reflect.ValueOf(pkVal))
 			}
 
-			if _, err := q.saveAny(q.ctx, q.exec, relatedVal.Interface(), isUpdate); err != nil {
+			if _, err := q.saveAny(q.ctx, q.exec, relatedVal.Interface(), isUpdate, q.tenantScopeFor(relMeta)); err != nil && !errors.Is(err, errExcludedByWhere) {
 				return err
 			}
 
@@ -1590,7 +1675,7 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 					item.Field(fm.Index).Set(reflect.ValueOf(pkVal))
 				}
 
-				if _, err := q.saveAny(q.ctx, q.exec, itemPtr.Interface(), isUpdate); err != nil {
+				if _, err := q.saveAny(q.ctx, q.exec, itemPtr.Interface(), isUpdate, q.tenantScopeFor(relMeta)); err != nil && !errors.Is(err, errExcludedByWhere) {
 					return err
 				}
 			}
@@ -1606,7 +1691,7 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 				// Only save related item if it is new (zero PK).
 				// If it already has a PK, it was created beforehand — just link it.
 				if isZeroPKValue(item.Field(relMeta.PK.Index)) {
-					if _, err := q.saveAny(q.ctx, q.exec, itemPtr.Interface(), isUpdate); err != nil {
+					if _, err := q.saveAny(q.ctx, q.exec, itemPtr.Interface(), isUpdate, q.tenantScopeFor(relMeta)); err != nil && !errors.Is(err, errExcludedByWhere) {
 						return err
 					}
 				}
@@ -2192,6 +2277,9 @@ func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns [
 // DELETE … WHERE pk IN (…) statements, chunked to batchChunkSize to stay within
 // every supported dialect's placeholder limit (Oracle: 1000, MSSQL: ~2100, others: larger).
 //
+// The query's conditions are ANDed with the ids, as in Delete (QK-40): an id
+// whose row does not satisfy them is not deleted.
+//
 // Example:
 //
 //	affected, err := quark.For[User](ctx, client).DeleteBatch([]any{1, 2, 3})
@@ -2243,8 +2331,22 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 
 		sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)",
 			table, pkCol, strings.Join(phs, ", "))
+		args := chunk
 
-		result, err := q.executeExec(ctx, sqlStr, chunk)
+		// The query's conditions narrow the ids, as they do for Delete
+		// (QK-40): an id that does not satisfy them is not deleted.
+		whereSQL, whereArgs, err := q.whereForWrite(len(chunk) + 1)
+		if err != nil {
+			return totalAffected, err
+		}
+		if whereSQL != "" {
+			sqlStr += " AND " + whereSQL
+			// The capped slice makes append copy instead of writing into
+			// the caller's ids beyond this chunk.
+			args = append(chunk[:len(chunk):len(chunk)], whereArgs...)
+		}
+
+		result, err := q.executeExec(ctx, sqlStr, args)
 		if err != nil {
 			return totalAffected, fmt.Errorf("delete batch failed: %w", err)
 		}
@@ -2554,6 +2656,12 @@ func (q *Query[T]) upsertBatchOracle(
 // Each entity undergoes a partial update: zero-value fields are skipped (same semantics as Update).
 // A transaction is used to guarantee atomicity across all rows.
 //
+// The query's conditions are ANDed with each entity's key, as in Update
+// (QK-40): an entity whose row does not satisfy them is not written, the way
+// an entity whose key does not exist is not written. UpdateBatch returns no
+// count, so a caller that needs to know which rows were written calls Update
+// per entity.
+//
 // Example:
 //
 //	err := quark.For[User](ctx, client).UpdateBatch(users)
@@ -2610,7 +2718,11 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 				tenantID:  q.tenantID,
 				tenantCol: q.tenantCol,
 				schema:    q.schema, // SchemaPerTenant: keep writes in the tenant schema (BB-8)
-				err:       q.err,
+				// The query's conditions narrow each row's key (QK-40); a row
+				// that does not satisfy them is not written, like a key that
+				// does not exist.
+				where: q.where,
+				err:   q.err,
 			}
 			sqlStr, args, err := bq.buildUpdate(v)
 			if err != nil {

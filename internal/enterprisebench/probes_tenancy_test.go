@@ -320,6 +320,25 @@ func rlsBoundToTenant(stmt string, args []any, tenant string) bool {
 	return true
 }
 
+// rlsStatement returns the first statement recorded since the last reset that
+// starts with verb ("UPDATE ", "DELETE "), and the arguments bound to it; ""
+// and nil when there is none.
+//
+// recorder.last() is the right reading for a door that emits one statement.
+// A guarded write that touched nothing emits two — the write, and then the
+// SELECT that asks whether the row passes the conditions (QK-40) — and the
+// write is the one whose scoping is being measured.
+func rlsStatement(r *recorder, verb string) (string, []any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ev := range r.events {
+		if strings.HasPrefix(ev.SQL, verb) {
+			return ev.SQL, ev.Args
+		}
+	}
+	return "", nil
+}
+
 // rlsScopedTo reads the last recorded statement and reports whether it filters
 // by the tenant column AND binds that filter to the given tenant. It is the
 // form every client-side scoping check in this family uses; rlsScopedToTenant
@@ -463,7 +482,15 @@ func probeRlsNativeRefusalOnOtherEngines(t *testing.T, e *env) verdict {
 // RowLevelSecurityClient — the five builder doors the control's note names
 // (List, Where, Or, UpdateMap, DeleteBy) and the four that address a row
 // directly (Find, Update(entity), Delete(entity), Create) — and reads the
-// statement each one emitted. The strategy's whole contract is that the tenant
+// statement each one emitted.
+//
+// Until A11 Q11 the four direct paths leaked together and the probe read each
+// one's leak. Q11 closed them (QK-42, with QK-40 for the writes), and "did not
+// leak" read off a call that touched nothing measures nothing, so each direct
+// path is now measured positively: Find of the other tenant's id is
+// ErrNotFound from a statement bound to this tenant, and Find of its own id
+// returns it; each write by key binds the tenant, reports zero rows and
+// leaves the other tenant's row as it was; Create stores the resolved tenant. The strategy's whole contract is that the tenant
 // predicate is in the WHERE and bound to the CALLER's tenant, so the probe
 // reads both: the clause, because a row can come back from a scoped statement
 // by coincidence and from an unscoped one by leak, and the value the router
@@ -500,8 +527,17 @@ func probeRlsClientPredicatePKPaths(t *testing.T, e *env) verdict {
 
 	// Or() is the path where a predicate that merely PRECEDES the group is
 	// escaped by operator precedence, so the group is read on its own.
+	//
+	// The Or has a left side, as an application writes it. Until A11 Q11 this
+	// probe used a bare Or(), which rendered `tenant = ? OR (tenant = ? AND
+	// id = ?)` and returned every row of the tenant; since QK-41 the scopes
+	// are ANDed with the caller's expression as a whole, a bare Or() means its
+	// group alone, and the group here names tb's row — so it returned nothing
+	// and measured nothing (rlsOwnedOnlyBy). With id 1 on the left the read
+	// has a row of this tenant to return and one of the other to refuse,
+	// before and after the change.
 	rec.reset()
-	disjunctive, err := quark.For[rlsRow](ta, router).Or(func(q *quark.Query[rlsRow]) *quark.Query[rlsRow] {
+	disjunctive, err := quark.For[rlsRow](ta, router).Where("id", "=", 1).Or(func(q *quark.Query[rlsRow]) *quark.Query[rlsRow] {
 		return q.Where("id", "=", 2)
 	}).List()
 	if err != nil {
@@ -531,49 +567,77 @@ func probeRlsClientPredicatePKPaths(t *testing.T, e *env) verdict {
 
 	builderScoped := listScoped && whereScoped && orScoped && updateMapScoped && deleteByScoped
 
-	// Read by primary key: id 2 belongs to "tb".
+	// Read by primary key: id 2 belongs to "tb". Leaking is the old world —
+	// the row comes back from a statement with no tenant predicate. Scoped is
+	// all of: not found, from a statement bound to "ta", and this tenant's own
+	// id 1 found through the same door, so "not found" is not a door that
+	// finds nothing at all.
 	rec.reset()
 	found, findErr := quark.For[rlsRow](ta, router).Find(2)
 	findLeaks := findErr == nil && found.TenantID == "tb" && !rlsScopedToTenant(rec.last())
+	findRefused := errors.Is(findErr, quark.ErrNotFound) && rlsScopedTo(rec, "ta")
+	own, ownErr := quark.For[rlsRow](ta, router).Find(1)
+	findScoped := findRefused && ownErr == nil && own.TenantID == "ta"
 
-	// Write by primary key through the entity path.
+	// tbRow reads tb's row back through the base client, which no tenant
+	// confines: what a write by key did to it is the measurement.
+	tbRow := func() (rlsRow, bool) {
+		row, err := quark.For[rlsRow](context.Background(), c).Find(2)
+		return row, err == nil
+	}
+
+	// Write by primary key through the entity path, aimed at tb's row. Scoped
+	// means all of it: the UPDATE binds the tenant predicate to "ta", it
+	// reports zero rows and no error, and tb's row reads back as it was. The
+	// statement is looked up by its verb, because a guarded write that
+	// touched nothing asks the database afterwards whether the row passes
+	// the conditions, and that SELECT is the last thing recorded.
 	rec.reset()
 	stolen := rlsRow{ID: 2, TenantID: "tb", Status: "written-by-ta"}
 	updated, updErr := quark.For[rlsRow](ta, router).Update(&stolen)
-	updateLeaks := updErr == nil && updated == 1 && !rlsScopedToTenant(rec.last())
+	updStmt, updArgs := rlsStatement(rec, "UPDATE ")
+	after, tbThere := tbRow()
+	updateScoped := updErr == nil && updated == 0 &&
+		rlsScopedToTenant(updStmt) && rlsBoundToTenant(updStmt, updArgs, "ta") &&
+		tbThere && after.Status == "owned-by-tb"
 
-	// Delete by primary key through the entity path.
+	// Delete by primary key through the entity path, aimed at the same row.
 	rec.reset()
 	deleted, delErr := quark.For[rlsRow](ta, router).Delete(&rlsRow{ID: 2})
-	deleteLeaks := delErr == nil && deleted == 1 && !rlsScopedToTenant(rec.last())
+	delStmt, delArgs := rlsStatement(rec, "DELETE ")
+	_, tbStill := tbRow()
+	deleteScoped := delErr == nil && deleted == 0 &&
+		rlsScopedToTenant(delStmt) && rlsBoundToTenant(delStmt, delArgs, "ta") && tbStill
 
 	// Create carrying somebody else's tenant id: the router resolves "ta",
-	// the row says "tb", and nothing reconciles the two.
+	// the row says "tb". Leaking is the row stored under "tb"; stamped is the
+	// row stored under the tenant the router resolved.
 	planted := rlsRow{ID: 99, TenantID: "tb", Status: "planted-by-ta"}
-	createLeaks := false
+	createLeaks, createStamped := false, false
 	if err := quark.For[rlsRow](ta, router).Create(&planted); err == nil {
 		stored, err := quark.For[rlsRow](context.Background(), c).Find(99)
 		createLeaks = err == nil && stored.TenantID == "tb"
+		createStamped = err == nil && stored.TenantID == "ta"
 	}
 
 	// Each verdict is the CONJUNCTION of the facts its title states. A
-	// disjunction ("any of the four leaks") would keep this control green
-	// while three of the four closed, which is the regression the bench is
-	// here to catch: the title would then describe a product that no longer
-	// exists, and nothing would say so.
+	// disjunction ("any of the direct paths is scoped") would keep this
+	// control green while some of them reopened, which is the regression the
+	// bench is here to catch: the title would then describe a product that no
+	// longer exists, and nothing would say so. Every state between "all
+	// scoped" and "the builder doors broken" is a path that changed its mind,
+	// and stops the bench.
 	switch {
-	case builderScoped && !findLeaks && !updateLeaks && !deleteLeaks && !createLeaks:
+	case builderScoped && findScoped && updateScoped && deleteScoped && createStamped:
 		return present
-	case builderScoped && findLeaks && updateLeaks && deleteLeaks && createLeaks:
-		return partial
 	case !builderScoped:
 		// The predicate is missing from the path the strategy is named after.
 		return absent
 	default:
 		t.Fatalf("client-side scoping measured: builder doors list=%v where=%v or=%v updateMap=%v deleteBy=%v; "+
-			"direct paths leak find=%v update=%v delete=%v create=%v — some path changed its mind since this control was written, re-measure and retitle",
+			"direct paths scoped find=%v update=%v delete=%v create-stamped=%v (find leaks=%v, create leaks=%v) — some path changed its mind since this control was written, re-measure and retitle",
 			listScoped, whereScoped, orScoped, updateMapScoped, deleteByScoped,
-			findLeaks, updateLeaks, deleteLeaks, createLeaks)
+			findScoped, updateScoped, deleteScoped, createStamped, findLeaks, createLeaks)
 		return absent
 	}
 }

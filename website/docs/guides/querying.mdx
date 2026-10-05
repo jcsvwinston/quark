@@ -194,6 +194,12 @@ users, err := quark.For[User](ctx, client).
 // WHERE active = ? OR (role = ? AND verified = ?)
 ```
 
+The filters Quark adds on its own — `deleted_at IS NULL` on a soft-delete
+model, the tenant predicate under `RowLevelSecurityClient` — are ANDed with
+your conditions as a whole, so an `Or` group cannot bring back a row they
+exclude. On a soft-delete model the query above reads
+`WHERE deleted_at IS NULL AND (active = ? OR (role = ? AND verified = ?))`.
+
 For predicates that nest deeper than `Or` reads well, reach for the
 [expression AST](#composable-expressions) further down.
 

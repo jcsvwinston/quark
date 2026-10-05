@@ -135,11 +135,23 @@ func (q *BaseQuery) strictReadCheck(entrypoint string) error {
 // read) run before the context lookup so untracked or non-point reads pay
 // as little as possible.
 func (q *BaseQuery) noteNPlusOneRead() {
-	if q.limit != 1 || len(q.where) != 1 {
+	if q.limit != 1 {
 		return
 	}
-	cond := q.where[0]
-	if cond.column != q.pk.Column || cond.operator != "=" || len(cond.group) > 0 {
+	// The scopes Quark adds (the tenant predicate) do not make a point read
+	// something else: Find under RowLevelSecurityClient carries the tenant
+	// next to the key since QK-42.
+	var cond *condition
+	for i := range q.where {
+		if q.where[i].scope {
+			continue
+		}
+		if cond != nil {
+			return
+		}
+		cond = &q.where[i]
+	}
+	if cond == nil || cond.column != q.pk.Column || cond.operator != "=" || len(cond.group) > 0 {
 		return
 	}
 	tracker, _ := q.ctx.Value(readTrackerKey{}).(*readTracker)

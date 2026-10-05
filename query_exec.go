@@ -524,9 +524,17 @@ func (q *Query[T]) List() ([]T, error) {
 }
 
 // First returns the first matching row or ErrNotFound.
+//
+// The limit it sets is put back when it returns: it used to stay on the
+// receiver, and a later List on the same query returned one row. Put back
+// rather than set on a copy, because a copy of the query is one more
+// allocation of its whole struct on every First and every Find — the engine
+// bench (PG-02, MY-01) holds Find's allocations to 5 % of the record.
 func (q *Query[T]) First() (T, error) {
 	var zero T
 
+	limit, hasLimit := q.limit, q.hasLimit
+	defer func() { q.limit, q.hasLimit = limit, hasLimit }()
 	q.limit = 1
 	q.hasLimit = true
 	results, err := q.List()
@@ -541,7 +549,11 @@ func (q *Query[T]) First() (T, error) {
 	return results[0], nil
 }
 
-// Find retrieves a single row by primary key.
+// Find retrieves a single row by primary key, ANDed with the query's
+// conditions: the tenant predicate of RowLevelSecurityClient, the soft-delete
+// filter, and any Where the caller added (QK-42, QK-40). A row the conditions
+// exclude — another tenant's among them — is ErrNotFound, the same answer as a
+// key that does not exist.
 func (q *Query[T]) Find(id any) (T, error) {
 	var zero T
 
@@ -561,14 +573,21 @@ func (q *Query[T]) Find(id any) (T, error) {
 		return zero, fmt.Errorf("%w: model %T has no primary key — tag a field with pk:\"true\" or name a column db:\"id\"", ErrInvalidQuery, zero)
 	}
 
-	q.where = []condition{{
+	// The key is ADDED to the query's conditions, and only for this call. It
+	// used to replace them, for good: the tenant predicate went with the
+	// rest, so Find(id) under RowLevelSecurityClient read another tenant's
+	// row by its id (QK-42), and the same query reused afterwards listed
+	// without its tenant. ownedAppend leaves the caller's slice untouched,
+	// and the deferred assignment puts the receiver's back (see First for
+	// why not a copy of the query).
+	where := q.where
+	defer func() { q.where = where }()
+	q.where = ownedAppend(q.where, condition{
 		column:   q.pk.Column,
 		operator: "=",
 		value:    id,
 		logic:    "AND",
-	}}
-	q.limit = 1
-
+	})
 	return q.First()
 }
 
@@ -775,11 +794,9 @@ func (q *Query[T]) Count() (int64, error) {
 		sqlBuf.WriteString(j.onClause)
 	}
 
-	// WHERE clause
-	whereConds := q.where
-	if pred := q.softDeletePredicate(); pred != nil {
-		whereConds = append([]condition{*pred}, whereConds...)
-	}
+	// WHERE clause: the scopes ANDed with the caller's conditions as a
+	// whole (QK-41).
+	whereConds := q.scopedConditions(q.softDeletePredicate())
 
 	if len(whereConds) > 0 {
 		// Start the WHERE arg index after any CTE args already enqueued so
@@ -1087,10 +1104,8 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 			ErrInvalidQuery, len(q.where), q.client.limits.MaxWhereConditions)
 	}
 
-	whereConds := q.where
-	if pred := q.softDeletePredicate(); pred != nil {
-		whereConds = append([]condition{*pred}, whereConds...)
-	}
+	// The scopes ANDed with the caller's conditions as a whole (QK-41).
+	whereConds := q.scopedConditions(q.softDeletePredicate())
 
 	if len(whereConds) > 0 {
 		// Start the WHERE arg index after any CTE args already enqueued so
@@ -1567,24 +1582,70 @@ func listOperand(op string, v any) ([]any, error) {
 	return out, nil
 }
 
+// scopedConditions returns the condition list a statement over the query's
+// own table renders: the scopes first — extra, the soft-delete predicate a
+// read adds, and the tenant predicate RowLevelSecurityClient injected — and
+// then the caller's conditions as ONE parenthesised group ANDed with them.
+//
+// Before QK-41 the scopes were simply prepended to the caller's conditions,
+// and an Or group the caller wrote at the top level escaped them:
+// Where("name", "=", "a").Or(…"b"…) on a soft-delete model rendered
+// `"deleted_at" IS NULL AND "name" = ? OR ("name" = ?)`, which SQL parses as
+// `(deleted_at IS NULL AND name = a) OR (name = b)` and returns b from the
+// trash. Grouping the caller's conditions makes every scope hold for every
+// row the statement touches, whatever the caller's expression is.
+//
+// With no scope the caller's conditions come back as they are, so a query
+// without soft delete or a tenant renders exactly as before. A leading Or()
+// — one with nothing before it — now means its group alone, as it does on a
+// query with no scope; before, it was ORed with the scopes themselves.
+func (q *BaseQuery) scopedConditions(extra *condition) []condition {
+	n := 0
+	for i := range q.where {
+		if q.where[i].scope {
+			n++
+		}
+	}
+	if extra == nil && n == 0 {
+		return q.where
+	}
+	scopes := make([]condition, 0, n+2)
+	if extra != nil {
+		scopes = append(scopes, *extra)
+	}
+	caller := make([]condition, 0, len(q.where)-n)
+	for _, c := range q.where {
+		if c.scope {
+			scopes = append(scopes, c)
+		} else {
+			caller = append(caller, c)
+		}
+	}
+	if len(caller) == 0 {
+		return scopes
+	}
+	return append(scopes, condition{logic: "AND", group: caller})
+}
+
 // whereForWrite renders the query's conditions for an UPDATE or a DELETE
 // through buildWhereClause, so WhereNot, Or groups, IN, BETWEEN, IS NULL, the
 // escaped LIKE forms and WhereExpr select the same rows a SELECT with the same
 // conditions selects (QK-39). argIndex is the next placeholder index — after
 // the SET arguments and any key predicate the statement binds first — so the
 // numbered placeholders of PostgreSQL, SQL Server and Oracle continue in
-// order. The tenant predicate RowLevelSecurityClient injects is one of the
-// conditions, so it is rendered here as it is for a SELECT.
+// order. The tenant predicate RowLevelSecurityClient injects is a scope, ANDed
+// with the caller's conditions as a whole as it is for a SELECT (QK-41).
 //
 // The fragment comes back parenthesised: an Or group renders as `a OR (b)`
 // at the top level, and a statement that ANDs the fragment with its own
 // primary-key predicate must not let that OR escape it. It is "" when the
 // query has no conditions.
 func (q *BaseQuery) whereForWrite(argIndex int) (string, []any, error) {
-	if len(q.where) == 0 {
+	conds := q.scopedConditions(nil)
+	if len(conds) == 0 {
 		return "", nil, nil
 	}
-	frag, args, err := q.buildWhereClause(q.where, argIndex)
+	frag, args, err := q.buildWhereClause(conds, argIndex)
 	if err != nil {
 		return "", nil, err
 	}
@@ -1815,10 +1876,8 @@ func (q *Query[T]) aggregate(fn, column string) (float64, error) {
 	sqlBuf.WriteString(") FROM ")
 	sqlBuf.WriteString(q.fullTableName())
 
-	whereConds := q.where
-	if pred := q.softDeletePredicate(); pred != nil {
-		whereConds = append([]condition{*pred}, whereConds...)
-	}
+	// The scopes ANDed with the caller's conditions as a whole (QK-41).
+	whereConds := q.scopedConditions(q.softDeletePredicate())
 	if len(whereConds) > 0 {
 		// Start arg index after any CTE args already enqueued.
 		whereSQL, whereArgs, err := q.buildWhereClause(whereConds, len(args)+1)

@@ -59,7 +59,7 @@ control needs a live engine to go further, its note says so, and
 
 ## The result
 
-**47 of 69 controls present. 18 partial. 4 absent.**
+**48 of 69 controls present. 17 partial. 4 absent.**
 
 ### migraciones — 12 present · 1 partial · 3 absent
 
@@ -121,13 +121,13 @@ control needs a live engine to go further, its note says so, and
 | `LIKE-10` | One aggregating check covers every lane the workflow declares | **present** | — |
 | `LIKE-11` | An engine lane fails, rather than skips, when its engine does not answer | **present** | — |
 
-### rls — 7 present · 5 partial · 1 absent
+### rls — 8 present · 4 partial · 1 absent
 
 | id | control | verdict | what is missing |
 |---|---|---|---|
 | `RLS-01` | Native RLS is offered by exactly one of the six dialects, and it emits PostgreSQL's set_config | **partial** | One engine, and measured again at A8 S8, which decided to leave it so. SQL Server's SESSION_CONTEXT and Oracle's DBMS_SESSION context are SESSION-scoped: set inside a transaction they survive its commit on the pooled connection, so the next tenant to borrow that connection would inherit the previous one's identity unless every path cleared it — PostgreSQL's set_config(..., true) is transaction-scoped and needs no clearing. What each engine gets is written in the multi-tenant guide: PostgreSQL Native; the five others RowLevelSecurityClient, and Native refuses on all three doors. |
 | `RLS-02` | On an engine without native RLS, For[T], Tx and GetClient all refuse | **present** | Closed at A8 S8: GetClient — the ClientProvider method — fails closed with ErrUnsupportedFeature like the other two doors, instead of handing back the base client through which a read returned every tenant's rows. |
-| `RLS-03` | RowLevelSecurityClient scopes the five builder paths; Find/Update/Delete by primary key emit no tenant predicate, and Create keeps a foreign one | **partial** | The injected predicate survives List, Where, Or, UpdateMap and DeleteBy, and is dropped by every path that addresses a row by primary key: Find overwrites the condition slice, Update(entity) and Delete(entity) build their WHERE from the key alone. Create keeps a tenant id the caller supplied, so a row can be written under a foreign tenant. This is the only row-level option outside PostgreSQL. |
+| `RLS-03` | RowLevelSecurityClient scopes the five builder paths and the four that address a row by key: Find, Update and Delete bind the tenant predicate, and Create stores the resolved tenant | **present** | Closed at A11 Q11 (QK-42, with QK-40 and QK-41 in the same change). Until then the predicate survived List, Where, Or, UpdateMap and DeleteBy and was dropped by every path that addresses a row by key: Find replaced the condition slice, Update(entity) and Delete(entity) built their WHERE from the key alone, and Create kept a tenant id the caller supplied. Find now ANDs the key with the query's conditions and another tenant's id is ErrNotFound; the writes by key AND them too and report zero rows; inserts and updates write the resolved tenant into the tenant column. Re-measured there: the probe reads each direct path positively instead of reading a leak's absence. This is the only row-level option outside PostgreSQL. |
 | `RLS-04` | VerifyRLSPolicies is reachable and refuses to certify nothing, and the Native router verifies the engine enforces before it serves | **present** | Closed at A8 S8: the router checks once per table, at first use, that row-level security is enabled and a policy exists (pg_class, pg_policy), and refuses with ErrRLSNotEnforced otherwise — a catalog it cannot read included, which is what this bench's PostgreSQL-shaped SQLite measures. TenantConfig.SkipPolicyVerification opts out; quarktenant.VerifyRLSPolicies remains the detailed preflight. |
 | `RLS-05` | InstallRLSPolicies renders the isolation DDL for every registered model, with USING and WITH CHECK, and touches nothing on a dry run | **present** | — |
 | `RLS-06` | `quark tenant install-rls-policies` and `verify-rls-policies` exist in the shipped binary, and the embeddable runner keeps its bare actions | **present** | Closed at A8 S10. The cobra `tenant` group of cmd/quark registers both commands, reading the models from source (--from-models) and rendering the runner's own DDL shape, so what ADR-0012 prints is what the binary accepts. quarktenant.Run is the embeddable runner an application wires into a main of its own; its actions stay bare (install-rls-policies, verify-rls-policies) and it still rejects a `tenant` prefix — that is not a gap, it is a different program. The binary is a module of its own, so this bench reads its sources for the commands. |
