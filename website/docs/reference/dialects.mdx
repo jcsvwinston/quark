@@ -91,3 +91,12 @@ Registering a name again replaces the dialect registered under it.
 
 The dialect interface covers SQL generation, placeholder formatting, identifier
 quoting, and schema DDL.
+
+The contract is declared in `github.com/jcsvwinston/quark/quarkdriver`: the
+`Dialect` interface and the types it names, the optional interfaces Quark asks
+a dialect, the schema model, `ErrUnsupportedFeature` and the registry
+(`quarkdriver.RegisterDialect`). `quark.Dialect`, `quark.RegisterDialect` and
+the other names in package `quark` are aliases of the same types, so the code
+above is unchanged; a driver module writes and registers its dialect against
+`quarkdriver` without importing package `quark`. See
+[Where the contract lives](./api/dialects#where-the-contract-lives).

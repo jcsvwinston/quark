@@ -3,8 +3,12 @@ type: playbook
 module: dialects
 files:
   - dialect.go
-last_review: 2026-05-10
-related_adrs: [0005]
+  - quarkdriver/dialect.go
+  - quarkdriver/migration_lock.go
+  - quarkdriver/schema_model.go
+  - quarkdriver/schema.go
+last_review: 2026-10-05
+related_adrs: [0005, 0023, 0026]
 related_p0: []
 closed_p0: [P0-2]
 phase: 0
@@ -25,7 +29,40 @@ Cada `Dialect` provee:
 - `LastInsertIDQuery` — `last_insert_rowid()` (SQLite), `LASTVAL()` (PG con secuencia), `SCOPE_IDENTITY()` (MSSQL), driver-level (MySQL).
 - `JSONExtract`, `UpsertSQL`, `BuildRoutineQuery`, DDL básico (`AlterTable*`, `RenameColumn`, `RenameTable`).
 
-Registro de dialectos custom: `RegisterDialect("vertica", verticaDialect)` (`dialect.go:859`).
+Registro de dialectos custom: `RegisterDialect("vertica", verticaDialect)`.
+
+### Where the contract lives (ADR-0026, A11 Q3)
+
+The contract is declared in `quarkdriver`, the leaf package a driver module
+imports: `Dialect` and `LockOptions`/`LockMode` (`quarkdriver/dialect.go`),
+`SavepointDialect`, `ColumnTypeMapper`, the sentinels `ErrUnsupportedFeature`
+and `ErrLockTimeout`, the registry (`RegisterDialect`, `LookupDialect`); the
+migration lock (`quarkdriver/migration_lock.go`); `SchemaIntrospector` and the
+schema model (`quarkdriver/schema_model.go`); and the schema-path questions of
+A11 Q2 (`quarkdriver/schema.go`). Package `quark` declares each name again as
+an ALIAS (`type Dialect = quarkdriver.Dialect`), never as a copy, and
+`quark.RegisterDialect` calls `quarkdriver.RegisterDialect`. `DetectDialect`,
+`DetectDialectByName`, `ErrDialectNotSupported` and the six built-ins stay in
+package `quark`.
+
+Rules that follow:
+
+- **New contract is born in `quarkdriver`.** A type a dialect implements or a
+  dialect method names is declared there from its first commit, and aliased
+  from `quark` only if applications name it. If it names a type that is still
+  in `quark`, that type moves too, as an alias.
+- **Nothing in `quarkdriver` imports package `quark`.** It stays a leaf.
+  The bench measures it: `DRV-02` builds `internal/extbench/testdata/extdriver`
+  standalone, whose dialect (`dialect/dialect.go`) is written against
+  `quarkdriver` alone, and fails if any of its packages needs the root.
+- **An alias, not a copy.** `TestDialectContractAliases`
+  (`dialect_contract_alias_test.go`) checks that every name is the same
+  `reflect.Type` under both packages and that the sentinels are one value.
+  `dialect_contract_v115_test.go` is written against v1.15.2's names only and
+  must keep compiling unchanged — do not add `quarkdriver` names to it.
+- **Methods cannot be added to an alias.** `quark` cannot declare a method on
+  `Schema`, `LockOptions` or any moved type; a helper on them is a function in
+  `quark` or a method declared in `quarkdriver`.
 
 ## Bugs P0 vivos
 
@@ -65,13 +102,16 @@ MariaDB no tiene driver `database/sql` propio (usa `go-sql-driver/mysql`, nombre
 
 ### The dialect registry is guarded by a lock (A11 Q1)
 
-`RegisterDialect` writes, and `DetectDialect` / `DetectDialectByName` read,
-`customDialectRegistry` under `customDialectMu` (`dialect.go`). Before, it was
-a plain map, and a registration after start-up raced with any goroutine
-building a client (bench control `DRV-01`). Keep every reader behind
-`lookupCustomDialect`. Regression: `TestRegisterDialectConcurrent` in
-`dialect_unit_test.go` (the race lane runs it) and `DRV-01` in
-`internal/extbench`, which turns red if the lock goes.
+`quarkdriver.RegisterDialect` writes, and `quarkdriver.LookupDialect` reads,
+`dialects` under `dialectMu` (`quarkdriver/dialect.go`, since A11 Q3; Q1 put
+the lock on the map when it lived in `dialect.go`). `quark.RegisterDialect`
+calls the first, and `DetectDialect` / `DetectDialectByName` call the second
+before the built-in names. Before Q1 it was a plain map, and a registration
+after start-up raced with any goroutine building a client (bench control
+`DRV-01`). Keep every reader behind `LookupDialect`. Regression:
+`TestRegisterDialectConcurrent` in `dialect_unit_test.go` (the race lane runs
+it) and `DRV-01` in `internal/extbench`, whose race fixture hammers both
+names and turns red if the lock goes.
 
 ### The schema path asks the dialect (A11 Q2)
 
@@ -149,7 +189,7 @@ Mezcla SQL builder + DDL + procedures + JSON. Cuando MariaDB añade `CreateSeque
 
 ## Decisiones que afectan al módulo
 
-- **ADR 0026 (dialect contract in `quarkdriver`)**: the `Dialect` interface, the types it names, the optional interfaces and the registry move to `quarkdriver`, and package `quark` keeps every name as an alias. Until the move lands (A11 Q3), **declare any NEW dialect contract type in `quarkdriver`**, not here.
+- **ADR 0026 (dialect contract in `quarkdriver`)**: the `Dialect` interface, the types it names, the optional interfaces, the schema model, the sentinels and the registry live in `quarkdriver` since A11 Q3, and package `quark` keeps every name as an alias. **Declare any NEW dialect contract type in `quarkdriver`**, not here (see § Where the contract lives).
 
 - **ADR 0005 (Solo relacional)**: no hay backends NoSQL. TimescaleDB/CockroachDB se aceptan vía dialecto Postgres si emergen.
 

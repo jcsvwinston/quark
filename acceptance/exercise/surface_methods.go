@@ -134,11 +134,13 @@ func surfaceCursorTrack(ctx context.Context, client *quark.Client, rec *recorder
 		return fmt.Errorf("surface AsSubquery: %w", err)
 	}
 	_, _ = sub.SQL()
+	// quark.LockOptions es alias de quarkdriver.LockOptions (ADR-0026): el
+	// método se declara, y se inventaría, en quarkdriver.
 	_ = quark.LockOptions{}.IsZero()
 	rec.Note(
 		QF("(*Cursor[T]).Next"), QF("(*Cursor[T]).Scan"), QF("(*Cursor[T]).Err"), QF("(*Cursor[T]).Close"),
 		QF("(*TrackedQuery[T]).List"), QF("(*TrackedQuery[T]).First"),
-		QF("(*Subquery).SQL"), QF("(LockOptions).IsZero"),
+		QF("(*Subquery).SQL"), QD("(LockOptions).IsZero"),
 	)
 	return nil
 }

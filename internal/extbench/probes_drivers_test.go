@@ -254,16 +254,42 @@ func probeOtherRegistriesRace(t *testing.T, e *env) verdict {
 
 // --- DRV-02 ------------------------------------------------------------------------
 
+// The fixture's packages: the module root registers the engine with
+// database/sql and its dialect with quarkdriver; errs registers the
+// classifier; dialect writes the SQL.
+const (
+	extRootPkg       = "example.com/extdriver"
+	extClassifierPkg = "example.com/extdriver/errs"
+	extDialectPkg    = "example.com/extdriver/dialect"
+)
+
 func probeRegistrationWithoutRoot(t *testing.T, e *env) verdict {
 	childProbe(t)
 	dir := extdriverModule(t, e)
-	classifierHalf := deps(t, dir, standalone, "example.com/extdriver/errs")
-	wholeDriver := deps(t, dir, standalone, "example.com/extdriver")
+	classifierHalf := deps(t, dir, standalone, extClassifierPkg)
+	dialectHalf := deps(t, dir, standalone, extDialectPkg)
+	wholeDriver := deps(t, dir, standalone, extRootPkg)
+	// Each half is measured only if the driver actually uses it: a dialect
+	// package nothing imports would be root-free and prove nothing.
+	if !wholeDriver[extClassifierPkg] || !wholeDriver[extDialectPkg] {
+		t.Fatalf("the fixture driver does not import both of its halves (%s: %v, %s: %v): the probe would measure a package the driver does not register",
+			extClassifierPkg, wholeDriver[extClassifierPkg], extDialectPkg, wholeDriver[extDialectPkg])
+	}
 	classifierFree := !classifierHalf[rootPkg] && classifierHalf[driverPkg]
-	driverNeedsRoot := wholeDriver[rootPkg]
+	dialectFree := !dialectHalf[rootPkg] && dialectHalf[driverPkg]
+	driverFree := !wholeDriver[rootPkg]
 
-	// Why the dialect half needs it: the types the Dialect contract names.
+	// Where the contract a dialect implements is declared, and which types
+	// of package quark its methods name: a type outside the package cannot
+	// implement an interface whose methods name a type it cannot import.
 	api := e.loadAPI(t)
+	declaredIn := func(name string) string {
+		obj := api.lookup(rootPkg, name)
+		if n, ok := types.Unalias(obj.Type()).(*types.Named); ok && n.Obj().Pkg() != nil {
+			return n.Obj().Pkg().Path()
+		}
+		return obj.Pkg().Path()
+	}
 	dialect := api.lookup(rootPkg, "Dialect").Type().Underlying().(*types.Interface)
 	named := map[string]bool{}
 	for i := 0; i < dialect.NumMethods(); i++ {
@@ -281,12 +307,15 @@ func probeRegistrationWithoutRoot(t *testing.T, e *env) verdict {
 		rootTypes = append(rootTypes, n)
 	}
 	sort.Strings(rootTypes)
-	t.Logf("the classifier half imports quarkdriver and not package quark: %v (%d packages)", classifierFree, len(classifierHalf))
-	t.Logf("the whole driver (dialect registered) imports package quark: %v (%d packages)", driverNeedsRoot, len(wholeDriver))
-	t.Logf("types of package quark the Dialect interface names: %v; RegisterDialect lives in package quark", rootTypes)
+	_, registryInLeaf := api.pkgs[driverPkg].Scope().Lookup("RegisterDialect").(*types.Func)
+	t.Logf("the classifier half (%s) imports quarkdriver and not package quark: %v (%d packages)", extClassifierPkg, classifierFree, len(classifierHalf))
+	t.Logf("the dialect half (%s) imports quarkdriver and not package quark: %v (%d packages)", extDialectPkg, dialectFree, len(dialectHalf))
+	t.Logf("the whole driver (%s, both registered) is free of package quark: %v (%d packages)", extRootPkg, driverFree, len(wholeDriver))
+	t.Logf("quark.Dialect is declared in %s; types of package quark its methods name: %v; quarkdriver.RegisterDialect exists: %v",
+		declaredIn("Dialect"), rootTypes, registryInLeaf)
 
 	switch {
-	case classifierFree && !driverNeedsRoot:
+	case classifierFree && dialectFree && driverFree:
 		return present
 	case classifierFree:
 		return partial
@@ -381,7 +410,7 @@ func probeKitChecksDialect(t *testing.T, e *env) verdict {
 			}
 		}
 	}
-	t.Logf("places the conformance kit (%s) can be handed a quark.Dialect: %v", drivertestPkg, takes)
+	t.Logf("places the conformance kit (%s) can be handed a Dialect: %v", drivertestPkg, takes)
 	if len(takes) > 0 {
 		t.Fatalf("the kit now takes a dialect (%v). Before this control can move, extend this probe to run the kit against a dialect that is wrong on purpose — placeholders, quoting, upsert, limit, savepoint — and record whether the kit catches each", takes)
 	}

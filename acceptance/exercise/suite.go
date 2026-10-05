@@ -35,6 +35,11 @@ func CM(method string) string { return qpkg + ".(*Client)." + method }
 // NewTenantRouter, RowLevelSecurityClient…).
 func QF(name string) string { return qpkg + "." + name }
 
+// QD es la key de un símbolo de quarkdriver, el contrato de los módulos de
+// driver y del dialecto (ADR-0023, ADR-0026): QD("RegisterDialect") →
+// "github.com/jcsvwinston/quark/quarkdriver.RegisterDialect".
+func QD(name string) string { return qpkg + "/quarkdriver." + name }
+
 // TRM es la key de un método de *TenantRouter: TRM("Tx") →
 // "github.com/jcsvwinston/quark.(*TenantRouter).Tx".
 func TRM(method string) string { return qpkg + ".(*TenantRouter)." + method }

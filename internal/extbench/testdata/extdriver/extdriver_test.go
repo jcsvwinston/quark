@@ -5,6 +5,7 @@ package extdriver_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -81,5 +82,24 @@ func TestEndToEnd(t *testing.T) {
 	err = quark.For[note](ctx, c).Create(&note{Title: "first"})
 	if !quark.IsUniqueViolation(err) {
 		t.Fatalf("a duplicate key from the driver is not classified as a unique violation: %v", err)
+	}
+
+	// The dialect's sentinel, built from quarkdriver, is the application's
+	// quark.ErrUnsupportedFeature: one value under two names.
+	_, err = quark.For[note](ctx, c).ForUpdate().List()
+	if !errors.Is(err, quark.ErrUnsupportedFeature) {
+		t.Fatalf("a lock the engine cannot take is not ErrUnsupportedFeature: %v", err)
+	}
+
+	// The schema the dialect reads, in quarkdriver's model, is the
+	// application's quark.Schema.
+	var schema quark.Schema
+	schema, err = c.IntrospectSchema(ctx)
+	if err != nil {
+		t.Fatalf("introspect: %v", err)
+	}
+	if len(schema.Tables) != 1 || schema.Tables[0].Name != "notes" || len(schema.Tables[0].Columns) != 2 ||
+		!schema.Tables[0].Columns[0].PrimaryKey || schema.Tables[0].Columns[1].Name != "title" {
+		t.Fatalf("introspected schema: %+v", schema)
 	}
 }

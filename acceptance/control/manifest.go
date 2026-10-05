@@ -12,6 +12,13 @@ type Symbol struct {
 	Pkg  string `json:"pkg"`  // p.ej. github.com/jcsvwinston/quark
 	Name string `json:"name"` // p.ej. (*Query[T]).UpsertBatch o WithReplicas
 	Kind string `json:"kind"` // func | method | type | var
+	// AliasOf, en un tipo que es ALIAS (`type Dialect = quarkdriver.Dialect`),
+	// es la clave (pkg.Nombre) del tipo nombrado al que apunta. Los métodos de
+	// un alias no se listan bajo él sino bajo el tipo que los declara, así que
+	// sin este campo un tipo que se MUEVE dejando un alias (ADR-0026) se leía
+	// en el diff como métodos quitados de un paquete y añadidos a otro, sin
+	// nada que uniera las dos mitades. No es una firma: no fija parámetros.
+	AliasOf string `json:"alias_of,omitempty"`
 }
 
 // Key es la clave canónica usada en cobertura y allowlist.

@@ -16,6 +16,18 @@
 //
 //	import _ "github.com/jcsvwinston/quark/drivers/mysql"
 //
+// The package also holds the dialect contract (ADR-0026): the Dialect
+// interface and the types it names, the optional interfaces Quark asserts on
+// a dialect (savepoints, column types, migration locks, schema
+// introspection and the schema model it answers in, and the schema-path
+// questions of schema.go), the sentinels a dialect returns
+// (ErrUnsupportedFeature, ErrLockTimeout) and the dialect registry
+// (RegisterDialect, LookupDialect). A driver module for an engine Quark does
+// not ship writes and registers its dialect against this package alone.
+// Package quark keeps every one of those names — quark.Dialect,
+// quark.Schema, quark.RegisterDialect — as an alias of the same type or a
+// call to the function here, so an application does not change a line.
+//
 // The package is named quarkdriver, not driver, because
 // database/sql/driver is imported by exactly the code that would import this
 // one — naming it "driver" would make every such file alias one of the two.

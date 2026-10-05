@@ -62,8 +62,10 @@ var (
 	// active database dialect. Returned by builder methods (e.g. ForUpdate
 	// on SQLite) so callers can branch by dialect or fall back to a different
 	// strategy. The error message includes the dialect name and the feature
-	// being requested.
-	ErrUnsupportedFeature = errors.New("feature not supported by dialect")
+	// being requested. It holds the value of
+	// quarkdriver.ErrUnsupportedFeature, which a dialect returns (ADR-0026),
+	// so errors.Is matches under either name.
+	ErrUnsupportedFeature = quarkdriver.ErrUnsupportedFeature
 
 	// ErrInvalidTimezone indicates that a model field carries a
 	// quark:"tz=..." tag whose value is not a valid IANA timezone name

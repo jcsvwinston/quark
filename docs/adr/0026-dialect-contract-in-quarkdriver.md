@@ -3,7 +3,7 @@ id: 0026
 title: The dialect contract moves to quarkdriver; package quark keeps every name as an alias
 status: accepted
 date: 2026-10-04
-implemented: pending (arc A11, session Q3)
+implemented: v1.16 (arc A11, session Q3 — quarkdriver/dialect.go, migration_lock.go, schema_model.go; aliases in package quark)
 deciders: jcsvwinston
 related: [0019, 0023, 0024]
 supersedes: null
@@ -213,3 +213,25 @@ of it blocks `Q2` or `Q3`.
 - If moving the schema model turns out to drag a dependency into `quarkdriver`
   that a leaf should not carry, split the introspection contract into its own
   leaf under `quarkdriver/` rather than leaving it in the root.
+
+## Implementation (A11 Q3)
+
+- The contract is in `quarkdriver/dialect.go` (`Dialect`, `LockOptions`,
+  `LockMode`, `SavepointDialect`, `ColumnTypeMapper`, the two sentinels and
+  the registry, with its `sync.RWMutex`), `quarkdriver/migration_lock.go` and
+  `quarkdriver/schema_model.go`. Package `quark` declares each name as an
+  alias; `RegisterDialect` calls `quarkdriver.RegisterDialect`, and
+  `DetectDialect` / `DetectDialectByName` call `quarkdriver.LookupDialect`
+  first.
+- `acceptance/apisurface.json` moved 36 members, not 39: the 21 of `Dialect`
+  and 15 of the other moved types (`LockOptions.IsZero`, three of
+  `SavepointDialect`, three of `DBConn`, two of `Result`, one each of
+  `MigrationLock`, `MigrationLocker`, `DBConnector`, `Row`,
+  `SchemaIntrospector` and `ColumnTypeMapper`). The generator now records, on
+  a type that is an alias, the type it names (`alias_of`), so the move is
+  visible in the file as a move; keying each member by its declaring package
+  with a signature is still `Q6`'s.
+- `DRV-02` is present on a fixture whose dialect is written against
+  `quarkdriver` alone. `dialect_contract_v115_test.go` is a program written
+  against v1.15.2's names; it compiled unchanged against the published
+  v1.15.2 and compiles against this tree.
