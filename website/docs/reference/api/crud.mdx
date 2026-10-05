@@ -50,7 +50,7 @@ Behavior:
 | Associations | Recursively saves `belongs_to`, main entity, `has_one`, `has_many`, then many-to-many links. |
 | Primary key | Writes back integer PKs when the dialect supports `RETURNING` or last-insert ID. |
 | Cache | Invalidates the model table tag after successful write execution. |
-| Tenant | Under `RowLevelSecurityClient` the tenant column is set to the resolved tenant, whatever the entity carried. A different value is replaced, not written, and logged (`quark.tenant.foreign_value_replaced`). The same holds for `Update`, `UpdateFields`, `UpdateBatch`, `CreateBatch` and the insert branch of the upserts. |
+| Tenant | Under `RowLevelSecurityClient` the tenant column is set to the resolved tenant, whatever the entity carried. A different value is replaced, not written, and logged (`quark.tenant.foreign_value_replaced`). The same holds for `Update`, `UpdateFields`, `UpdateBatch`, `UpdateMap`, `CreateBatch` and the upserts. |
 
 The entity must be a non-nil pointer to a struct.
 
@@ -278,6 +278,7 @@ Rules:
 | At least one `Where` is required. | Prevents accidental full-table updates. |
 | Map keys are sorted. | Produces deterministic SQL. |
 | Keys are validated as identifiers. | Protects dynamic update maps. |
+| Under `RowLevelSecurityClient` the tenant column, if the map names it, is written with the resolved tenant. | A map cannot move a row to another tenant; a different value is logged (`quark.tenant.foreign_value_replaced`). |
 
 `UpdateMap` is the preferred API for explicit zero values, admin bulk changes,
 and computed updates that do not require loading a full entity.
@@ -432,6 +433,40 @@ conflict columns if you need it.
 
 Validation runs before the SQL is built.
 
+### Upserts under `RowLevelSecurityClient`
+
+The update branch only touches a row of the resolved tenant, and the row is
+inserted under the resolved tenant whatever the entity's tenant field holds:
+
+| Dialect | Update branch under the tenant |
+| --- | --- |
+| PostgreSQL, SQLite | `ON CONFLICT (...) DO UPDATE SET ... WHERE <table>.tenant_id = ?` |
+| MySQL, MariaDB | `ON DUPLICATE KEY UPDATE c = IF(tenant_id = ?, VALUES(c), c), ...` |
+| SQL Server | `MERGE ... WHEN MATCHED AND target.tenant_id = @p THEN UPDATE ...` |
+| Oracle | `MERGE ... WHEN MATCHED THEN UPDATE SET ... WHERE target.tenant_id = :n` |
+
+When the conflict key is held by a row of another tenant, that row is not
+updated and no row is inserted — the key is taken. `Upsert` returns an error
+wrapping `ErrConstraintViolation`, the same error a `Create` of that key
+returns:
+
+```go
+err := quark.For[Product](ctx, router).Upsert(product, []string{"sku"}, []string{"name"})
+if errors.Is(err, quark.ErrConstraintViolation) {
+    // the SKU exists, and not in this tenant — or another unique key collided
+}
+```
+
+Without an update branch — empty `updateCols` on PostgreSQL, SQLite, MySQL
+and MariaDB — a conflict with another tenant's row writes nothing and is not
+reported, as a conflict with the tenant's own row is not. A unique key that
+includes the tenant column (`(tenant_id, sku)`) avoids the collision
+altogether. On MySQL and MariaDB the upsert reads the row back by its
+conflict key within the tenant, which is also how the key of an updated row
+is written back to the entity. A dialect Quark has no guarded form for
+refuses the upsert under this strategy with `ErrUnsupportedFeature`, and so
+does a model without the tenant column.
+
 ## UpsertBatch
 
 ### `UpsertBatch(entities []*T, conflictCols []string, updateCols []string) error`
@@ -460,6 +495,15 @@ Behavior:
 | Oracle | One `MERGE` per entity. |
 
 Empty input returns `nil`. All entities are validated before any SQL is built.
+
+Under `RowLevelSecurityClient` each row's update branch is confined to the
+tenant as for [`Upsert`](#upserts-under-rowlevelsecurityclient), and the
+batch is all or nothing: it runs in a transaction — the caller's, when there
+is one — and a row whose conflict key belongs to another tenant fails the
+whole batch with `ErrConstraintViolation`. MySQL and MariaDB upsert one row
+at a time under this strategy: a multi-row statement reports one count for
+the batch, which cannot tell a row of another tenant from a row of this one
+that already held its values.
 
 ## UpdateBatch
 

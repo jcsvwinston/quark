@@ -107,13 +107,15 @@ reach another tenant's row:
   into the tenant column, whatever the entity carried; a different value is
   replaced and logged (`quark.tenant.foreign_value_replaced`), so a row cannot
   be planted in another tenant or moved into one.
-
-Two writes are not confined this way. `UpdateMap` writes what its map says,
-the tenant column included: do not put the tenant column in it. `Upsert` and
-`UpsertBatch` insert under the resolved tenant, but their update branch
-applies to whichever row holds the conflicting key, in any tenant: under this
-strategy, make the conflict columns include the tenant column (a unique key on
-`(tenant_id, …)`), or use `Create` and `Update`.
+- `UpdateMap` writes the resolved tenant into the tenant column when its map
+  names it, with the same log line.
+- `Upsert` and `UpsertBatch` insert under the resolved tenant, and their
+  update branch only touches the tenant's row. When the conflict key belongs to
+  another tenant, nothing is written and the call returns
+  `ErrConstraintViolation` — what a `Create` of the key returns; a batch is
+  rolled back whole. A unique key that includes the tenant column
+  (`(tenant_id, …)`) keeps tenants from colliding at all. See
+  [CRUD — Upserts under RowLevelSecurityClient](/docs/reference/api/crud#upserts-under-rowlevelsecurityclient).
 
 Remember the boundary: this is client-side scoping, so `client.Raw()` and
 `client.Exec()` aren't filtered. When that bypass risk matters and you're on

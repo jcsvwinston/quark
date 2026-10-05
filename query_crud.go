@@ -280,12 +280,8 @@ func (q *BaseQuery) ensureTenantID(v reflect.Value) {
 	if field.Kind() != reflect.String || !field.CanSet() {
 		return
 	}
-	if cur := field.String(); cur != "" && cur != q.tenantID && q.client != nil && q.client.logger != nil {
-		q.client.logger.Warn("the entity carried another tenant's id in the tenant column; RowLevelSecurityClient writes the resolved tenant instead",
-			"event", "quark.tenant.foreign_value_replaced",
-			"table", q.table,
-			"column", q.tenantCol,
-		)
+	if cur := field.String(); cur != "" && cur != q.tenantID {
+		q.warnForeignTenantValue()
 	}
 	field.SetString(q.tenantID)
 }
@@ -1085,6 +1081,11 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 
 // UpdateMap updates fields using a map (for partial updates without full entity).
 // Requires Where clause for safety.
+//
+// Under RowLevelSecurityClient a map that names the tenant column writes the
+// resolved tenant into it, whatever value the map holds (QK-44); a different
+// value is logged (event quark.tenant.foreign_value_replaced), as Create and
+// the updates by entity do. The caller's map is not modified.
 // Returns the number of rows affected.
 func (q *Query[T]) UpdateMap(data map[string]any) (int64, error) {
 	if q.err != nil {
@@ -1102,6 +1103,10 @@ func (q *Query[T]) UpdateMap(data map[string]any) (int64, error) {
 	if len(q.where) == 0 {
 		return 0, fmt.Errorf("%w: UpdateMap requires Where clause to prevent accidental full table update", ErrInvalidQuery)
 	}
+
+	// Under RowLevelSecurityClient the tenant column holds the resolved
+	// tenant whatever the map says (QK-44).
+	data = q.confineTenantColumn(data)
 
 	// Build UPDATE from map
 	sql, args, err := q.buildUpdateMap(data)
@@ -1710,6 +1715,11 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 // Upsert inserts or updates a record depending on whether a conflict occurs on conflictCols.
 // updateCols specifies which columns to update on conflict; if empty, all non-conflict columns are updated.
 //
+// Under RowLevelSecurityClient the update branch only touches a row of the
+// resolved tenant (QK-43). When the conflicting row belongs to another
+// tenant, nothing is written and Upsert returns an error wrapping
+// ErrConstraintViolation — what a Create of the same key returns.
+//
 // Example:
 //
 //	quark.For[User](ctx, client).Upsert(&user, []string{"email"}, []string{"name", "updated_at"})
@@ -1725,6 +1735,9 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 	// MSSQL/Oracle: invalid MERGE). Fail the same way everywhere.
 	if len(conflictCols) == 0 {
 		return fmt.Errorf("%w: Upsert requires at least one conflict column", ErrInvalidQuery)
+	}
+	if err := q.checkTenantUpsert(); err != nil {
+		return err
 	}
 	if err := q.client.Validate(q.ctx, entity); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
@@ -1773,10 +1786,14 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 	switch dialectName {
 	case "mssql", "oracle":
 		// MERGE syntax — build the full MERGE statement
-		mergeSQL, mergeArgs, mergeErr := q.buildMerge(v, conflictCols, updateCols)
+		mergeSQL, mergeArgs, hasUpdate, mergeErr := q.buildMerge(v, conflictCols, updateCols)
 		if mergeErr != nil {
 			return mergeErr
 		}
+		// Under the tenant guard a MERGE that changed no row matched a row of
+		// another tenant: WHEN MATCHED did not fire for it, and WHEN NOT
+		// MATCHED cannot, because it matched (QK-43).
+		foreign := q.tenantGuarded() && hasUpdate
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 		defer cancel()
 		// SQL Server: back-fill the generated PK via `OUTPUT INSERTED.<pk>`
@@ -1794,19 +1811,34 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 			var id int64
 			// executeQueryRow pins to q.exec (primary/tx) — this is a write.
 			if scanErr := q.executeQueryRow(ctx, outSQL, mergeArgs).Scan(&id); scanErr != nil {
+				if foreign && errors.Is(scanErr, sql.ErrNoRows) {
+					return q.errUpsertOutsideTenant()
+				}
 				return wrapDBError(scanErr)
 			}
 			setPKValue(v, q.pk, id)
 			return nil
 		}
-		_, execErr := q.executeExec(ctx, mergeSQL, mergeArgs)
-		return execErr
+		res, execErr := q.executeExec(ctx, mergeSQL, mergeArgs)
+		if execErr != nil {
+			return execErr
+		}
+		if foreign {
+			if n, _ := res.RowsAffected(); n == 0 {
+				return q.errUpsertOutsideTenant()
+			}
+		}
+		return nil
 	default:
-		upsertFragment := q.dialect.UpsertSQL(conflictCols, updateCols, argOffset)
-		fullSQL := insertSQL + upsertFragment + returningClause
-
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 		defer cancel()
+
+		if q.tenantGuarded() {
+			return q.upsertGuardedInsertStyle(ctx, v, insertSQL, returningClause, args, conflictCols, updateCols)
+		}
+
+		upsertFragment := q.dialect.UpsertSQL(conflictCols, updateCols, argOffset)
+		fullSQL := insertSQL + upsertFragment + returningClause
 
 		if q.dialect.SupportsReturning() && q.pk.Column != "" {
 			row := q.executeQueryRow(ctx, fullSQL, args)
@@ -1845,7 +1877,13 @@ func upsertShouldBackfillPK[T any](q *Query[T], v reflect.Value) bool {
 }
 
 // buildMerge constructs a MERGE (UPSERT) statement for MSSQL and Oracle.
-func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCols []string) (string, []any, error) {
+// hasUpdate reports whether it has a WHEN MATCHED branch. Under
+// RowLevelSecurityClient that branch only fires for a row of the resolved
+// tenant (QK-43).
+func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCols []string) (string, []any, bool, error) {
+	// Stamp the resolved tenant: UpsertBatch on Oracle reaches here without
+	// going through buildInsert, which is where Upsert stamps it.
+	q.ensureTenantID(v)
 	t := v.Type()
 	type colVal struct {
 		col string
@@ -1941,7 +1979,7 @@ func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCol
 	}
 	sqlBuf.WriteString(fmt.Sprintf("ON (%s)\n", strings.Join(onParts, " AND ")))
 	if len(updateParts) > 0 {
-		sqlBuf.WriteString(fmt.Sprintf("WHEN MATCHED THEN UPDATE SET %s\n", strings.Join(updateParts, ", ")))
+		sqlBuf.WriteString(q.mergeMatchedClause(strings.Join(updateParts, ", "), argIndex, &args))
 	}
 	sqlBuf.WriteString(fmt.Sprintf("WHEN NOT MATCHED THEN INSERT (%s) VALUES (%s)",
 		strings.Join(insCols, ", "), strings.Join(insSrc, ", ")))
@@ -1953,7 +1991,23 @@ func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCol
 		sqlBuf.WriteString(";")
 	}
 
-	return sqlBuf.String(), args, nil
+	return sqlBuf.String(), args, len(updateParts) > 0, nil
+}
+
+// mergeMatchedClause renders a MERGE's WHEN MATCHED branch for the SET list
+// sets. Under RowLevelSecurityClient it only fires for a row of the resolved
+// tenant (QK-43): SQL Server takes the condition on the WHEN, Oracle as a
+// WHERE on the UPDATE. The tenant is bound at argIndex and appended to args.
+func (q *BaseQuery) mergeMatchedClause(sets string, argIndex int, args *[]any) string {
+	if !q.tenantGuarded() {
+		return fmt.Sprintf("WHEN MATCHED THEN UPDATE SET %s\n", sets)
+	}
+	*args = append(*args, q.tenantID)
+	cond := fmt.Sprintf("target.%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(argIndex))
+	if q.dialect.Name() == "oracle" {
+		return fmt.Sprintf("WHEN MATCHED THEN UPDATE SET %s WHERE %s\n", sets, cond)
+	}
+	return fmt.Sprintf("WHEN MATCHED AND %s THEN UPDATE SET %s\n", cond, sets)
 }
 
 // CreateBatch inserts multiple records in a single SQL statement using bulk VALUES.
@@ -2382,6 +2436,9 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 	if len(conflictCols) == 0 {
 		return fmt.Errorf("%w: UpsertBatch requires at least one conflict column", ErrInvalidQuery)
 	}
+	if err := q.checkTenantUpsert(); err != nil {
+		return err
+	}
 	if len(entities) == 0 {
 		return nil
 	}
@@ -2440,32 +2497,83 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	// Oracle upserts row-at-a-time (identity-sequence limitation, see below)
-	// and needs no chunking.
-	if q.dialect.Name() == "oracle" {
-		return q.upsertBatchOracle(ctx, entities, conflictCols, updateCols)
+	run := func(bq *Query[T]) error {
+		// Oracle upserts row-at-a-time (identity-sequence limitation, see
+		// below) and needs no chunking.
+		if bq.dialect.Name() == "oracle" {
+			return bq.upsertBatchOracle(ctx, entities, conflictCols, updateCols)
+		}
+		// Under the tenant guard MySQL and MariaDB upsert row at a time: a
+		// multi-row statement reports one rows-affected for the whole batch,
+		// and a row of another tenant kept by the guard is not told apart
+		// from a row of this one that already held its values (QK-43).
+		if bq.tenantGuarded() && bq.upsertFamily() == "duplicate_key" {
+			return bq.upsertBatchGuardedRows(ctx, entities, conflictCols, updateCols)
+		}
+
+		// Chunk to the dialect's bind-parameter ceiling, exactly like
+		// CreateBatch (QK-P1-4): a large UpsertBatch used to build one giant
+		// statement and blow SQL Server's ~2100-parameter cap (and the other
+		// engines' higher ones). Same non-transactional chunk contract as
+		// CreateBatch — wrap in client.Tx for all-or-nothing across chunks.
+		// The tenant guard binds one more argument per statement on
+		// PostgreSQL, SQLite and SQL Server; one column's worth of headroom
+		// covers it.
+		width := len(cols)
+		if bq.tenantGuarded() {
+			width++
+		}
+		rowsPerChunk := batchBindParamCeiling(bq.dialect.Name()) / width
+		if rowsPerChunk < 1 {
+			rowsPerChunk = 1
+		}
+		for start := 0; start < len(entities); start += rowsPerChunk {
+			end := min(start+rowsPerChunk, len(entities))
+			chunk := entities[start:end]
+			var err error
+			if bq.dialect.Name() == "mssql" {
+				err = bq.upsertBatchMSSQLBulk(ctx, chunk, cols, conflictCols, updateCols)
+			} else {
+				err = bq.upsertBatchStandard(ctx, chunk, cols, conflictCols, updateCols)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
-	// Chunk to the dialect's bind-parameter ceiling, exactly like CreateBatch
-	// (QK-P1-4): a large UpsertBatch used to build one giant statement and
-	// blow SQL Server's ~2100-parameter cap (and the other engines' higher
-	// ones). Same non-transactional chunk contract as CreateBatch — wrap in
-	// client.Tx for all-or-nothing across chunks.
-	rowsPerChunk := batchBindParamCeiling(q.dialect.Name()) / len(cols)
-	if rowsPerChunk < 1 {
-		rowsPerChunk = 1
+	// Under RowLevelSecurityClient the batch is all or nothing: a conflict
+	// with another tenant's row is found after the statement that met it,
+	// and the rows that statement and the earlier chunks wrote must not
+	// stay (QK-43). Inside a caller's transaction the error is returned and
+	// the caller's rollback undoes them.
+	if q.tenantGuarded() && q.tx == nil {
+		return q.client.Tx(ctx, func(tx *Tx) error {
+			tq := *q
+			tq.exec = tx.tx
+			tq.tx = tx
+			return run(&tq)
+		})
 	}
-	for start := 0; start < len(entities); start += rowsPerChunk {
-		end := min(start+rowsPerChunk, len(entities))
-		chunk := entities[start:end]
-		var err error
-		if q.dialect.Name() == "mssql" {
-			err = q.upsertBatchMSSQLBulk(ctx, chunk, cols, conflictCols, updateCols)
-		} else {
-			err = q.upsertBatchStandard(ctx, chunk, cols, conflictCols, updateCols)
+	return run(q)
+}
+
+// upsertBatchGuardedRows upserts each entity on its own, through the guarded
+// single-row path, for MySQL and MariaDB under RowLevelSecurityClient (QK-43).
+func (q *Query[T]) upsertBatchGuardedRows(ctx context.Context, entities []*T, conflictCols, updateCols []string) error {
+	for _, entity := range entities {
+		v := reflect.ValueOf(entity)
+		if v.Kind() == reflect.Ptr {
+			v = v.Elem()
 		}
+		insert, args, err := q.buildInsert(v)
 		if err != nil {
 			return err
+		}
+		insertSQL, returning := splitReturning(insert)
+		if err := q.upsertGuardedInsertStyle(ctx, v, insertSQL, returning, args, conflictCols, updateCols); err != nil {
+			return fmt.Errorf("upsert batch failed: %w", err)
 		}
 	}
 	return nil
@@ -2517,10 +2625,29 @@ func (q *Query[T]) upsertBatchStandard(
 		sqlBuf.WriteString(")")
 	}
 
-	sqlBuf.WriteString(q.dialect.UpsertSQL(conflictCols, updateCols, argIndex))
+	hasUpdate := false
+	if q.tenantGuarded() {
+		clause, guardArgs, upd, err := q.guardedConflictClause(conflictCols, updateCols, argIndex)
+		if err != nil {
+			return err
+		}
+		sqlBuf.WriteString(clause)
+		args = append(args, guardArgs...)
+		hasUpdate = upd
+	} else {
+		sqlBuf.WriteString(q.dialect.UpsertSQL(conflictCols, updateCols, argIndex))
+	}
 
-	if _, err := q.executeExec(ctx, sqlBuf.String(), args); err != nil {
+	res, err := q.executeExec(ctx, sqlBuf.String(), args)
+	if err != nil {
 		return fmt.Errorf("upsert batch failed: %w", err)
+	}
+	// Every row of the statement is either inserted or updates a row of the
+	// tenant; one the guard skipped met another tenant's row (QK-43).
+	if hasUpdate {
+		if n, _ := res.RowsAffected(); n < int64(len(entities)) {
+			return q.errUpsertOutsideTenant()
+		}
 	}
 	return nil
 }
@@ -2617,13 +2744,21 @@ func (q *Query[T]) upsertBatchMSSQLBulk(
 		strings.Join(valueRows, ", "), srcAlias, strings.Join(srcCols, ", ")))
 	sqlBuf.WriteString(fmt.Sprintf("ON (%s)\n", strings.Join(onParts, " AND ")))
 	if len(updateParts) > 0 {
-		sqlBuf.WriteString(fmt.Sprintf("WHEN MATCHED THEN UPDATE SET %s\n", strings.Join(updateParts, ", ")))
+		sqlBuf.WriteString(q.mergeMatchedClause(strings.Join(updateParts, ", "), argIndex, &args))
 	}
 	sqlBuf.WriteString(fmt.Sprintf("WHEN NOT MATCHED THEN INSERT (%s) VALUES (%s);",
 		strings.Join(insCols, ", "), strings.Join(insSrc, ", ")))
 
-	if _, err := q.executeExec(ctx, sqlBuf.String(), args); err != nil {
+	res, err := q.executeExec(ctx, sqlBuf.String(), args)
+	if err != nil {
 		return fmt.Errorf("upsert batch (mssql) failed: %w", err)
+	}
+	// A source row the guarded WHEN MATCHED skipped met another tenant's
+	// row (QK-43).
+	if q.tenantGuarded() && len(updateParts) > 0 {
+		if n, _ := res.RowsAffected(); n < int64(len(entities)) {
+			return q.errUpsertOutsideTenant()
+		}
 	}
 	return nil
 }
@@ -2641,12 +2776,18 @@ func (q *Query[T]) upsertBatchOracle(
 		if v.Kind() == reflect.Ptr {
 			v = v.Elem()
 		}
-		mergeSQL, mergeArgs, err := q.buildMerge(v, conflictCols, updateCols)
+		mergeSQL, mergeArgs, hasUpdate, err := q.buildMerge(v, conflictCols, updateCols)
 		if err != nil {
 			return err
 		}
-		if _, err := q.executeExec(ctx, mergeSQL, mergeArgs); err != nil {
+		res, err := q.executeExec(ctx, mergeSQL, mergeArgs)
+		if err != nil {
 			return fmt.Errorf("upsert batch (oracle) failed: %w", err)
+		}
+		if q.tenantGuarded() && hasUpdate {
+			if n, _ := res.RowsAffected(); n == 0 {
+				return q.errUpsertOutsideTenant()
+			}
 		}
 	}
 	return nil

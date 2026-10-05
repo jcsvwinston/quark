@@ -49,6 +49,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("WhereGuards", func(t *testing.T) {
 		testWhereGuards(ctx, t, client)
 	})
+	t.Run("UpsertTenant", func(t *testing.T) {
+		testUpsertTenant(ctx, t, client)
+	})
 	t.Run("LikeEscape", func(t *testing.T) {
 		testLikeEscape(ctx, t, client)
 	})
