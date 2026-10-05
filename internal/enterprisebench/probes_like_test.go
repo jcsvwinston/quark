@@ -626,8 +626,9 @@ const qk25SharedEntryPoint = "suite_test.go"
 //
 // The form is read instead of the two words "LIKE" and "ESCAPE" because the
 // WORDS are what prose writes and the FORM is what a test writes. This module
-// is full of comments about an "escape hatch" — client_options_strict_test.go,
-// join_builder_test.go, strict_reads_test.go, update_zero_values_test.go — and
+// is full of comments about an "escape hatch" — client_options_strict_test.go
+// and strict_reads_test.go; join_builder and update_zero_values before A11 Q4
+// moved them to the public suite — and
 // a single "Unlike ..." in one of those lines would have spelled both tokens
 // and credited every engine with a proof nobody wrote.
 var qk25EscapeAssertion = regexp.MustCompile(`(?i)LIKE\s+(\?|:\w+|\$\d+|@\w+|'[^']*')\s+ESCAPE\s+'`)

@@ -267,3 +267,21 @@ Consecuencia directa de la sección «Qué se rompe»: el binario tiene ahora do
 números que no coinciden —el suyo (`cmd/quark/vX.Y.Z`) y el de la biblioteca
 que lleva dentro— y el archivo de release se llama con el segundo. Imprimir
 sólo uno obliga a elegir a quién mentir, así que imprime los dos.
+
+### La mitad genérica de la suite vuelve al módulo de la biblioteca (A11 Q4)
+
+Este ADR sacó las suites por motor a `internal/enginesuite` por lo que traían
+al build list de quien importa Quark: drivers y testcontainers. Lo que una de
+esas suites comprueba sin ramificar por el nombre de un motor no trae nada de
+eso, y un driver de terceros necesita poder correrlo — `internal/` no se
+importa desde fuera (control `DRV-07` del banco de extensibilidad). Así que esa
+mitad —43 subtests de `SharedSuite`, movidos sin cambios— vive ahora en
+`quarkdriver/drivertest/suite`, un paquete del módulo de la biblioteca que sólo
+importa Quark y la librería estándar, junto al kit del dialecto
+(`drivertest.VerifyDialect`). La decisión de este ADR no cambia, y la medida lo
+confirma: desde un módulo de fuera, con `GOWORK=off`, el paquete suma 165
+paquetes al grafo frente a los 160 de la biblioteca, ningún módulo nuevo al
+build list, y ningún driver, testcontainers, Redis ni OpenTelemetry.
+`internal/enginesuite` sigue siendo el sitio de lo específico de cada motor, y
+cada `TestSuite<Engine>` corre ahora el kit y la suite pública antes de
+`SharedSuite`.

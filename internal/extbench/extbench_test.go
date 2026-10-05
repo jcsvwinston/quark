@@ -43,9 +43,9 @@
 // module, the driver modules of this repository) are skipped under -short,
 // where the race lane runs, and measured in the full lane; they need the
 // module cache, or the network to fill it. Nothing here certifies a dialect
-// against a live engine other than SQLite — that is internal/enginesuite's
-// job, and DRV-07 records that a driver outside this repository cannot reach
-// it.
+// against a live engine other than SQLite: the dialect kit and the engine
+// suite this bench measures (DRV-05, DRV-07) run against the other five in
+// CI's driver and integration lanes.
 package extbench
 
 import (

@@ -944,13 +944,17 @@ orders, err := quark.For[Order](ctx, client).
 | MySQL 8+ | `FOR UPDATE` | ✅ | ✅ | `FOR SHARE` |
 | MariaDB 10.6+ | `FOR UPDATE` | ✅ | ✅ | `LOCK IN SHARE MODE` ¹ |
 | Oracle | `FOR UPDATE` | ✅ (12c+) | ✅ | ❌ → `ErrUnsupportedFeature` |
-| SQL Server | `WITH (UPDLOCK, ROWLOCK)` | `READPAST` | ❌ → `ErrUnsupportedFeature` | `WITH (HOLDLOCK, ROWLOCK)` |
+| SQL Server | `WITH (UPDLOCK, ROWLOCK)` | `READPAST` ² | ❌ → `ErrUnsupportedFeature` | `WITH (HOLDLOCK, ROWLOCK)` |
 | SQLite | ❌ → `ErrUnsupportedFeature` | n/a | n/a | n/a |
 
 ¹ MariaDB has no `FOR SHARE` keyword, so `ForShare()` emits `LOCK IN SHARE MODE`,
 which takes no modifiers — combining it with `SkipLocked`/`NoWait` returns
 `ErrUnsupportedFeature`. SQLite has no row-level lock primitive; use
 `BEGIN IMMEDIATE`/`EXCLUSIVE` in your transaction wrapper instead.
+
+² With `ForUpdate` only. `HOLDLOCK` is `SERIALIZABLE`, and SQL Server accepts
+`READPAST` only under `READ COMMITTED` or `REPEATABLE READ`, so
+`ForShare().SkipLocked()` returns `ErrUnsupportedFeature`.
 
 Locks belong inside an explicit transaction — outside one, the lock is released
 the moment the SELECT completes.

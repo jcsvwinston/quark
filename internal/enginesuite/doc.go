@@ -17,4 +17,11 @@
 // and bug-bash harnesses are. Its tests are the same tests, under the same
 // names, that the integration matrix has always run — the CI lanes now run
 // them from inside this directory.
+//
+// What a driver outside the repository can run is not here. The dialect kit
+// (quarkdriver/drivertest.VerifyDialect) and the engine-generic half of the
+// shared suite (quarkdriver/drivertest/suite, moved out in A11 Q4) are
+// packages of the library's module that import no driver and no container
+// library; every TestSuite<Engine> runs both on its engine
+// (conformance_test.go) before SharedSuite runs the engine-specific rest.
 package enginesuite

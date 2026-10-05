@@ -1,7 +1,7 @@
 // Copyright 2026 jcsvwinston
 // SPDX-License-Identifier: Apache-2.0
 
-package enginesuite
+package suite
 
 import (
 	"context"
@@ -38,7 +38,7 @@ type bb2Order struct {
 //	    (`bb2_orders.deleted_at IS NULL`) so a joined table that also exposes
 //	    `deleted_at` doesn't make the column ambiguous.
 //
-// Before the fix this whole path was un-runnable via List() — join_builder_test.go
+// Before the fix this whole path was un-runnable via List() — join_builder.go
 // reaches for Count() specifically to dodge the `SELECT *` ambiguity.
 func testBB2JoinProjection(ctx context.Context, t *testing.T, baseClient *quark.Client) {
 	t.Helper()

@@ -20,5 +20,6 @@ func TestSuiteSQLite(t *testing.T) {
 	}
 	defer client.Close()
 
+	runConformance(t, client, "sqlite")
 	SharedSuite(t, client)
 }

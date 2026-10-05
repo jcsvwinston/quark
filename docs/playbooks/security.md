@@ -64,8 +64,8 @@ Fix aplicado:
 2. **Wiring**: ambos call sites (`query_exec.go:buildSelect` y `Count`) llaman al validator antes de concatenar `j.onClause`. Path inválido → `ErrInvalidJoin` (sentinel nuevo en `errors.go`) sin ejecutar SQL.
 3. **Deprecation**: `Join`, `LeftJoin`, `RightJoin` en su forma string-raw están marcados `// Deprecated:` en godoc; reemplazo en v0.4 con builder estructurado `Join(table).On(col, op, otherCol)` (Fase 2 AST).
 
-Cobertura: `testJoinOnSecurity` en `join_on_security_test.go` wired a
-`SharedSuite` — 4 subtests (valid identifier join, valid AND-joined, 8
+Cobertura: `testJoinOnSecurity` en `quarkdriver/drivertest/suite/join_on_security.go`
+(la suite de motor pública, que `internal/enginesuite` corre en los seis motores) — 4 subtests (valid identifier join, valid AND-joined, 8
 vectores de inyección rechazados, mismo check para Count). Unit tests
 adicionales en `internal/guard/guard_test.go` (`TestValidateJoinOn_Valid`
 con 12 casos, `TestValidateJoinOn_Invalid` con 18 casos, BoundMethod).

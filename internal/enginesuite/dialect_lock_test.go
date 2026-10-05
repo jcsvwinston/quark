@@ -55,6 +55,9 @@ func TestLockSuffix_PerDialect(t *testing.T) {
 		{"mssql/for-update+skip", quark.LockOptions{Mode: quark.LockForUpdate, SkipLocked: true}, quark.MSSQL(), " WITH (UPDLOCK, ROWLOCK, READPAST)", "", false, nil},
 		{"mssql/for-share", quark.LockOptions{Mode: quark.LockForShare}, quark.MSSQL(), " WITH (HOLDLOCK, ROWLOCK)", "", false, nil},
 		{"mssql/nowait-unsupported", quark.LockOptions{Mode: quark.LockForUpdate, NoWait: true}, quark.MSSQL(), "", "", true, quark.ErrUnsupportedFeature},
+		// HOLDLOCK is SERIALIZABLE and READPAST is refused there (error 650):
+		// found by the dialect kit's LockSuffix check (A11 Q4).
+		{"mssql/for-share+skip-unsupported", quark.LockOptions{Mode: quark.LockForShare, SkipLocked: true}, quark.MSSQL(), "", "", true, quark.ErrUnsupportedFeature},
 
 		// SQLite — anything non-zero is unsupported.
 		{"sqlite/for-update-unsupported", quark.LockOptions{Mode: quark.LockForUpdate}, quark.SQLite(), "", "", true, quark.ErrUnsupportedFeature},

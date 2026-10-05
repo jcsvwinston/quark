@@ -32,5 +32,6 @@ func TestSuitePostgres(t *testing.T) {
 	}
 	defer client.Close()
 
+	runConformance(t, client, "pgx")
 	SharedSuite(t, client)
 }

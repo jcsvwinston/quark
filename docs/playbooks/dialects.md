@@ -4,6 +4,7 @@ module: dialects
 files:
   - dialect.go
   - quarkdriver/dialect.go
+  - quarkdriver/drivertest/dialect.go
   - quarkdriver/migration_lock.go
   - quarkdriver/schema_model.go
   - quarkdriver/schema.go
@@ -132,6 +133,45 @@ interface promotes its methods and nothing else (the extlite wrapper in
 `internal/extbench/probes_participant_test.go` is the reference, and its
 faithfulness check lists every optional interface).
 
+### The conformance kit holds every dialect to the contract (A11 Q4)
+
+`drivertest.VerifyDialect` (`quarkdriver/drivertest/dialect*.go`) checks a
+dialect against a live engine: every method of `Dialect` and every optional
+interface the dialect implements, through Quark's queries and its schema path,
+judged by what the engine then holds or refuses. The six built-ins run it in
+the engine suites (`internal/enginesuite/conformance_test.go`, subtest
+`TestSuite<Engine>/DialectKit`), the five driver modules in their own tests
+(`drivers/*/kit_test.go`), and the bench's fixture driver too (`DRV-05` breaks
+the fixture's dialect six ways and expects six named failures). Its first run
+found MariaDB's `DROP CHECK` (MariaDB has none: `DropCheck` writes
+`DROP CONSTRAINT`) and SQL Server's `ForShare().SkipLocked()` (`HOLDLOCK` is
+serializable and `READPAST` is refused there: now `ErrUnsupportedFeature`).
+
+`quarkdriver/drivertest/suite` is the engine-generic half of what
+`SharedSuite` ran: 43 subtests moved there unchanged, which a third party's
+driver runs with `suite.Run` and the in-repo engines run through
+`TestSuite<Engine>/EngineSuite`. What stays in `SharedSuite` branches on a
+built-in's name, starts a container, or needs Redis or an OpenTelemetry
+collector.
+
+Rules that follow:
+
+- **A new optional interface gets its kit check in the same change.** The
+  check names the interface, exercises it when implemented and its default
+  when not, and asserts on the engine's behaviour, never on a statement's text.
+- **A dialect change keeps the kit green on its engine.** The kit runs in the
+  integration lane of every engine; a red `DialectKit` is a dialect bug or a
+  kit bug, never something to skip.
+- **The suite package stays engine-agnostic.** A test that has to branch on
+  `Dialect().Name()` belongs in `internal/enginesuite`, not in
+  `quarkdriver/drivertest/suite`; a test there that a third-party engine cannot
+  pass for a reason of the engine (no window functions) is skipped by the
+  driver with `go test -skip`, not by the suite.
+- **The kit's test files in the driver modules are tagged `!pinnedquark`**
+  while the modules' floor predates the kit: the standalone CI lane vets with
+  `-tags pinnedquark`. The tag becomes unnecessary once the release train
+  raises the floors to the release that ships the kit.
+
 ## Anti-patterns a vigilar
 
 ### Branching on `Dialect.Name()` where an interface can answer
@@ -199,9 +239,24 @@ Mezcla SQL builder + DDL + procedures + JSON. Cuando MariaDB añade `CreateSeque
 - **Fase 1**: tipos ricos — `decimal.Decimal`, `uuid.UUID`, `time.Duration`, `[]byte`/`bytea`, `JSON[T]` genérico, arrays Postgres.
 - **Fase 2**: AST permite expresar window functions, locking, CTEs por dialecto.
 - **Fase 3**: introspección completa (tipos, NOT NULL, defaults, índices, FKs, checks) por dialecto.
+- **A11 Q5 (driver template and "Writing a driver")** builds on the kit:
+  the reference implementation is `internal/extbench/testdata/extdriver` — a
+  dialect written against `quarkdriver` alone that passes `VerifyDialect` and
+  `suite.Run` (it needed `AutoIncrementer`, `TableRebuilder` and an
+  introspector that reads indexes and foreign keys). A template module with
+  its own `go.mod` built `GOWORK=off` needs a quark that ships the kit (the
+  release after A11 Q4) or a `replace` as the fixture has; it is a new module,
+  so the umbrella's `align-module-floors.sh`, Dependabot's list and `DRV-08`'s
+  `knownModules` have to learn it. What the guide must say that the contract
+  cannot express yet: the query path still branches on the names `mssql` and
+  `oracle` (`query_crud.go`, `query_exec.go`) and the LIKE escape tail on
+  `mysql`/`mariadb`/`mssql` (`like.go`); referential actions reach the DDL as
+  written (Oracle refuses `ON UPDATE` and `ON DELETE NO ACTION`); and Oracle's
+  `VARCHAR2(n)` counts bytes, not characters.
 
 ## Tests críticos a no romper
 
+- `drivertest.VerifyDialect` en las suites por motor (`TestSuite<Engine>/DialectKit`) y en los módulos de driver (`drivers/*/kit_test.go`) — el contrato del dialecto contra el motor vivo.
 - `dialect_test.go` y `dialect_unit_test.go` — pruebas unitarias por dialecto (placeholder, quote, limit/offset, returning).
 - `n_fixes_test.go` — bugs Oracle/MSSQL retroalimentados por auditoría.
 - Suites por motor (`postgres_suite_test.go`, etc.).

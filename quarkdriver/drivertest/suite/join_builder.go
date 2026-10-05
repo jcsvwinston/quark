@@ -1,7 +1,7 @@
 // Copyright 2026 jcsvwinston
 // SPDX-License-Identifier: Apache-2.0
 
-package enginesuite
+package suite
 
 import (
 	"context"
@@ -26,7 +26,7 @@ type jbOrder struct {
 	Amount int64 `db:"amount"`
 }
 
-// testJoinBuilder is the SharedSuite registration for F2-join-builder.
+// testJoinBuilder is the engine-suite registration for F2-join-builder.
 // It cross-checks the typed `Join(table).On(left, op, right)` form and
 // the `OnRaw(onClause)` escape hatch against the existing JOIN-rendering
 // pipeline.

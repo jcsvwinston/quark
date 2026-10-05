@@ -100,3 +100,8 @@ the other names in package `quark` are aliases of the same types, so the code
 above is unchanged; a driver module writes and registers its dialect against
 `quarkdriver` without importing package `quark`. See
 [Where the contract lives](./api/dialects#where-the-contract-lives).
+
+A dialect is checked against its engine by the conformance kit,
+`drivertest.VerifyDialect`, and the engine as a whole by the engine suite,
+`suite.Run` — the same checks the six built-in engines run. See
+[Checking a dialect](./api/dialects#checking-a-dialect).

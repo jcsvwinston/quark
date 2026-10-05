@@ -120,7 +120,8 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 	// OJO: el contrato "sin cambios → sin SQL" NO aplica a Account — Save
 	// corre BeforeUpdate ANTES del diff (dirty_track.go) y el hook toca
 	// UpdatedAt en cada llamada, así que siempre hay delta. El contrato puro
-	// lo pinnea dirty_track_test.go con un modelo sin hooks; aquí se asierta
+	// lo pinnea quarkdriver/drivertest/suite/dirty_track.go con un modelo sin
+	// hooks; aquí se asierta
 	// que el re-Save es válido e idempotente a nivel de datos.
 	if rows, err := tracked.Save(ctx); err != nil || rows != 1 {
 		return fmt.Errorf("re-Save: rows=%d err=%v (el hook garantiza delta)", rows, err)

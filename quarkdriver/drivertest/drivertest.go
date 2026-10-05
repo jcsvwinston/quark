@@ -1,14 +1,15 @@
 // Copyright 2026 jcsvwinston
 // SPDX-License-Identifier: Apache-2.0
 
-// Package drivertest is a conformance kit for Quark driver modules.
+// Package drivertest is the conformance kit for Quark driver modules. A
+// driver module runs it from its own tests; it has two halves, and an engine
+// suite beside them.
 //
-// Classifiers are consulted in turn, which makes one property sharp enough to
-// deserve a suite of its own: a classifier that answers true for an error it
-// did not produce answers for ANOTHER engine, and the bug shows up as a wrong
-// HTTP status on a deployment its author never runs.
-//
-// A driver module runs it from its own test:
+// Verify checks the module's error classifier. Classifiers are consulted in
+// turn, which makes one property sharp enough to deserve a suite of its own:
+// a classifier that answers true for an error it did not produce answers for
+// ANOTHER engine, and the bug shows up as a wrong HTTP status on a deployment
+// its author never runs.
 //
 //	drivertest.Verify(t, drivertest.Case{
 //	    Engine:     "mysql",
@@ -17,6 +18,24 @@
 //	    Deadlock:   &gomysql.MySQLError{Number: 1213},
 //	    Neither:    []error{&gomysql.MySQLError{Number: 1452}},
 //	})
+//
+// VerifyDialect checks the module's dialect against a live engine the
+// driver's test opens: every method of quarkdriver.Dialect and every optional
+// interface the dialect implements, through Quark's queries and its schema
+// path, judged by what the engine then holds or refuses.
+//
+//	drivertest.VerifyDialect(t, drivertest.DialectCase{
+//	    Dialect:    extsql.Dialect(),
+//	    DB:         db, // opened by the test, with the driver's own DSN
+//	    DriverName: "extsql",
+//	})
+//
+// The engine suite, package quarkdriver/drivertest/suite, runs the checks the
+// six built-in engines run on a *quark.Client over the driver's engine.
+//
+// VerifyDialect drives the dialect through Quark, so this package imports
+// package quark; Verify alone needs only quarkdriver. Neither imports a
+// driver or starts a server.
 package drivertest
 
 import (

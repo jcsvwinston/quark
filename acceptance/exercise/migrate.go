@@ -114,7 +114,8 @@ var MIGRATE = Exerciser{Name: "migrate", Fn: func(ctx context.Context, client *q
 	// Plan.Down sobre un plan vacío es vacío, y sobre uno irreversible da
 	// error en vez de un rollback que dice que fue bien y deja el esquema
 	// distinto. El ida y vuelta completo contra cada motor lo cubre
-	// internal/enginesuite/migrate_reversible_test.go.
+	// quarkdriver/drivertest/suite/migrate_reversible.go, que la suite de
+	// motor corre en los seis.
 	emptyDown, derr := p1.Down()
 	if derr != nil {
 		return fmt.Errorf("Plan.Down de un plan vacío: %w", derr)

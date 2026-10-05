@@ -1,7 +1,7 @@
 // Copyright 2026 jcsvwinston/quark
 // SPDX-License-Identifier: Apache-2.0
 
-package enginesuite
+package suite
 
 import (
 	"context"

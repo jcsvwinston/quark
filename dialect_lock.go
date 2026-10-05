@@ -68,13 +68,19 @@ func (o *OracleDialect) LockSuffix(opts LockOptions) (string, string, error) {
 // suffix). Single-row pessimistic-style locks come from
 // (UPDLOCK, ROWLOCK) for ForUpdate and (HOLDLOCK, ROWLOCK) for ForShare.
 // SkipLocked maps to READPAST; NoWait has no direct hint, so it errors out
-// rather than silently blocking.
+// rather than silently blocking. A shared lock that skips locked rows has no
+// form either: HOLDLOCK is SERIALIZABLE, and SQL Server takes READPAST only
+// under READ COMMITTED or REPEATABLE READ (error 650, found by the dialect
+// kit's LockSuffix check — drivertest.VerifyDialect, A11 Q4).
 func (m *MSSQLDialect) LockSuffix(opts LockOptions) (string, string, error) {
 	if opts.IsZero() {
 		return "", "", nil
 	}
 	if opts.NoWait {
 		return "", "", fmt.Errorf("%w: mssql has no NOWAIT for table hints; use SET LOCK_TIMEOUT 0 in your transaction or RawQuery", ErrUnsupportedFeature)
+	}
+	if opts.Mode == LockForShare && opts.SkipLocked {
+		return "", "", fmt.Errorf("%w: mssql cannot skip locked rows under a shared lock (HOLDLOCK is SERIALIZABLE, and READPAST needs READ COMMITTED or REPEATABLE READ)", ErrUnsupportedFeature)
 	}
 	hints := make([]string, 0, 3)
 	switch opts.Mode {

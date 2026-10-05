@@ -1,4 +1,4 @@
-package enginesuite
+package suite
 
 import (
 	"context"

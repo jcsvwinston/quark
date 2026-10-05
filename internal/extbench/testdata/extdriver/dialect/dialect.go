@@ -31,6 +31,8 @@ func New(name string) Dialect { return Dialect{name: name} }
 var (
 	_ quarkdriver.Dialect            = Dialect{}
 	_ quarkdriver.SchemaIntrospector = Dialect{}
+	_ quarkdriver.AutoIncrementer    = Dialect{}
+	_ quarkdriver.TableRebuilder     = Dialect{}
 )
 
 func (d Dialect) Name() string             { return d.name }
@@ -151,9 +153,24 @@ func (d Dialect) UpsertSQL(conflictCols, updateCols []string, _ int) string {
 	return fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s", conflict, strings.Join(sets, ", "))
 }
 
-// IntrospectSchema reads the tables and their columns from SQLite's catalog,
-// in the schema model quarkdriver declares. It reads no indexes, foreign keys
-// or checks: the fixture needs the model to be reachable, not complete.
+// AutoIncrementColumn: only INTEGER PRIMARY KEY aliases SQLite's rowid, and
+// the catalog reports that column as INTEGER. Without it Quark writes the
+// SQL standard's identity column, which SQLite rejects.
+func (Dialect) AutoIncrementColumn() (definition, dataType string) {
+	return "INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER"
+}
+
+// RebuildsTables: SQLite has no ALTER COLUMN and no ADD or DROP CONSTRAINT,
+// so ApplyPlan changes a column, a foreign key or a check by rebuilding the
+// table — which reads SQLite's own catalog, and this engine keeps it.
+func (Dialect) RebuildsTables() bool { return true }
+
+// IntrospectSchema reads the tables, their columns, indexes and foreign keys
+// from SQLite's catalog, in the schema model quarkdriver declares. It reads
+// no checks: SQLite keeps no catalog of them, and Quark's diff skips checks
+// when the live side reports none. Indexes and foreign keys it must read —
+// without them PlanMigration proposes, on every run, the index a model
+// declares (the dialect kit's SchemaIntrospector check).
 func (d Dialect) IntrospectSchema(ctx context.Context, exec quarkdriver.Executor) (quarkdriver.Schema, error) {
 	rows, err := exec.QueryContext(ctx,
 		`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
@@ -197,7 +214,83 @@ func (d Dialect) IntrospectSchema(ctx context.Context, exec quarkdriver.Executor
 		if err := cols.Err(); err != nil {
 			return quarkdriver.Schema{}, err
 		}
+		if t.Indexes, err = indexes(ctx, exec, name); err != nil {
+			return quarkdriver.Schema{}, err
+		}
+		if t.ForeignKeys, err = foreignKeys(ctx, exec, name); err != nil {
+			return quarkdriver.Schema{}, err
+		}
 		s.Tables = append(s.Tables, t)
 	}
 	return s, nil
+}
+
+// indexes reads a table's indexes but the one backing its primary key.
+func indexes(ctx context.Context, exec quarkdriver.Executor, table string) ([]quarkdriver.Index, error) {
+	rows, err := exec.QueryContext(ctx, `SELECT name, "unique" FROM pragma_index_list(?) WHERE origin <> 'pk' ORDER BY name`, table)
+	if err != nil {
+		return nil, err
+	}
+	var out []quarkdriver.Index
+	for rows.Next() {
+		var ix quarkdriver.Index
+		var unique int
+		if err := rows.Scan(&ix.Name, &unique); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ix.Unique = unique == 1
+		out = append(out, ix)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		cols, err := exec.QueryContext(ctx, `SELECT name FROM pragma_index_info(?) ORDER BY seqno`, out[i].Name)
+		if err != nil {
+			return nil, err
+		}
+		for cols.Next() {
+			var c string
+			if err := cols.Scan(&c); err != nil {
+				cols.Close()
+				return nil, err
+			}
+			out[i].Columns = append(out[i].Columns, c)
+		}
+		cols.Close()
+		if err := cols.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// foreignKeys reads a table's foreign keys. SQLite's catalog keeps no
+// constraint names, so Name is empty and Quark's diff matches them by their
+// columns.
+func foreignKeys(ctx context.Context, exec quarkdriver.Executor, table string) ([]quarkdriver.ForeignKey, error) {
+	rows, err := exec.QueryContext(ctx, `SELECT id, "table", "from", "to", on_update, on_delete FROM pragma_foreign_key_list(?) ORDER BY id, seq`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []quarkdriver.ForeignKey
+	last := -1
+	for rows.Next() {
+		var id int
+		var ref, from, to, onUpdate, onDelete string
+		if err := rows.Scan(&id, &ref, &from, &to, &onUpdate, &onDelete); err != nil {
+			return nil, err
+		}
+		if id != last {
+			out = append(out, quarkdriver.ForeignKey{RefTable: ref, OnUpdate: onUpdate, OnDelete: onDelete})
+			last = id
+		}
+		fk := &out[len(out)-1]
+		fk.Columns = append(fk.Columns, from)
+		fk.RefColumns = append(fk.RefColumns, to)
+	}
+	return out, rows.Err()
 }

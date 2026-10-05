@@ -115,6 +115,12 @@ var manualReasons = map[string]string{
 	// El kit de conformidad recibe *testing.T: sólo es invocable desde un
 	// test, y lo ejecutan los cinco módulos de driver en los suyos.
 	"github.com/jcsvwinston/quark/quarkdriver/drivertest.Verify": reasonTestKit,
+	// El kit del dialecto y la suite de motor (A11 Q4) también reciben
+	// *testing.T: los corren los cinco módulos de driver, el fixture de
+	// extbench y las suites por motor de internal/enginesuite, contra un motor
+	// vivo — algo que el superapp no puede hacer sin ser un test.
+	"github.com/jcsvwinston/quark/quarkdriver/drivertest.VerifyDialect": reasonTestKit,
+	"github.com/jcsvwinston/quark/quarkdriver/drivertest/suite.Run":     reasonTestKit,
 
 	// La pista del driver ausente sólo se puede ejercer en un binario que NO
 	// enlace ese driver, y el superapp los enlaza los seis por definición:

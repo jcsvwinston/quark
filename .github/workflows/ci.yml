@@ -214,6 +214,56 @@ jobs:
     # untested — and what they carry decides whether a rejected insert is
     # reported as "already taken", whether a deadlocked transaction is
     # retried, and whether a downed replica is failed over.
+    #
+    # Each module also runs the dialect kit (drivertest.VerifyDialect, A11
+    # Q4) against its engine. SQLite's is in memory; PostgreSQL, MySQL and
+    # MariaDB come up here as services, cheap enough for every pull request.
+    # SQL Server and Oracle run the same kit in their integration lanes —
+    # the engine suites call it on every engine, and the oracle lane runs the
+    # oracle module's own — so here those two modules run the kit's contract
+    # half and log that the engine half had no server.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: quark
+          POSTGRES_PASSWORD: quark
+          POSTGRES_DB: quark_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quark"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: quark
+          MYSQL_DATABASE: quark_test
+          MYSQL_USER: quark
+          MYSQL_PASSWORD: quark
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pquark"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: quark
+          MARIADB_DATABASE: quark_test
+          MARIADB_USER: quark
+          MARIADB_PASSWORD: quark
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -232,6 +282,10 @@ jobs:
           drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle
 
       - name: Build, vet and test
+        env:
+          QUARK_TEST_POSTGRES_DSN: postgres://quark:quark@localhost:5432/quark_test?sslmode=disable
+          QUARK_TEST_MYSQL_DSN: quark:quark@tcp(localhost:3306)/quark_test?parseTime=true
+          QUARK_TEST_MARIADB_DSN: quark:quark@tcp(localhost:3307)/quark_test?parseTime=true
         run: |
           set -euo pipefail
           for m in drivers/postgres drivers/mysql drivers/sqlite drivers/mssql drivers/oracle; do
@@ -273,6 +327,12 @@ jobs:
   # without quarkdriver, and only the workspace made it build. This lane is
   # the consumer's view: no workspace, tidy must be a no-op, and the module
   # must build against the quark it pins.
+  #
+  # `-tags pinnedquark` on vet leaves out the test files that exercise kit
+  # API newer than the pinned quark (each says so in its header): a consumer
+  # never compiles a driver's tests, the `drivers` lane above compiles and
+  # runs them against the tree, and the release train raises the floor that
+  # makes the tag unnecessary.
   drivers-standalone:
     name: Driver modules (standalone, no workspace)
     runs-on: ubuntu-latest
@@ -299,7 +359,7 @@ jobs:
                 exit 1
               fi
               go build ./...
-              go vet ./...
+              go vet -tags pinnedquark ./...
             )
           done
 
@@ -705,6 +765,20 @@ jobs:
           cd cmd/quark
           go test -tags=integration -timeout 14m -count=1 \
             -run '^TestTenantProvisionSchemaPerTenantPostgres$' -v ./...
+
+      # The oracle driver module's own dialect kit, against this lane's
+      # Oracle (A11 Q4): the DSN oracle-up.sh exported, so the engine costs
+      # nothing more. The workspace belongs to this step, as in the CLI step
+      # above, and is removed on exit for the same reason.
+      - name: Run the oracle driver module's dialect kit
+        if: matrix.engine == 'oracle'
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          trap 'rm -f "$GITHUB_WORKSPACE/go.work" "$GITHUB_WORKSPACE/go.work.sum"' EXIT
+          bash scripts/ci/link_workspace.sh . drivers/oracle
+          cd drivers/oracle
+          go test -count=1 -run '^TestDialectConformance$' -v ./...
 
       # QK6-1: this lane's leg of the all-engines tests. The `/` in the
       # pattern splits it into (top-level regex)/(subtest regex), so only

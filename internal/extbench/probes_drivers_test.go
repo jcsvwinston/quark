@@ -17,7 +17,6 @@ package extbench
 import (
 	"errors"
 	"fmt"
-	"go/build"
 	"go/types"
 	"io/fs"
 	"os"
@@ -382,39 +381,169 @@ func probeFullParticipant(t *testing.T, e *env) verdict {
 
 // --- DRV-05 ------------------------------------------------------------------------
 
-func probeKitChecksDialect(t *testing.T, e *env) verdict {
-	api := e.loadAPI(t)
-	dialect := api.lookup(rootPkg, "Dialect").Type()
-	kit := api.pkgs[drivertestPkg]
-	var takes []string
-	for _, name := range kit.Scope().Names() {
-		obj := kit.Scope().Lookup(name)
-		if !obj.Exported() {
+// kitMutation is a dialect that is wrong on purpose: a patch to the fixture
+// driver's dialect source and the kit subtest that must fail for it, by
+// name. The patch replaces one line the fixture is known to have; a fixture
+// that no longer has it stops the probe instead of measuring nothing.
+type kitMutation struct {
+	name   string // what is wrong
+	find   string // a line of dialect/dialect.go
+	patch  string // what it becomes
+	caught string // the kit subtest that must fail
+}
+
+var kitMutations = []kitMutation{
+	{
+		"placeholders that all bind the first value",
+		`func (Dialect) Placeholder(int) string     { return "?" }`,
+		`func (Dialect) Placeholder(int) string     { return "?1" }`,
+		"engine/Placeholder",
+	},
+	{
+		"quoting that does not escape the quote character",
+		"return `\"` + strings.ReplaceAll(identifier, `\"`, `\"\"`) + `\"`",
+		"return `\"` + identifier + `\"`",
+		"engine/Quote",
+	},
+	{
+		"an upsert that ignores the columns to update",
+		`return fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s", conflict, strings.Join(sets, ", "))`,
+		`return fmt.Sprintf(" ON CONFLICT (%s) DO NOTHING", conflict)`,
+		"engine/UpsertSQL",
+	},
+	{
+		"LIMIT and OFFSET swapped",
+		`return fmt.Sprintf("LIMIT %d OFFSET %d", limit, offset)`,
+		`return fmt.Sprintf("LIMIT %d OFFSET %d", offset, limit)`,
+		"engine/LimitOffset",
+	},
+	{
+		"a SavepointDialect whose rollback releases instead",
+		`func (Dialect) CurrentTimestamp() string   { return "CURRENT_TIMESTAMP" }`,
+		`func (Dialect) CurrentTimestamp() string   { return "CURRENT_TIMESTAMP" }
+func (Dialect) SavepointStmt(n string) string           { return "SAVEPOINT " + n }
+func (Dialect) RollbackToSavepointStmt(n string) string { return "RELEASE SAVEPOINT " + n }
+func (Dialect) ReleaseSavepointStmt(n string) string    { return "RELEASE SAVEPOINT " + n }`,
+		"engine/SavepointDialect",
+	},
+	{
+		"an AutoIncrementer whose key the engine does not number",
+		`return "INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER"`,
+		`return "BIGINT PRIMARY KEY", "INTEGER"`,
+		"engine/AutoIncrementer",
+	},
+}
+
+// kitRun runs the fixture's dialect kit test in dir and returns the leaf
+// subtests that failed and whether the engine half ran.
+func kitRun(t *testing.T, dir string) (failed []string, engineRan bool, out string) {
+	t.Helper()
+	out, _ = goRun(t, dir, standalone, "test", "-count=1", "-json", "-run", "^TestDialectConformance$", ".")
+	run := parseTestJSON(out)
+	if len(run.action) == 0 {
+		t.Fatalf("the fixture's dialect kit test did not run:\n%s", out)
+	}
+	for test, action := range run.action {
+		if test == "TestDialectConformance/engine/Placeholder" && action == "pass" {
+			engineRan = true
+		}
+		if action != "fail" {
 			continue
 		}
-		switch o := obj.(type) {
-		case *types.TypeName:
-			if st, ok := o.Type().Underlying().(*types.Struct); ok {
-				for i := 0; i < st.NumFields(); i++ {
-					if types.Implements(st.Field(i).Type(), dialect.Underlying().(*types.Interface)) || types.Identical(st.Field(i).Type(), dialect) {
-						takes = append(takes, name+"."+st.Field(i).Name())
-					}
-				}
-			}
-		case *types.Func:
-			sig := o.Type().(*types.Signature)
-			for i := 0; i < sig.Params().Len(); i++ {
-				if types.Identical(sig.Params().At(i).Type(), dialect) {
-					takes = append(takes, name)
-				}
+		leaf := true
+		for other, a := range run.action {
+			if a == "fail" && strings.HasPrefix(other, test+"/") {
+				leaf = false
 			}
 		}
+		if leaf {
+			failed = append(failed, strings.TrimPrefix(test, "TestDialectConformance/"))
+		}
 	}
-	t.Logf("places the conformance kit (%s) can be handed a Dialect: %v", drivertestPkg, takes)
-	if len(takes) > 0 {
-		t.Fatalf("the kit now takes a dialect (%v). Before this control can move, extend this probe to run the kit against a dialect that is wrong on purpose — placeholders, quoting, upsert, limit, savepoint — and record whether the kit catches each", takes)
+	sort.Strings(failed)
+	return failed, engineRan, out
+}
+
+func probeKitChecksDialect(t *testing.T, e *env) verdict {
+	childProbe(t)
+	// The kit takes a dialect: a field of DialectCase holds one.
+	api := e.loadAPI(t)
+	caseType, ok := api.lookup(drivertestPkg, "DialectCase").(*types.TypeName)
+	if !ok {
+		t.Logf("drivertest has no DialectCase: the kit takes no dialect")
+		return absent
 	}
-	return absent
+	dialect := api.lookup(rootPkg, "Dialect").Type()
+	takes := false
+	st := caseType.Type().Underlying().(*types.Struct)
+	for i := 0; i < st.NumFields(); i++ {
+		if types.Identical(st.Field(i).Type(), dialect) {
+			takes = true
+		}
+	}
+	if !takes {
+		t.Logf("drivertest.DialectCase has no field of type Dialect")
+		return absent
+	}
+
+	// The right dialect passes, with the engine half run.
+	failed, engineRan, out := kitRun(t, extdriverModule(t, e))
+	t.Logf("the fixture's own dialect: kit failures %v, engine half ran: %v", failed, engineRan)
+	if len(failed) > 0 || !engineRan {
+		t.Logf("output:\n%s", out)
+		return absent
+	}
+
+	// Each wrong dialect fails, and the kit names the method.
+	src := filepath.Join(e.root, "internal", "extbench", "testdata", "extdriver", "dialect", "dialect.go")
+	orig, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		m      kitMutation
+		failed []string
+	}
+	results := make([]result, len(kitMutations))
+	var wg sync.WaitGroup
+	for i, m := range kitMutations {
+		if !strings.Contains(string(orig), m.find) {
+			t.Fatalf("mutation %q: the fixture's dialect no longer has the line it patches:\n%s", m.name, m.find)
+		}
+		dir := fixtureModule(t, e, "extdriver")
+		patched := strings.Replace(string(orig), m.find, m.patch, 1)
+		if err := os.WriteFile(filepath.Join(dir, "dialect", "dialect.go"), []byte(patched), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		wg.Add(1)
+		go func(i int, m kitMutation, dir string) {
+			defer wg.Done()
+			f, _, _ := kitRun(t, dir)
+			results[i] = result{m, f}
+		}(i, m, dir)
+	}
+	wg.Wait()
+	caught := 0
+	for _, r := range results {
+		hit := false
+		for _, f := range r.failed {
+			if f == r.m.caught || strings.HasPrefix(f, r.m.caught+"/") {
+				hit = true
+			}
+		}
+		t.Logf("wrong on purpose — %s: caught by %s: %v (%d failing subtests)", r.m.name, r.m.caught, hit, len(r.failed))
+		if hit {
+			caught++
+		}
+	}
+	switch caught {
+	case len(kitMutations):
+		return present
+	case 0:
+		return absent
+	default:
+		return partial
+	}
 }
 
 // --- DRV-06 ------------------------------------------------------------------------
@@ -423,12 +552,16 @@ func probeKitChecksDialect(t *testing.T, e *env) verdict {
 var inRepoDrivers = []string{"mssql", "mysql", "oracle", "postgres", "sqlite"}
 
 // kitSubtest is a subtest drivertest.Verify always runs; its presence in a
-// module's test output means the kit ran there.
+// module's test output means the classifier kit ran there.
 const kitSubtest = "recognises_its_own_unique_violation"
+
+// dialectKitSubtest is a subtest drivertest.VerifyDialect always runs, with
+// or without a database.
+const dialectKitSubtest = "contract/Placeholder"
 
 func probeEveryDriverRunsKit(t *testing.T, e *env) verdict {
 	childProbe(t)
-	var ran, didNot []string
+	var full, partialRun []string
 	for _, d := range inRepoDrivers {
 		dir := filepath.Join(e.root, "drivers", d)
 		work := linkWorkspace(t, e, dir)
@@ -437,27 +570,52 @@ func probeEveryDriverRunsKit(t *testing.T, e *env) verdict {
 		if len(run.action) == 0 {
 			t.Fatalf("drivers/%s: no test ran (%v):\n%s", d, err, out)
 		}
-		kit := false
+		classifier := quarkdriverHas(t, run, kitSubtest)
+		dialectKit, engineRan, engineSkipped := false, 0, 0
 		for test, action := range run.action {
-			if strings.HasSuffix(test, "/"+kitSubtest) && action == "pass" {
-				kit = true
+			if strings.HasSuffix(test, "/"+dialectKitSubtest) && action == "pass" {
+				dialectKit = true
+			}
+			if strings.HasSuffix(test, "/engine") || test == "TestDialectConformance/engine" {
+				switch action {
+				case "pass":
+					engineRan++
+				case "skip":
+					engineSkipped++
+				}
 			}
 		}
-		if kit {
-			ran = append(ran, d)
-		} else {
-			didNot = append(didNot, d)
+		// postgres registers no classifier by design (CON-07): its kit is
+		// the dialect's.
+		wantClassifier := d != "postgres"
+		t.Logf("drivers/%s: classifier kit ran: %v (expected: %v); dialect kit ran: %v; its engine half ran against %d database(s) and was skipped for want of one %d time(s)",
+			d, classifier, wantClassifier, dialectKit, engineRan, engineSkipped)
+		if dialectKit && (classifier || !wantClassifier) {
+			full = append(full, d)
+		} else if dialectKit || classifier {
+			partialRun = append(partialRun, d)
 		}
 	}
-	t.Logf("driver modules whose tests run drivertest.Verify: %v; whose tests do not: %v", ran, didNot)
+	t.Logf("driver modules that run the kit — the classifier half where they register a classifier, the dialect half always: %v; that run part of it: %v", full, partialRun)
 	switch {
-	case len(didNot) == 0:
+	case len(full) == len(inRepoDrivers):
 		return present
-	case len(ran) > 0:
+	case len(full)+len(partialRun) > 0:
 		return partial
 	default:
 		return absent
 	}
+}
+
+// quarkdriverHas reports whether a subtest with the given suffix passed.
+func quarkdriverHas(t *testing.T, run testRun, suffix string) bool {
+	t.Helper()
+	for test, action := range run.action {
+		if strings.HasSuffix(test, "/"+suffix) && action == "pass" {
+			return true
+		}
+	}
+	return false
 }
 
 // linkWorkspace writes a go.work that builds the module in dir against THIS
@@ -495,41 +653,81 @@ func linkWorkspace(t *testing.T, e *env, dir string) string {
 
 // --- DRV-07 ------------------------------------------------------------------------
 
+const suitePkg = "github.com/jcsvwinston/quark/quarkdriver/drivertest/suite"
+
+// heavy are import paths the public suite must not bring into a driver
+// module's graph: a container library, an engine's driver, a cache or
+// tracing backend.
+var heavy = []string{"testcontainers", "jackc/pgx", "go-sql-driver", "go-mssqldb", "go-ora", "mattn/go-sqlite3", "modernc.org/sqlite", "redis", "opentelemetry"}
+
+// suiteSubtests returns the direct subtests of parent that passed.
+func suiteSubtests(run testRun, parent string) (passed, other []string) {
+	for test, action := range run.action {
+		rest, ok := strings.CutPrefix(test, parent+"/")
+		if !ok || strings.Contains(rest, "/") {
+			continue
+		}
+		if action == "pass" {
+			passed = append(passed, rest)
+		} else {
+			other = append(other, rest+":"+action)
+		}
+	}
+	sort.Strings(passed)
+	sort.Strings(other)
+	return passed, other
+}
+
 func probeEngineSuiteReachable(t *testing.T, e *env) verdict {
 	childProbe(t)
-	// What an importer of the engine suite would get: the exported
-	// declarations of its non-test files.
-	suiteDir := filepath.Join(e.root, "internal", "enginesuite")
-	pkg, err := build.ImportDir(suiteDir, 0)
-	if err != nil {
-		t.Fatalf("read the engine suite package: %v", err)
-	}
-	// Whether a module outside this repository may import an internal
-	// package of quark at all: asked of the go command, from a copy of the
-	// fixture of its own (the package it adds must not break DRV-03's build).
-	dir := fixtureModule(t, e, "extdriver")
-	probeDir := filepath.Join(dir, "reachinternal")
-	if err := os.MkdirAll(probeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	src := "package reachinternal\n\nimport _ \"github.com/jcsvwinston/quark/internal/guard\"\n"
-	if err := os.WriteFile(filepath.Join(probeDir, "reach.go"), []byte(src), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, buildErr := goRun(t, dir, standalone, "build", "./reachinternal")
-	refused := buildErr != nil && strings.Contains(out, "use of internal package")
+	dir := extdriverModule(t, e)
 
-	t.Logf("engine suite: import path %s; non-test files %v; test files %d (the suite lives in them)",
-		"github.com/jcsvwinston/quark/internal/enginesuite", pkg.GoFiles, len(pkg.TestGoFiles))
-	t.Logf("a module outside the repository importing an internal package of quark is refused by the go command: %v", refused)
-	if !refused {
-		t.Logf("go build output:\n%s", out)
+	// 1. A module outside the repository imports the suite, and what it
+	// brings is Quark and the standard library.
+	out, err := goRun(t, dir, standalone, "list", "-deps", suitePkg)
+	if err != nil {
+		t.Logf("go list -deps %s from example.com/extdriver: %v\n%s", suitePkg, err, out)
+		return absent
 	}
-	exportsSuite := len(pkg.GoFiles) > 1 // doc.go alone exports nothing
+	graph := strings.Fields(out)
+	var dragged []string
+	for _, p := range graph {
+		for _, h := range heavy {
+			if strings.Contains(p, h) {
+				dragged = append(dragged, p)
+			}
+		}
+	}
+	lib := deps(t, dir, standalone, rootPkg)
+	t.Logf("%s from a module outside the repository (GOWORK=off): %d packages (the library alone: %d); container, driver, cache or tracing packages among them: %v",
+		suitePkg, len(graph), len(lib), dragged)
+
+	// 2. The fixture driver runs it, standalone.
+	out, _ = goRun(t, dir, standalone, "test", "-count=1", "-json", "-run", "^TestEngineSuite$", ".")
+	fixture, fixtureOther := suiteSubtests(parseTestJSON(out), "TestEngineSuite")
+	t.Logf("example.com/extdriver ran the suite: %d subtests passed, others %v", len(fixture), fixtureOther)
+
+	// 3. The in-repo engines run the same suite: internal/enginesuite's
+	// SQLite lane, the one this bench can run without a server.
+	suiteDir := filepath.Join(e.root, "internal", "enginesuite")
+	out, _ = goRun(t, suiteDir, []string{"GOWORK=off"}, "test", "-count=1", "-json", "-run", "^TestSuiteSQLite$", ".")
+	inRepoRun := parseTestJSON(out)
+	inRepo, inRepoOther := suiteSubtests(inRepoRun, "TestSuiteSQLite/EngineSuite")
+	shared, _ := suiteSubtests(inRepoRun, "TestSuiteSQLite")
+	internalOnly := 0
+	for _, s := range shared {
+		if s != "EngineSuite" && s != "DialectKit" {
+			internalOnly++
+		}
+	}
+	same := strings.Join(fixture, ",") == strings.Join(inRepo, ",")
+	t.Logf("internal/enginesuite's TestSuiteSQLite ran the same suite: %d subtests passed (others %v), identical to the fixture's: %v; %d subtests of the shared suite stay internal (engine-specific)",
+		len(inRepo), inRepoOther, same, internalOnly)
+
 	switch {
-	case !refused && exportsSuite:
+	case len(dragged) == 0 && len(fixture) > 0 && len(fixtureOther) == 0 && same:
 		return present
-	case exportsSuite:
+	case len(fixture) > 0 || len(inRepo) > 0:
 		return partial
 	default:
 		return absent

@@ -25,5 +25,6 @@ func TestSuiteOracle(t *testing.T) {
 	}
 	defer client.Close()
 
+	runConformance(t, client, "oracle")
 	SharedSuite(t, client)
 }

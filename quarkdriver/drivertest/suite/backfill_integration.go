@@ -1,7 +1,7 @@
 // Copyright 2026 jcsvwinston
 // SPDX-License-Identifier: Apache-2.0
 
-package enginesuite
+package suite
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 // `fetchBackfillBatch` has dialect-specific branches (MSSQL TOP,
 // Oracle FETCH NEXT, others LIMIT) and `ensureBackfillStateTable`
 // has dialect-specific CREATE TABLE syntax — both must be
-// validated against each motor the SharedSuite covers.
+// validated against each engine the suite runs on.
 //
 // The fixture is intentionally small (5 rows, batch 2) to keep the
 // matrix fast; the contract being asserted is "the helper iterates

@@ -46,5 +46,6 @@ func TestSuiteMSSQL(t *testing.T) {
 	}
 	defer client.Close()
 
+	runConformance(t, client, "sqlserver")
 	SharedSuite(t, client)
 }

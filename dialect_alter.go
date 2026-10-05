@@ -98,9 +98,17 @@ func (m *MySQLDialect) DropForeignKey(table, constraint string) string {
 	return fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s", m.Quote(table), m.Quote(constraint))
 }
 
-// DropCheck is ALTER TABLE … DROP CHECK (MySQL 8.0.16+, MariaDB 10.2.1+).
+// DropCheck is ALTER TABLE … DROP CHECK (MySQL 8.0.16+).
 func (m *MySQLDialect) DropCheck(table, constraint string) string {
 	return fmt.Sprintf("ALTER TABLE %s DROP CHECK %s", m.Quote(table), m.Quote(constraint))
+}
+
+// DropCheck is the standard ALTER TABLE … DROP CONSTRAINT on MariaDB, which
+// has no DROP CHECK: the MySQL spelling it inherited was a syntax error
+// (Error 1064) on MariaDB 11.4, found by the dialect kit's ObjectDropper
+// check (drivertest.VerifyDialect, A11 Q4).
+func (m *MariaDBDialect) DropCheck(table, constraint string) string {
+	return fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", m.Quote(table), m.Quote(constraint))
 }
 
 // --- SQL Server --------------------------------------------------------------
