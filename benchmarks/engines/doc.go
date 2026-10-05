@@ -20,8 +20,9 @@
 // runner far better than a time does: across the CPU models GitHub's runners
 // drew, absolute times differed by 40–50 % and ratios by at most 16 %. Not
 // entirely, though, so the time checks are asserted only on the machine the
-// record was taken on — the CI runner — and allocations, which do not depend
-// on the machine at all, are asserted everywhere.
+// record was taken on — the CI runner, and on it only the CPU models the
+// reference runs drew — and allocations, which do not depend on the machine
+// at all, are asserted everywhere.
 //
 // The benchmarks themselves live in the _test.go files: run.sh starts the
 // engines and runs them the way the published page describes, and the

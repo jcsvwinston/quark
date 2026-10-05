@@ -80,21 +80,21 @@ within none.
 
 | control | engine | operation | judged against | recorded ratio | verdict | Quark allocs/op · B/op |
 |---|---|---|---|---:|---|---:|
-| `PG-01` | PostgreSQL | Insert one row and read its generated id back | `database/sql` · pgx | 1.26 · 1.31 | **absent** | 86 · 4425 |
-| `PG-02` | PostgreSQL | Select one row by primary key | `database/sql` · pgx | 1.24 · 1.30 | **absent** | 74 · 4830 |
-| `PG-03` | PostgreSQL | Select 100 rows with a WHERE, an ORDER BY and a LIMIT | `database/sql` | 1.35 | **absent** | 576 · 37000 |
-| `PG-04` | PostgreSQL | Select 100 parents and their 500 children | `database/sql` | 1.98 | **absent** | 4757 · 208500 |
-| `PG-05` | PostgreSQL | Insert 1000 rows in one statement with their ids back | `database/sql` | 1.33 | **absent** | 27880 · 1906000 |
-| `MY-01` | MySQL | Select one row by primary key | `database/sql` · `database/sql`, statement reused | 1.42 · 2.72 | **absent** | 69 · 4470 |
+| `PG-01` | PostgreSQL | Insert one row and read its generated id back | `database/sql` · pgx | 1.26 · 1.29 | **absent** | 81 · 4360 |
+| `PG-02` | PostgreSQL | Select one row by primary key | `database/sql` · pgx | 1.24 · 1.29 | **absent** | 72 · 4755 |
+| `PG-03` | PostgreSQL | Select 100 rows with a WHERE, an ORDER BY and a LIMIT | `database/sql` | 1.17 | **absent** | 573 · 25780 |
+| `PG-04` | PostgreSQL | Select 100 parents and their 500 children | `database/sql` | 1.25 | **absent** | 2869 · 156240 |
+| `PG-05` | PostgreSQL | Insert 1000 rows in one statement with their ids back | `database/sql` | 1.09 | **present** | 13040 · 1401900 |
+| `MY-01` | MySQL | Select one row by primary key | `database/sql` · `database/sql`, statement reused | 1.40 · 2.71 | **absent** | 67 · 4390 |
 
 What each distance is made of, as measured:
 
-- **`PG-01`** (InsertOne) — Over the limit against both baselines on the reference runner (1.20–1.31 against database/sql and 1.20–1.36 against pgx across seven runs). Quark allocates 86 times and 4.4 KB per insert, against 21 times and 1.1 KB for database/sql and 13 times and 0.6 KB for pgx: the statement is built from the struct, validated and stamped on every call. That work costs about 35 µs per insert on the runner and about 6 µs on a laptop, where the same code sits on the threshold (1.12 and 1.16).
-- **`PG-02`** (FindByPK) — Over the limit on the reference runner: 1.20–1.26 against database/sql, inside the band, and 1.24–1.30 against pgx; on a laptop it sits on the threshold (1.11 and 1.13). Find goes through the list path — the SELECT is assembled by the query builder (8 % of the client's CPU in a profile) and the row goes through the generic scanner — and allocates 74 times and 4.8 KB per row, against 28 times for database/sql and 10 for pgx.
-- **`PG-03`** (List100) — About 35 % over database/sql on the reference runner, 30 % on a laptop. The largest single item: List serializes the whole result to JSON even when no cache is configured, and discards it — 15 % of the client's CPU and about 12 KB of the 37 KB allocated per call, in a CPU and a memory profile of this operation. Building scan destinations through reflection for every row is another 11 %.
-- **`PG-04`** (Preload100) — About twice database/sql. The informational arm runs the hand-written program with the children's query in Quark's shape — SELECT * and an IN list of 100 placeholders — and splits the gap in two: on the reference runner that arm takes 1.26 ms where = ANY($1) with one array parameter takes 0.82 ms, and Quark takes 1.61 ms, 0.35 ms over it, scanning the children and mapping them onto their parents through reflection (half the client's CPU in a profile).
-- **`PG-05`** (InsertBatch1000) — About a third over database/sql, sending the same single statement. In a CPU profile: each of the 4000 placeholders is formatted with fmt.Sprintf (14 % of the client's CPU), and the validator walks every struct of the batch although the model declares no validation rule (9 %). Quark allocates 27 900 times per batch against 9 000 for database/sql.
-- **`MY-01`** (FindByPK) — 1.4 times a program that sends the query per call, and 2.7 times one that prepares the statement once. With arguments and without interpolateParams, the driver prepares, executes and closes a server-side statement on every query; Quark reuses none, so every Find pays all three. With interpolateParams=true in the DSN the driver sends one text query instead: on the reference runner Quark's Find drops from 275 µs to 161 µs, against 102 µs for the reused statement.
+- **`PG-01`** (InsertOne) — Over the limit against both baselines on the reference runners (1.20–1.36 against database/sql and 1.22–1.41 against pgx across ten runs). Quark allocates 81 times and 4.4 KB per insert, against 21 times and 1.1 KB for database/sql and 13 times and 0.6 KB for pgx: the INSERT is built from the struct on every call, 9 % of the client's CPU in a profile. Validating a model that declares no rule and reading the clock for one with no timestamp columns no longer happen (A12 Q2); they were five allocations, and no move a run can see in the ratio. Quark's share costs about 30 µs per insert on the EPYC runner and a few µs on a laptop, where the same code sits on the threshold (1.14 and 1.16).
+- **`PG-02`** (FindByPK) — Over the limit on the reference runners: 1.10–1.25 against database/sql, inside the band, and 1.12–1.30 against pgx; on a laptop it sits on the threshold (1.09 and 1.13). Find goes through the list path — the SELECT is assembled by the query builder (8 % of the client's CPU in a profile) and the row goes through the generic scanner — and allocates 72 times and 4.8 KB per row, against 29 times for database/sql and 10 for pgx.
+- **`PG-03`** (List100) — 17 % over database/sql on the reference runners (1.14–1.29 across ten runs), inside the band, so the verdict is not asserted; 15 % on a laptop. It was 35 % until A12 Q2: List serialized the whole result to JSON when no cache was configured and discarded it (QK-34), and decided for every row and column whether the field needed a scan target of its own. It now allocates 25.8 KB per call instead of 37 KB. What remains, in a CPU profile: pointing the scan targets at each row's fields through reflection (about 8 % of the client's CPU besides the driver's own Scan) and assembling the SELECT (5 %).
+- **`PG-04`** (Preload100) — A quarter over database/sql (1.22–1.31 across ten runs); it was twice. Since A12 Q2 the children are selected with = ANY($1) and one array parameter instead of an IN list of 100 placeholders, and assembled onto their parents with one growth per parent instead of a reflect.Append per row (QK-35). The informational arm keeps the old shape: the hand-written program sending the IN list took 1.25 ms on the EPYC runner where = ANY($1) took 0.79 ms. What remains: the parent list (PG-03), and mapping the 500 children — each row's key read through reflection and looked up, the row copied — about 15 % of the client's CPU besides the driver's Next and Scan.
+- **`PG-05`** (InsertBatch1000) — Within the limit in every run (1.08–1.11 across ten), and inside the band, so the verdict is not asserted. It was a third over database/sql until A12 Q2 (QK-36): each of the 4000 placeholders was formatted with fmt.Sprintf, the validator walked every struct of the batch although the model declares no rule, and each row's placeholders went through a slice and a join. Quark allocates 13 000 times per batch against 9 000 for database/sql; reading each field through reflection to bind it is 8 % of the client's CPU in a profile.
+- **`MY-01`** (FindByPK) — 1.4 times a program that sends the query per call, and 2.7 times one that prepares the statement once. With arguments and without interpolateParams, the driver prepares, executes and closes a server-side statement on every query; Quark reuses none, so every Find pays all three. With interpolateParams=true in the DSN the driver sends one text query instead: on the EPYC runner Quark's Find drops from 268 µs to 157 µs, against 102 µs for the reused statement.
 
 {/* engine-bench:end */}
 
@@ -103,42 +103,67 @@ What each distance is made of, as measured:
 The record is taken on **the CI runner**, because that is where the bench runs
 on every change: a GitHub-hosted `ubuntu-latest` machine with 4 vCPUs, which
 GitHub draws from more than one CPU model. The recorded ratios are the medians
-of seven runs on 2026-10-04 that drew three models — five on an AMD EPYC 7763,
-one on an Intel Xeon Platinum 8370C, one on an Intel Xeon 6973P. The times
-below are the EPYC runs'; the ratios are the seven runs' medians, with their
-range. The Xeon 6973P ran every arm 40–50 % faster than the EPYC and gave
-the same ratios within 8 %, which is the point of recording ratios.
+of ten runs on 2026-10-05 that drew five models — five on an AMD EPYC 7763,
+two on an Intel Xeon 6973P-C, and one each on an AMD EPYC 9V45, an AMD EPYC
+9V74 and an Intel Xeon Platinum 8370C; the time checks are asserted on those
+five models only (see *Method*). The times below are the EPYC 7763 runs'; the
+ratios are the ten runs' medians, with their range. The Xeon 6973P-C ran every
+arm 40–50 % faster than the EPYC 7763 and gave the same ratios within 5 %,
+which is the point of recording ratios.
 
 | Operation | `database/sql` | pgx | Quark | Quark ÷ `database/sql` | Quark ÷ pgx |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| InsertOne | 126.7 µs | 122.4 µs | 161.0 µs | 1.26 (1.20–1.31) | 1.31 (1.20–1.36) |
-| FindByPK | 135.2 µs | 129.7 µs | 168.4 µs | 1.24 (1.20–1.26) | 1.30 (1.24–1.30) |
-| List100 | 269.1 µs | 240.5 µs | 361.2 µs | 1.35 (1.34–1.49) | — |
-| Preload100 | 821.6 µs | 701.6 µs | 1.61 ms | 1.98 (1.94–2.08) | — |
-| InsertBatch1000 | 5.55 ms | 5.16 ms | 7.42 ms | 1.33 (1.28–1.34) | — |
+| InsertOne | 123.8 µs | 120.9 µs | 155.4 µs | 1.26 (1.20–1.36) | 1.29 (1.22–1.41) |
+| FindByPK | 132.2 µs | 128.1 µs | 165.2 µs | 1.24 (1.10–1.25) | 1.29 (1.12–1.30) |
+| List100 | 266.1 µs | 238.5 µs | 314.9 µs | 1.17 (1.14–1.29) | — |
+| Preload100 | 793.9 µs | 682.9 µs | 977.4 µs | 1.25 (1.22–1.31) | — |
+| InsertBatch1000 | 5.45 ms | 5.13 ms | 5.90 ms | 1.09 (1.08–1.11) | — |
 
 | MySQL FindByPK | `database/sql` per call | `database/sql`, statement reused | Quark | Quark, `interpolateParams=true` |
 | --- | ---: | ---: | ---: | ---: |
-| time | 195.8 µs | 101.7 µs | 275.0 µs | 160.9 µs |
-| Quark ÷ baseline | 1.42 (1.40–1.57) | 2.72 (2.68–3.15) | | |
+| time | 193.6 µs | 101.7 µs | 268.5 µs | 157.0 µs |
+| Quark ÷ baseline | 1.40 (1.37–1.55) | 2.71 (2.61–3.15) | | |
 
 The informational arm of Preload100 — the hand-written program sending the
-children's query in Quark's shape — took 1.26 ms on the EPYC runner.
+children's query as `SELECT *` with an `IN` list of 100 placeholders, the
+shape Quark sent on PostgreSQL before 2026-10-05 — took 1.25 ms on the EPYC
+7763 runner.
+
+**What moved on 2026-10-05.** The record before this one was taken the day
+before, on seven runs over three of the same models, against code that
+serialized every `List` result to JSON with no cache configured, selected
+preloaded children with one placeholder per key and appended them one
+reflection call at a time, decided per row and column how to scan each field,
+formatted every placeholder with `fmt`, and validated models that declare no
+rule:
+
+| Control | Quark ÷ baseline, before | after | Quark allocs/op, before | after | Quark B/op, before | after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `PG-01` InsertOne | 1.26 · 1.31 | 1.26 · 1.29 | 86 | 81 | 4425 | 4360 |
+| `PG-02` FindByPK | 1.24 · 1.30 | 1.24 · 1.29 | 74 | 72 | 4830 | 4755 |
+| `PG-03` List100 | 1.35 | 1.17 | 576 | 573 | 37000 | 25780 |
+| `PG-04` Preload100 | 1.98 | 1.25 | 4757 | 2869 | 208500 | 156240 |
+| `PG-05` InsertBatch1000 | 1.33 | 1.09 | 27880 | 13040 | 1906000 | 1401900 |
+| `MY-01` FindByPK | 1.42 · 2.72 | 1.40 · 2.71 | 69 | 67 | 4470 | 4390 |
+
+The single-row operations did not move: what they spend beyond the baselines
+is elsewhere (building the statement, and the row going through the generic
+path), and is described in the recorded block above.
 
 **A laptop**, for comparison — Apple M4 Pro, Docker Desktop's Linux VM with
-12 CPUs, eight runs the same day with the rest of the machine busy:
+12 CPUs, three runs on 2026-10-05 with the rest of the machine busy:
 
 | Operation | `database/sql` | pgx | Quark | Quark ÷ `database/sql` | Quark ÷ pgx |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| InsertOne | 53.0 µs | 54.8 µs | 59.5 µs | 1.12 | 1.16 |
-| FindByPK | 53.8 µs | 51.8 µs | 58.2 µs | 1.11 | 1.13 |
-| List100 | 105.8 µs | 97.8 µs | 143.8 µs | 1.30 | — |
-| Preload100 | 327.6 µs | 279.0 µs | 652.8 µs | 1.96 | — |
-| InsertBatch1000 | 2.13 ms | 1.98 ms | 2.79 ms | 1.31 | — |
-| MySQL FindByPK | 84.3 µs per call, 39.8 µs reused | — | 95.7 µs (60.8 µs with `interpolateParams=true`) | 1.23 · 2.54 | — |
+| InsertOne | 58.5 µs | 59.9 µs | 69.7 µs | 1.14 | 1.16 |
+| FindByPK | 54.1 µs | 55.1 µs | 58.8 µs | 1.09 | 1.13 |
+| List100 | 107.9 µs | 100.3 µs | 125.2 µs | 1.15 | — |
+| Preload100 | 341.9 µs | 280.3 µs | 383.2 µs | 1.17 | — |
+| InsertBatch1000 | 2.17 ms | 2.05 ms | 2.56 ms | 1.14 | — |
+| MySQL FindByPK | 81.2 µs per call, 39.1 µs reused | — | 101.2 µs (65.2 µs with `interpolateParams=true`) | 1.23 · 2.54 | — |
 
 The same code is measured closer to the limit on the laptop: Quark's own work
-on a single-row insert costs about 6 µs there and about 35 µs on the runner's
+on a single-row insert costs a few µs there and about 30 µs on the runner's
 vCPU, while the round trip only a little more than doubles. A verdict on a
 15 % limit is therefore a statement about a machine, and the verdicts above
 are the CI runner's.
@@ -192,6 +217,14 @@ only on the machine the record was taken on:
 - **Around the recorded ratio**, a drift of ±20 %, or twice the run's relative
   scatter if that is wider. A ratio that moves further fails the test and asks
   for the record to move in the same change. Asserted on the CI runner only.
+- Both time checks are asserted only when the runner's CPU is a model the
+  record was taken on. GitHub draws the runner's CPU from a pool, and the model
+  moves whole runs: across 34 runs on 2026-10-04 and 05, before this record, the
+  runs on one model agreed within 3 % (22 on an AMD EPYC 7763, 7 on an EPYC
+  9V74), while from one model to another List100 moved by up to 24 % and
+  MySQL's FindByPK by up to 20 %, with the same allocations. On a model no
+  reference run drew, the run reports its verdicts and ratios like a laptop
+  does; its allocations are still asserted.
 - **Around Quark's recorded allocations** — count and bytes per operation — a
   tolerance of ±5 %. Allocations do not depend on the machine: they were the
   same on the laptop and on every runner, and moved by under 2 % from run to

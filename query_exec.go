@@ -366,19 +366,24 @@ func (q *Query[T]) List() ([]T, error) {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	// computeFromDB executes the SQL, scans the rows, marshals the
-	// result slice and notifies observers. Used both as the singleflight
-	// compute callback (when the cacheStore is a *stampedeStore) and
-	// directly by the legacy cache-aside path. Wrapping it once keeps
-	// the observer / log semantics identical: exactly one observer
-	// event per actual SQL trip, regardless of how many concurrent
-	// callers were collapsed by singleflight.
-	computeFromDB := func(ctx context.Context) ([]T, []byte, error) {
+	// computeFromDB executes the SQL, scans the rows and notifies
+	// observers. Used both as the singleflight compute callback (when the
+	// cacheStore is a *stampedeStore), by the legacy cache-aside path and
+	// by the uncached path. Wrapping it once keeps the observer / log
+	// semantics identical: exactly one observer event per actual SQL trip,
+	// regardless of how many concurrent callers were collapsed by
+	// singleflight.
+	//
+	// It does not serialize the result: only the two cache paths need the
+	// JSON form, and they marshal it themselves. The uncached path used to
+	// marshal every result here and discard it — 13 % of a 100-row List's
+	// CPU and about a third of its bytes (QK-34).
+	computeFromDB := func(ctx context.Context) ([]T, error) {
 		start := time.Now()
 		rows, err := q.executeQuery(ctx, sqlStr, args)
 		duration := time.Since(start)
 		if err != nil {
-			return nil, nil, fmt.Errorf("query failed: %w", wrapDBError(err))
+			return nil, fmt.Errorf("query failed: %w", wrapDBError(err))
 		}
 		defer rows.Close()
 
@@ -396,15 +401,13 @@ func (q *Query[T]) List() ([]T, error) {
 		for rows.Next() {
 			var entity T
 			if scanErr := q.scanRow(rows, &entity); scanErr != nil {
-				return nil, nil, scanErr
+				return nil, scanErr
 			}
 			results = append(results, entity)
 		}
 		if rerr := rows.Err(); rerr != nil {
-			return nil, nil, wrapDBError(rerr)
+			return nil, wrapDBError(rerr)
 		}
-
-		data, _ := json.Marshal(results)
 
 		q.notifyObservers(QueryEvent{
 			SQL:       sqlStr,
@@ -414,7 +417,7 @@ func (q *Query[T]) List() ([]T, error) {
 			Operation: "SELECT",
 			Rows:      int64(len(results)),
 		})
-		return results, data, nil
+		return results, nil
 	}
 
 	// 2. Try the cache path. When a *stampedeStore is installed (the
@@ -433,11 +436,12 @@ func (q *Query[T]) List() ([]T, error) {
 		// below — that's documented and intentional.
 		if ss, ok := q.client.cacheStore.(*stampedeStore); ok {
 			data, err := ss.getOrCompute(ctx, cacheKey, q.cache.TTL, q.cache.Tags, func(ctx context.Context) ([]byte, error) {
-				r, bytes, err := computeFromDB(ctx)
+				r, err := computeFromDB(ctx)
 				if err != nil {
 					return nil, err
 				}
 				results = r // capture for the post-compute path below
+				bytes, _ := json.Marshal(r)
 				return bytes, nil
 			})
 			if err != nil {
@@ -456,11 +460,12 @@ func (q *Query[T]) List() ([]T, error) {
 					_ = ss.Delete(ctx, cacheKey)
 					results = nil // re-arm capture for the recompute path
 					data2, rerr := ss.getOrCompute(ctx, cacheKey, q.cache.TTL, q.cache.Tags, func(ctx context.Context) ([]byte, error) {
-						r, bytes, cerr := computeFromDB(ctx)
+						r, cerr := computeFromDB(ctx)
 						if cerr != nil {
 							return nil, cerr
 						}
 						results = r
+						bytes, _ := json.Marshal(r)
 						return bytes, nil
 					})
 					if rerr != nil {
@@ -490,17 +495,18 @@ func (q *Query[T]) List() ([]T, error) {
 				}
 			}
 			if results == nil {
-				r, bytes, err := computeFromDB(ctx)
+				r, err := computeFromDB(ctx)
 				if err != nil {
 					return nil, err
 				}
 				results = r
+				bytes, _ := json.Marshal(r)
 				_ = q.client.cacheStore.Set(ctx, cacheKey, bytes, q.cache.TTL, q.cache.Tags...)
 			}
 		}
 	} else {
-		// No cache configured — straight compute.
-		r, _, err := computeFromDB(ctx)
+		// No cache configured — straight compute, and no JSON copy.
+		r, err := computeFromDB(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1693,12 +1699,17 @@ func (q *Query[T]) scanRow(rows *sql.Rows, dest *T) error {
 	}
 
 	// Per row: re-point the reused scan-target buffer at this row's fields.
+	// Whether a column needs a native target was decided with the plan; a
+	// column that does not goes straight to the pointer form.
 	for i := range q.scanPlan {
 		sc := &q.scanPlan[i]
-		if sc.fieldIndex >= 0 {
-			q.scanDest[i] = makeScanDest(elem.Field(sc.fieldIndex), sc.loc)
-		} else {
+		switch {
+		case sc.fieldIndex < 0:
 			q.scanDest[i] = &q.scanDiscard
+		case sc.native:
+			q.scanDest[i] = makeScanDest(elem.Field(sc.fieldIndex), sc.loc)
+		default:
+			q.scanDest[i] = scanDestForPtr(elem.Field(sc.fieldIndex).Addr().Interface(), sc.loc)
 		}
 	}
 	return rows.Scan(q.scanDest...)
@@ -1746,6 +1757,9 @@ func (q *Query[T]) resolveScanPlan(rows *sql.Rows, elem reflect.Value) error {
 			}
 		}
 		plan[i] = scanCol{fieldIndex: idx, loc: loc}
+		if idx >= 0 {
+			plan[i].native = hasNativeScanDest(elem.Type().Field(idx).Type)
+		}
 	}
 	q.scanPlan = plan
 	q.scanDest = make([]any, len(columns))
@@ -1772,10 +1786,12 @@ func (q *Query[T]) findFieldIndex(elem reflect.Value, column string) int {
 
 // scanCol is one column's resolved scan target in a Query's reflection scan
 // plan (see scanPlan): the struct field index to scan into, or -1 to discard
-// the column, plus the per-column timezone (nil when the tz feature is off).
+// the column, plus the per-column timezone (nil when the tz feature is off)
+// and whether the field's type takes a native target (hasNativeScanDest).
 type scanCol struct {
 	fieldIndex int
 	loc        *time.Location
+	native     bool
 }
 
 // loadRelations eager loads requested relations for the given results,

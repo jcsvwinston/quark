@@ -2252,13 +2252,20 @@ func (q *Query[T]) createBatchBackfillPerRow(entities []*T, columns []string, co
 // the chunk (which aliases the caller's slice, so PKs reach the caller).
 func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns []string, colIndexes []int, colTags []string) error {
 	var sqlBuf strings.Builder
+	// About seven bytes per placeholder ("$1234, ") and four per row's
+	// parentheses and separator, so the builder grows once, not a dozen times.
+	sqlBuf.Grow(128 + len(entities)*(7*len(colIndexes)+4))
 	sqlBuf.WriteString("INSERT INTO ")
 	sqlBuf.WriteString(q.fullTableName())
 	sqlBuf.WriteString(" (")
 	sqlBuf.WriteString(strings.Join(columns, ", "))
 	sqlBuf.WriteString(") VALUES ")
 
-	var args []any
+	// The arguments are sized up front, and each row's placeholders are
+	// written straight into the statement: a slice and a strings.Join per
+	// row, and an argument slice grown by appending, were two allocations
+	// per row and a dozen copies of the whole argument list (QK-36).
+	args := make([]any, 0, len(entities)*len(colIndexes))
 	argIndex := 1
 	for rowIdx, entity := range entities {
 		v := reflect.ValueOf(entity)
@@ -2270,15 +2277,16 @@ func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns [
 		if rowIdx > 0 {
 			sqlBuf.WriteString(", ")
 		}
-		placeholders := make([]string, len(colIndexes))
+		sqlBuf.WriteByte('(')
 		for j, ci := range colIndexes {
-			placeholders[j] = q.dialect.Placeholder(argIndex)
+			if j > 0 {
+				sqlBuf.WriteString(", ")
+			}
+			writePlaceholder(&sqlBuf, q.dialect, argIndex)
 			args = append(args, q.bindColumnArg(colTags[j], v.Field(ci).Interface()))
 			argIndex++
 		}
-		sqlBuf.WriteString("(")
-		sqlBuf.WriteString(strings.Join(placeholders, ", "))
-		sqlBuf.WriteString(")")
+		sqlBuf.WriteByte(')')
 	}
 
 	// RETURNING for dialects that support it
@@ -2921,6 +2929,14 @@ func (q *BaseQuery) linkM2M(rel RelationMeta, parentPK, childPK any) error {
 // columns pay one map lookup each. This replaces the 18 hand-written hook
 // methods the reference app needed just to stamp timestamps.
 func stampTimestamps(entity any, meta *ModelMeta, creating bool) {
+	// A model with neither column has nothing to stamp: return before
+	// reading the clock, which a 1000-row batch otherwise read 1000 times
+	// for nothing.
+	if _, ok := meta.FieldByCol["updated_at"]; !ok {
+		if _, ok := meta.FieldByCol["created_at"]; !ok || !creating {
+			return
+		}
+	}
 	v := reflect.ValueOf(entity)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
