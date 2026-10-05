@@ -174,8 +174,28 @@ stamps the resolved tenant on every insert and update by entity instead of
 filling an empty field only — an entity carrying another tenant's id was
 inserted under it, and an Update moved the row. A foreign value is replaced
 and logged (`quark.tenant.foreign_value_replaced`). `UpdateMap` still writes
-its map verbatim. The A8 bench control `RLS-03` reads all four direct paths
+its map verbatim (until QK-44). The A8 bench control `RLS-03` reads all four direct paths
 positively and records **present**.
+
+### Upserts and map updates stay inside the tenant
+
+Before QK-43 the update branch of `Upsert`/`UpsertBatch` carried no tenant
+predicate on any engine: tenant A upserting a key tenant B held rewrote B's
+row, and on SQL Server and Oracle an empty `updateCols` ("every non-conflict
+column") also wrote A's id into B's tenant column. `upsert_tenant.go` builds
+the guarded branch per family (`upsertFamily`: `on_conflict`,
+`duplicate_key`, `merge`); a dialect outside them refuses under
+RowLevelSecurityClient (`checkTenantUpsert`). A conflict with another
+tenant's row is reported as `ErrConstraintViolation`: PostgreSQL/SQLite see
+no RETURNING row or zero rows affected, SQL Server/Oracle zero rows from the
+MERGE, and MySQL/MariaDB — whose zero also means "own row already held the
+values" — read the row back by conflict key within the tenant
+(`finishGuardedDuplicateKey`), which also back-fills the key of an updated
+row; RETURNING is not used there under the guard because MariaDB would hand
+back the other tenant's id. `UpsertBatch` under the guard runs in a
+transaction and goes row by row on MySQL/MariaDB. QK-44: `UpdateMap` passes
+its map through `confineTenantColumn`. Regression: `upsert_tenant_test.go` and
+`internal/enginesuite/upsert_tenant_test.go` (`UpsertTenant`, six engines).
 
 ### Scopes AND with the caller's whole expression
 
@@ -231,6 +251,7 @@ Bifurcación por back-fill de PK (Finding G): cuando el PK es auto-generado, los
 - `composite_pk_test.go` — composite PKs en los 6 motores.
 - `in_operand_test.go` and `internal/enginesuite/in_typed_slices_test.go` — the IN / BETWEEN operand as any slice or array, the empty list meaning what `[]any{}` means, and what is refused (QK-33).
 - `write_where_test.go` and `internal/enginesuite/write_where_test.go` — the write paths and PreloadWhere select the same rows as a SELECT with the same conditions (QK-39).
+- `upsert_tenant_test.go` and `internal/enginesuite/upsert_tenant_test.go` — the upserts' update branch and UpdateMap stay inside the tenant (QK-43, QK-44).
 - `where_guard_test.go` and `internal/enginesuite/where_guard_test.go` — reads by key stay inside the tenant and inserts/updates store the resolved tenant (QK-42); the writes by key honour the query's conditions and the tenant, report nothing when excluded, keep `ErrStaleEntity` for real conflicts (QK-40); the scopes AND with the caller's whole expression (QK-41).
 
 Cualquier cambio en `Query[T]` debe pasar la suite completa, no sólo SQLite.
