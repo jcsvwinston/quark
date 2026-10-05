@@ -2,17 +2,17 @@ package commands
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
-	"text/template"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"golang.org/x/mod/module"
 	"gopkg.in/yaml.v3"
 
 	clidb "github.com/jcsvwinston/quark/cmd/quark/internal/db"
@@ -34,35 +34,35 @@ func moduleLineFrom(gomod []byte) string {
 
 // resolveModule finds the module that <dir> belongs to by walking up looking
 // for a go.mod, and returns the import path OF dir itself (the module path
-// extended by dir's relative position under the module root). found is false
-// when dir is not inside any Go module — the caller then scaffolds a go.mod so
-// the generated runner's imports resolve instead of pointing at a placeholder
-// module that matches nothing (QC-1).
-func resolveModule(dir string) (modulePath, projectName string, found bool) {
+// extended by dir's relative position under the module root) and the go.mod
+// it found. found is false when dir is not inside any Go module — the caller
+// then scaffolds a go.mod so the generated runner's imports resolve instead
+// of pointing at a placeholder module that matches nothing (QC-1).
+func resolveModule(dir string) (modulePath, projectName, goMod string, found bool) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return "", "", false
+		return "", "", "", false
 	}
 	cur := abs
 	for {
 		if data, err := os.ReadFile(filepath.Join(cur, "go.mod")); err == nil {
 			mod := moduleLineFrom(data)
 			if mod == "" {
-				return "", "", false
+				return "", "", "", false
 			}
 			rel, err := filepath.Rel(cur, abs)
 			if err != nil {
-				return "", "", false
+				return "", "", "", false
 			}
 			modulePath = mod
 			if rel != "." {
 				modulePath = mod + "/" + filepath.ToSlash(rel)
 			}
-			return modulePath, moduleBaseName(modulePath), true
+			return modulePath, moduleBaseName(modulePath), filepath.Join(cur, "go.mod"), true
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
-			return "", "", false // reached the filesystem root
+			return "", "", "", false // reached the filesystem root
 		}
 		cur = parent
 	}
@@ -100,12 +100,13 @@ func deriveModuleName(dir string) string {
 }
 
 // ensureGoModule guarantees dir is inside a Go module, creating a minimal
-// go.mod when it is not, and returns the import path of dir plus whether it
-// scaffolded the file. Without a module the runner 'quark init' writes cannot
-// build and `go run ./cmd/<app>` fails instantly — the QC-1 defect.
-func ensureGoModule(dir string) (modulePath, projectName string, created bool, err error) {
-	if mod, name, found := resolveModule(dir); found {
-		return mod, name, false, nil
+// go.mod when it is not, and returns the import path of dir, the go.mod's
+// path, and whether it scaffolded the file. Without a module the runner
+// 'quark init' writes cannot build and `go run ./cmd/<app>` fails instantly —
+// the QC-1 defect.
+func ensureGoModule(dir string) (modulePath, projectName, goMod string, created bool, err error) {
+	if mod, name, goMod, found := resolveModule(dir); found {
+		return mod, name, goMod, false, nil
 	}
 
 	module := initModule
@@ -118,11 +119,12 @@ func ensureGoModule(dir string) (modulePath, projectName string, created bool, e
 		goVersion = parts[0] + "." + parts[1]
 	}
 	content := fmt.Sprintf("module %s\n\ngo %s\n", module, goVersion)
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(content), 0o644); err != nil {
-		return "", "", false, fmt.Errorf("creating go.mod: %w", err)
+	goMod = filepath.Join(dir, "go.mod")
+	if err := os.WriteFile(goMod, []byte(content), 0o644); err != nil {
+		return "", "", "", false, fmt.Errorf("creating go.mod: %w", err)
 	}
 	fmt.Printf("  Created go.mod (module %s)\n", module)
-	return module, moduleBaseName(module), true, nil
+	return module, moduleBaseName(module), goMod, true, nil
 }
 
 var (
@@ -132,22 +134,26 @@ var (
 	initWith    []string
 )
 
-// initWithTargets lists what --with knows how to write. Only "nucleus" today
-// (the module that mounts the client plus the nucleus.yml the framework boots from):
-// the Quark side of the Quark<->Nucleus seam, as a module the host mounts.
-var initWithTargets = []string{"nucleus"}
+// initWithTargets lists what --with knows how to write, one per run: the
+// package of the frameworks guide's section for that framework, copied from
+// the fixture CI tests (see integrations in init_with.go), with the shared
+// notes model, and a server main for chi, Echo, Gin and gRPC — Nucleus
+// mounts its module from the host's main and gets the nucleus.yml it boots
+// from instead. The extension bench reads this literal (INT-06).
+var initWithTargets = []string{"chi", "echo", "gin", "grpc", "nucleus"}
 
 func init() {
 	initCmd.Flags().StringVar(&initDir, "dir", ".", "Base directory for initialization")
 	initCmd.Flags().StringVar(&initDialect, "dialect", "postgresql", "Default database dialect (postgresql|postgres|mysql|mariadb|sqlite|mssql|sqlserver|oracle)")
 	initCmd.Flags().StringVar(&initModule, "module", "", "Module path for a scaffolded go.mod when the directory is not already inside a Go module (default: the directory name)")
-	initCmd.Flags().StringSliceVar(&initWith, "with", nil, "Also write the integration for a host framework (nucleus: internal/<app>/module.go, a Nucleus module wrapping the Quark client)")
+	initCmd.Flags().StringSliceVar(&initWith, "with", nil, "Also write the integration with one framework (chi|echo|gin|grpc|nucleus): internal/<app> serving a notes API on the Quark client, internal/notes, and a go.mod that requires the framework")
 	rootCmd.AddCommand(initCmd)
 }
 
 var initCmd = &cobra.Command{
 	Use: "init",
 	Example: `  quark init --dialect postgresql
+  quark init --dialect sqlite --with chi
   quark init --dialect sqlite --with nucleus`,
 	Short:         "Initialize a new Quark project",
 	SilenceUsage:  true,
@@ -168,15 +174,18 @@ func runInit() error {
 		return fmt.Errorf("unknown dialect %q: expected one of postgresql|postgres|mysql|mariadb|sqlite|mssql|sqlserver|oracle", initDialect)
 	}
 	// Same rule for --with: an unknown target fails before anything is
-	// written, naming what is accepted.
-	withNucleus := false
+	// written, naming what is accepted. One framework per project: two
+	// would write two packages into internal/<app> and two server mains.
+	var with *integration
 	for _, target := range initWith {
-		switch strings.TrimSpace(target) {
-		case "nucleus":
-			withNucleus = true
-		default:
+		in := integrationFor(strings.TrimSpace(target))
+		if in == nil {
 			return fmt.Errorf("unknown --with target %q: expected one of %s", target, strings.Join(initWithTargets, "|"))
 		}
+		if with != nil && with != in {
+			return fmt.Errorf("--with takes one framework, got %s and %s", with.target, in.target)
+		}
+		with = in
 	}
 
 	fmt.Printf("Initializing Quark project in %s...\n", initDir)
@@ -189,9 +198,20 @@ func runInit() error {
 	// one, the runner's imports point at a placeholder module that matches
 	// nothing and `go run ./cmd/<app>` fails instantly (QC-1). This resolves
 	// (or creates) the module path so everything downstream lines up.
-	moduleName, projectName, createdGoMod, err := ensureGoModule(initDir)
+	moduleName, projectName, goMod, createdGoMod, err := ensureGoModule(initDir)
 	if err != nil {
 		return err
+	}
+
+	// The integration is rendered before anything else is written, so a
+	// template that fails leaves no half-scaffolded project behind.
+	var scaffolded scaffold
+	var integrationFiles []file
+	if with != nil {
+		scaffolded = scaffold{in: with, module: moduleName, project: projectName, pkg: packageIdent(projectName), dialect: initDialect}
+		if integrationFiles, err = scaffolded.files(); err != nil {
+			return err
+		}
 	}
 
 	// Create directories
@@ -269,26 +289,43 @@ func runInit() error {
 		return err
 	}
 
-	// --with nucleus: the Quark side of the seam with Nucleus, as source
-	// text the host mounts. Quark is the autonomous data layer of the suite
-	// and carries no framework dependency (QADR-0001/0006), so the CLI
-	// cannot compile the module against Nucleus: it writes the module and
-	// the nucleus.yml the printed mount line reads, and leaves main.go to
-	// the reader; the whole application around it is `nucleus new <app>
-	// --with quark`.
-	pkg := ""
-	if withNucleus {
-		pkg = packageIdent(projectName)
-		if err := writeNucleusModule(initDir, pkg, projectName, initDialect); err != nil {
+	// --with <framework>: the code of the frameworks guide's section for it,
+	// copied from the fixture CI compiles and tests, and the go.mod
+	// requirements it needs. Quark carries no framework dependency
+	// (QADR-0001/0006), so the CLI writes the code as text; what it writes
+	// is built, vetted and tested in a project of its own by
+	// TestInitWithBuilds. For Nucleus, main is the host application's: init
+	// writes the module and the nucleus.yml the printed mount line reads,
+	// and the whole application around it is `nucleus new <app> --with quark`.
+	var steps *scaffold
+	if with != nil {
+		if err := writeIntegration(initDir, integrationFiles); err != nil {
 			return err
 		}
-		if err := writeNucleusConfig(initDir, initDialect); err != nil {
-			return err
+		if with.target == "nucleus" {
+			if err := writeNucleusConfig(initDir, initDialect); err != nil {
+				return err
+			}
 		}
+		pinned, unpinned := suiteRequirements()
+		added, kept, err := requireModules(goMod, append(append([]module.Version{}, with.requires...), pinned...))
+		if err != nil {
+			return fmt.Errorf("adding the requirements of --with %s to %s: %w", with.target, goMod, err)
+		}
+		if len(added) > 0 {
+			fmt.Printf("  Required in go.mod: %s\n", moduleList(added))
+		}
+		if len(kept) > 0 {
+			fmt.Printf("  Kept in go.mod at the version it already required: %s\n", moduleList(kept))
+		}
+		if len(unpinned) > 0 {
+			fmt.Printf("  Left to go mod tidy: %s (this quark is a development build, with no release of its own to pin)\n", strings.Join(unpinned, " and "))
+		}
+		steps = &scaffolded
 	}
 
 	color.Green("\nQuark project initialized.")
-	printInitNextSteps(projectName, createdGoMod, pkg)
+	printInitNextSteps(projectName, createdGoMod, steps)
 	return nil
 }
 
@@ -299,31 +336,41 @@ func runInit() error {
 // before this change, until a go.mod even existed). QC-1: say the true next
 // steps.
 //
-// nucleusPkg is the package --with nucleus wrote ("" when it did not): the
-// steps then add the Nucleus dependency, the mount line, and the full-app
-// path on the Nucleus side, so the reader knows which generator owns main.go.
-func printInitNextSteps(projectName string, createdGoMod bool, nucleusPkg string) {
+// with is the integration --with wrote (nil when there was none). Its
+// go.mod requirements are already written, so the dependencies are one
+// `go mod tidy`; the steps then say how to serve it — the server main for
+// chi, Echo, Gin and gRPC, the mount line and the full-app path on the
+// Nucleus side for Nucleus, so the reader knows which generator owns main.go.
+func printInitNextSteps(projectName string, createdGoMod bool, with *scaffold) {
 	fmt.Println("\nNext steps:")
 	step := 1
 	if createdGoMod {
 		fmt.Printf("  %d. Edit go.mod if you want a different module path.\n", step)
 		step++
 	}
-	fmt.Printf("  %d. go get github.com/jcsvwinston/quark@latest   # add the runtime dependency\n", step)
-	step++
-	// The scaffolded runner imports this CLI's command tree, which is a
-	// module of its own since ADR-0024 — so it is a second `go get`, and
-	// leaving it out makes the runner fail to build on the first try.
-	fmt.Printf("  %d. go get github.com/jcsvwinston/quark/cmd/quark@latest # the command tree cmd/%s/main.go embeds\n", step, projectName)
-	step++
-	if nucleusPkg != "" {
-		fmt.Printf("  %d. go get github.com/jcsvwinston/nucleus@latest # the host framework of internal/%s\n", step, nucleusPkg)
+	if with == nil {
+		fmt.Printf("  %d. go get github.com/jcsvwinston/quark@latest   # add the runtime dependency\n", step)
 		step++
-		fmt.Printf("  %d. In main: client, err := quark.New(%q, dsn) and nucleus.New().FromConfigFile(\"nucleus.yml\").Mount(%s.Module(client))\n", step, clidb.DriverName(initDialect), nucleusPkg)
-		fmt.Printf("     nucleus.yml is written here and names the .quark.yml database; edit both if you change it.\n")
+		// The scaffolded runner imports this CLI's command tree, which is a
+		// module of its own since ADR-0024 — so it is a second `go get`, and
+		// leaving it out makes the runner fail to build on the first try.
+		fmt.Printf("  %d. go get github.com/jcsvwinston/quark/cmd/quark@latest # the command tree cmd/%s/main.go embeds\n", step, projectName)
 		step++
-		fmt.Printf("     For the whole application generated around this module (config, policy file, admin panel):\n")
-		fmt.Printf("       nucleus new %s --with quark\n", projectName)
+	} else {
+		fmt.Printf("  %d. go mod tidy   # fetches what go.mod requires, and the %s driver module\n", step, initDialect)
+		step++
+		in, pkg := with.in, with.pkg
+		switch in.server {
+		case serveHTTP, serveGRPC:
+			fmt.Printf("  %d. go run ./cmd/%s-server   # serves internal/%s with %s on %s; QUARK_DATABASE_DEFAULT_DSN picks the database\n", step, projectName, pkg, in.framework, in.addr)
+			step++
+		default:
+			fmt.Printf("  %d. In main: client, err := quark.New(%q, dsn) and nucleus.New().FromConfigFile(\"nucleus.yml\").Mount(%s.Module(client))\n", step, clidb.DriverName(initDialect), pkg)
+			fmt.Printf("     nucleus.yml is written here and names the .quark.yml database; edit both if you change it.\n")
+			step++
+			fmt.Printf("     For the whole application generated around this module (config, policy file, admin panel):\n")
+			fmt.Printf("       nucleus new %s --with quark\n", projectName)
+		}
 	}
 	fmt.Printf("  %d. quark migrate create initial_schema --from-models ./models --dialect %s\n", step, initDialect)
 	step++
@@ -333,14 +380,28 @@ func printInitNextSteps(projectName string, createdGoMod bool, nucleusPkg string
 // packageIdentChars strips everything a Go package name cannot carry.
 var packageIdentChars = regexp.MustCompile(`[^a-z0-9_]+`)
 
+// takenPackageNames are names internal/<app> cannot take: a keyword-free
+// identifier still cannot be main (that is a command), notes (the model's
+// package, which it imports), or the name of a package the server main
+// imports beside it.
+var takenPackageNames = map[string]bool{
+	"main": true, "notes": true, "notespb": true, "quark": true, "nucleus": true,
+	"context": true, "errors": true, "log": true, "net": true, "http": true,
+	"os": true, "signal": true, "syscall": true, "time": true,
+}
+
 // packageIdent turns a project name ("my-shop.api") into a Go package name
-// ("myshopapi"): lowercase, identifier characters only, never empty and
-// never starting with a digit.
+// ("myshopapi"): lowercase, identifier characters only, never empty, never
+// starting with a digit, and never a keyword or a name the scaffold's own
+// files need ("app" is appended: "quark" becomes "quarkapp").
 func packageIdent(name string) string {
 	id := packageIdentChars.ReplaceAllString(strings.ToLower(name), "")
 	id = strings.TrimLeft(id, "0123456789_")
 	if id == "" {
 		return "app"
+	}
+	if token.IsKeyword(id) || takenPackageNames[id] {
+		return id + "app"
 	}
 	return id
 }
@@ -360,40 +421,6 @@ func driverModuleFor(dialect string) string {
 	default:
 		return "drivers/" + dialect
 	}
-}
-
-// writeNucleusModule writes internal/<pkg>/module.go: a nucleus.Module that
-// wraps a *quark.Client with Routes, OnStart (schema), Policies and a CSRF
-// exemption for its JSON API. An existing file is never overwritten.
-func writeNucleusModule(dir, pkg, projectName, dialect string) error {
-	modDir := filepath.Join(dir, "internal", pkg)
-	path := filepath.Join(modDir, "module.go")
-	if _, err := os.Stat(path); err == nil {
-		color.Yellow("Warning: internal/%s/module.go already exists. Skipping.", pkg)
-		return nil
-	}
-	tmpl, err := template.New("with_nucleus_module").Parse(withNucleusModuleTemplate)
-	if err != nil {
-		return fmt.Errorf("parsing the nucleus module template: %w", err)
-	}
-	var buf bytes.Buffer
-	err = tmpl.Execute(&buf, map[string]string{
-		"Package":      pkg,
-		"Project":      projectName,
-		"Driver":       clidb.DriverName(dialect),
-		"DriverModule": driverModuleFor(dialect),
-	})
-	if err != nil {
-		return fmt.Errorf("rendering the nucleus module: %w", err)
-	}
-	if err := os.MkdirAll(modDir, 0o755); err != nil {
-		return fmt.Errorf("creating %s: %w", modDir, err)
-	}
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-		return fmt.Errorf("creating %s: %w", path, err)
-	}
-	fmt.Printf("  Created internal/%s/module.go (Nucleus module wrapping the Quark client — mount it with .Mount(%s.Module(client)))\n", pkg, pkg)
-	return nil
 }
 
 // writeNucleusConfig writes nucleus.yml, the minimum

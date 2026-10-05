@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // `quark init --with nucleus` writes the Quark side of the Quark<->Nucleus
-// seam as SOURCE TEXT: a nucleus.Module[struct{}] that wraps a *quark.Client.
-// Quark is the autonomous data layer of the suite and carries no framework
-// dependency (QADR-0001/0006), so this repo never compiles the emitted file
-// against Nucleus: these tests parse it and pin the shape a Nucleus host
-// expects; the only place the file is compiled against a real Nucleus is the
-// suite's own integration lane.
+// seam: a nucleus.Module[struct{}] that wraps a *quark.Client — the code of
+// the Nucleus fixture in internal/integrations — and the nucleus.yml the
+// host boots from. Quark carries no framework dependency (QADR-0001/0006),
+// so this package never imports Nucleus: these tests pin what init writes
+// and where, and TestInitWithBuilds (init_with_test.go) builds it against a
+// real Nucleus in a project of its own.
 package commands
 
 import (
@@ -41,6 +41,9 @@ func runInitArgs(t *testing.T, args ...string) (stdout string, err error) {
 	realStdout := os.Stdout
 	os.Stdout = w
 	rootCmd.SetArgs(append([]string{"init"}, args...))
+	// A string-slice flag parsed a second time appends to what the first
+	// parse left in the variable.
+	initWith = nil
 	err = rootCmd.Execute()
 	os.Stdout = realStdout
 	_ = w.Close()
@@ -67,8 +70,8 @@ func TestInitWithNucleusWritesModule(t *testing.T) {
 		t.Fatalf("init --with nucleus did not write internal/shop/module.go: %v", err)
 	}
 
-	// The file must be valid Go: it is the one artefact this repo can never
-	// compile against its consumer, so at least its syntax is pinned here.
+	// The file must be valid Go; TestInitWithBuilds compiles it against
+	// Nucleus, and this pins its shape.
 	if _, err := parser.ParseFile(token.NewFileSet(), modulePath, src, parser.AllErrors); err != nil {
 		t.Fatalf("emitted module does not parse: %v\n%s", err, src)
 	}
@@ -78,18 +81,37 @@ func TestInitWithNucleusWritesModule(t *testing.T) {
 		`"github.com/jcsvwinston/nucleus/pkg/nucleus"`,
 		`"github.com/jcsvwinston/quark"`,
 		`_ "github.com/jcsvwinston/quark/drivers/sqlite"`,
+		`"example.com/shop/internal/notes"`,
 		"func Module(client *quark.Client) nucleus.ModuleSpec",
 		"nucleus.Module[struct{}]{",
 		"Routes: func(r nucleus.Router, _ struct{})",
-		"OnStart: func(ctx context.Context, rt nucleus.Runtime, _ struct{}) error",
+		"OnStart: func(ctx context.Context, _ nucleus.Runtime, _ struct{}) error",
 		"Policies: []nucleus.PolicyRule{",
 		"CSRFExempt:",
-		"quark.For[Note](c.Request.Context(), m.client)",
-		"quark.IsUniqueViolation(err)",
+		"quark.For[notes.Note](c.Request.Context(), client)",
+		"err := client.Tx(ctx, func(tx *quark.Tx) error {",
+		"return fail(err)",
 	} {
 		if !strings.Contains(string(src), want) {
 			t.Errorf("emitted module missing %q:\n%s", want, src)
 		}
+	}
+
+	// The model and the error classification the module answers with live
+	// in internal/notes, as in the fixture.
+	model, err := os.ReadFile(filepath.Join(dir, "internal", "notes", "notes.go"))
+	if err != nil {
+		t.Fatalf("init --with nucleus did not write internal/notes/notes.go: %v", err)
+	}
+	for _, want := range []string{"package notes", "type Note struct", "quark.IsUniqueViolation(err)"} {
+		if !strings.Contains(string(model), want) {
+			t.Errorf("internal/notes/notes.go missing %q:\n%s", want, model)
+		}
+	}
+
+	// go.mod requires Nucleus at the version the fixture is tested at.
+	if got := readGoMod(t, dir)["github.com/jcsvwinston/nucleus"]; got != "v1.30.1" {
+		t.Errorf("go.mod requires github.com/jcsvwinston/nucleus at %q, want v1.30.1", got)
 	}
 
 	// The runner scaffold is unchanged: --with adds a file, it does not
@@ -101,7 +123,7 @@ func TestInitWithNucleusWritesModule(t *testing.T) {
 	// Next steps name the mount line and the full-app path on the Nucleus
 	// side, so the reader knows which of the two generators owns main.go.
 	for _, want := range []string{
-		"go get github.com/jcsvwinston/nucleus@latest",
+		"go mod tidy",
 		"Mount(shop.Module(client))",
 		"nucleus new shop --with quark",
 		"Created nucleus.yml",
@@ -201,6 +223,24 @@ func TestNucleusDatabaseURLCoversEveryDialect(t *testing.T) {
 	}
 	if got := nucleusDatabaseURL("bogus"); got != "" {
 		t.Errorf("nucleusDatabaseURL(bogus) = %q, want empty", got)
+	}
+}
+
+// One framework per project: two would write two packages into
+// internal/<app>. Like an unknown target, it fails before anything is
+// written.
+func TestInitWithRejectsTwoFrameworks(t *testing.T) {
+	dir := t.TempDir()
+	_, err := runInitArgs(t, "--dir", dir, "--dialect", "sqlite", "--with", "chi,gin")
+	if err == nil || !strings.Contains(err.Error(), "--with takes one framework, got chi and gin") {
+		t.Fatalf("expected an error naming the two frameworks, got %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("files were written despite the two --with targets: %v", entries)
+	}
+	// The same one twice is one.
+	if _, err := runInitArgs(t, "--dir", dir, "--dialect", "sqlite", "--with", "chi", "--with", "chi"); err != nil {
+		t.Fatalf("--with chi --with chi: %v", err)
 	}
 }
 

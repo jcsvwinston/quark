@@ -263,3 +263,11 @@ And one you will meet the first time you touch a workflow:
   `gh api repos/<owner>/<action>/commits/<tag> --jq .sha`. Dependabot moves
   those pins forward weekly; the comment is how it (and you) know which
   release a SHA is.
+
+And one you will meet the first time you edit an integration fixture:
+
+- **`quark init --with` copies**: the CLI embeds byte-for-byte copies of
+  the fixtures in `internal/integrations` (everything but their tests) under
+  `cmd/quark/commands/templates/integrations`, and
+  `TestInitWithTemplatesAreTheFixtures` fails when a fixture changes and its
+  copy does not — `make regen` rewrites them.

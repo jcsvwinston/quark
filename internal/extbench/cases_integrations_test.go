@@ -9,7 +9,8 @@ package extbench
 // directory — so the bench counts an integration once a module of the
 // repository requires the framework, the packages that import it pass their
 // tests standalone, and one of those tests holds the guide's section to that
-// code. A guide's code block alone does not count: nothing compiles it.
+// code. A guide's code block alone does not count: nothing compiles it. And
+// `quark init --with` counts a target once what it writes compiles.
 
 func controlsIntegrations() []control {
 	return []control{
@@ -51,9 +52,9 @@ func controlsIntegrations() []control {
 		{
 			id:     "INT-06",
 			family: "integrations",
-			title:  "quark init --with writes each official integration, and what it writes is compiled by a module of the repository",
-			want:   partial,
-			note:   "Measured on the CLI's flag validation — the CLI is a module of its own (ADR-0024) the bench cannot import, so it reads the initWithTargets literal the validation consults, with go/parser: --with accepts nucleus and refuses chi, echo, gin and grpc. What --with nucleus writes is still built by nothing. Since A11 Q9 a module of the repository requires Nucleus — internal/integrations, whose Nucleus fixture is written by hand in the shape the template writes — and this probe counts a module that requires the framework as compiling the target's output, so it no longer lists nucleus as uncompiled; that check has to read the template's output itself before it can say so.",
+			title:  "quark init --with writes each official integration — chi, Echo, Gin, gRPC and Nucleus — and what it writes builds, vets and tests in a project of its own against this tree",
+			want:   present,
+			note:   "Measured by running the CLI's TestInitWithBuilds against this tree (the CLI is a module of its own that the bench cannot import, so it runs the module's test through a workspace, as CI's CLI lane does), after reading the initWithTargets literal the flag's validation consults: --with accepts all five, and for each the test writes a project with `quark init --with <target>`, replaces every Quark module it requires with this tree, and runs go mod tidy, go build, go vet and go test with no workspace — a dialect per target, so the driver rewrite compiles for every engine module. What init writes is the fixture's code (A11 Q10): the CLI embeds byte-for-byte copies of internal/integrations, a CLI test fails when a copy and its fixture differ, and init changes only the package clause and its doc comment, the import paths and the driver module, beside a server main for chi, Echo, Gin and gRPC. Before A11 Q10 --with accepted nucleus alone and what it wrote was built by nothing; a probe that counted a module requiring the framework as compiling the template's output said less than that. Breaking one copy turns its subtest red and this control to partial.",
 			probe:  probeInitWith,
 		},
 	}
