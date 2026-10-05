@@ -5,75 +5,46 @@ package quark
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
-// MigrationLock is the handle returned by Client.AcquireMigrationLock.
-// The caller must invoke Release before the *Client is closed; the
-// lock is held by a dedicated connection for its entire lifetime so a
-// process panic / Client.Close releases it automatically through the
-// underlying driver's session teardown.
-//
-// The lock guarantees mutual exclusion across processes sharing the
-// same database. Concurrent acquirers of the same `name` block up to
-// the requested timeout; the first one wins, the rest receive
-// `ErrLockTimeout` if the timeout elapses.
-type MigrationLock interface {
-	// Release relinquishes the lock and returns the underlying
-	// connection to the pool. Safe to call multiple times; subsequent
-	// calls are no-ops. Returns an error only if the release RPC fails
-	// — not if the lock was already released.
-	Release(ctx context.Context) error
-}
+// The migration-lock contract a dialect implements is declared in
+// quarkdriver (ADR-0026), where each type is documented; the names below are
+// aliases of the same types, so a lock written against either is the same
+// lock.
+
+// MigrationLock is the handle returned by Client.AcquireMigrationLock; the
+// caller must invoke Release before the *Client is closed.
+type MigrationLock = quarkdriver.MigrationLock
 
 // MigrationLocker is the optional interface a Dialect implements to
 // support distributed migration locks. PG / MySQL / MariaDB / MSSQL /
 // Oracle implement it; SQLite does not.
-//
-// Kept as an optional interface — not a required method on Dialect —
-// so custom Dialect implementations downstream don't have to grow
-// this method to keep compiling. They opt in if and when they need
-// distributed-lock support.
-type MigrationLocker interface {
-	AcquireMigrationLock(ctx context.Context, db DBConnector, name string, timeout time.Duration) (MigrationLock, error)
-}
+type MigrationLocker = quarkdriver.MigrationLocker
 
 // DBConnector is the narrow subset of *sql.DB the lock implementations
-// need. It exists so the optional-interface contract doesn't drag the
-// full Executor surface into MigrationLocker. The only implementation
-// of this in practice is *sql.DB itself; the alias keeps tests honest
-// without re-exporting database/sql.
-type DBConnector interface {
-	Conn(ctx context.Context) (DBConn, error)
-}
+// need.
+type DBConnector = quarkdriver.DBConnector
 
 // DBConn is the per-connection subset the lock implementations consume.
-// Wraps *sql.Conn so the locks can ExecContext and Close on a single
-// connection without coupling to database/sql package types directly.
-type DBConn interface {
-	ExecContext(ctx context.Context, query string, args ...any) (Result, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) Row
-	Close() error
-}
+type DBConn = quarkdriver.DBConn
 
 // Result mirrors database/sql.Result for the lock implementations.
-type Result interface {
-	LastInsertId() (int64, error)
-	RowsAffected() (int64, error)
-}
+type Result = quarkdriver.Result
 
 // Row mirrors *database/sql.Row for the lock implementations (Scan only).
-type Row interface {
-	Scan(dest ...any) error
-}
+type Row = quarkdriver.Row
 
 // ErrLockTimeout is returned by AcquireMigrationLock when the lock
 // cannot be acquired within the given timeout. Distinct from
 // ErrUnsupportedFeature (which means the dialect doesn't model
 // distributed locks at all). Distinct from generic driver errors.
-var ErrLockTimeout = errors.New("migration lock acquisition timed out")
+// It holds the value of quarkdriver.ErrLockTimeout, so errors.Is matches
+// an error a driver module built from either name.
+var ErrLockTimeout = quarkdriver.ErrLockTimeout
 
 // AcquireMigrationLock attempts to acquire a cluster-wide advisory
 // lock named `name` for migration operations. The first concurrent

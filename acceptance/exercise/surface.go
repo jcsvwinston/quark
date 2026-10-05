@@ -9,6 +9,7 @@ import (
 	"github.com/jcsvwinston/quark"
 	"github.com/jcsvwinston/quark/acceptance/domain"
 	"github.com/jcsvwinston/quark/acceptance/recorder"
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
 // SURFACE ejerce la cola de superficie pública CALLABLE que los exercisers de
@@ -196,9 +197,19 @@ func surfaceDialectFactories(rec *recorder.Recorder) error {
 	if _, err := quark.DetectDialectByName("postgres"); err != nil {
 		return fmt.Errorf("surface DetectDialectByName: %w", err)
 	}
+	// El registro es uno bajo dos nombres (ADR-0026): lo que registra un
+	// módulo de driver en quarkdriver lo resuelve quark, y al revés.
+	quarkdriver.RegisterDialect("surface_probe_driver", quark.MySQL())
+	if d, err := quark.DetectDialectByName("surface_probe_driver"); err != nil || d.Name() != "mysql" {
+		return fmt.Errorf("surface quarkdriver.RegisterDialect: DetectDialectByName devolvió %v, %v", d, err)
+	}
+	if d, ok := quarkdriver.LookupDialect("surface_probe"); !ok || d.Name() != "sqlite" {
+		return fmt.Errorf("surface quarkdriver.LookupDialect: no ve lo registrado con quark.RegisterDialect (%v, %v)", d, ok)
+	}
 	rec.Note(
 		QF("PostgreSQL"), QF("MySQL"), QF("MariaDB"), QF("SQLite"), QF("MSSQL"), QF("Oracle"),
 		QF("RegisterDialect"), QF("DetectDialect"), QF("DetectDialectByName"),
+		QD("RegisterDialect"), QD("LookupDialect"),
 	)
 	return nil
 }

@@ -6,8 +6,10 @@ package extbench
 // The "drivers" family: shipping a database engine for Quark from outside
 // this repository. ADR-0023 moved the engines out of the library and gave the
 // classifier a leaf contract (quarkdriver); this family measures how far that
-// goes for a driver nobody in this repository writes — and the answer is that
-// the query path is open and the schema path is not.
+// goes for a driver nobody in this repository writes. The bench found the
+// query path open and the schema path keyed on the dialect's name (A11 Q2
+// closed that), and the dialect contract in package quark (A11 Q3 moved it to
+// quarkdriver).
 
 func controlsDrivers() []control {
 	return []control{
@@ -23,8 +25,8 @@ func controlsDrivers() []control {
 			id:     "DRV-02",
 			family: "drivers",
 			title:  "A driver module outside this repository registers its dialect and its classifier without importing package quark",
-			want:   partial,
-			note:   "Measured with go list -deps on a driver module built standalone (GOWORK=off) as example.com/extdriver: the half that registers the classifier imports quarkdriver and not package quark. The half that registers the dialect cannot avoid it — RegisterDialect lives in package quark, and the Dialect interface names quark.LockOptions (in LockSuffix), so implementing it means importing the library: 208 packages against the classifier half's 163. The listener is already root-free (quarkdriver.ListenerFactory); the dialect is the one piece of a driver that is not.",
+			want:   present,
+			note:   "Measured with go list -deps on a driver module built standalone (GOWORK=off) as example.com/extdriver, whose three packages register through quarkdriver alone: errs the classifier (163 packages), dialect a SQLite dialect written against quarkdriver.Dialect, LockOptions, ErrUnsupportedFeature, SchemaIntrospector and the schema model (72 packages), and the module root the database/sql driver and quarkdriver.RegisterDialect (165 packages). None imports package quark. Present since A11 Q3 (ADR-0026), which moved the dialect contract to quarkdriver and left every name in package quark as an alias of the same type; against v1.15.0 the dialect half could not avoid package quark — RegisterDialect lived there and Dialect.LockSuffix named quark.LockOptions — and the driver took 208 packages. Making the fixture's dialect import package quark turns this control back to partial (161 packages for the dialect half, 208 for the driver). The fixture's own test is the application, and imports package quark.",
 			probe:  probeRegistrationWithoutRoot,
 		},
 		{
@@ -32,7 +34,7 @@ func controlsDrivers() []control {
 			family: "drivers",
 			title:  "A driver module outside this repository, built standalone against this tree, opens its engine by name, reads and writes, classifies its duplicate key and passes drivertest.Verify",
 			want:   present,
-			note:   "The fixture creates its table by hand: what Migrate writes for an engine name Quark does not know is DRV-04's subject, and the kit it passes checks classifiers only (DRV-05).",
+			note:   "The dialect the fixture registers is its own, written against quarkdriver alone (DRV-02); the end-to-end test also takes a row lock its engine refuses — quarkdriver.ErrUnsupportedFeature from the dialect, matched as quark.ErrUnsupportedFeature — and reads the table back through the dialect's SchemaIntrospector as a quark.Schema. The fixture creates its table by hand: what Migrate writes for an engine name Quark does not know is DRV-04's subject, and the kit it passes checks classifiers only (DRV-05).",
 			probe:  probeExternalDriverEndToEnd,
 		},
 		{
@@ -48,7 +50,7 @@ func controlsDrivers() []control {
 			family: "drivers",
 			title:  "The conformance kit checks a driver's dialect: placeholders, quoting, upsert, limit and savepoints",
 			want:   absent,
-			note:   "Measured on the kit's type-checked API: no field of drivertest.Case and no function of drivertest takes a quark.Dialect, so a dialect that quotes identifiers unsafely or numbers its placeholders wrong passes the kit — it is never shown one. The kit checks the three classifier predicates and nothing else. When the kit gains a way to take a dialect, this probe stops and asks to be extended to run it against a dialect that is wrong on purpose.",
+			note:   "Measured on the kit's type-checked API: no field of drivertest.Case and no function of drivertest takes a Dialect, so a dialect that quotes identifiers unsafely or numbers its placeholders wrong passes the kit — it is never shown one. The kit checks the three classifier predicates and nothing else. When the kit gains a way to take a dialect, this probe stops and asks to be extended to run it against a dialect that is wrong on purpose.",
 			probe:  probeKitChecksDialect,
 		},
 		{

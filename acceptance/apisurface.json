@@ -1727,136 +1727,6 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
-      "name": "(ColumnTypeMapper).MapColumnType",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(DBConn).Close",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(DBConn).ExecContext",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(DBConn).QueryRowContext",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(DBConnector).Conn",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).AlterTableAddColumn",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).AlterTableAlterColumn",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).AlterTableDropColumn",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).BuildProcedureCall",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).BuildRoutineQuery",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).CurrentTimestamp",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).JSONExtract",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).LastInsertIDQuery",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).LimitOffset",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).LockSuffix",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).Name",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).Placeholder",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).Placeholders",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).Quote",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).RenameColumn",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).RenameTable",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).Returning",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).SupportsLastInsertID",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).SupportsReturning",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).SupportsTransactionalDDL",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Dialect).UpsertSQL",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
       "name": "(Event).Kind",
       "kind": "method"
     },
@@ -1887,11 +1757,6 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
-      "name": "(LockOptions).IsZero",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
       "name": "(Middleware).WrapExec",
       "kind": "method"
     },
@@ -1903,16 +1768,6 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Middleware).WrapQueryRow",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(MigrationLock).Release",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(MigrationLocker).AcquireMigrationLock",
       "kind": "method"
     },
     {
@@ -2008,41 +1863,6 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Range[T]).Value",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Result).LastInsertId",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Result).RowsAffected",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(Row).Scan",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(SavepointDialect).ReleaseSavepointStmt",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(SavepointDialect).RollbackToSavepointStmt",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(SavepointDialect).SavepointStmt",
-      "kind": "method"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
-      "name": "(SchemaIntrospector).IntrospectSchema",
       "kind": "method"
     },
     {
@@ -2273,7 +2093,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Check",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Check"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2303,12 +2124,14 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Column",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Column"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ColumnTypeMapper",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.ColumnTypeMapper"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2338,12 +2161,14 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DBConn",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.DBConn"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DBConnector",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.DBConnector"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2388,7 +2213,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Dialect",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Dialect"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2538,12 +2364,14 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "EventListener",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Listener"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "EventPayload",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.EventPayload"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2553,7 +2381,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Executor",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Executor"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2568,7 +2397,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "FieldMeta",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/internal/schema.FieldMeta"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2593,7 +2423,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ForeignKey",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.ForeignKey"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2668,7 +2499,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Index",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Index"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2748,7 +2580,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "LockMode",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.LockMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2758,7 +2591,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "LockOptions",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.LockOptions"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2803,12 +2637,14 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "MigrationLock",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.MigrationLock"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "MigrationLocker",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.MigrationLocker"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2823,7 +2659,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ModelMeta",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/internal/schema.ModelMeta"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2953,7 +2790,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Nullable",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "database/sql.Null"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3148,7 +2986,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RelationMeta",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/internal/schema.RelationMeta"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3173,7 +3012,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Result",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Result"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3183,7 +3023,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Row",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Row"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3208,7 +3049,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SQLGuard",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/internal/guard.SQLGuard"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3223,7 +3065,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SavepointDialect",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.SavepointDialect"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3248,12 +3091,14 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Schema",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Schema"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SchemaIntrospector",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.SchemaIntrospector"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3358,7 +3203,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Table",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/quarkdriver.Table"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3403,12 +3249,14 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TypeMapper",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/internal/migrate.TypeMapper"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TypeOptions",
-      "kind": "type"
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/internal/migrate.TypeOptions"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3807,12 +3655,142 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(ColumnTypeMapper).MapColumnType",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ColumnTyper).BoolLiteral",
       "kind": "method"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ColumnTyper).ColumnType",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(DBConn).Close",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(DBConn).ExecContext",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(DBConn).QueryRowContext",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(DBConnector).Conn",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).AlterTableAddColumn",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).AlterTableAlterColumn",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).AlterTableDropColumn",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).BuildProcedureCall",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).BuildRoutineQuery",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).CurrentTimestamp",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).JSONExtract",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).LastInsertIDQuery",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).LimitOffset",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).LockSuffix",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).Name",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).Placeholder",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).Placeholders",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).Quote",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).RenameColumn",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).RenameTable",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).Returning",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).SupportsLastInsertID",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).SupportsReturning",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).SupportsTransactionalDDL",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Dialect).UpsertSQL",
       "kind": "method"
     },
     {
@@ -3872,6 +3850,21 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(LockOptions).IsZero",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(MigrationLock).Release",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(MigrationLocker).AcquireMigrationLock",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ObjectDropper).DropCheck",
       "kind": "method"
     },
@@ -3887,12 +3880,52 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Result).LastInsertId",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Result).RowsAffected",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(Row).Scan",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(SavepointDialect).ReleaseSavepointStmt",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(SavepointDialect).RollbackToSavepointStmt",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(SavepointDialect).SavepointStmt",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(SchemaIntrospector).IntrospectSchema",
+      "kind": "method"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(TableRebuilder).RebuildsTables",
       "kind": "method"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "AutoIncrementer",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Check",
       "kind": "type"
     },
     {
@@ -3904,6 +3937,11 @@
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Classifiers",
       "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Column",
+      "kind": "type"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
@@ -3927,7 +3965,27 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ColumnTypeMapper",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ColumnTyper",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "DBConn",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "DBConnector",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Dialect",
       "kind": "type"
     },
     {
@@ -3937,7 +3995,17 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ErrLockTimeout",
+      "kind": "var"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ErrNoSubscription",
+      "kind": "var"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ErrUnsupportedFeature",
       "kind": "var"
     },
     {
@@ -3948,6 +4016,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Executor",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ForeignKey",
       "kind": "type"
     },
     {
@@ -3963,6 +4036,11 @@
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "IdentifierValidator",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Index",
       "kind": "type"
     },
     {
@@ -4072,6 +4150,36 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "LockForShare",
+      "kind": "const"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "LockForUpdate",
+      "kind": "const"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "LockMode",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "LockNone",
+      "kind": "const"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "LockOptions",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "LookupDialect",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LookupListener",
       "kind": "func"
     },
@@ -4079,6 +4187,16 @@
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LookupListenerFactory",
       "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "MigrationLock",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "MigrationLocker",
+      "kind": "type"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
@@ -4132,6 +4250,11 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "RegisterDialect",
+      "kind": "func"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "RegisterListener",
       "kind": "func"
     },
@@ -4147,7 +4270,37 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Result",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Row",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "SavepointDialect",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Schema",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "SchemaIntrospector",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "SchemaObject",
+      "kind": "type"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "Table",
       "kind": "type"
     },
     {

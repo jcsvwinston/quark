@@ -105,7 +105,7 @@ func extract(pkg *packages.Package) []control.Symbol {
 		case *types.Func:
 			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "func"})
 		case *types.TypeName:
-			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "type"})
+			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "type", AliasOf: aliasTarget(o)})
 			syms = append(syms, methodsOf(pkg.PkgPath, o)...)
 		case *types.Var:
 			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "var"})
@@ -114,6 +114,24 @@ func extract(pkg *packages.Package) []control.Symbol {
 		}
 	}
 	return syms
+}
+
+// aliasTarget devuelve, para un alias de un tipo NOMBRADO, la clave de ese
+// tipo (`github.com/jcsvwinston/quark/quarkdriver.Dialect`); "" para un tipo
+// que no es alias o un alias de un tipo sin nombre. methodsOf no lista los
+// métodos de un alias —se listan bajo el paquete que declara el tipo—, así que
+// esta clave es lo que une en apisurface.json el nombre que se queda con los
+// métodos que se fueron: quark.Dialect apunta a quarkdriver.Dialect, donde
+// están los 21 (Dialect).X desde ADR-0026.
+func aliasTarget(tn *types.TypeName) string {
+	if !tn.IsAlias() {
+		return ""
+	}
+	named, ok := types.Unalias(tn.Type()).(*types.Named)
+	if !ok || named.Obj().Pkg() == nil {
+		return ""
+	}
+	return named.Obj().Pkg().Path() + "." + named.Obj().Name()
 }
 
 // methodsOf devuelve los métodos exportados de un tipo nombrado. Para tipos

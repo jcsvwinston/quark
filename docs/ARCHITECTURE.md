@@ -97,6 +97,8 @@ client, err := quark.New("customdb", "customdb://user:pass@localhost/db")
 
 The `Dialect` interface includes methods for SQL generation, identifier quoting, placeholder formatting, and DDL operations (ALTER TABLE).
 
+The interface, the types its methods name, the optional interfaces Quark asserts on a dialect, the schema model, the sentinels `ErrUnsupportedFeature` / `ErrLockTimeout` and the registry are declared in the leaf package `quarkdriver` ([ADR-0026](adr/0026-dialect-contract-in-quarkdriver.md)); package `quark` keeps every name as an alias of the same type. A driver module registers its dialect with `quarkdriver.RegisterDialect` without importing the ORM; `quark.RegisterDialect` writes the same registry, and `DetectDialect` reads it before the built-in names.
+
 ## Recursive Association Persistence
 
 Quark v1.0 introduces the ability to save complex object graphs in a single operation. When calling `.Create()` or `.Update()`, Quark orchestrates the persistence order:

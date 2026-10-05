@@ -115,6 +115,25 @@ func implementable(a *apiTypes) []censusEntry {
 	return out
 }
 
+// censusAliases maps every exported alias in package quark of a type
+// declared in quarkdriver ("quark.Dialect") to the qualified name the census
+// counts it under ("quarkdriver.Dialect"). implementable counts the type
+// once, where it is declared; the alias is the name an application writes.
+func censusAliases(a *apiTypes) map[string]string {
+	out := map[string]string{}
+	p := a.pkgs[rootPkg]
+	for _, name := range p.Scope().Names() {
+		tn, ok := p.Scope().Lookup(name).(*types.TypeName)
+		if !ok || !tn.Exported() || !tn.IsAlias() {
+			continue
+		}
+		if named, ok := types.Unalias(tn.Type()).(*types.Named); ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == driverPkg {
+			out["quark."+name] = "quarkdriver." + named.Obj().Name()
+		}
+	}
+	return out
+}
+
 // --- CON-01 -------------------------------------------------------------------
 
 // docPages returns every published page of the site's current docs.
@@ -185,6 +204,14 @@ func probeContractPage(t *testing.T, e *env) verdict {
 	for _, c := range census {
 		known[c.name] = c
 		known[c.qualified()] = c
+	}
+	// A page may name a type by its alias in package quark — quark.Dialect
+	// for quarkdriver.Dialect since A11 Q3 — and that is the same type: a
+	// stability row naming it declares the census entry, it does not dangle.
+	for alias, target := range censusAliases(e.loadAPI(t)) {
+		if c, ok := known[target]; ok {
+			known[alias] = c
+		}
 	}
 
 	declared := map[string]bool{} // census entries a stability row declares
@@ -283,9 +310,12 @@ func probeSurfaceFreeze(t *testing.T, e *env) verdict {
 		fieldList = append(fieldList, f)
 	}
 	sort.Strings(fieldList)
+	// alias_of names the type an alias points at (A11 Q3): it ties a moved
+	// type's name to its members, and fixes no parameter, so it is not a
+	// signature.
 	carriesSignature := false
 	for _, f := range fieldList {
-		if f != "pkg" && f != "name" && f != "kind" {
+		if f != "pkg" && f != "name" && f != "kind" && f != "alias_of" {
 			carriesSignature = true
 		}
 	}

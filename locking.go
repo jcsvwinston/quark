@@ -3,36 +3,32 @@
 
 package quark
 
-// LockMode is the kind of pessimistic lock requested for a SELECT.
-type LockMode int
+import "github.com/jcsvwinston/quark/quarkdriver"
+
+// LockMode is the kind of pessimistic lock requested for a SELECT. It is
+// declared in quarkdriver with the dialect contract whose LockSuffix takes it
+// (ADR-0026); this name is an alias of the same type.
+type LockMode = quarkdriver.LockMode
 
 const (
 	// LockNone means no lock clause is emitted (the default).
-	LockNone LockMode = iota
+	LockNone = quarkdriver.LockNone
 	// LockForUpdate locks the rows for update; other transactions cannot
 	// read-with-lock or write the matching rows until the current
 	// transaction commits or rolls back. Most engines support it.
-	LockForUpdate
+	LockForUpdate = quarkdriver.LockForUpdate
 	// LockForShare takes a shared read lock — other transactions can also
 	// read-with-lock but not write. Supported on PG / MySQL 8+ / MariaDB;
 	// not on SQLite. MSSQL approximates with HOLDLOCK.
-	LockForShare
+	LockForShare = quarkdriver.LockForShare
 )
 
 // LockOptions describes the pessimistic-lock behaviour for a SELECT.
 // The zero value (LockMode == LockNone) emits nothing — callers opt in
-// via ForUpdate / ForShare on Query[T].
-type LockOptions struct {
-	Mode       LockMode
-	SkipLocked bool
-	NoWait     bool
-}
-
-// IsZero reports whether the options request no lock at all. Used by
-// dialects to short-circuit their LockSuffix implementations.
-func (o LockOptions) IsZero() bool {
-	return o.Mode == LockNone && !o.SkipLocked && !o.NoWait
-}
+// via ForUpdate / ForShare on Query[T]. It is declared in quarkdriver, where
+// Dialect.LockSuffix names it (ADR-0026); this name is an alias of the same
+// type, IsZero method included.
+type LockOptions = quarkdriver.LockOptions
 
 // ForUpdate marks the query so the emitted SELECT acquires a row-level
 // FOR UPDATE lock. Composes with SkipLocked / NoWait. Returns the receiver

@@ -6,136 +6,22 @@ package quark
 import (
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/jcsvwinston/quark/internal/guard"
+	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
-// Dialect defines the interface for database-specific SQL generation.
-// Each supported database (PostgreSQL, MySQL, SQLite, etc.) implements this interface.
-type Dialect interface {
-	// Name returns the dialect name (e.g., "postgres", "mysql", "sqlite").
-	Name() string
-
-	// Placeholder returns the placeholder for the given parameter index.
-	// PostgreSQL: $1, $2, etc.
-	// MySQL/SQLite: ?
-	// MSSQL: @p1, @p2, etc.
-	// Oracle: :1, :2, etc.
-	Placeholder(index int) string
-
-	// Quote returns a quoted identifier (table/column name).
-	// PostgreSQL: "identifier"
-	// MySQL: `identifier`
-	// MSSQL: [identifier]
-	// SQLite/Oracle: "identifier"
-	Quote(identifier string) string
-
-	// Placeholders returns a slice of placeholders for n parameters.
-	Placeholders(n int) []string
-
-	// LimitOffset returns the LIMIT/OFFSET clause for the given parameters.
-	LimitOffset(limit, offset int) string
-
-	// SupportsReturning indicates if the dialect supports RETURNING clause.
-	SupportsReturning() bool
-
-	// Returning returns the RETURNING clause for the given columns.
-	// Returns empty string if not supported.
-	Returning(columns ...string) string
-
-	// SupportsLastInsertID indicates if the dialect supports LastInsertId().
-	SupportsLastInsertID() bool
-
-	// LastInsertIDQuery returns the query to get the last insert ID.
-	// Used for dialects that don't support RETURNING.
-	LastInsertIDQuery(table, pkColumn string) string
-
-	// CurrentTimestamp returns the SQL function for current timestamp.
-	CurrentTimestamp() string
-
-	// BuildRoutineQuery returns the SQL for a table-valued function or routine returning rows.
-	// E.g., Postgres: SELECT * FROM func($1, $2)
-	BuildRoutineQuery(routine string, argCount int) string
-
-	// BuildProcedureCall returns the SQL for calling a procedure (pure logic / OUT params).
-	// E.g., MySQL: CALL proc(?, ?)
-	BuildProcedureCall(procedure string, argCount int) string
-
-	// JSONExtract returns the SQL expression to extract a value from a JSON column,
-	// the bind args required by that expression, or an error if the path is
-	// malformed.
-	//
-	// The returned SQL fragment uses literal '?' as a neutral bind marker; the
-	// caller (typically buildWhereClause) substitutes each '?' for the dialect's
-	// placeholder syntax (`$N`, `?`, `@pN`, `:N`) at the appropriate arg index.
-	//
-	// The path is validated by guard.ValidateJSONPath before it reaches the
-	// SQL. Every dialect that can bind the path does so — never interpolating
-	// it — which closes the SQL-injection vector that existed while the path
-	// was concatenated with fmt.Sprintf. Oracle is the one exception: its
-	// JSON_VALUE rejects a bound path (ORA-40454), so the validated path is
-	// inlined as a literal, made safe by the same [A-Za-z0-9_.] restriction
-	// that makes Quote(validatedIdentifier) safe.
-	//
-	// Example outputs (with column "data" and path "user.name"):
-	//   Postgres: jsonb_extract_path_text(("data")::jsonb, ?, ?) / args=["user","name"]
-	//   MySQL:    JSON_EXTRACT(`data`, ?) / args=["$.user.name"]
-	//   SQLite:   JSON_EXTRACT("data", ?) / args=["$.user.name"]
-	//   MSSQL:    JSON_VALUE([data], ?) / args=["$.user.name"]
-	//   Oracle:   JSON_VALUE("DATA", '$.user.name') / args=nil (path inlined, see above)
-	JSONExtract(column, path string) (sql string, args []any, err error)
-
-	// AlterTableAddColumn returns SQL to add a column to a table.
-	// E.g., PostgreSQL: ALTER TABLE "users" ADD COLUMN "email" VARCHAR(255)
-	AlterTableAddColumn(table, column, dataType string) string
-
-	// AlterTableDropColumn returns SQL to drop a column from a table.
-	// E.g., PostgreSQL: ALTER TABLE "users" DROP COLUMN "email"
-	AlterTableDropColumn(table, column string) string
-
-	// AlterTableAlterColumn returns SQL to alter a column's type.
-	// E.g., PostgreSQL: ALTER TABLE "users" ALTER COLUMN "email" TYPE VARCHAR(255)
-	AlterTableAlterColumn(table, column, newDataType string) string
-
-	// RenameColumn returns SQL to rename a column.
-	// E.g., PostgreSQL: ALTER TABLE "users" RENAME COLUMN "old_name" TO "new_name"
-	RenameColumn(table, oldName, newName string) string
-
-	// RenameTable returns SQL to rename a table.
-	// E.g., PostgreSQL: ALTER TABLE "users" RENAME TO "accounts"
-	RenameTable(oldName, newName string) string
-
-	// SupportsTransactionalDDL indicates if the dialect supports DDL in
-	// transactions: whether a ROLLBACK undoes a CREATE, ALTER or DROP run
-	// inside the transaction. ApplyPlan wraps a plan in one transaction when
-	// it is true and takes its resumable, checkpointed path when it is false;
-	// Sync wraps its column changes in a transaction when it is true.
-	SupportsTransactionalDDL() bool
-
-	// LockSuffix returns the SQL fragments needed to attach a pessimistic
-	// lock to a SELECT.
-	//
-	//   - tableHint is appended after the FROM clause's table name. MSSQL
-	//     uses this slot for `WITH (UPDLOCK, ROWLOCK)`-style hints; the
-	//     row-level locking dialects return "" here.
-	//   - suffix is appended at the very end of the SELECT (after ORDER BY
-	//     and LIMIT/OFFSET) — `FOR UPDATE [SKIP LOCKED|NOWAIT]` for the
-	//     PG/MySQL/Oracle/MariaDB family.
-	//
-	// Returning ErrUnsupportedFeature signals "this dialect doesn't speak
-	// pessimistic locks at this level" — SQLite is the canonical case.
-	// LockOptions.IsZero() input must always return ("", "", nil).
-	LockSuffix(opts LockOptions) (tableHint, suffix string, err error)
-
-	// UpsertSQL returns the dialect-specific upsert (INSERT … ON CONFLICT … DO UPDATE)
-	// fragment that is appended after the VALUES clause.
-	// conflictCols: columns that define the conflict target (e.g. primary key or unique index).
-	// updateCols:   columns to update on conflict; if empty defaults to all non-conflict columns.
-	// argOffset:    current placeholder index (1-based) so positional dialects stay in sync.
-	// Returns the SQL fragment and the additional argument list (for the SET clause values).
-	UpsertSQL(conflictCols, updateCols []string, argOffset int) string
-}
+// Dialect is the interface a database dialect implements: placeholder
+// syntax, identifier quoting, pagination, upsert, locking and DDL. Each
+// supported database (PostgreSQL, MySQL, SQLite, etc.) implements it.
+//
+// It is declared in quarkdriver, the leaf package a driver module imports
+// (ADR-0026), where its methods are documented; this name is an alias of
+// the same type. A dialect written against quark.Dialect is a
+// quarkdriver.Dialect and the reverse, so an application keeps writing
+// quark.WithDialect(quark.PostgreSQL()) and a driver module implements the
+// interface without importing package quark.
+type Dialect = quarkdriver.Dialect
 
 // baseDialect provides common functionality for all dialects.
 type baseDialect struct {
@@ -974,25 +860,6 @@ func (m *MariaDBDialect) UpsertSQL(conflictCols, updateCols []string, argOffset 
 	return m.MySQLDialect.UpsertSQL(conflictCols, updateCols, argOffset)
 }
 
-// customDialectRegistry holds user-registered dialects. customDialectMu
-// guards it: a registration can happen after start-up — a test registering
-// its own dialect, a module that registers late — while another goroutine
-// resolves a dialect through [DetectDialect] (which [New] calls). Before the
-// lock, that was a data race on a plain map (A11 bench, control DRV-01), and
-// a concurrent write could end the process with "concurrent map writes".
-var (
-	customDialectMu       sync.RWMutex
-	customDialectRegistry = make(map[string]Dialect)
-)
-
-// lookupCustomDialect reads the registry under its read lock.
-func lookupCustomDialect(name string) (Dialect, bool) {
-	customDialectMu.RLock()
-	defer customDialectMu.RUnlock()
-	d, ok := customDialectRegistry[name]
-	return d, ok
-}
-
 // RegisterDialect allows developers to register custom database dialects.
 // This enables support for proprietary or non-standard databases.
 //
@@ -1009,19 +876,20 @@ func lookupCustomDialect(name string) (Dialect, bool) {
 //	d, _ := quark.DetectDialectByName("cockroach")
 //	client, err := quark.NewWithDB("pgx", db, quark.WithDialect(d))
 //
-// RegisterDialect is safe to call concurrently with itself, [DetectDialect]
-// and [DetectDialectByName]. Registering a name again replaces the dialect
-// registered under it.
+// The registry is quarkdriver's (ADR-0026): RegisterDialect calls
+// [quarkdriver.RegisterDialect], so a dialect a driver module registers
+// there without importing this package and one registered here are found
+// the same way. RegisterDialect is safe to call concurrently with itself,
+// [DetectDialect] and [DetectDialectByName]. Registering a name again
+// replaces the dialect registered under it.
 func RegisterDialect(name string, d Dialect) {
-	customDialectMu.Lock()
-	defer customDialectMu.Unlock()
-	customDialectRegistry[name] = d
+	quarkdriver.RegisterDialect(name, d)
 }
 
 // DetectDialect attempts to auto-detect the dialect from a driver name.
 func DetectDialect(driverName string) (Dialect, error) {
-	// First check custom registry
-	if d, ok := lookupCustomDialect(driverName); ok {
+	// First check the registry: a registered name wins over a built-in one.
+	if d, ok := quarkdriver.LookupDialect(driverName); ok {
 		return d, nil
 	}
 
@@ -1046,8 +914,8 @@ func DetectDialect(driverName string) (Dialect, error) {
 // DetectDialectByName attempts to get a dialect by name from all registered dialects
 // including custom ones. This is useful when you know the exact dialect name.
 func DetectDialectByName(name string) (Dialect, error) {
-	// First check custom registry
-	if d, ok := lookupCustomDialect(name); ok {
+	// First check the registry
+	if d, ok := quarkdriver.LookupDialect(name); ok {
 		return d, nil
 	}
 
@@ -1055,27 +923,13 @@ func DetectDialectByName(name string) (Dialect, error) {
 	return DetectDialect(name)
 }
 
-// SavepointDialect is an optional [Dialect] extension for engines whose
+// SavepointDialect is the optional [Dialect] extension for engines whose
 // savepoint statements diverge from the ANSI form (SAVEPOINT /
-// ROLLBACK TO SAVEPOINT / RELEASE SAVEPOINT). A Dialect that does not
-// implement it gets the ANSI statements, which are correct for PostgreSQL,
-// MySQL, MariaDB and SQLite. The transaction layer ([Tx.Savepoint],
-// [Tx.RollbackTo], [Tx.ReleaseSavepoint]) consults this interface via a type
-// assertion, so adding it to a dialect is non-breaking for existing custom
-// dialects registered through [RegisterDialect].
-//
-// name arrives already validated by guard.ValidateIdentifier; the dialect
-// decides whether to quote it. A ReleaseSavepointStmt returning "" means the
-// engine has no explicit savepoint-release statement (the savepoint is
-// released at COMMIT) — the Tx layer then skips that Exec. Found by the
-// post-v1.0 bug-bash (BB-9, phase F8): SQL Server uses SAVE TRANSACTION /
-// ROLLBACK TRANSACTION and has no release; Oracle has SAVEPOINT and
-// ROLLBACK TO SAVEPOINT but no RELEASE SAVEPOINT.
-type SavepointDialect interface {
-	SavepointStmt(name string) string
-	RollbackToSavepointStmt(name string) string
-	ReleaseSavepointStmt(name string) string
-}
+// ROLLBACK TO SAVEPOINT / RELEASE SAVEPOINT); the transaction layer
+// ([Tx.Savepoint], [Tx.RollbackTo], [Tx.ReleaseSavepoint]) asserts it on
+// the dialect. It is declared, and documented, in quarkdriver (ADR-0026);
+// this name is an alias of the same type.
+type SavepointDialect = quarkdriver.SavepointDialect
 
 // --- SQL Server: SAVE TRANSACTION / ROLLBACK TRANSACTION, no release ---
 

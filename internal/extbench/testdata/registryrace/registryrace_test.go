@@ -45,12 +45,19 @@ func hammer(write, read func(i int)) {
 	done.Wait()
 }
 
+// TestDialectRegistry writes the registry under both of its names — quark's
+// and, since ADR-0026 moved it to the leaf, quarkdriver's — and reads it
+// through both.
 func TestDialectRegistry(t *testing.T) {
 	hammer(
-		func(i int) { quark.RegisterDialect(fmt.Sprintf("racedialect%d", i), quark.SQLite()) },
+		func(i int) {
+			quark.RegisterDialect(fmt.Sprintf("racedialect%d", i), quark.SQLite())
+			quarkdriver.RegisterDialect(fmt.Sprintf("racedriverdialect%d", i), quark.SQLite())
+		},
 		func(i int) {
 			_, _ = quark.DetectDialect(fmt.Sprintf("racedialect%d", i))
-			_, _ = quark.DetectDialectByName(fmt.Sprintf("racedialect%d", i))
+			_, _ = quark.DetectDialectByName(fmt.Sprintf("racedriverdialect%d", i))
+			_, _ = quarkdriver.LookupDialect(fmt.Sprintf("racedialect%d", i))
 		},
 	)
 }

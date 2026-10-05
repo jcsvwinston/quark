@@ -8,35 +8,27 @@
 // it; it is not compiled as part of the library.
 //
 // The engine is SQLite under another name, so the fixture needs no database
-// server: modernc's driver registered a second time, and SQLite's dialect
-// with its name changed.
+// server: modernc's driver registered a second time, a classifier (package
+// errs) and a dialect (package dialect) of its own. All three registrations
+// go through quarkdriver, and no package of the driver imports package quark
+// (ADR-0026); the bench checks that on the build graph (DRV-02). Only the
+// fixture's test, which plays the application, imports package quark.
 //
 //	import _ "example.com/extdriver"
 package extdriver
 
 import (
-	"context"
 	"database/sql"
 
-	"github.com/jcsvwinston/quark"
+	"github.com/jcsvwinston/quark/quarkdriver"
 
+	"example.com/extdriver/dialect"
 	"example.com/extdriver/errs"
 
 	moderncsqlite "modernc.org/sqlite"
 )
 
-// Dialect is SQLite's dialect under the fixture's engine name.
-type Dialect struct{ quark.Dialect }
-
-// Name answers the engine name the driver registers under.
-func (Dialect) Name() string { return errs.Engine }
-
-// IntrospectSchema forwards the optional interface SQLite's dialect has.
-func (d Dialect) IntrospectSchema(ctx context.Context, exec quark.Executor) (quark.Schema, error) {
-	return d.Dialect.(quark.SchemaIntrospector).IntrospectSchema(ctx, exec)
-}
-
 func init() {
 	sql.Register(errs.Engine, &moderncsqlite.Driver{})
-	quark.RegisterDialect(errs.Engine, Dialect{quark.SQLite()})
+	quarkdriver.RegisterDialect(errs.Engine, dialect.New(errs.Engine))
 }
