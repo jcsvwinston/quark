@@ -9,9 +9,11 @@ package extbench
 // goes for a driver nobody in this repository writes. The bench found the
 // query path open and the schema path keyed on the dialect's name (A11 Q2
 // closed that), the dialect contract in package quark (A11 Q3 moved it to
-// quarkdriver), and a kit that never saw a dialect and an engine suite no
-// module outside the repository could reach (A11 Q4: drivertest.VerifyDialect
-// and quarkdriver/drivertest/suite).
+// quarkdriver), a kit that never saw a dialect and an engine suite no module
+// outside the repository could reach (A11 Q4: drivertest.VerifyDialect and
+// quarkdriver/drivertest/suite), and no template a driver author could start
+// from (A11 Q5: internal/drivertemplate, with the guide "Writing a driver"
+// held to its code).
 
 func controlsDrivers() []control {
 	return []control{
@@ -75,8 +77,8 @@ func controlsDrivers() []control {
 			id:     "DRV-08",
 			family: "drivers",
 			title:  "A driver template module builds standalone (GOWORK=off) and passes the kit",
-			want:   absent,
-			note:   "Measured over every go.mod of the repository: 12 modules — the library, the CLI, the five drivers, the acceptance harness, the benchmarks, the bug-bash harness, the engine suites and the integration fixtures — and no other module requires the library, so nothing is a template for a driver someone else writes. The nearest things are the five drivers, each one engine's module pinned to a published quark, and the fixture this bench builds for DRV-03, which lives in testdata.",
+			want:   present,
+			note:   "Measured over every go.mod of the repository: 13 modules, each named with its role in the probe's knownModules (a module the list does not name fails the probe), and one of them the driver template. Since A11 Q5 internal/drivertemplate is a driver for SQLite through modernc.org/sqlite under a name of its own (templite), in a module whose path is not this repository's (example.com/drivertemplate), so the Go toolchain refuses it Quark's internal packages as it would a third party's; its go.mod replaces Quark with this tree. Built with no workspace: its code reaches 163 packages and package quark is not one of them (quarkdriver alone), and its tests pass — drivertest.Verify on errors the engine raised (4 subtests passed, the 2 about deadlocks skipped: SQLite has none), drivertest.VerifyDialect with both halves run (56 passed, 6 skipped with the default Quark uses logged), suite.Run's 43 subtests on a client opened by name, a check that the driver imports no package of Quark but quarkdriver, and TestGuideMatchesTemplate, which holds every Go block of website/docs/guides/writing-a-driver.mdx to the template's code. Before it, the 12 modules held no template: the nearest things were the five drivers, each pinned to a published quark, and the fixture this bench builds for DRV-03 in testdata. Swapping LIMIT and OFFSET in the template's dialect (engine/LimitOffset fails), making its dialect import package quark (package quark enters the graph, and the import check fails) and editing one line of the guide each turn this control to partial.",
 			probe:  probeDriverTemplate,
 		},
 	}

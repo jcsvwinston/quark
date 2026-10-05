@@ -736,17 +736,32 @@ func probeEngineSuiteReachable(t *testing.T, e *env) verdict {
 
 // --- DRV-08 ------------------------------------------------------------------------
 
-// knownModules are the modules of this repository that are not a driver
-// template, by their directory.
-var knownModules = map[string]bool{
-	".": true, "acceptance": true, "benchmarks": true, "bugbash": true,
-	"cmd/quark": true, "internal/enginesuite": true, "internal/integrations": true,
-	"drivers/mssql": true, "drivers/mysql": true, "drivers/oracle": true,
-	"drivers/postgres": true, "drivers/sqlite": true,
+// driverTemplate is the role of the module DRV-08 measures.
+const driverTemplate = "driver template"
+
+// knownModules names every module of this repository, by its directory, with
+// what it is. DRV-08 measures the module whose role is driverTemplate, and a
+// module the map does not name fails the probe: a module added to the tree is
+// placed here in the same change, as Dependabot's list has to learn it.
+var knownModules = map[string]string{
+	".":                       "the library",
+	"cmd/quark":               "the CLI",
+	"drivers/mssql":           "a driver of this repository",
+	"drivers/mysql":           "a driver of this repository",
+	"drivers/oracle":          "a driver of this repository",
+	"drivers/postgres":        "a driver of this repository",
+	"drivers/sqlite":          "a driver of this repository",
+	"acceptance":              "the acceptance harness",
+	"benchmarks":              "the benchmarks",
+	"bugbash":                 "the bug-bash harness",
+	"internal/enginesuite":    "the engine suites",
+	"internal/integrations":   "the integration fixtures",
+	"internal/drivertemplate": driverTemplate,
 }
 
 // repoModules returns the directory (relative to the root) of every go.mod in
-// the repository, outside node_modules and testdata.
+// the repository, outside node_modules, testdata and hidden directories (.git,
+// and the worktrees a tool may keep under .claude).
 func repoModules(t *testing.T, e *env) []string {
 	t.Helper()
 	var mods []string
@@ -754,7 +769,7 @@ func repoModules(t *testing.T, e *env) []string {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == "testdata" || d.Name() == ".git") {
+		if d.IsDir() && path != e.root && (d.Name() == "node_modules" || d.Name() == "testdata" || strings.HasPrefix(d.Name(), ".")) {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() && d.Name() == "go.mod" {
@@ -770,43 +785,112 @@ func repoModules(t *testing.T, e *env) []string {
 	return mods
 }
 
+// guideTemplateTest is the test of the template that holds the guide
+// "Writing a driver" to its code; the bench asks for it by name, as INT-01…05
+// ask for the fixtures' guide test.
+const guideTemplateTest = "TestGuideMatchesTemplate"
+
+// suiteMarker is a subtest suite.Run always runs: the parent of a passed
+// "<parent>/CRUD" is the test that ran the engine suite.
+const suiteMarker = "CRUD"
+
 func probeDriverTemplate(t *testing.T, e *env) verdict {
 	childProbe(t)
 	mods := repoModules(t, e)
-	var candidates []string
+	var templates, unknown []string
 	for _, m := range mods {
-		if knownModules[m] {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(e.root, m, "go.mod"))
-		if err == nil && strings.Contains(string(raw), rootPkg+" ") {
-			candidates = append(candidates, m)
+		role, ok := knownModules[m]
+		switch {
+		case !ok:
+			unknown = append(unknown, m)
+		case role == driverTemplate:
+			templates = append(templates, m)
 		}
 	}
-	t.Logf("modules in the repository: %d %v; modules requiring the library that are none of the known ones: %v", len(mods), mods, candidates)
+	if len(unknown) > 0 {
+		t.Fatalf("modules of the repository that knownModules does not name: %v — say what each one is in the same change that adds it", unknown)
+	}
+	t.Logf("modules in the repository: %d %v; the driver template among them: %v", len(mods), mods, templates)
 
-	passing := 0
-	for _, m := range candidates {
-		dir := filepath.Join(e.root, m)
-		out, err := goRun(t, dir, []string{"GOWORK=off"}, "test", "-count=1", "-json", "./...")
-		run := parseTestJSON(out)
-		kit := false
-		for test, action := range run.action {
-			if strings.HasSuffix(test, "/"+kitSubtest) && action == "pass" {
-				kit = true
-			}
-		}
-		t.Logf("%s standalone: err=%v, the kit ran: %v", m, err, kit)
-		if err == nil && kit {
-			passing++
+	verdictOf := absent
+	for _, m := range templates {
+		switch measureTemplate(t, e, m) {
+		case present:
+			return present
+		case partial, absent:
+			verdictOf = partial
 		}
 	}
-	switch {
-	case passing > 0:
-		return present
-	case len(candidates) > 0:
-		return partial
-	default:
+	return verdictOf
+}
+
+// measureTemplate builds and tests one template module the way a third party
+// builds its driver: no workspace, the module's own go.mod. Present when the
+// module requires the library under a path that is not this repository's, its
+// driver code reaches no package quark, and its tests pass with the
+// classifier kit, both halves of the dialect kit, the engine suite and the
+// guide's check among them.
+func measureTemplate(t *testing.T, e *env, m string) verdict {
+	t.Helper()
+	dir := filepath.Join(e.root, m)
+	raw, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modPath := ""
+	requires := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		f := strings.Fields(strings.TrimPrefix(strings.TrimSpace(line), "require "))
+		if len(f) >= 2 && f[0] == "module" {
+			modPath = f[1]
+		}
+		if len(f) >= 2 && f[0] == rootPkg && strings.HasPrefix(f[1], "v") {
+			requires = true
+		}
+	}
+	outside := modPath != "" && modPath != rootPkg && !strings.HasPrefix(modPath, rootPkg+"/")
+	t.Logf("%s: module %s, its path outside this repository's: %v; requires the library: %v", m, modPath, outside, requires)
+	if !requires {
 		return absent
 	}
+
+	// The driver's code — its packages, not their tests — must not reach
+	// package quark: a driver is written against quarkdriver (ADR-0026).
+	out, err := goRun(t, dir, []string{"GOWORK=off"}, "list", "-deps", "-f", "{{.ImportPath}}", "./...")
+	needsRoot := err != nil || strings.Contains("\n"+out+"\n", "\n"+rootPkg+"\n")
+	t.Logf("%s: go list -deps of its packages: err=%v, package quark among them: %v", m, err, needsRoot)
+
+	out, err = goRun(t, dir, []string{"GOWORK=off"}, "test", "-count=1", "-json", "./...")
+	run := parseTestJSON(out)
+	classifier := quarkdriverHas(t, run, kitSubtest)
+	dialectContract := quarkdriverHas(t, run, dialectKitSubtest)
+	dialectEngine := quarkdriverHas(t, run, "engine/Placeholder")
+	var suiteParent string
+	for test, action := range run.action {
+		if parent, ok := strings.CutSuffix(test, "/"+suiteMarker); ok && action == "pass" && !strings.Contains(parent, "/") {
+			suiteParent = parent
+		}
+	}
+	var suitePassed, suiteOther []string
+	if suiteParent != "" {
+		suitePassed, suiteOther = suiteSubtests(run, suiteParent)
+	}
+	guide := run.action[guideTemplateTest] == "pass"
+	t.Logf("%s standalone (GOWORK=off): err=%v; classifier kit ran: %v; dialect kit, contract half: %v, engine half: %v; engine suite (%s): %d subtests passed, others %v; %s passed: %v",
+		m, err, classifier, dialectContract, dialectEngine, suiteParent, len(suitePassed), suiteOther, guideTemplateTest, guide)
+	if err != nil {
+		var failed []string
+		for test, action := range run.action {
+			if action == "fail" {
+				failed = append(failed, test)
+			}
+		}
+		sort.Strings(failed)
+		t.Logf("%s: failed tests: %v", m, failed)
+	}
+	if err == nil && outside && !needsRoot && classifier && dialectContract && dialectEngine &&
+		len(suitePassed) > 0 && guide {
+		return present
+	}
+	return partial
 }

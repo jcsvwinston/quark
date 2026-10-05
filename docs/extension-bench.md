@@ -144,6 +144,24 @@ closing a gap turns the suite red with "this one moved, update the verdict".
    unchanged (`dialect_contract_v115_test.go`). The surface file records the
    type an alias names (`alias_of`), so the 36 members that left package
    quark read as a move, not as a removal.
+8. **There was no driver to start from** (`DRV-08`): the twelve modules of
+   the repository held the five drivers, each one engine's module pinned to a
+   published quark, and the fixture this bench builds lived in testdata, where
+   no build but the bench's reaches it. *Closed in A11 Q5:*
+   `internal/drivertemplate` is a driver for SQLite through
+   `modernc.org/sqlite`, registered under a name of its own, in a module whose
+   path is not this repository's, written against `quarkdriver` alone — the
+   probe checks on the build graph that its code reaches no package quark.
+   Its tests run the classifier kit, both halves of the dialect kit and the
+   engine suite's 43 subtests, and CI's driver-template lane runs them with no
+   workspace. The guide "Writing a driver"
+   (`website/docs/guides/writing-a-driver.mdx`) walks from an empty module to
+   that driver, and every Go block on it is held to the template's code by the
+   template's own test. It also says what the dialect contract cannot express
+   yet: the branches on the names `mssql` and `oracle` in the insert, upsert
+   and pagination paths, the `LIKE` escape clause chosen by name, referential
+   actions and the unit of a length that reach the DDL unasked, and the
+   features tied to PostgreSQL.
 
 ## The verdicts
 
@@ -182,9 +200,14 @@ under another name, in process: with the engine and the dialect methods held
 equal, any difference between the two arms is behaviour keyed on the
 dialect's name.
 
+The driver template `DRV-08` measures is the same engine under a third name
+(`templite`), in a module of the repository rather than in testdata: the
+bench builds and tests it where it lives, as CI does, and keeps the testdata
+fixture for the controls that break a dialect on purpose (`DRV-05`).
+
 ## The result
 
-**20 of 22 controls present. 1 partial. 1 absent.**
+**21 of 22 controls present. 1 partial. 0 absent.**
 
 ### contract — 7 present · 1 partial · 0 absent
 
@@ -199,7 +222,7 @@ dialect's name.
 | `CON-07` | Every method Quark calls on a caller's type has an exported interface to implement and assert against | **present** | Measured: the three conventions Quark honours on a caller's type each have an exported interface since A11 Q6 — quark.TableNamer for a model's TableName() string, quark.Validator for a model's Validate(context.Context) error, and quarkdriver.SQLStater for an error's SQLState() string, which classifies any driver's error by its PostgreSQL code. Each was exercised: the table took the name, the validation error aborted the insert, a 23505 classified as a unique violation and a 40P01 as a deadlock. Quark asserts against these types itself: quark.TableNamer is an alias of the internal/schema interface the model metadata asserts, Client.Validate asserts quark.Validator, and the PostgreSQL classification asserts quarkdriver.SQLStater through errors.As. Each is additive: a type with the method already satisfies the interface. Before A11 Q6 Quark asserted them against an internal interface and two anonymous ones, and none had a name a third party could write var _ quark.X = (*T)(nil) against; removing any of the three turns this control back to partial. |
 | `CON-08` | The global registries other than the dialect's — classifiers, listener factories, type mappers, generated scanners and binders — are race-free under the race detector | **present** | — |
 
-### drivers — 7 present · 0 partial · 1 absent
+### drivers — 8 present · 0 partial · 0 absent
 
 | id | control | verdict | what is missing |
 |---|---|---|---|
@@ -210,7 +233,7 @@ dialect's name.
 | `DRV-05` | The conformance kit checks a driver's dialect: placeholders, quoting, upsert, limit and savepoints | **present** | Measured by running the kit from the fixture driver built standalone (GOWORK=off): drivertest.VerifyDialect takes the dialect and a live *sql.DB the driver's test opens, and checks every method of quarkdriver.Dialect and every optional interface the dialect implements (skipping, with the reason logged, the ones it does not), on queries and on the schema path — Migrate, PlanMigration, ApplyPlan, Sync, IntrospectSchema, savepoints, row locks, the migration lock — judged by what the engine then holds or refuses, never by the text of a statement. The fixture's own dialect passes with the engine half run; six dialects wrong on purpose each fail, and the failing subtest names the method: placeholders that all bind the first value (engine/Placeholder), quoting that does not escape the quote character (engine/Quote), an upsert that ignores the columns to update (engine/UpsertSQL), LIMIT and OFFSET swapped (engine/LimitOffset), a SavepointDialect whose rollback releases (engine/SavepointDialect), and an AutoIncrementer whose key the engine does not number (engine/AutoIncrementer). The six built-in dialects pass it against their engines in the engine suites; it found two of them wrong — MariaDB dropped a CHECK with MySQL's DROP CHECK (Error 1064) and SQL Server accepted a shared lock that skips locked rows, which the engine refuses (error 650) — both fixed in the same change. A kit that stops catching any one of the six turns this control partial. |
 | `DRV-06` | Every driver module of this repository runs the conformance kit | **present** | Measured by running each driver module's tests against this tree (a go.work, as CI's driver lane builds) and looking for the kits' subtests: all five run the dialect kit (drivertest.VerifyDialect on the built-in dialect their driver serves — MySQL's module both MySQL's and MariaDB's), and the four that register a classifier also run drivertest.Verify; postgres registers none by design (CON-07), and the dialect kit is what it runs now. The kit's engine half needs a server: in this bench only SQLite's runs (in memory), and the other modules log that they had no DSN. CI's driver lane gives postgres, mysql and mariadb a server each (services), the oracle lane runs the oracle module's kit against its Oracle, and SQL Server's dialect is held to the same kit in the mssql lane through internal/enginesuite. The standalone lane vets those test files out (-tags pinnedquark) until the release train raises the modules' floor to a quark that has the kit. |
 | `DRV-07` | A driver module outside this repository can run the engine conformance suite the in-repo engines run | **present** | Measured from the fixture driver built standalone (GOWORK=off): it imports quarkdriver/drivertest/suite, whose graph is 165 packages against the library's 160 — no container library, no engine driver, no Redis or OpenTelemetry — and its TestEngineSuite passes suite.Run's 43 subtests on its own engine. internal/enginesuite's TestSuiteSQLite runs the same suite.Run, with the same 43 subtests, and so do the five integration lanes (TestSuite<Engine>/EngineSuite). The 43 are the engine-generic subtests of the shared suite, moved out of internal/enginesuite unchanged but for a portable DROP TABLE; the 29 that stay there branch on a built-in engine's name, start a container, need Redis or an OpenTelemetry collector, or touch the tenancy paths — and the dialect kit (DRV-05) is the engine-agnostic form of their dialect half. |
-| `DRV-08` | A driver template module builds standalone (GOWORK=off) and passes the kit | **absent** | Measured over every go.mod of the repository: 12 modules — the library, the CLI, the five drivers, the acceptance harness, the benchmarks, the bug-bash harness, the engine suites and the integration fixtures — and no other module requires the library, so nothing is a template for a driver someone else writes. The nearest things are the five drivers, each one engine's module pinned to a published quark, and the fixture this bench builds for DRV-03, which lives in testdata. |
+| `DRV-08` | A driver template module builds standalone (GOWORK=off) and passes the kit | **present** | Measured over every go.mod of the repository: 13 modules, each named with its role in the probe's knownModules (a module the list does not name fails the probe), and one of them the driver template. Since A11 Q5 internal/drivertemplate is a driver for SQLite through modernc.org/sqlite under a name of its own (templite), in a module whose path is not this repository's (example.com/drivertemplate), so the Go toolchain refuses it Quark's internal packages as it would a third party's; its go.mod replaces Quark with this tree. Built with no workspace: its code reaches 163 packages and package quark is not one of them (quarkdriver alone), and its tests pass — drivertest.Verify on errors the engine raised (4 subtests passed, the 2 about deadlocks skipped: SQLite has none), drivertest.VerifyDialect with both halves run (56 passed, 6 skipped with the default Quark uses logged), suite.Run's 43 subtests on a client opened by name, a check that the driver imports no package of Quark but quarkdriver, and TestGuideMatchesTemplate, which holds every Go block of website/docs/guides/writing-a-driver.mdx to the template's code. Before it, the 12 modules held no template: the nearest things were the five drivers, each pinned to a published quark, and the fixture this bench builds for DRV-03 in testdata. Swapping LIMIT and OFFSET in the template's dialect (engine/LimitOffset fails), making its dialect import package quark (package quark enters the graph, and the import check fails) and editing one line of the guide each turn this control to partial. |
 
 ### integrations — 6 present · 0 partial · 0 absent
 

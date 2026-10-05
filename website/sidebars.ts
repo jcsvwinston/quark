@@ -33,6 +33,7 @@ const sidebars: SidebarsConfig = {
         'guides/cli',
         'guides/codegen',
         'guides/frameworks',
+        'guides/writing-a-driver',
       ],
     },
     {

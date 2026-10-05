@@ -28,6 +28,7 @@ quark/
 ├── drivers/                     ← un módulo por motor (ADR-0023)
 ├── internal/enginesuite/        ← las suites por motor, MÓDULO PROPIO sin publicar (ADR-0024)
 ├── internal/integrations/       ← fixtures de integración (net/http, chi, Echo, Gin, gRPC, Nucleus), MÓDULO PROPIO sin publicar —el único del repo que requiere Nucleus; la biblioteca no (QADR-0001/0006)—; la guía de frameworks se comprueba contra ellas, y `quark init --with` escribe copias byte a byte de ellas (cmd/quark/commands/templates/integrations; `make regen` las refresca) (A11)
+├── internal/drivertemplate/     ← plantilla de driver (SQLite vía modernc bajo el nombre `templite`), MÓDULO PROPIO sin publicar con path `example.com/drivertemplate` —fuera del del repo, así el toolchain le niega los internal/ de Quark como a un tercero— y `replace` a este árbol; escrita SOLO contra `quarkdriver`; sus tests corren drivertest.Verify, VerifyDialect y suite.Run, y sostienen la guía `guides/writing-a-driver.mdx` bloque a bloque. Un módulo nuevo del repo entra en Dependabot, en `knownModules` de DRV-08 (`internal/extbench`) y, si va bajo internal/, el `align-module-floors.sh` del paraguas lo tidya solo (A11 Q5)
 ├── acceptance/                  ← arnés de aceptación cross-engine, MÓDULO PROPIO sin publicar (ADR-0024)
 ├── docs/                        ← markdown fuente (ROADMAP, ARCHITECTURE, ANALISIS_MADUREZ…)
 ├── website/                     ← sitio Docusaurus publicado en GitHub Pages del repo quark (jcsvwinston.github.io/quark/) vía .github/workflows/deploy.yml

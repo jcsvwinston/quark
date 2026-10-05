@@ -189,6 +189,10 @@ An application then opens `quark.New("extsql", dsn)`, and the client resolves
 the dialect by that name. A dialect that wraps a built-in one — a CockroachDB
 driver on `quark.PostgreSQL()` — imports package `quark` to reach it, and may.
 
+[Writing a driver](../../guides/writing-a-driver) builds a whole driver module
+this way, from an empty module to one that passes the conformance kit, and
+lists what the contract cannot express yet.
+
 ## What the schema path asks a dialect
 
 `Migrate`, `PlanMigration`, `Sync`, `ApplyPlan` and the tables Quark keeps for
