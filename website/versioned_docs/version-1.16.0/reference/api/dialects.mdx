@@ -1,0 +1,318 @@
+# Dialects API Reference
+
+A dialect is the one place a database's quirks live: placeholder syntax,
+identifier quoting, upsert form, pagination, and DDL. Quark picks one for you
+from the driver name, so most applications never touch this API.
+
+You need it in two cases — overriding a mis-detected dialect, and registering a
+dialect of your own. See [Dialects](../dialects) for the engine-by-engine
+support table.
+
+## Built-In Constructors
+
+```go
+postgres := quark.PostgreSQL()
+mysql := quark.MySQL()
+mariadb := quark.MariaDB()
+sqlite := quark.SQLite()
+mssql := quark.MSSQL()
+oracle := quark.Oracle()
+```
+
+| Constructor | `Name()` |
+| --- | --- |
+| `quark.PostgreSQL()` | `postgres` |
+| `quark.MySQL()` | `mysql` |
+| `quark.MariaDB()` | `mariadb` |
+| `quark.SQLite()` | `sqlite` |
+| `quark.MSSQL()` | `mssql` |
+| `quark.Oracle()` | `oracle` |
+
+## Interface
+
+The interface is declared in `github.com/jcsvwinston/quark/quarkdriver`, the
+package a driver module imports, and its methods are documented there.
+`quark.Dialect` is an alias of the same type: a dialect written against either
+name is the other, so an application keeps writing
+`quark.WithDialect(quark.PostgreSQL())` and nothing changes for it.
+
+```go
+type Dialect interface {
+    Name() string
+    Placeholder(index int) string
+    Quote(identifier string) string
+    Placeholders(n int) []string
+    LimitOffset(limit, offset int) string
+    SupportsReturning() bool
+    Returning(columns ...string) string
+    SupportsLastInsertID() bool
+    LastInsertIDQuery(table, pkColumn string) string
+    CurrentTimestamp() string
+    BuildRoutineQuery(routine string, argCount int) string
+    BuildProcedureCall(procedure string, argCount int) string
+    JSONExtract(column, path string) (sql string, args []any, err error)
+    AlterTableAddColumn(table, column, dataType string) string
+    AlterTableDropColumn(table, column string) string
+    AlterTableAlterColumn(table, column, newDataType string) string
+    RenameColumn(table, oldName, newName string) string
+    RenameTable(oldName, newName string) string
+    SupportsTransactionalDDL() bool
+    LockSuffix(opts LockOptions) (tableHint, suffix string, err error)
+    UpsertSQL(conflictCols, updateCols []string, argOffset int) string
+}
+```
+
+## Placeholder Examples
+
+| Dialect | Placeholder |
+| --- | --- |
+| PostgreSQL | `$1`, `$2` |
+| MySQL / MariaDB | `?` |
+| SQLite | `?` |
+| SQL Server | `@p1`, `@p2` |
+| Oracle | `:1`, `:2` |
+
+## Returning and Insert IDs
+
+| Dialect | Preferred generated-ID path |
+| --- | --- |
+| PostgreSQL | `RETURNING` |
+| SQLite | `RETURNING` |
+| MariaDB | `RETURNING` |
+| MySQL | `LastInsertId` |
+| SQL Server | `SCOPE_IDENTITY()` |
+| Oracle | `RETURNING ... INTO` handling in Quark write path |
+
+## Upsert
+
+| Dialect | Shape |
+| --- | --- |
+| PostgreSQL | `ON CONFLICT (...) DO UPDATE SET ...` |
+| SQLite | `ON CONFLICT (...) DO UPDATE SET ...` |
+| MySQL / MariaDB | `ON DUPLICATE KEY UPDATE ...` |
+| SQL Server | `MERGE` built by Quark's CRUD layer. |
+| Oracle | `MERGE` built by Quark's CRUD layer. |
+
+## Detection
+
+```go
+d, err := quark.DetectDialect("postgres")
+d, err = quark.DetectDialectByName("mariadb")
+```
+
+`DetectDialectByName` first checks custom dialect registrations, then falls back
+to built-in detection.
+
+## Custom Dialects
+
+```go
+quark.RegisterDialect("cockroach", myDialect)
+
+d, err := quark.DetectDialectByName("cockroach")
+if err != nil {
+    return err
+}
+
+client, err := quark.New("pgx", dsn, quark.WithDialect(d))
+```
+
+Custom dialects must implement the full `Dialect` interface. A partial dialect
+will fail at compile time if assigned to a `quark.Dialect` variable.
+
+`RegisterDialect`, `DetectDialect` and `DetectDialectByName` are safe to call
+from any goroutine: the registry is guarded by a lock, so registering a dialect
+while another goroutine builds a client is not a data race. Registering a name
+again replaces the dialect registered under it.
+
+### Where the contract lives
+
+The dialect contract is declared in `quarkdriver`, and package `quark` keeps
+every name as an alias of the same type, or as a function that calls the one in
+`quarkdriver`. Nothing is deprecated: the `quark` names are the application's,
+the `quarkdriver` names are the driver author's, and they are interchangeable.
+
+| In `quarkdriver` | Also named in `quark` |
+| --- | --- |
+| `Dialect`, `LockOptions`, `LockMode` (`LockNone`, `LockForUpdate`, `LockForShare`) | same names |
+| `SavepointDialect`, `ColumnTypeMapper` | same names |
+| `MigrationLocker`, `MigrationLock`, `DBConnector`, `DBConn`, `Result`, `Row` | same names |
+| `SchemaIntrospector`, `Executor`, and the schema model: `Schema`, `Table`, `Column`, `Index`, `ForeignKey`, `Check` | same names |
+| `ErrUnsupportedFeature`, `ErrLockTimeout` | same names, same values: `errors.Is` matches under either |
+| `RegisterDialect(name, d)`, `LookupDialect(name)` | `quark.RegisterDialect` writes the same registry; `quark.DetectDialect` and `DetectDialectByName` read it before the built-in names |
+| `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`, `ColumnAlterer`, `ObjectDropper`, `TableRebuilder` and their types | only in `quarkdriver` |
+
+`DetectDialect`, `DetectDialectByName`, `ErrDialectNotSupported` and the six
+built-in dialects stay in package `quark`: they are implementations, not
+contract.
+
+Because an alias is the same type, the only visible difference is the type's
+package path: `%T`, `reflect.Type.String()` and `reflect.Type.PkgPath()`
+report `quarkdriver.Schema` where they reported `quark.Schema` in v1.15.
+Code that compares a printed type name sees the new one.
+
+### From a driver module
+
+A driver module for an engine Quark does not ship writes and registers its
+dialect against `quarkdriver` alone, without importing package `quark`:
+
+```go
+package extdriver
+
+import (
+    "database/sql"
+    "fmt"
+
+    "github.com/jcsvwinston/quark/quarkdriver"
+)
+
+type dialect struct{ /* … */ }
+
+var _ quarkdriver.Dialect = dialect{}
+
+func (dialect) LockSuffix(opts quarkdriver.LockOptions) (string, string, error) {
+    if opts.IsZero() {
+        return "", "", nil
+    }
+    return "", "", fmt.Errorf("%w: no row locks", quarkdriver.ErrUnsupportedFeature)
+}
+
+// … the other Dialect methods …
+
+func init() {
+    sql.Register("extsql", &extDriver{})
+    quarkdriver.RegisterDialect("extsql", dialect{})
+}
+```
+
+An application then opens `quark.New("extsql", dsn)`, and the client resolves
+the dialect by that name. A dialect that wraps a built-in one — a CockroachDB
+driver on `quark.PostgreSQL()` — imports package `quark` to reach it, and may.
+
+## What the schema path asks a dialect
+
+`Migrate`, `PlanMigration`, `Sync`, `ApplyPlan` and the tables Quark keeps for
+itself (the migrator's ledger, `ApplyPlan`'s checkpoint, `Backfill`'s state)
+write DDL. What they write is the dialect's answer to a handful of questions,
+each an **optional interface** in `github.com/jcsvwinston/quark/quarkdriver`
+that Quark asserts on the dialect. None of them is answered from `Name()`: the
+name is how a dialect is registered and found, not what it can do.
+
+A dialect that does not implement one gets the default in the table: a
+portable spelling where one exists, or `ErrUnsupportedFeature` where none does.
+It never gets DDL chosen for another engine's name.
+
+| Interface | Asked for | Default when not implemented |
+| --- | --- | --- |
+| `quarkdriver.ColumnTyper` | the column type of each portable kind (`ColumnType(ColumnSpec)`), and the literal of a boolean `DEFAULT` (`BoolLiteral`) | the portable types below, `TRUE`/`FALSE` |
+| `quarkdriver.AutoIncrementer` | the definition of a single-column integer key the engine numbers itself, and the catalog type of that column | `BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY`, catalog type `BIGINT` |
+| `quarkdriver.IdempotentDDL` | creating a table or an index only when it is missing, and which errors mean "it exists already" | `CREATE TABLE IF NOT EXISTS`, `CREATE [UNIQUE] INDEX IF NOT EXISTS`, no error counts as "exists" |
+| `quarkdriver.SchemaIntrospector` (also `quark.SchemaIntrospector`) | the current schema; `Sync` reads the table's columns through it | `IntrospectSchema` and `Sync` return `ErrUnsupportedFeature` |
+| `quarkdriver.ColumnTypeMapper` (also `quark.ColumnTypeMapper`) | a column type a hand-built `Plan` carries, in the engine's form (`TEXT` → `CLOB` on Oracle) | the type is used as written |
+| `Dialect.SupportsTransactionalDDL()` (required) | whether `ApplyPlan` runs a plan in one transaction, and whether `Sync` wraps its changes in one | — every dialect answers |
+| `quarkdriver.ColumnAlterer` | the statements of an in-place column change (`OpAlterColumn`): type, nullability, default, primary key; it may read the catalog through the `Executor` it is given | the dialect's own `AlterTableAlterColumn` for the type, `ALTER COLUMN … SET/DROP NOT NULL`, `SET/DROP DEFAULT`, `ADD CONSTRAINT pk_<table> PRIMARY KEY`; dropping a key returns `ErrUnsupportedFeature`, since its name is in the catalog |
+| `quarkdriver.ObjectDropper` | dropping an index, a foreign key and a `CHECK` by name | `DROP INDEX <index>`, `ALTER TABLE <table> DROP CONSTRAINT <name>` |
+| `quarkdriver.TableRebuilder` | whether the engine changes a table by rebuilding it, SQLite's way | in-place `ALTER` statements |
+
+A method of `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL` or
+`ObjectDropper` that returns `""` takes the default for that one question, so a
+dialect can answer only what its engine spells differently.
+
+`quarkdriver.Executor` is the same type as `quark.Executor`: the interface a
+`*sql.DB`, a `*sql.Tx` and a `*sql.Conn` share. The same holds for every type
+of the contract that package `quark` also names (see
+[Where the contract lives](#where-the-contract-lives)).
+
+Quark classifies a field's Go type into a `quarkdriver.ColumnKind` before it
+asks — it unwraps pointers, `sql.Null[T]`, `quark.JSON[T]` and
+`quark.Array[T]` — so a dialect never sees a Go type. A type registered with
+`quark.RegisterTypeMapper` is consulted first, and receives the dialect's
+`Name()`.
+
+| Kind | Go types | Portable type | PostgreSQL | MySQL / MariaDB | SQLite | SQL Server | Oracle |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `KindString` | `string` | `VARCHAR(255)`, `VARCHAR(N)` with `size=N` | `TEXT` | `VARCHAR(255)` | `TEXT` | `NVARCHAR(255)` | `VARCHAR2(255)` |
+| `KindText` | Quark's own long text | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
+| `KindInt16` / `KindInt32` / `KindInt64` | integers by width, `time.Duration` | `SMALLINT` / `INTEGER` / `BIGINT` | same | same | same | same | `NUMBER(5)` / `NUMBER(10)` / `NUMBER(19)` |
+| `KindFloat32` / `KindFloat64` | `float32` / `float64` | `REAL` / `DOUBLE PRECISION` | same | `REAL` / `DOUBLE` | `REAL` / `REAL` | `REAL` / `FLOAT(53)` | `BINARY_FLOAT` / `BINARY_DOUBLE` |
+| `KindDecimal` | a float with `precision=P,scale=S` | `DECIMAL(P,S)` | same | same | same | same | `NUMBER(P,S)` |
+| `KindBool` | `bool` | `BOOLEAN` | `BOOLEAN` | `BOOLEAN` | `BOOLEAN` | `BIT` | `NUMBER(1)` |
+| `KindTime` | `time.Time` | `TIMESTAMP` | `TIMESTAMP` | `DATETIME` | `DATETIME` | `DATETIME2` | `TIMESTAMP` |
+| `KindBytes` | `[]byte` | `BLOB` | `BYTEA` | `BLOB` | `BLOB` | `VARBINARY(MAX)` | `BLOB` |
+| `KindJSON` | `quark.JSON[T]`, `quark.Array[T]`, maps, slices of non-scalars | `TEXT` | `JSONB` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
+| `KindUUID` | 16-byte arrays (`uuid.UUID`) | `CHAR(36)` | `UUID` | `CHAR(36)` | `UUID` | `NCHAR(36)` | `VARCHAR2(36)` |
+| `KindIP` | `net.IP` | `VARCHAR(45)` | `INET` | `VARCHAR(45)` | `TEXT` | `NVARCHAR(45)` | `VARCHAR2(45)` |
+| `KindArray` | slices of a scalar | `TEXT` | the element type `[]` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
+| `KindRange` | `quark.Range[T]` | `TEXT` | `TSTZRANGE`, `INT8RANGE`, `INT4RANGE`, `NUMRANGE` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
+| `KindOther` | anything else | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` |
+
+The per-Go-type result, generated from the code, is the
+[type matrix](../type-matrix).
+
+The auto-increment keys of the built-ins: `BIGSERIAL PRIMARY KEY`
+(PostgreSQL), `BIGINT AUTO_INCREMENT PRIMARY KEY` (MySQL, MariaDB),
+`INTEGER PRIMARY KEY AUTOINCREMENT` (SQLite, catalog type `INTEGER`),
+`BIGINT IDENTITY(1,1) PRIMARY KEY` (SQL Server) and
+`NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY` (Oracle). The default is the
+SQL standard's identity column: an engine that does not accept it fails the
+`CREATE TABLE` instead of creating a key that stays `NULL`.
+
+`SupportsTransactionalDDL()` is true for PostgreSQL, SQL Server and SQLite and
+false for MySQL, MariaDB and Oracle, which commit around every DDL statement;
+`ApplyPlan` takes its resumable, checkpointed path there. Oracle's dialect used
+to answer true, which nothing acted on while `ApplyPlan` decided by the
+dialect's name.
+
+PostgreSQL and SQLite take the `IdempotentDDL` default. MySQL and MariaDB
+implement it because they have no `IF NOT EXISTS` on `CREATE INDEX` (a
+duplicate index name, error 1061, counts as "exists"); SQL Server guards each
+`CREATE` with a lookup in `sys.tables` / `sys.indexes`; Oracle writes a plain
+`CREATE TABLE` and counts ORA-00955, ORA-01408 and ORA-02264 as "exists".
+
+For `ApplyPlan`, PostgreSQL implements `ColumnAlterer` only to read the name of
+the primary-key constraint it drops, and takes the standard statements
+otherwise; MySQL and MariaDB restate the column with `MODIFY COLUMN`; SQL Server
+treats a default as the named constraint it is there; Oracle writes one
+`MODIFY` with only what changes. MySQL, MariaDB (`DROP INDEX … ON`,
+`DROP FOREIGN KEY`, `DROP CHECK`) and SQL Server (`DROP INDEX … ON`) implement
+`ObjectDropper`. SQLite implements `TableRebuilder`: it has no `ALTER COLUMN`
+and no `ADD`/`DROP CONSTRAINT`, so a column change, a foreign key and a `CHECK`
+rebuild the table inside the plan's transaction. The rebuild reads SQLite's own
+catalog, so only an engine that keeps that catalog can answer true.
+
+### Wrapping a built-in dialect
+
+A dialect that embeds a built-in one to change a method — its name, say —
+promotes only the methods of the `Dialect` interface. The optional interfaces
+are not promoted through an embedded interface value, so the wrapper has to
+forward the ones the built-in implements, or the schema path takes the
+defaults:
+
+```go
+type cockroach struct{ quark.Dialect }
+
+func (cockroach) Name() string { return "cockroach" }
+
+func (d cockroach) ColumnType(s quarkdriver.ColumnSpec) string {
+    return d.Dialect.(quarkdriver.ColumnTyper).ColumnType(s)
+}
+func (d cockroach) BoolLiteral(v bool) string {
+    return d.Dialect.(quarkdriver.ColumnTyper).BoolLiteral(v)
+}
+func (d cockroach) AutoIncrementColumn() (string, string) {
+    return d.Dialect.(quarkdriver.AutoIncrementer).AutoIncrementColumn()
+}
+func (d cockroach) IntrospectSchema(ctx context.Context, exec quark.Executor) (quark.Schema, error) {
+    return d.Dialect.(quark.SchemaIntrospector).IntrospectSchema(ctx, exec)
+}
+func (d cockroach) AlterColumn(ctx context.Context, exec quarkdriver.Executor, c quarkdriver.ColumnChange) ([]string, error) {
+    return d.Dialect.(quarkdriver.ColumnAlterer).AlterColumn(ctx, exec, c)
+}
+```
+
+Which interfaces each built-in implements is pinned by Quark's own tests. A
+wrapper of `quark.PostgreSQL()`, like the one above, forwards `ColumnTyper`,
+`AutoIncrementer`, `ColumnAlterer` and `SchemaIntrospector` — and
+`MigrationLocker` too, for the migrator's lock, which the example leaves out. A
+wrapper of `quark.SQLite()` forwards `ColumnTyper`, `AutoIncrementer`,
+`TableRebuilder` and `SchemaIntrospector`.
+
