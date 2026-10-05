@@ -15,24 +15,32 @@ import (
 // narrow DBConnector / DBConn / Result / Row interfaces. The lock
 // implementations use the interfaces directly so they don't import
 // `database/sql` (and so the tests can swap in fakes without the real
-// driver).
-type sqlDBAdapter struct{ db *sql.DB }
+// driver). What a lock sends on the connection goes through the client's
+// execution seam, as schema work (StatementDDL): the lock serves a
+// migration.
+type sqlDBAdapter struct {
+	client *Client
+	db     *sql.DB
+}
 
 func (a sqlDBAdapter) Conn(ctx context.Context) (DBConn, error) {
 	c, err := a.db.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return sqlConnAdapter{conn: c}, nil
+	return sqlConnAdapter{client: a.client, conn: c}, nil
 }
 
-type sqlConnAdapter struct{ conn *sql.Conn }
+type sqlConnAdapter struct {
+	client *Client
+	conn   *sql.Conn
+}
 
 func (a sqlConnAdapter) ExecContext(ctx context.Context, q string, args ...any) (Result, error) {
-	return a.conn.ExecContext(ctx, q, args...)
+	return a.client.execStmt(ctx, a.conn, stmt{kind: StatementDDL, op: "EXEC"}, q, args)
 }
 func (a sqlConnAdapter) QueryRowContext(ctx context.Context, q string, args ...any) Row {
-	return a.conn.QueryRowContext(ctx, q, args...)
+	return a.client.queryRowStmt(ctx, a.conn, stmt{kind: StatementDDL, op: "QUERY_ROW"}, q, args)
 }
 func (a sqlConnAdapter) Close() error { return a.conn.Close() }
 

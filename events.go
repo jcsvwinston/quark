@@ -205,7 +205,7 @@ func Notify(ctx context.Context, provider ClientProvider, channel, payload strin
 		// pg_notify (the function form) supports bound parameters,
 		// unlike the NOTIFY command.
 		sqlStr = "SELECT pg_notify($1, $2)"
-		_, err = client.db.ExecContext(ctx, sqlStr, channel, payload)
+		_, err = client.execStmt(ctx, client.db, stmt{kind: StatementExec, op: "EXEC"}, sqlStr, []any{channel, payload})
 	case "mysql":
 		return fmt.Errorf("notify not supported in MySQL")
 	case "sqlite":

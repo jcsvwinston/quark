@@ -76,10 +76,13 @@ func (c *Client) mapColumnType(t string) string {
 // Code that reads [Schema] should treat the unpopulated slices as
 // "not yet introspected" (or, for SQLite Checks, "intentionally not
 // surfaced"), not "no constraints exist".
+//
+// The dialect reads the catalog through an Executor whose statements pass
+// the middleware chain and reach the observers as StatementIntrospection.
 func (c *Client) IntrospectSchema(ctx context.Context) (Schema, error) {
 	introspector, ok := c.dialect.(SchemaIntrospector)
 	if !ok {
 		return Schema{}, fmt.Errorf("%w: dialect %s does not yet support schema introspection (F3-2)", ErrUnsupportedFeature, c.dialect.Name())
 	}
-	return introspector.IntrospectSchema(ctx, c.db)
+	return introspector.IntrospectSchema(ctx, c.observed(c.db, StatementIntrospection, StatementIntrospection))
 }

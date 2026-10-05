@@ -87,6 +87,11 @@ import (
 //     the constraint ops rebuild the table inside the plan's
 //     transaction; a CHECK the rebuild cannot read back makes it
 //     refuse with ErrUnsupportedFeature rather than lose the check.
+//
+// Every statement it sends — its own and those of the dialect's
+// ColumnAlterer and TableRebuilder, which receive the same Executor —
+// passes the middleware chain and reaches the observers: what it
+// executes as StatementDDL, what it reads as StatementIntrospection.
 func (c *Client) ApplyPlan(ctx context.Context, plan Plan) error {
 	if c.dialect.SupportsTransactionalDDL() {
 		return c.applyPlanTx(ctx, plan)
@@ -118,8 +123,9 @@ func (c *Client) applyPlanTx(ctx context.Context, plan Plan) error {
 		// sql.ErrTxDone which we don't propagate.
 		_ = tx.Rollback()
 	}()
+	exec := c.schemaExec(tx)
 	for i, op := range plan.Ops {
-		if err := c.applyOne(ctx, tx, op); err != nil {
+		if err := c.applyOne(ctx, exec, op); err != nil {
 			return fmt.Errorf("ApplyPlan: op %d (%s): %w", i, op.String(), err)
 		}
 	}
@@ -154,11 +160,12 @@ func (c *Client) applyPlanNoTx(ctx context.Context, plan Plan) error {
 	if len(plan.Ops) == 0 {
 		return nil
 	}
-	if err := c.ensureMigrationStateTable(ctx, c.db); err != nil {
+	exec := c.schemaExec(c.db)
+	if err := c.ensureMigrationStateTable(ctx, exec); err != nil {
 		return fmt.Errorf("ApplyPlan: %w", err)
 	}
 	planHash := plan.Hash()
-	resumeFrom, err := c.lastAppliedOpIndex(ctx, c.db, planHash)
+	resumeFrom, err := c.lastAppliedOpIndex(ctx, exec, planHash)
 	if err != nil {
 		return fmt.Errorf("ApplyPlan: %w", err)
 	}
@@ -168,10 +175,10 @@ func (c *Client) applyPlanNoTx(ctx context.Context, plan Plan) error {
 		if i <= resumeFrom {
 			continue
 		}
-		if err := c.applyOne(ctx, c.db, op); err != nil {
+		if err := c.applyOne(ctx, exec, op); err != nil {
 			return fmt.Errorf("ApplyPlan: op %d (%s): %w", i, op.String(), err)
 		}
-		if err := c.recordOpApplied(ctx, c.db, planHash, i, op.String()); err != nil {
+		if err := c.recordOpApplied(ctx, exec, planHash, i, op.String()); err != nil {
 			// Rare: the op itself succeeded but recording the
 			// state failed. Surface this so the caller knows the
 			// schema is one step ahead of the checkpoint — they

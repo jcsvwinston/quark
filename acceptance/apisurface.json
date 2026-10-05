@@ -3511,7 +3511,7 @@
       "pkg": "github.com/jcsvwinston/quark",
       "name": "QueryEvent",
       "kind": "type",
-      "sig": "struct{SQL string; Args []any; Duration time.Duration; Rows int64; Error error; Table string; Operation string}"
+      "sig": "struct{SQL string; Args []any; Duration time.Duration; Rows int64; Error error; Table string; Operation string; Kind StatementKind}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3760,6 +3760,54 @@
       "name": "StartsWith",
       "kind": "func",
       "sig": "func(Expr, string) Expr"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StatementDDL",
+      "kind": "const",
+      "sig": "StatementKind"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StatementExec",
+      "kind": "const",
+      "sig": "StatementKind"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StatementIntrospection",
+      "kind": "const",
+      "sig": "StatementKind"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StatementKind",
+      "kind": "type",
+      "sig": "string"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StatementKindFromContext",
+      "kind": "func",
+      "sig": "func(context.Context) StatementKind"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StatementQuery",
+      "kind": "const",
+      "sig": "StatementKind"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StatementRaw",
+      "kind": "const",
+      "sig": "StatementKind"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "StatementSavepoint",
+      "kind": "const",
+      "sig": "StatementKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -4351,6 +4399,12 @@
       "name": "RedactionMode",
       "kind": "type",
       "sig": "int"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/otel",
+      "name": "StatementKindKey",
+      "kind": "const",
+      "sig": "untyped string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",

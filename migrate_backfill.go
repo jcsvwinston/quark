@@ -89,6 +89,11 @@ type BackfillSpec struct {
 // serialisation. The state table's primary key on Name prevents
 // silent corruption — concurrent runs would race on the UPDATE,
 // not produce divergent state.
+//
+// Every statement it sends passes the middleware chain and reaches the
+// observers: the batch reads as StatementQuery, the state table's
+// writes as StatementDDL and its reads as StatementIntrospection, like
+// the rest of Quark's bookkeeping.
 func (c *Client) Backfill(ctx context.Context, spec BackfillSpec) error {
 	if spec.Name == "" {
 		return fmt.Errorf("Backfill: Name is required")
@@ -163,7 +168,7 @@ func (c *Client) ensureBackfillStateTable(ctx context.Context) error {
 		"last_pk " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindInt64}) + " NOT NULL",
 		"updated_at " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindTime}) + " DEFAULT CURRENT_TIMESTAMP NOT NULL",
 	}, ",\n  ")
-	if err := c.createTableIfNotExists(ctx, c.db, backfillStateTableName, body); err != nil {
+	if err := c.createTableIfNotExists(ctx, c.schemaExec(c.db), backfillStateTableName, body); err != nil {
 		return fmt.Errorf("ensureBackfillStateTable: %w", err)
 	}
 	return nil
@@ -181,7 +186,7 @@ func (c *Client) ensureBackfillStateTable(ctx context.Context) error {
 func (c *Client) readBackfillState(ctx context.Context, name string) (int64, error) {
 	q := fmt.Sprintf(`SELECT COALESCE(MAX(last_pk), 0) FROM %s WHERE name = %s`,
 		c.dialect.Quote(backfillStateTableName), c.dialect.Placeholder(1))
-	row := c.db.QueryRowContext(ctx, q, name)
+	row := c.queryRowStmt(ctx, c.db, stmt{kind: StatementIntrospection, op: "QUERY_ROW", table: backfillStateTableName}, q, []any{name})
 	var lastPK int64
 	if err := row.Scan(&lastPK); err != nil {
 		return 0, fmt.Errorf("readBackfillState: %w", err)
@@ -207,7 +212,8 @@ func (c *Client) writeBackfillState(ctx context.Context, name string, lastPK int
 		c.dialect.Quote(backfillStateTableName),
 		c.dialect.Placeholder(1),
 		c.dialect.Placeholder(2))
-	res, err := c.db.ExecContext(ctx, updQ, lastPK, name)
+	ledger := stmt{kind: StatementDDL, op: "EXEC", table: backfillStateTableName}
+	res, err := c.execStmt(ctx, c.db, ledger, updQ, []any{lastPK, name})
 	if err != nil {
 		return fmt.Errorf("writeBackfillState update: %w", err)
 	}
@@ -225,7 +231,7 @@ func (c *Client) writeBackfillState(ctx context.Context, name string, lastPK int
 		c.dialect.Quote(backfillStateTableName),
 		c.dialect.Placeholder(1),
 		c.dialect.Placeholder(2))
-	if _, err := c.db.ExecContext(ctx, insQ, name, lastPK); err != nil {
+	if _, err := c.execStmt(ctx, c.db, ledger, insQ, []any{name, lastPK}); err != nil {
 		return fmt.Errorf("writeBackfillState insert: %w", err)
 	}
 	return nil
@@ -248,7 +254,7 @@ func (c *Client) fetchBackfillBatch(ctx context.Context, table, pkCol string, la
 		c.dialect.Placeholder(1),
 		c.dialect.Quote(pkCol),
 		c.dialect.LimitOffset(batchSize, 0))
-	rows, err := c.db.QueryContext(ctx, q, lastPK)
+	rows, err := c.queryStmt(ctx, c.db, stmt{kind: StatementQuery, op: "SELECT", table: table}, q, []any{lastPK})
 	if err != nil {
 		return nil, err
 	}

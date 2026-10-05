@@ -12,6 +12,7 @@ import (
 
 	"github.com/jcsvwinston/quark"
 	imigrate "github.com/jcsvwinston/quark/internal/migrate"
+	"github.com/jcsvwinston/quark/internal/observe"
 	"github.com/jcsvwinston/quark/quarkdriver"
 )
 
@@ -31,6 +32,11 @@ type Migration struct {
 	// atomic with the last statement; the migrator says so at Debug. A
 	// migration that sets both forms is used through the transactional
 	// one where it applies and Up/Down elsewhere (QK-6).
+	//
+	// The *sql.Tx is database/sql's: what UpTx and DownTx send on it does
+	// not pass the client's middleware chain nor reach its observers. What
+	// Up and Down send through the client (client.Exec, the query
+	// builder, Migrate) does.
 	UpTx   func(ctx context.Context, tx *sql.Tx) error
 	DownTx func(ctx context.Context, tx *sql.Tx) error
 }
@@ -156,6 +162,15 @@ func (m *Migrator) acquireLock(ctx context.Context) (func(), error) {
 	}, nil
 }
 
+// ledger wraps exec so the migrator's own statements — the ledger table's
+// CREATE, reads and rows — pass the client's middleware chain and reach its
+// observers, as schema work: writes are quark.StatementDDL, reads
+// quark.StatementIntrospection. What an UpTx or DownTx sends on the
+// *sql.Tx it is handed does not: that transaction is the caller's.
+func (m *Migrator) ledger(exec quarkdriver.Executor) quarkdriver.Executor {
+	return observe.Executor(m.client, exec, observe.KindDDL, observe.KindIntrospection)
+}
+
 // applyUp runs one migration and records it. With UpTx and a dialect that
 // rolls DDL back, migration and ledger row share a transaction.
 func (m *Migrator) applyUp(ctx context.Context, id string, migration *Migration) error {
@@ -176,7 +191,7 @@ func (m *Migrator) applyUp(ctx context.Context, id string, migration *Migration)
 			_ = tx.Rollback()
 			return fmt.Errorf("failed to apply migration %s: %w", id, err)
 		}
-		if _, err := tx.ExecContext(ctx, insertSQL, id, migration.Name); err != nil {
+		if _, err := m.ledger(tx).ExecContext(ctx, insertSQL, id, migration.Name); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("failed to record migration %s: %w", id, err)
 		}
@@ -206,7 +221,7 @@ func (m *Migrator) revertDown(ctx context.Context, id string, migration *Migrati
 			_ = tx.Rollback()
 			return fmt.Errorf("failed to revert migration %s: %w", id, err)
 		}
-		if _, err := tx.ExecContext(ctx, deleteSQL, id); err != nil {
+		if _, err := m.ledger(tx).ExecContext(ctx, deleteSQL, id); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("failed to unrecord migration %s: %w", id, err)
 		}
@@ -238,7 +253,7 @@ func (m *Migrator) Init(ctx context.Context) error {
 		"name " + str,
 		"applied_at " + types.Column(quarkdriver.ColumnSpec{Kind: quarkdriver.KindTime}) + " DEFAULT CURRENT_TIMESTAMP NOT NULL",
 	}, ",\n  ")
-	if _, err := m.client.Raw().ExecContext(ctx, imigrate.CreateTableIfNotExists(d, m.tableName, body)); err != nil {
+	if _, err := m.ledger(m.client.Raw()).ExecContext(ctx, imigrate.CreateTableIfNotExists(d, m.tableName, body)); err != nil {
 		if imigrate.IsAlreadyExists(d, quarkdriver.ObjectTable, err) {
 			return nil
 		}
@@ -248,8 +263,9 @@ func (m *Migrator) Init(ctx context.Context) error {
 }
 
 func (m *Migrator) GetApplied(ctx context.Context) (map[string]bool, error) {
-	// Use raw DB to bypass SQLGuard validation for internal queries
-	rows, err := m.client.Raw().QueryContext(ctx, fmt.Sprintf("SELECT id FROM %s", m.tableName))
+	// The raw pool, to bypass SQLGuard validation for internal queries, but
+	// through the client's execution seam.
+	rows, err := m.ledger(m.client.Raw()).QueryContext(ctx, fmt.Sprintf("SELECT id FROM %s", m.tableName))
 	if err != nil {
 		return nil, err
 	}
@@ -360,8 +376,9 @@ func (m *Migrator) Down(ctx context.Context, steps int) error {
 	}
 	defer release()
 
-	// Use raw DB to bypass SQLGuard validation for internal queries
-	rows, err := m.client.Raw().QueryContext(ctx, fmt.Sprintf("SELECT id FROM %s ORDER BY id DESC", m.tableName))
+	// The raw pool, to bypass SQLGuard validation for internal queries, but
+	// through the client's execution seam.
+	rows, err := m.ledger(m.client.Raw()).QueryContext(ctx, fmt.Sprintf("SELECT id FROM %s ORDER BY id DESC", m.tableName))
 	if err != nil {
 		return err
 	}

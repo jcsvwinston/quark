@@ -377,10 +377,19 @@ func newClient(db *sql.DB, driverName, dataSource string, borrowed bool, opts []
 		stampedeXFetchBeta: 1.0,
 	}
 
-	// Auto-detect dialect from driverName if not specified. On detection
-	// failure c.dialect stays nil here: an explicit WithDialect applied
-	// below still wins, and if none arrives, construction fails after the
-	// options loop (DX audit A5 — it used to WARN and silently assume
+	// Apply client options (skip pool options)
+	for _, opt := range opts {
+		if clientOpt, ok := opt.(Option); ok {
+			clientOpt(c)
+		}
+	}
+
+	// Auto-detect the dialect from driverName when no WithDialect set one.
+	// It runs after the options so that an explicit WithDialect skips it,
+	// probe included, and so that the probe below is a statement like any
+	// other — through the middleware and to the observers the options
+	// registered. On detection failure c.dialect stays nil and construction
+	// fails just below (DX audit A5 — it used to WARN and silently assume
 	// PostgreSQL, emitting SQL for the wrong engine from then on).
 	if c.dialect == nil {
 		if dialect, err := DetectDialect(driverName); err == nil {
@@ -390,22 +399,14 @@ func newClient(db *sql.DB, driverName, dataSource string, borrowed bool, opts []
 			// cannot tell them apart by name. Probe the server version and upgrade
 			// to the MariaDB dialect when actually connected to MariaDB, so the
 			// dialect divergences (e.g. LOCK IN SHARE MODE vs the MySQL-8-only
-			// FOR SHARE — BB-3) are emitted correctly. An explicit WithDialect
-			// applied below still wins. (BB-3)
-			if c.dialect.Name() == "mysql" && isMariaDBServer(ctx, db) {
+			// FOR SHARE — BB-3) are emitted correctly. (BB-3)
+			if c.dialect.Name() == "mysql" && c.isMariaDBServer(ctx) {
 				c.dialect = MariaDB()
 				// Debug, not Info: WithOptions re-runs New (and thus this probe) on
 				// every clone, so an Info line here would spam logs in apps that
 				// derive clients per-request or in test suites.
 				c.logger.Debug("detected a MariaDB server via SELECT VERSION(); using the MariaDB dialect instead of MySQL")
 			}
-		}
-	}
-
-	// Apply client options (skip pool options)
-	for _, opt := range opts {
-		if clientOpt, ok := opt.(Option); ok {
-			clientOpt(c)
 		}
 	}
 
@@ -498,14 +499,15 @@ func newClient(db *sql.DB, driverName, dataSource string, borrowed bool, opts []
 	return c, nil
 }
 
-// isMariaDBServer reports whether the server reached through db identifies as
-// MariaDB. MariaDB embeds the literal "MariaDB" in its version string (e.g.
-// "11.4.2-MariaDB-ubu2404"), while MySQL does not. Any probe error is treated
-// as "not MariaDB" so dialect detection never blocks New() — the worst case is
-// the MySQL dialect on a MariaDB server, i.e. the pre-BB-3 behaviour.
-func isMariaDBServer(ctx context.Context, db *sql.DB) bool {
+// isMariaDBServer reports whether the server the client is connected to
+// identifies as MariaDB. MariaDB embeds the literal "MariaDB" in its version
+// string (e.g. "11.4.2-MariaDB-ubu2404"), while MySQL does not. Any probe
+// error is treated as "not MariaDB" so dialect detection never blocks New() —
+// the worst case is the MySQL dialect on a MariaDB server, i.e. the pre-BB-3
+// behaviour. The probe goes through the execution seam as introspection.
+func (c *Client) isMariaDBServer(ctx context.Context) bool {
 	var version string
-	if err := db.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version); err != nil {
+	if err := c.queryRowStmt(ctx, c.db, stmt{kind: StatementIntrospection, op: "QUERY_ROW"}, "SELECT VERSION()", nil).Scan(&version); err != nil {
 		return false
 	}
 	return strings.Contains(strings.ToLower(version), "mariadb")
@@ -668,28 +670,15 @@ func (c *Client) RawQuery(ctx context.Context, query string, args ...any) (*sql.
 
 	c.warnRawUnderNativeRLS(ctx, "RawQuery")
 
-	start := time.Now()
-	rows, err := c.db.QueryContext(ctx, query, args...)
-	duration := time.Since(start)
-
-	// Notify observers
-	qEvent := QueryEvent{
-		SQL:       query,
-		Args:      args,
-		Duration:  duration,
-		Error:     err,
-		Operation: "RAW_QUERY",
-	}
-	c.logSlowQueryIfNeeded(qEvent)
-	for _, obs := range c.observers {
-		obs.ObserveQuery(qEvent)
-	}
-
-	return rows, err
+	// Through the execution seam like every other statement: the middleware
+	// chain wraps it and the observers get a RAW_QUERY event of kind raw.
+	return c.queryStmt(ctx, c.db, stmt{kind: StatementRaw, op: "RAW_QUERY"}, query, args)
 }
 
 // Exec executes a raw SQL statement (INSERT, UPDATE, DELETE, DDL).
-// This is primarily used for migrations and schema changes.
+// This is primarily used for migrations and schema changes. It passes the
+// middleware chain and reaches the observers as a RAW_EXEC event of kind
+// raw.
 func (c *Client) Exec(ctx context.Context, query string, args ...any) error {
 	if !c.limits.AllowRawQueries {
 		return fmt.Errorf("%w: raw queries are disabled by default, enable with WithLimits", ErrInvalidQuery)
@@ -701,28 +690,7 @@ func (c *Client) Exec(ctx context.Context, query string, args ...any) error {
 
 	c.warnRawUnderNativeRLS(ctx, "Exec")
 
-	start := time.Now()
-	res, err := c.db.ExecContext(ctx, query, args...)
-	duration := time.Since(start)
-
-	// Notify observers
-	rowsAffected := int64(0)
-	if err == nil {
-		rowsAffected, _ = res.RowsAffected()
-	}
-	qEvent := QueryEvent{
-		SQL:       query,
-		Args:      args,
-		Duration:  duration,
-		Error:     err,
-		Operation: "RAW_EXEC",
-		Rows:      rowsAffected,
-	}
-	c.logSlowQueryIfNeeded(qEvent)
-	for _, obs := range c.observers {
-		obs.ObserveQuery(qEvent)
-	}
-
+	_, err := c.execStmt(ctx, c.db, stmt{kind: StatementRaw, op: "RAW_EXEC"}, query, args)
 	return err
 }
 

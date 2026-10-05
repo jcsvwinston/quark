@@ -21,19 +21,23 @@ import (
 // were invisible to every QueryObserver and to the slow-query log (which
 // piggybacks on the same notifyObservers pipeline). The row count is not
 // known at emit time (the rows are scanned by the caller), so Rows stays 0,
-// matching the "SELECT (stream)" event contract.
+// matching the "SELECT (stream)" event contract. A failed statement is
+// reported by the seam, under the same Operation.
 func (q *BaseQuery) preloadQuery(ctx context.Context, table, sqlStr string, args []any) (*sql.Rows, error) {
 	start := time.Now()
-	rows, err := q.executeQuery(ctx, sqlStr, args)
+	rows, err := q.executeQuery(ctx, "PRELOAD", table, sqlStr, args)
+	if err != nil {
+		return nil, err
+	}
 	q.notifyObservers(QueryEvent{
 		SQL:       sqlStr,
 		Args:      args,
 		Duration:  time.Since(start),
-		Error:     err,
 		Table:     table,
 		Operation: "PRELOAD",
+		Kind:      StatementQuery,
 	})
-	return rows, err
+	return rows, nil
 }
 
 // preloadKeyFilter renders the condition that selects the related rows of

@@ -6,6 +6,9 @@ package otel
 import (
 	"context"
 	"database/sql"
+	"io"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/jcsvwinston/quark"
@@ -15,6 +18,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
+	_ "modernc.org/sqlite"
 )
 
 // fakeResult satisfies sql.Result with a fixed RowsAffected so the WrapExec
@@ -301,5 +306,131 @@ func TestMetrics_RowsHistogramOnlyOnExec(t *testing.T) {
 	}
 	if rowsCount != 1 {
 		t.Errorf("quark.queries.rows should see exactly 1 data point (the Exec), got %d", rowsCount)
+	}
+}
+
+// kindRow is the model the client-level tests migrate.
+type kindRow struct {
+	ID   int64  `db:"id" pk:"true"`
+	Name string `db:"name"`
+}
+
+func (kindRow) TableName() string { return "otel_kind_rows" }
+
+// TestSpans_SchemaWorkAndSavepoints drives a real client (SQLite in memory)
+// through the middleware: the CREATE TABLE of Migrate, the catalog reads of
+// IntrospectSchema and the SAVEPOINT / ROLLBACK TO of a transaction each get
+// a span, tagged with the statement's kind, beside the query builder's own.
+// The data points of quark.queries.total carry the kind too.
+// Before A11 Q7 none of the first three reached the middleware, so no trace
+// showed them.
+func TestSpans_SchemaWorkAndSavepoints(t *testing.T) {
+	rec := setupTracerRecorder(t)
+	reader := setupMetricReader(t)
+	ctx := context.Background()
+
+	client, err := quark.New("sqlite", "file:otel_kinds?mode=memory&cache=shared",
+		quark.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		quark.WithMiddleware(New(WithDBSystem("sqlite"))))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	if err := client.Migrate(ctx, &kindRow{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if _, err := client.IntrospectSchema(ctx); err != nil {
+		t.Fatalf("introspect: %v", err)
+	}
+	if err := client.Tx(ctx, func(tx *quark.Tx) error {
+		if err := quark.ForTx[kindRow](ctx, tx).Create(&kindRow{Name: "a"}); err != nil {
+			return err
+		}
+		if err := tx.Savepoint("sp"); err != nil {
+			return err
+		}
+		return tx.RollbackTo("sp")
+	}); err != nil {
+		t.Fatalf("tx: %v", err)
+	}
+
+	// The span of the first statement of each kind, by its statement.
+	byKind := map[string]string{}
+	for _, s := range rec.Ended() {
+		kind := findAttr(s, StatementKindKey).AsString()
+		if kind == "" {
+			t.Errorf("span %s for %q carries no %s", s.Name(), findAttr(s, "db.statement").AsString(), StatementKindKey)
+			continue
+		}
+		if _, seen := byKind[kind]; !seen {
+			byKind[kind] = s.Name() + " " + findAttr(s, "db.statement").AsString()
+		}
+	}
+	for kind, prefix := range map[string]string{
+		string(quark.StatementDDL):           "quark.exec CREATE TABLE",
+		string(quark.StatementIntrospection): "quark.query ",
+		string(quark.StatementSavepoint):     `quark.exec SAVEPOINT "sp"`,
+		// SQLite's Create reads its key back with RETURNING, through
+		// QueryRowContext: a query by the method it is sent with.
+		string(quark.StatementQuery): "quark.query_row INSERT INTO",
+	} {
+		got, ok := byKind[kind]
+		if !ok {
+			t.Errorf("no span of kind %s; spans by kind: %v", kind, byKind)
+			continue
+		}
+		if !strings.HasPrefix(got, prefix) {
+			t.Errorf("first span of kind %s is %q, want it to start with %q", kind, got, prefix)
+		}
+	}
+	var rollbackTo bool
+	for _, s := range rec.Ended() {
+		if findAttr(s, StatementKindKey).AsString() == string(quark.StatementSavepoint) &&
+			strings.HasPrefix(findAttr(s, "db.statement").AsString(), "ROLLBACK TO SAVEPOINT") {
+			rollbackTo = true
+		}
+	}
+	if !rollbackTo {
+		t.Error("no savepoint span for the ROLLBACK TO SAVEPOINT")
+	}
+
+	// The counter's data points carry the kind too, so a dashboard can
+	// leave schema work out.
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	kinds := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, mt := range sm.Metrics {
+			if mt.Name != "quark.queries.total" {
+				continue
+			}
+			for _, dp := range mt.Data.(metricdata.Sum[int64]).DataPoints {
+				v, _ := dp.Attributes.Value(StatementKindKey)
+				kinds[v.AsString()] += dp.Value
+			}
+		}
+	}
+	for _, k := range []quark.StatementKind{quark.StatementDDL, quark.StatementIntrospection, quark.StatementSavepoint, quark.StatementQuery} {
+		if kinds[string(k)] == 0 {
+			t.Errorf("quark.queries.total has no data point of kind %s: %v", k, kinds)
+		}
+	}
+}
+
+// TestSpan_NoKindOutsideAClient pins that a middleware called directly, with
+// a context that never went through a client's chain, adds no kind attribute.
+func TestSpan_NoKindOutsideAClient(t *testing.T) {
+	rec := setupTracerRecorder(t)
+	exec := New().WrapExec(func(ctx context.Context, _ quark.Executor, _ string, _ []any) (sql.Result, error) {
+		return fakeResult{rows: 1}, nil
+	})
+	if _, err := exec(context.Background(), nil, "DELETE FROM t", nil); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if v := findAttr(rec.Ended()[0], StatementKindKey); v.Type() != attribute.INVALID {
+		t.Errorf("%s = %v on a span from outside a client", StatementKindKey, v.AsInterface())
 	}
 }

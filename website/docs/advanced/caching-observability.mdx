@@ -180,9 +180,28 @@ func (o *MetricsObserver) ObserveQuery(e quark.QueryEvent) {
 client, _ := quark.New("postgres", dsn, quark.WithQueryObserver(&MetricsObserver{}))
 ```
 
-`QueryEvent` carries `SQL`, `Args`, `Duration`, `Rows`, `Error`, `Table`, and
-`Operation` (`SELECT`, `EXEC`, `QUERY_ROW`, `RAW_QUERY`, `RAW_EXEC`). Redact
-sensitive `Args` before exporting them.
+`QueryEvent` carries `SQL`, `Args`, `Duration`, `Rows`, `Error`, `Table`,
+`Operation` (`SELECT`, `EXEC`, `QUERY_ROW`, `QUERY`, `RAW_QUERY`, `RAW_EXEC`, …)
+and `Kind`. Redact sensitive `Args` before exporting them.
+
+Observers and middleware see every statement Quark sends, not only the query
+builder's: the DDL of `Migrate`, `Sync` and `ApplyPlan`, the catalog reads
+behind `PlanMigration`, savepoints, and raw SQL. `Kind` tells them apart
+(`query`, `exec`, `ddl`, `introspection`, `savepoint`, `raw`); a middleware
+reads it with `quark.StatementKindFromContext(ctx)`. To keep schema work out
+of an application's metrics, filter on it:
+
+```go
+func (o *MetricsObserver) ObserveQuery(e quark.QueryEvent) {
+    if e.Kind == quark.StatementDDL || e.Kind == quark.StatementIntrospection {
+        return
+    }
+    metrics.RecordQuery(e.Table, e.Operation, e.Duration, e.Rows, e.Error)
+}
+```
+
+The [observability reference](../reference/api/observability#what-is-observed)
+lists what each kind covers and the few things that are not observed.
 
 ### Slow-query logging
 

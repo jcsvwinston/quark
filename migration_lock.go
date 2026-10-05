@@ -81,5 +81,5 @@ func (c *Client) AcquireMigrationLock(ctx context.Context, name string, timeout 
 	if !ok {
 		return nil, fmt.Errorf("%w: dialect %s does not support distributed migration locks", ErrUnsupportedFeature, c.dialect.Name())
 	}
-	return locker.AcquireMigrationLock(ctx, sqlDBAdapter{c.db}, name, timeout)
+	return locker.AcquireMigrationLock(ctx, sqlDBAdapter{client: c, db: c.db}, name, timeout)
 }

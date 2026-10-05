@@ -221,11 +221,13 @@ Middleware can wrap:
 
 | Method | Path |
 | --- | --- |
-| `WrapQuery` | `QueryContext`, used by list and streaming reads. |
+| `WrapQuery` | `QueryContext`, used by list and streaming reads, preloads and catalog reads. |
 | `WrapQueryRow` | `QueryRowContext`, used by counts, inserts with returning, aggregates. |
-| `WrapExec` | `ExecContext`, used by writes and DDL helpers. |
+| `WrapExec` | `ExecContext`, used by writes, DDL, savepoints and `Client.Exec`. |
 
-Multiple middleware are executed in registration order.
+Every statement Quark sends passes through the chain; `quark.StatementKindFromContext(ctx)`
+says what it is for. Multiple middleware are executed in registration order,
+the first registered outermost.
 
 ## Query Observers
 
@@ -251,4 +253,5 @@ client, err := quark.New("postgres", dsn,
 | `Rows` | `int64` | Rows returned or affected when known. |
 | `Error` | `error` | Nil on success. |
 | `Table` | `string` | Model table when known. |
-| `Operation` | `string` | `SELECT`, `EXEC`, `QUERY_ROW`, `RAW_QUERY`, `RAW_EXEC`, etc. |
+| `Operation` | `string` | `SELECT`, `EXEC`, `QUERY_ROW`, `QUERY`, `RAW_QUERY`, `RAW_EXEC`, etc. |
+| `Kind` | `StatementKind` | `query`, `exec`, `ddl`, `introspection`, `savepoint` or `raw` — see [what is observed](./api/observability#what-is-observed). |

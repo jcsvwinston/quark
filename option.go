@@ -43,7 +43,8 @@ func WithQueryObserver(o QueryObserver) Option {
 }
 
 // WithMiddleware adds middleware to the query execution chain.
-// Middleware is applied in the order they are added.
+// Middleware is applied in the order they are added: the first added is the
+// outermost, so it sees a statement first and its result last.
 func WithMiddleware(m Middleware) Option {
 	return func(c *Client) {
 		c.middleware = append(c.middleware, m)
@@ -411,21 +412,30 @@ func WithConnMaxIdleTime(d time.Duration) PoolOption {
 	}
 }
 
-// QueryObserver is called after each query execution.
-// Use this for logging, metrics, auditing, etc.
+// QueryObserver is called after each statement Quark sends to the engine —
+// the query builder's, schema work, introspection, savepoints and raw SQL
+// alike (see [StatementKind]). Use it for logging, metrics, auditing, etc.
 type QueryObserver interface {
 	ObserveQuery(event QueryEvent)
 }
 
-// QueryEvent represents a executed query.
+// QueryEvent describes one statement Quark sent to the engine.
 type QueryEvent struct {
-	SQL       string
-	Args      []any
-	Duration  time.Duration
-	Rows      int64
-	Error     error
-	Table     string
-	Operation string // "SELECT", "INSERT", "UPDATE", "DELETE", "PRELOAD" (eager-loading batch), "QUERY_ROW", "SELECT (stream)", "RAW_QUERY", "RAW_EXEC"
+	SQL      string
+	Args     []any
+	Duration time.Duration
+	Rows     int64
+	Error    error
+	Table    string
+	// Operation is how the statement was sent: "SELECT", "SELECT (stream)",
+	// "SELECT (cursor)" and "PRELOAD" for the query builder's reads,
+	// "QUERY_ROW", "EXEC" and "QUERY" for a statement sent through
+	// QueryRowContext, ExecContext or QueryContext, and "RAW_QUERY" and
+	// "RAW_EXEC" for Client.RawQuery and Client.Exec.
+	Operation string
+	// Kind is what the statement is for: query, exec, ddl, introspection,
+	// savepoint or raw.
+	Kind StatementKind
 }
 
 // ExecFunc is the signature for SQL execution functions used by middleware.
@@ -439,7 +449,11 @@ type QueryRowFunc func(ctx context.Context, exec Executor, sqlStr string, args [
 
 // Middleware wraps query execution for cross-cutting concerns like
 // logging, retry logic, caching, rate limiting, etc.
-// It intercepts all types of database interactions (Exec, Query, QueryRow).
+// Every statement Quark sends to the engine passes through it — the query
+// builder's, schema work, introspection, savepoints and raw SQL alike — by
+// the method it is sent with (Exec, Query, QueryRow); [StatementKindFromContext]
+// says what the statement is for. Middlewares compose in the order they are
+// registered: the first registered is the outermost.
 type Middleware interface {
 	WrapExec(next ExecFunc) ExecFunc
 	WrapQuery(next QueryFunc) QueryFunc

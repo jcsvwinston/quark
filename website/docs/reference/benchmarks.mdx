@@ -80,7 +80,7 @@ within none.
 
 | control | engine | operation | judged against | recorded ratio | verdict | Quark allocs/op · B/op |
 |---|---|---|---|---:|---|---:|
-| `PG-01` | PostgreSQL | Insert one row and read its generated id back | `database/sql` · pgx | 1.26 · 1.29 | **absent** | 81 · 4360 |
+| `PG-01` | PostgreSQL | Insert one row and read its generated id back | `database/sql` · pgx | 1.26 · 1.29 | **absent** | 79 · 3706 |
 | `PG-02` | PostgreSQL | Select one row by primary key | `database/sql` · pgx | 1.24 · 1.29 | **absent** | 72 · 4755 |
 | `PG-03` | PostgreSQL | Select 100 rows with a WHERE, an ORDER BY and a LIMIT | `database/sql` | 1.17 | **absent** | 573 · 25780 |
 | `PG-04` | PostgreSQL | Select 100 parents and their 500 children | `database/sql` | 1.25 | **absent** | 2869 · 156240 |
@@ -89,7 +89,7 @@ within none.
 
 What each distance is made of, as measured:
 
-- **`PG-01`** (InsertOne) — Over the limit against both baselines on the reference runners (1.20–1.36 against database/sql and 1.22–1.41 against pgx across ten runs). Quark allocates 81 times and 4.4 KB per insert, against 21 times and 1.1 KB for database/sql and 13 times and 0.6 KB for pgx: the INSERT is built from the struct on every call, 9 % of the client's CPU in a profile. Validating a model that declares no rule and reading the clock for one with no timestamp columns no longer happen (A12 Q2); they were five allocations, and no move a run can see in the ratio. Quark's share costs about 30 µs per insert on the EPYC runner and a few µs on a laptop, where the same code sits on the threshold (1.14 and 1.16).
+- **`PG-01`** (InsertOne) — Over the limit against both baselines on the reference runners (1.20–1.36 against database/sql and 1.22–1.41 against pgx across ten runs). Quark allocates 79 times and 3.7 KB per insert, against 21 times and 1.1 KB for database/sql and 13 times and 0.6 KB for pgx: the INSERT is built from the struct on every call, 9 % of the client's CPU in a profile. Validating a model that declares no rule and reading the clock for one with no timestamp columns no longer happen (A12 Q2); they were five allocations, and no move a run can see in the ratio. Since A11 Q7 the single-row read of the generated id goes through the execution seam, which calls the engine directly when no middleware is registered: the per-call func value that captured the query is gone, and with it the heap copy of the query Create makes for the insert — two allocations and 0.65 KB (81 and 4.4 KB before, measured on the same machine). Quark's share costs about 30 µs per insert on the EPYC runner and a few µs on a laptop, where the same code sits on the threshold (1.14 and 1.16).
 - **`PG-02`** (FindByPK) — Over the limit on the reference runners: 1.10–1.25 against database/sql, inside the band, and 1.12–1.30 against pgx; on a laptop it sits on the threshold (1.09 and 1.13). Find goes through the list path — the SELECT is assembled by the query builder (8 % of the client's CPU in a profile) and the row goes through the generic scanner — and allocates 72 times and 4.8 KB per row, against 29 times for database/sql and 10 for pgx.
 - **`PG-03`** (List100) — 17 % over database/sql on the reference runners (1.14–1.29 across ten runs), inside the band, so the verdict is not asserted; 15 % on a laptop. It was 35 % until A12 Q2: List serialized the whole result to JSON when no cache was configured and discarded it (QK-34), and decided for every row and column whether the field needed a scan target of its own. It now allocates 25.8 KB per call instead of 37 KB. What remains, in a CPU profile: pointing the scan targets at each row's fields through reflection (about 8 % of the client's CPU besides the driver's own Scan) and assembling the SELECT (5 %).
 - **`PG-04`** (Preload100) — A quarter over database/sql (1.22–1.31 across ten runs); it was twice. Since A12 Q2 the children are selected with = ANY($1) and one array parameter instead of an IN list of 100 placeholders, and assembled onto their parents with one growth per parent instead of a reflect.Append per row (QK-35). The informational arm keeps the old shape: the hand-written program sending the IN list took 1.25 ms on the EPYC runner where = ANY($1) took 0.79 ms. What remains: the parent list (PG-03), and mapping the 500 children — each row's key read through reflection and looked up, the row copied — about 15 % of the client's CPU besides the driver's Next and Scan.
@@ -149,6 +149,16 @@ rule:
 The single-row operations did not move: what they spend beyond the baselines
 is elsewhere (building the statement, and the row going through the generic
 path), and is described in the recorded block above.
+
+**What moved on 2026-10-06.** Since A11 Q7 every statement goes through one
+execution path, which runs the middleware chain and reports to the observers.
+When no middleware is registered, that path calls the engine directly. The
+single-row read of an insert's generated id no longer builds a function value
+that captured the query, so the copy of the query that `Create` makes for the
+insert stays on the stack. `PG-01` drops from 81 allocations and 4360 bytes to
+79 and 3706. Both figures were measured on the laptop below, the old one on the
+code before the change. No other control moved, and the ratios were not
+retaken.
 
 **A laptop**, for comparison — Apple M4 Pro, Docker Desktop's Linux VM with
 12 CPUs, three runs on 2026-10-05 with the rest of the machine busy:

@@ -224,7 +224,7 @@ func (c *Client) writeAuditRow(ctx context.Context, exec Executor, st *auditStat
 	diffVal := JSON[map[string]any]{V: diff}
 	args := []any{time.Now().UTC(), tenantID, userID, table, operation, pk, diffVal}
 
-	if _, err := exec.ExecContext(ctx, sqlStr, args...); err != nil {
+	if _, err := c.execStmt(ctx, exec, stmt{kind: StatementExec, op: "EXEC", table: auditTableName}, sqlStr, args); err != nil {
 		return fmt.Errorf("audit write for %s/%s: %w", table, operation, err)
 	}
 	return nil
