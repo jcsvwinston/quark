@@ -19,6 +19,18 @@ type Symbol struct {
 	// en el diff como métodos quitados de un paquete y añadidos a otro, sin
 	// nada que uniera las dos mitades. No es una firma: no fija parámetros.
 	AliasOf string `json:"alias_of,omitempty"`
+	// Sig is the shape the symbol's contract fixes: the signature of a func
+	// or a method (parameter and result types, without names), the type of a
+	// var or a const, and the definition of a type — a struct's exported
+	// fields, a func type's signature, "interface" for an interface whose
+	// methods are listed as symbols of their own. An alias of a type declared
+	// in an in-scope package leaves it empty (alias_of says where, and the
+	// methods are listed under the declaring type); an alias of an internal
+	// type writes the whole definition of the type it names, because nothing
+	// else lists it. Without this field the file froze NAMES: changing a
+	// parameter of Dialect.UpsertSQL left it byte-identical (A11 Q6, control
+	// CON-02 of internal/extbench).
+	Sig string `json:"sig,omitempty"`
 }
 
 // Key es la clave canónica usada en cobertura y allowlist.

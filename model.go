@@ -20,6 +20,22 @@ type FieldMeta = schema.FieldMeta
 // RelationMeta is the metadata for a model relation.
 type RelationMeta = schema.RelationMeta
 
+// TableNamer is implemented by a model that names its own table:
+//
+//	TableName() string
+//
+// Without it, a model's table is its type name in snake case, pluralised
+// (User → users). Quark asks once per model type, on a zero *T, and caches
+// the answer in the model's metadata, which is where Migrate and the query
+// builder read the table from: the method may have a value or a pointer
+// receiver, and must not depend on the value's fields.
+//
+// The type is the one Quark asserts against, not a copy of it, so a model can
+// check that it satisfies the convention at compile time:
+//
+//	var _ quark.TableNamer = User{}
+type TableNamer = schema.TableNamer
+
 // pkMeta holds primary key metadata (kept lowercase for internal use).
 type pkMeta = schema.PKMeta
 

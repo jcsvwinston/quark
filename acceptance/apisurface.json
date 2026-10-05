@@ -3,2097 +3,2522 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Array[T]).Scan",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*CaseBuilder).Else",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(Expr) *CaseBuilder"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*CaseBuilder).ToSQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(Dialect, *SQLGuard) (string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*CaseBuilder).When",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(Expr, Expr) *CaseBuilder"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).AcquireMigrationLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, time.Duration) (MigrationLock, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).AddForeignKey",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, string, []string, string, []string, string, string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).ApplyPlan",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Plan) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Backfill",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, BackfillSpec) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).BeginTx",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, *sql.TxOptions) (*Tx, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).BlockedPanicCleanups",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() uint64"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Close",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).CreateIndex",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, string, []string, bool) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).DeferredCommitFailures",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() uint64"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Dialect",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() Dialect"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).DisableAuditLog",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func()"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).EnableAuditLog",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, AuditConfig) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Exec",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, ...any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).GetClient",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (*Client, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).IntrospectSchema",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (Schema, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Logger",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *slog.Logger"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Migrate",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, ...any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).MigrateRegistered",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).PlanMigration",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, ...any) (Plan, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).PlanMigrationRegistered",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (Plan, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Raw",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *sql.DB"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).RawQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, ...any) (*sql.Rows, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).RegisterModel",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).RegisteredModels",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() []any"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Sync",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, SyncOptions, ...any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Tx",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, func(tx *Tx) error) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).UseEventBus",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(EventBus)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).Validate",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Client).WithOptions",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...any) (*Client, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Cursor[T]).Close",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Cursor[T]).Err",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Cursor[T]).Next",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Cursor[T]).Scan",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*T) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*JSON[T]).Scan",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*JoinBuilder[T]).On",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*JoinBuilder[T]).OnExpr",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(Expr) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*JoinBuilder[T]).OnRaw",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*ListenerFactory).CreateListener",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (EventListener, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*LoggerEventBus).Publish",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Event) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).AcquireMigrationLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, DBConnector, string, time.Duration) (MigrationLock, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).AlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, quarkdriver.Executor, quarkdriver.ColumnChange) ([]string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).AlterTableAddColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).AlterTableAlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).AlterTableDropColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).AutoIncrementColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (string, string)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).BoolLiteral",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).BuildProcedureCall",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).BuildRoutineQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).ColumnType",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quarkdriver.ColumnSpec) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).CreateIndexIfNotExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, []string, bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).CreateTableIfNotExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).CurrentTimestamp",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).DropCheck",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).DropForeignKey",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).DropIndex",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).IntrospectSchema",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Executor) (Schema, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).IsAlreadyExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quarkdriver.SchemaObject, error) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).JSONExtract",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) (string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).LastInsertIDQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).LimitOffset",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).LockSuffix",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(LockOptions) (string, string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).Placeholder",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).Placeholders",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).Quote",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).ReleaseSavepointStmt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).RenameColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).RenameTable",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).Returning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).RollbackToSavepointStmt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).SavepointStmt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).SupportsLastInsertID",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).SupportsReturning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).SupportsTransactionalDDL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).UpsertSQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]string, []string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).AcquireMigrationLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, DBConnector, string, time.Duration) (MigrationLock, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).AlterTableAlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).AutoIncrementColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (string, string)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).BoolLiteral",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).ColumnType",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quarkdriver.ColumnSpec) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).CreateSequence",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int64, int64) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).CreateSystemVersionedTable",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).DropCheck",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).HistoryBetween",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).HistoryQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).IntrospectSchema",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Executor) (Schema, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).JSONExtract",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) (string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).JSONTable",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, ...string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).LastInsertIDQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).LimitOffset",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).LockSuffix",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(LockOptions) (string, string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).NextVal",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).RenameColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).Returning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).SupportsLastInsertID",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).SupportsReturning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).SupportsTransactionalDDL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MariaDBDialect).UpsertSQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]string, []string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).AcquireMigrationLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, DBConnector, string, time.Duration) (MigrationLock, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).AlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, quarkdriver.Executor, quarkdriver.ColumnChange) ([]string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).AlterTableAddColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).AlterTableAlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).AlterTableDropColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).AutoIncrementColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (string, string)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).BoolLiteral",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).BuildProcedureCall",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).BuildRoutineQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).ColumnType",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quarkdriver.ColumnSpec) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).CreateIndexIfNotExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, []string, bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).CreateTableIfNotExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).CurrentTimestamp",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).DropCheck",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).DropForeignKey",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).DropIndex",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).IntrospectSchema",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Executor) (Schema, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).IsAlreadyExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quarkdriver.SchemaObject, error) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).JSONExtract",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) (string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).LastInsertIDQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).LimitOffset",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).LockSuffix",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(LockOptions) (string, string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).Placeholder",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).Placeholders",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).Quote",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).RenameColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).RenameTable",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).Returning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).SupportsLastInsertID",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).SupportsReturning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).SupportsTransactionalDDL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).UpsertSQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]string, []string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OTelEventBus).Publish",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Event) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).AcquireMigrationLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, DBConnector, string, time.Duration) (MigrationLock, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).AlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, quarkdriver.Executor, quarkdriver.ColumnChange) ([]string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).AlterTableAddColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).AlterTableAlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).AlterTableDropColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).AutoIncrementColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (string, string)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).BoolLiteral",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).BuildProcedureCall",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).BuildRoutineQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).ColumnType",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quarkdriver.ColumnSpec) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).CreateIndexIfNotExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, []string, bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).CreateTableIfNotExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).CurrentTimestamp",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).IntrospectSchema",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Executor) (Schema, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).IsAlreadyExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quarkdriver.SchemaObject, error) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).JSONExtract",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) (string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).LastInsertIDQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).LimitOffset",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).LockSuffix",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(LockOptions) (string, string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).MapColumnType",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).Placeholder",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).Placeholders",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).Quote",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).ReleaseSavepointStmt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).RenameColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).RenameTable",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).Returning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).RollbackToSavepointStmt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).SavepointStmt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).SupportsLastInsertID",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).SupportsReturning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).SupportsTransactionalDDL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*OracleDialect).UpsertSQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]string, []string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).AcquireMigrationLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, DBConnector, string, time.Duration) (MigrationLock, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).AlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, quarkdriver.Executor, quarkdriver.ColumnChange) ([]string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).AlterTableAddColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).AlterTableAlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).AlterTableDropColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).AutoIncrementColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (string, string)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).BoolLiteral",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).BuildProcedureCall",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).BuildRoutineQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).ColumnType",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quarkdriver.ColumnSpec) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).CurrentTimestamp",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).IntrospectSchema",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Executor) (Schema, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).JSONExtract",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) (string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).LastInsertIDQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).LimitOffset",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).LockSuffix",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(LockOptions) (string, string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).Placeholder",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).Placeholders",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).Quote",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).RenameColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).RenameTable",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).Returning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).SupportsLastInsertID",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).SupportsReturning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).SupportsTransactionalDDL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*PostgresDialect).UpsertSQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]string, []string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).AllowUnbounded",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Apply",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...Scope[T]) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).AsSubquery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (*Subquery, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Avg",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) (float64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Cache",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(time.Duration, ...string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Count",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Create",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*T) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).CreateBatch",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]*T) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).CrossJoin",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Cursor",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (*Cursor[T], error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Delete",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*T) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).DeleteBatch",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]any) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).DeleteBy",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Distinct",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Except",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*Query[T]) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).ExceptAll",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*Query[T]) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Find",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(any) (T, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).First",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (T, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).ForShare",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).ForUpdate",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).FromCTE",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).FromTable",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).FullJoin",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) *JoinBuilder[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).GroupBy",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).HardDelete",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*T) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Having",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, any) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).HavingAggregate",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string, any) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).HavingExpr",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(Expr) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Intersect",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*Query[T]) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).IntersectAll",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*Query[T]) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Iter",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(func(T) error) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Join",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) *JoinBuilder[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).LeftJoin",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) *JoinBuilder[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Limit",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).List",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() ([]T, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Max",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) (float64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Min",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) (float64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).MustAsSubquery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Subquery"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).NoWait",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Offset",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).OnlyTrashed",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Or",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(func(*Query[T]) *Query[T]) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).OrderBy",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Paginate",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int, int) (*Page[T], error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).PaginateAfter",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int, string) (*KeysetPage[T], error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Preload",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).PreloadWhere",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string, any) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Restore",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*T) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).RightJoin",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) *JoinBuilder[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Select",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).SelectExpr",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, Expr) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).SkipLocked",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Sum",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) (float64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Track",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *TrackedQuery[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Union",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*Query[T]) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).UnionAll",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*Query[T]) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Unscoped",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Update",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*T) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).UpdateBatch",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]*T) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).UpdateFields",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*T, ...string) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).UpdateMap",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(map[string]any) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Upsert",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(*T, []string, []string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).UpsertBatch",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]*T, []string, []string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Where",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, any) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereBetween",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, any, any) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereContains",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereEndsWith",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereExpr",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(Expr) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereIn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, []any) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereJSON",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string, any) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereLike",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereNot",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, any) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereNotLike",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereP",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...Predicate) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereStartsWith",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WhereSubquery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).With",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, *Subquery) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WithRecursive",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, *Subquery) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WithTrashed",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).WithoutAssociations",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Range[T]).Scan",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Routine[T]).First",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (T, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Routine[T]).List",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() ([]T, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Routine[T]).Scalar",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (T, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).AlterTableAddColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).AlterTableAlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).AlterTableDropColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).AutoIncrementColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (string, string)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).BoolLiteral",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).BuildProcedureCall",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).BuildRoutineQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).ColumnType",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quarkdriver.ColumnSpec) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).CurrentTimestamp",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).IntrospectSchema",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Executor) (Schema, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).JSONExtract",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) (string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).LastInsertIDQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).LimitOffset",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).LockSuffix",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(LockOptions) (string, string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).Placeholder",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).Placeholders",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).Quote",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).RebuildsTables",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).RenameColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).RenameTable",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).Returning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).SupportsLastInsertID",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).SupportsReturning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).SupportsTransactionalDDL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*SQLiteDialect).UpsertSQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]string, []string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*ShardRouter).GetClient",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (*Client, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*ShardRouter).ShardNames",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Subquery).SQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (string, []any)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*TenantRouter).ActiveTenants",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*TenantRouter).GetClient",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (*Client, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*TenantRouter).ResolveTenant",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*TenantRouter).Tx",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, func(tx *Tx) error) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*TrackedQuery[T]).Find",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(any) (*Tracked[T], error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*TrackedQuery[T]).First",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (*Tracked[T], error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*TrackedQuery[T]).List",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() ([]*Tracked[T], error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tracked[T]).Changed",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tracked[T]).Save",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tx).Commit",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tx).OnCommit",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(func(context.Context) error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tx).OnRollback",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(func(context.Context) error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tx).ReleaseSavepoint",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tx).Rollback",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tx).RollbackTo",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tx).Savepoint",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Tx).Tx",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, func(tx *Tx) error) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Window).OrderBy",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(Expr, bool) *Window"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Window).PartitionBy",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...Expr) *Window"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Window).Range",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(FrameBound, FrameBound) *Window"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Window).Rows",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(FrameBound, FrameBound) *Window"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(AfterCreateHook).AfterCreate",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(AfterDeleteHook).AfterDelete",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(AfterFindHook).AfterFind",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(AfterUpdateHook).AfterUpdate",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Array[T]).Len",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Array[T]).Slice",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() []T"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Array[T]).Value",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (driver.Value, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(BaseMiddleware).WrapExec",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(ExecFunc) ExecFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(BaseMiddleware).WrapQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(QueryFunc) QueryFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(BaseMiddleware).WrapQueryRow",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(QueryRowFunc) QueryRowFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(BeforeCreateHook).BeforeCreate",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(BeforeDeleteHook).BeforeDelete",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(BeforeFindHook).BeforeFind",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(BeforeUpdateHook).BeforeUpdate",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(CacheLocker).AcquireLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, time.Duration) (bool, func() error, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(CacheStore).Delete",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(CacheStore).Get",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string) ([]byte, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(CacheStore).InvalidateTags",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, ...string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(CacheStore).Set",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, []byte, time.Duration, ...string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(ClientProvider).GetClient",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (*Client, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Event).Kind",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Event).Payload",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() any"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Event).Table",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(EventBus).Publish",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Event) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Expr).ToSQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(Dialect, *SQLGuard) (string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(JSON[T]).Value",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (driver.Value, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Middleware).WrapExec",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(ExecFunc) ExecFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Middleware).WrapQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(QueryFunc) QueryFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Middleware).WrapQueryRow",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(QueryRowFunc) QueryRowFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpAddCheck).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpAddColumn).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpAddForeignKey).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpAlterColumn).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpCreateIndex).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpCreateTable).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpDropCheck).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpDropColumn).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpDropForeignKey).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpDropIndex).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(OpDropTable).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Operation).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Plan).Down",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (Plan, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Plan).Hash",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Plan).IsEmpty",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Plan).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(QueryObserver).ObserveQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(QueryEvent)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Range[T]).PGLiteral",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(Range[T]).Value",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (driver.Value, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(ShardKeyer).ShardKey",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).Between",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(T, T) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).Eq",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(T) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).Gt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(T) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).Gte",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(T) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).In",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...T) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).IsNotNull",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).IsNull",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).Lt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(T) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).Lte",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(T) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).Name",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).Neq",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(T) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedColumn[T]).NotIn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...T) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedStringColumn).Contains",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedStringColumn).EndsWith",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedStringColumn).Like",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedStringColumn).LikeEscaped",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedStringColumn).NotLike",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedStringColumn).NotLikeEscaped",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) Predicate"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "(TypedStringColumn).StartsWith",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) Predicate"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(Validator).Validate",
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Add",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "AfterCreateHook",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "AfterDeleteHook",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "AfterFindHook",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "AfterUpdateHook",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "And",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(...Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Array",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{V []T}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "AuditConfig",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{UserFromContext func(context.Context) string; TenantFromContext func(context.Context) string; IncludeTables []string; ExcludeTables []string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BackfillSpec",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Name string; Table string; PKColumn string; BatchSize int; Process func(ctx context.Context, batchPKs []int64) error}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BaseMiddleware",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BaseQuery",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BeforeCreateHook",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BeforeDeleteHook",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BeforeFindHook",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BeforeUpdateHook",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BindInsert",
-      "kind": "const"
+      "kind": "const",
+      "sig": "BindMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BindMode",
-      "kind": "type"
+      "kind": "type",
+      "sig": "int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "BindUpdate",
-      "kind": "const"
+      "kind": "const",
+      "sig": "BindMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CacheConfig",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{TTL time.Duration; Tags []string; Enabled bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CacheLocker",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CacheStore",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Call",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, ClientProvider, string, ...any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CanonicalType",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Case",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() *CaseBuilder"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CaseBuilder",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2104,27 +2529,32 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CheckGeneratedDrift",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(reflect.Type) (bool, bool)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Client",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ClientProvider",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Cmp",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, string, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Col",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2141,27 +2571,32 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Contains",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, string) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CountDistinct",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CumeDist",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "CurrentRow",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() FrameBound"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Cursor",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2178,42 +2613,50 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DatabasePerTenant",
-      "kind": "const"
+      "kind": "const",
+      "sig": "TenantStrategy"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DefaultLimits",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Limits"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DefaultShardResolver",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DefaultTenantConfig",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() TenantConfig"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DeleteBatchOf",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any, V any](*Query[T], []V) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DenseRank",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DetectDialect",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) (Dialect, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "DetectDialectByName",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) (Dialect, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2224,147 +2667,176 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Diff",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Schema, Schema) []Operation"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Divide",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "EndsWith",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, string) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Eq",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrConnection",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrConstraintViolation",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrDialectNotSupported",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrEventEmitFailed",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrGeneratedStub",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrInvalidIdentifier",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrInvalidJSONPath",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrInvalidJoin",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrInvalidModel",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrInvalidQuery",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrInvalidTag",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrInvalidTimezone",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrIrreversibleOperation",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrListenerClosed",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrLockTimeout",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrNoSubscription",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrNotFound",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrRLSNotEnforced",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrStaleEntity",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrTenantMismatch",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrTimeout",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ErrUnsupportedFeature",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "EscapeLike",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Event",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "EventBus",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2381,7 +2853,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ExecFunc",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(context.Context, Executor, string, []any) (sql.Result, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2392,38 +2865,45 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Exists",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*Subquery) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Expr",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "FieldMeta",
       "kind": "type",
-      "alias_of": "github.com/jcsvwinston/quark/internal/schema.FieldMeta"
+      "alias_of": "github.com/jcsvwinston/quark/internal/schema.FieldMeta",
+      "sig": "= struct{Index int; Column string; Kind reflect.Kind; Type reflect.Type; IsPK bool; OldColumn string; NotNull bool; Default string; Unique bool; IndexName string; Check string; Size int; Precision int; Scale int; IsVersion bool; TZName string; TZ *time.Location}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "FirstValue",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Following",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(int) FrameBound"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "For",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any](context.Context, ClientProvider) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ForTx",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any](context.Context, *Tx) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2434,72 +2914,86 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "FrameBound",
-      "kind": "type"
+      "kind": "type",
+      "sig": "string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Func",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, ...Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "GenContractVersion",
-      "kind": "const"
+      "kind": "const",
+      "sig": "untyped int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "GeneratedBinderRegistered",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(reflect.Type) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "GeneratedMeta",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{ContractVersion int; ModelHash string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "GetModelMeta",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any]() *ModelMeta"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "GetModelMetaByType",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(reflect.Type) *ModelMeta"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Gt",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Gte",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "HasPlaceholders",
-      "kind": "var"
+      "kind": "var",
+      "sig": "func(query string) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "HashModelFields",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func([]ModelField) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "HashShardFunc",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func([]string) ShardFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "In",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, ...Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "InSub",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, *Subquery) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2510,77 +3004,92 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "IsDeadlock",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(error) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "IsUniqueViolation",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(error) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "JSON",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{V T}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "JSONExtract",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, string) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "JoinBuilder",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "KeysetPage",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{Items []T; Next string; HasMore bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Lag",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, int) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "LastValue",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Lead",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, int) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Like",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, string) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Limits",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{MaxQueryLength int; MaxResults int; MaxJoins int; MaxWhereConditions int; QueryTimeout time.Duration; AllowRawQueries bool; SafeMigrations bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ListenerFactory",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Lit",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(any) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "LockForShare",
-      "kind": "const"
+      "kind": "const",
+      "sig": "quarkdriver.LockMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "LockForUpdate",
-      "kind": "const"
+      "kind": "const",
+      "sig": "quarkdriver.LockMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2591,7 +3100,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "LockNone",
-      "kind": "const"
+      "kind": "const",
+      "sig": "quarkdriver.LockMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2602,42 +3112,50 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "LoggerEventBus",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Lt",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Lte",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "MSSQL",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Dialect"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "MSSQLDialect",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "MariaDB",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Dialect"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "MariaDBDialect",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{MySQLDialect}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Middleware",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -2654,365 +3172,437 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ModelField",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Name string; Column string; GoType string; IsPK bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ModelHash",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(reflect.Type) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ModelMeta",
       "kind": "type",
-      "alias_of": "github.com/jcsvwinston/quark/internal/schema.ModelMeta"
+      "alias_of": "github.com/jcsvwinston/quark/internal/schema.ModelMeta",
+      "sig": "= struct{Table string; PK internal/schema.PKMeta; HasPK bool; CompositePK []internal/schema.PKMeta; HasCompositePK bool; Fields []internal/schema.FieldMeta; FieldByCol map[string]*internal/schema.FieldMeta; Relations map[string]*internal/schema.RelationMeta; VersionFieldIndex int; HasTZ bool; TZError error; TagError error; TagWarnings []string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Multiply",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "MySQL",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Dialect"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "MySQLDialect",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NTile",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(int) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Ne",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "New",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, string, ...any) (*Client, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewListenerFactory",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*Client) *ListenerFactory"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewLoggerEventBus",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*slog.Logger) *LoggerEventBus"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewOTelEventBus",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*slog.Logger) *OTelEventBus"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewRoutine",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any](context.Context, ClientProvider, string, ...any) *Routine[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewSQLGuard",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() *SQLGuard"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewShardRouter",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(map[string]*Client, ShardResolver, ShardFunc) (*ShardRouter, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewTenantRouter",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(TenantConfig, func(ctx context.Context) string, func(tenantID string) (*Client, error)) *TenantRouter"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewTypedColumn",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any](string) TypedColumn[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewTypedStringColumn",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) TypedStringColumn"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewWindow",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() *Window"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NewWithDB",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, *sql.DB, ...any) (*Client, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Not",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NotExists",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*Subquery) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NotIn",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, ...Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NotInSub",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, *Subquery) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NotLike",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, string) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Notify",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, ClientProvider, string, string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NthValue",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, int) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "NullOf",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any]() Nullable[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Nullable",
       "kind": "type",
-      "alias_of": "database/sql.Null"
+      "alias_of": "database/sql.Null",
+      "sig": "[T any] = sql.Null[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OTelEventBus",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpAddCheck",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; Check Check}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpAddColumn",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; Column Column}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpAddForeignKey",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; ForeignKey ForeignKey}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpAlterColumn",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; Old Column; New Column}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpCreateIndex",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; Index Index}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpCreateTable",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table Table}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpDropCheck",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; Check string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpDropColumn",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; Column string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpDropForeignKey",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; ForeignKey string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpDropIndex",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; Index string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OpDropTable",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Operation",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface (sealed)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Option",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(*Client)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Or",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(...Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Oracle",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Dialect"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "OracleDialect",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Over",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, *Window) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Page",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{Items []T; Total int64; Page int; PageSize int; TotalPages int64}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "PercentRank",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Plan",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Ops []Operation}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "PoolOption",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface (sealed)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "PostgreSQL",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Dialect"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "PostgresDialect",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Preceding",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(int) FrameBound"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Predicate",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Query",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{BaseQuery}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "QueryEvent",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{SQL string; Args []any; Duration time.Duration; Rows int64; Error error; Table string; Operation string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "QueryFunc",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(context.Context, Executor, string, []any) (*sql.Rows, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "QueryObserver",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "QueryRowFunc",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(context.Context, Executor, string, []any) *sql.Row"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Range",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{Lower T; Upper T; Bounds string; Empty bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Rank",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RegisterDialect",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, Dialect)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RegisterGeneratedMeta",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(reflect.Type, GeneratedMeta)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RegisterTypeMapper",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(reflect.Type, TypeMapper)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RegisterTypedBinder",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(reflect.Type, TypedBinder)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RegisterTypedScanner",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(reflect.Type, TypedScanner)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RelationMeta",
       "kind": "type",
-      "alias_of": "github.com/jcsvwinston/quark/internal/schema.RelationMeta"
+      "alias_of": "github.com/jcsvwinston/quark/internal/schema.RelationMeta",
+      "sig": "= struct{Type string; Field string; JoinCol string; JoinTable string; JoinFK string; JoinRefFK string; PolyType string; PolyTypeColumn string; PolyIDColumn string; RefType reflect.Type; IsSlice bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ReplicaLeastConn",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ReplicaStrategy"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ReplicaRandom",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ReplicaStrategy"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ReplicaRoundRobin",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ReplicaStrategy"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ReplicaStrategy",
-      "kind": "type"
+      "kind": "type",
+      "sig": "int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3023,7 +3613,8 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Routine",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3034,38 +3625,45 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RowLevelSecurity",
-      "kind": "const"
+      "kind": "const",
+      "sig": "TenantStrategy"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RowLevelSecurityClient",
-      "kind": "const"
+      "kind": "const",
+      "sig": "TenantStrategy"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RowLevelSecurityNative",
-      "kind": "const"
+      "kind": "const",
+      "sig": "TenantStrategy"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "RowNumber",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SQLGuard",
       "kind": "type",
-      "alias_of": "github.com/jcsvwinston/quark/internal/guard.SQLGuard"
+      "alias_of": "github.com/jcsvwinston/quark/internal/guard.SQLGuard",
+      "sig": "= struct{} methods{QuoteIdentifier(internal/guard.Quoter, string) (string, error); QuoteQualifiedIdentifier(internal/guard.Quoter, string) (string, error); ValidateIdentifier(string) error; ValidateIdentifiers(...string) error; ValidateJSONPath(string) error; ValidateJoinOn(string) error; ValidateLikePattern(string, string) error; ValidateOperator(string) error; ValidateQualifiedIdentifier(string) error; ValidateRawQuery(string, bool) error}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SQLite",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Dialect"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SQLiteDialect",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3076,22 +3674,26 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ScanTarget",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(any) any"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ScatterCount",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any](context.Context, *ShardRouter, func(*Query[T]) *Query[T]) (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ScatterGather",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any](context.Context, *ShardRouter, func(*Query[T]) *Query[T], ScatterMerge[T]) ([]T, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ScatterMerge",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{Less func(a T, b T) bool; Limit int}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3108,102 +3710,122 @@
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SchemaPerTenant",
-      "kind": "const"
+      "kind": "const",
+      "sig": "TenantStrategy"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Scope",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] func(*Query[T]) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ShardFunc",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ShardKeyFromContext",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ShardKeyer",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ShardResolver",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(context.Context) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "ShardRouter",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SomeOf",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any](T) Nullable[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "StartsWith",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, string) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Sticky",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context) context.Context"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "StrictReadsMode",
-      "kind": "type"
+      "kind": "type",
+      "sig": "int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "StrictReadsOff",
-      "kind": "const"
+      "kind": "const",
+      "sig": "StrictReadsMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "StrictReadsReject",
-      "kind": "const"
+      "kind": "const",
+      "sig": "StrictReadsMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "StrictReadsWarn",
-      "kind": "const"
+      "kind": "const",
+      "sig": "StrictReadsMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "StubBinder",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(any, BindMode) ([]string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "StubScanner",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*sql.Rows, any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Sub",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*Subquery) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Subquery",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Subtract",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Expr, Expr) Expr"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "SyncOptions",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{DryRun bool; NoTransaction bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -3213,1320 +3835,1608 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "TableNamer",
+      "kind": "type",
+      "alias_of": "github.com/jcsvwinston/quark/internal/schema.TableNamer",
+      "sig": "= interface{TableName() string}"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "TenantConfig",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Strategy TenantStrategy; MaxCachedPools int; BaseClient *Client; TenantColumn string; SkipPolicyVerification bool; NativeRLSVar string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TenantRouter",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TenantStrategy",
-      "kind": "type"
+      "kind": "type",
+      "sig": "int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TrackReads",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context) context.Context"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Tracked",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{Entity *T}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TrackedQuery",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Tx",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TxFromContext",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context) *Tx"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TypeMapper",
       "kind": "type",
-      "alias_of": "github.com/jcsvwinston/quark/internal/migrate.TypeMapper"
+      "alias_of": "github.com/jcsvwinston/quark/internal/migrate.TypeMapper",
+      "sig": "= func(string, internal/migrate.TypeOptions) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TypeOptions",
       "kind": "type",
-      "alias_of": "github.com/jcsvwinston/quark/internal/migrate.TypeOptions"
+      "alias_of": "github.com/jcsvwinston/quark/internal/migrate.TypeOptions",
+      "sig": "= struct{Size int; Precision int; Scale int; IsPK bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TypedBinder",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(any, BindMode) ([]string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TypedColumn",
-      "kind": "type"
+      "kind": "type",
+      "sig": "[T any] struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TypedScanner",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(*sql.Rows, any) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "TypedStringColumn",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{TypedColumn[string]}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "UnboundedFollowing",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() FrameBound"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "UnboundedPreceding",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() FrameBound"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "Validator",
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WhereInOf",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func[T any, V any](*Query[T], string, []V) *Query[T]"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "Window",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithCacheCrossInstance",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithCacheJitter",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(float64) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithCacheStore",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(CacheStore) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithCacheXFetchBeta",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(float64) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithConnMaxIdleTime",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(time.Duration) PoolOption"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithConnMaxLifetime",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(time.Duration) PoolOption"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithDeadlockRetry",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(int) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithDefaultTZ",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*time.Location) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithDialect",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Dialect) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithLimits",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Limits) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithLogger",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*slog.Logger) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithMaxIdleConns",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(int) PoolOption"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithMaxOpenConns",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(int) PoolOption"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithMiddleware",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Middleware) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithQueryObserver",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(QueryObserver) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithReplicaDownCooldown",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(time.Duration) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithReplicaStrategy",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(ReplicaStrategy) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithReplicas",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(...string) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithShardKey",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, string) context.Context"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithShardKeyOf",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, ShardKeyer) context.Context"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithSlowQueryThreshold",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(time.Duration) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithStrictColumns",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
       "name": "WithStrictReads",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(StrictReadsMode) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "(*Store).AcquireLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, time.Duration) (bool, func() error, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "(*Store).Close",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func()"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "(*Store).Delete",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "(*Store).Get",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string) ([]byte, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "(*Store).InvalidateTags",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, ...string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "(*Store).Set",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, []byte, time.Duration, ...string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "New",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() *Store"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/memory",
       "name": "Store",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",
       "name": "(*Store).AcquireLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, time.Duration) (bool, func() error, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",
       "name": "(*Store).Delete",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",
       "name": "(*Store).Get",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string) ([]byte, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",
       "name": "(*Store).InvalidateTags",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, ...string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",
       "name": "(*Store).Ping",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",
       "name": "(*Store).Set",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, []byte, time.Duration, ...string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",
       "name": "New",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(Options) *Store"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",
       "name": "Options",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Addr string; Password string; DB int}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/cache/redis",
       "name": "Store",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "(*Migrator).Down",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, int) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "(*Migrator).GetApplied",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (map[string]bool, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "(*Migrator).Init",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "(*Migrator).Up",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, int) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "(*Migrator).UpDryRun",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, int) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "Migration",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{ID string; Name string; Message string; Up func(ctx context.Context, client *quark.Client) error; Down func(ctx context.Context, client *quark.Client) error; UpTx func(ctx context.Context, tx *sql.Tx) error; DownTx func(ctx context.Context, tx *sql.Tx) error}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "Migrator",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "MigratorOption",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(*Migrator)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "NewMigrator",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*quark.Client, ...MigratorOption) *Migrator"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "Register",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*Migration)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "RegisteredCount",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "RegisteredIDs",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "Reset",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func()"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "WithLockName",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) MigratorOption"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "WithLockTimeout",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(time.Duration) MigratorOption"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "WithLogger",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*slog.Logger) MigratorOption"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/migrate",
       "name": "WithoutLock",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() MigratorOption"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "(*Middleware).WrapExec",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quark.ExecFunc) quark.ExecFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "(*Middleware).WrapQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quark.QueryFunc) quark.QueryFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "(*Middleware).WrapQueryRow",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(quark.QueryRowFunc) quark.QueryRowFunc"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "IncludeArgs",
-      "kind": "const"
+      "kind": "const",
+      "sig": "RedactionMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "Middleware",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{quark.BaseMiddleware}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "New",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(...Option) *Middleware"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "Option",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(*Middleware)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "RedactArgs",
-      "kind": "const"
+      "kind": "const",
+      "sig": "RedactionMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "RedactionMode",
-      "kind": "type"
+      "kind": "type",
+      "sig": "int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "WithDBSystem",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/otel",
       "name": "WithSpanRedaction",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(RedactionMode) Option"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(AutoIncrementer).AutoIncrementColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (string, string)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ColumnAlterer).AlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Executor, ColumnChange) ([]string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ColumnKind).String",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ColumnTypeMapper).MapColumnType",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ColumnTyper).BoolLiteral",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ColumnTyper).ColumnType",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(ColumnSpec) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(DBConn).Close",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(DBConn).ExecContext",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, ...any) (Result, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(DBConn).QueryRowContext",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, ...any) Row"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(DBConnector).Conn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (DBConn, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).AlterTableAddColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).AlterTableAlterColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).AlterTableDropColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).BuildProcedureCall",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).BuildRoutineQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).CurrentTimestamp",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).JSONExtract",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) (string, []any, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).LastInsertIDQuery",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).LimitOffset",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).LockSuffix",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(LockOptions) (string, string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).Name",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).Placeholder",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).Placeholders",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(int) []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).Quote",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).RenameColumn",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).RenameTable",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).Returning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).SupportsLastInsertID",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).SupportsReturning",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).SupportsTransactionalDDL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Dialect).UpsertSQL",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func([]string, []string, int) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Executor).ExecContext",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, ...any) (sql.Result, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Executor).QueryContext",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, ...any) (*sql.Rows, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Executor).QueryRowContext",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string, ...any) *sql.Row"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(IdempotentDDL).CreateIndexIfNotExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string, []string, bool) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(IdempotentDDL).CreateTableIfNotExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(IdempotentDDL).IsAlreadyExists",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(SchemaObject, error) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(IdentifierValidator).ValidateIdentifier",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Listener).Close",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Listener).Listen",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Listener).Receive",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) (EventPayload, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Listener).Unlisten",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, string) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(LockOptions).IsZero",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(MigrationLock).Release",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(MigrationLocker).AcquireMigrationLock",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, DBConnector, string, time.Duration) (MigrationLock, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ObjectDropper).DropCheck",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ObjectDropper).DropForeignKey",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(ObjectDropper).DropIndex",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string, string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Result).LastInsertId",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Result).RowsAffected",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() (int64, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Row).Scan",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(...any) error"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(SQLStater).SQLState",
+      "kind": "method",
+      "sig": "func() string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(SavepointDialect).ReleaseSavepointStmt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(SavepointDialect).RollbackToSavepointStmt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(SavepointDialect).SavepointStmt",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(SchemaIntrospector).IntrospectSchema",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func(context.Context, Executor) (Schema, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(TableRebuilder).RebuildsTables",
-      "kind": "method"
+      "kind": "method",
+      "sig": "func() bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "AutoIncrementer",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Check",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Name string; Expression string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Classifier",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{UniqueViolation func(error) bool; Deadlock func(error) bool; TransientConn func(error) bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Classifiers",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() []Classifier"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Column",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Name string; Type string; Nullable bool; Default *string; PrimaryKey bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ColumnAlterer",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ColumnChange",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; Column string; Type string; Nullable bool; Default *string; PrimaryKey bool; TypeChanged bool; NullableChanged bool; DefaultChanged bool; PrimaryKeyChanged bool; HadDefault bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ColumnKind",
-      "kind": "type"
+      "kind": "type",
+      "sig": "int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ColumnSpec",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Kind ColumnKind; Elem ColumnKind; Size int; Precision int; Scale int}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ColumnTypeMapper",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ColumnTyper",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "DBConn",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "DBConnector",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Dialect",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ErrListenerClosed",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ErrLockTimeout",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ErrNoSubscription",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ErrUnsupportedFeature",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "EventPayload",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Channel string; Payload string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Executor",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ForeignKey",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Name string; Columns []string; RefTable string; RefColumns []string; OnDelete string; OnUpdate string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "HasEngine",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "IdempotentDDL",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "IdentifierValidator",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Index",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Name string; Columns []string; Unique bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "IsRegistered",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) bool"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindArray",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindBool",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindBytes",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindDecimal",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindFloat32",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindFloat64",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindIP",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindInt16",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindInt32",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindInt64",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindJSON",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindOther",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindRange",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindString",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindText",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindTime",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "KindUUID",
-      "kind": "const"
+      "kind": "const",
+      "sig": "ColumnKind"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Known",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Name string; Module string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Listener",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ListenerFactory",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(*sql.DB, IdentifierValidator) (Listener, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LockForShare",
-      "kind": "const"
+      "kind": "const",
+      "sig": "LockMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LockForUpdate",
-      "kind": "const"
+      "kind": "const",
+      "sig": "LockMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LockMode",
-      "kind": "type"
+      "kind": "type",
+      "sig": "int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LockNone",
-      "kind": "const"
+      "kind": "const",
+      "sig": "LockMode"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LockOptions",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Mode LockMode; SkipLocked bool; NoWait bool}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LookupDialect",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) (Dialect, bool)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LookupListener",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) (NewListenerFunc, bool)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LookupListenerFactory",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) (ListenerFactory, bool)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "MigrationLock",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "MigrationLocker",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "MissingDriverHint",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "MustRegister",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, Classifier)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "MustRegisterListener",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, NewListenerFunc)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "MustRegisterListenerFactory",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, ListenerFactory)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "NewListenerFunc",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(*sql.DB, *internal/guard.SQLGuard) (Listener, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ObjectConstraint",
-      "kind": "const"
+      "kind": "const",
+      "sig": "SchemaObject"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ObjectDropper",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ObjectIndex",
-      "kind": "const"
+      "kind": "const",
+      "sig": "SchemaObject"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "ObjectTable",
-      "kind": "const"
+      "kind": "const",
+      "sig": "SchemaObject"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Register",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, Classifier) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "RegisterDialect",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, Dialect)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "RegisterListener",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, NewListenerFunc) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "RegisterListenerFactory",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, ListenerFactory) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "RegisteredEngines",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Result",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Row",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "SQLStater",
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "SavepointDialect",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Schema",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Tables []Table}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "SchemaIntrospector",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "SchemaObject",
-      "kind": "type"
+      "kind": "type",
+      "sig": "int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "Table",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Name string; Columns []Column; Indexes []Index; ForeignKeys []ForeignKey; Checks []Check}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "TableRebuilder",
-      "kind": "type"
+      "kind": "type",
+      "sig": "interface"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
       "name": "Case",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Engine string; Classifier quarkdriver.Classifier; Unique error; Deadlock error; Neither []error}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
       "name": "DialectCase",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Dialect quarkdriver.Dialect; DB *sql.DB; DriverName string; Routines *Routines}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
       "name": "Routines",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Function string; Procedure string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
       "name": "Verify",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*testing.T, Case)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest",
       "name": "VerifyDialect",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*testing.T, DialectCase)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver/drivertest/suite",
       "name": "Run",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(*testing.T, *quark.Client)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "Action",
-      "kind": "type"
+      "kind": "type",
+      "sig": "string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "ActionApply",
-      "kind": "const"
+      "kind": "const",
+      "sig": "Action"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "ActionPlan",
-      "kind": "const"
+      "kind": "const",
+      "sig": "Action"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "ActionVerify",
-      "kind": "const"
+      "kind": "const",
+      "sig": "Action"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "ExitDriftDetected",
-      "kind": "const"
+      "kind": "const",
+      "sig": "untyped int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "ExitError",
-      "kind": "const"
+      "kind": "const",
+      "sig": "untyped int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "ExitSuccess",
-      "kind": "const"
+      "kind": "const",
+      "sig": "untyped int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "ParseAction",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) (Action, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "Run",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, Action, *quark.Client, ...any) int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkmigrate",
       "name": "RunWithOutput",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, Action, *quark.Client, io.Writer, io.Writer, ...any) int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "Action",
-      "kind": "type"
+      "kind": "type",
+      "sig": "string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ActionInstallRLSPolicies",
-      "kind": "const"
+      "kind": "const",
+      "sig": "Action"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ActionVerifyRLSPolicies",
-      "kind": "const"
+      "kind": "const",
+      "sig": "Action"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "DefaultInstallOptions",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() InstallOptions"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ErrInvalidCast",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ErrNoRegisteredModels",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ErrNoTenantColumn",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ErrRLSNotEnforced",
-      "kind": "var"
+      "kind": "var",
+      "sig": "error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ExitError",
-      "kind": "const"
+      "kind": "const",
+      "sig": "untyped int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ExitNotEnforced",
-      "kind": "const"
+      "kind": "const",
+      "sig": "untyped int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ExitSuccess",
-      "kind": "const"
+      "kind": "const",
+      "sig": "untyped int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "InstallOptions",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{TenantColumn string; NativeRLSVar string; ForceRLS bool; DryRun bool; LockTimeout time.Duration; LockName string; TenantColumnSQLCast string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "InstallRLSPolicies",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, *quark.Client, InstallOptions) ([]string, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "ParseAction",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) (Action, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "Run",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, []string, *quark.Client) int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "RunWithIO",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, []string, *quark.Client, io.Writer, io.Writer) int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "VerifyFinding",
-      "kind": "type"
+      "kind": "type",
+      "sig": "struct{Table string; TableExists bool; RowSecurityEnabled bool; ForceRowSecurity bool; PolicyPresent bool; PolicyName string; PolicyCommand string; PredicateGap string}"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktenant",
       "name": "VerifyRLSPolicies",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(context.Context, *quark.Client, InstallOptions) ([]VerifyFinding, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktest",
       "name": "Migrate",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(testing.TB, *quark.Client, ...any)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktest",
       "name": "SQLite",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(testing.TB, ...any) *quark.Client"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarktest",
       "name": "Tx",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(testing.TB, *quark.Client, func(tx *quark.Tx))"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/seed",
       "name": "Count",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/seed",
       "name": "Func",
-      "kind": "type"
+      "kind": "type",
+      "sig": "func(context.Context, *quark.Client) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/seed",
       "name": "Get",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string) (Func, bool)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/seed",
       "name": "Names",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func() []string"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/seed",
       "name": "Register",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func(string, Func)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/seed",
       "name": "Reset",
-      "kind": "func"
+      "kind": "func",
+      "sig": "func()"
     }
   ]
 }

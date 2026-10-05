@@ -65,6 +65,49 @@ Rules that follow:
   `Schema`, `LockOptions` or any moved type; a helper on them is a function in
   `quark` or a method declared in `quarkdriver`.
 
+### The published contract (A11 Q6)
+
+[`website/docs/reference/extension-contract.mdx`](../../website/docs/reference/extension-contract.mdx)
+is the contract a driver or dialect author reads: one table with every exported
+type of `quark` and `quarkdriver` that code outside them can implement — every
+interface Quark asserts on a dialect, `Classifier`, `SQLStater`, the listener
+contract and the adapters handed to a migration lock — each marked as an
+extension point or plumbing, with its stability (`stable`, `experimental`,
+`internal-use`) and where Quark uses it. The six schema-path interfaces of Q2
+are `experimental`: no engine outside this repository has implemented them yet.
+
+**The promise those two columns describe is a PROPOSAL pending the owner's
+decision**, and the page says so. Until it is adopted — which will be recorded
+in an ADR — the v1 promise of `website/docs/operations/upgrade.mdx` ("code that
+compiles against v1.3 compiles against every later v1.x") stands for EVERY
+exported type, extension point or plumbing: adding a method to any interface a
+third party can implement is a breaking change, whatever its row says.
+
+Rules that follow:
+
+- **A new implementable type gets its row in the same PR.** `CON-01` in
+  `internal/extbench` computes the census from the compiled packages and
+  fails when the table misses a type, names one twice (an alias and its
+  target are one type), names something outside the census, or uses a value
+  outside the page's vocabulary.
+- **An extension point gains no method within v1** (part of the proposal,
+  and already true under the adopted v1 promise). A new capability of a
+  dialect is a new optional interface Quark type-asserts (the Q2 pattern),
+  never a method added to `Dialect`; adding one breaks every dialect outside
+  the repository. What the proposal would add — that a plumbing interface
+  may gain a method in a minor — is NOT in force: do not rely on it until the
+  ADR exists.
+- **Signatures are frozen.** `acceptance/apisurface.json` records the `sig`
+  of every func, method and type; changing a parameter of a contract method
+  makes CI's freshness check fail with the diff, and `CON-02` checks that the
+  file holds the compiler's signature for the 94 symbols an implementation
+  depends on. Regenerate with `make regen` only when the change is meant.
+- **A convention Quark calls on a caller's type has an exported interface.**
+  `quarkdriver.SQLStater` is the one for a driver's errors: Quark reads its
+  code as a PostgreSQL SQLSTATE and, for unique violations and deadlocks,
+  does not consult the registered classifiers — a driver for another engine
+  registers a `Classifier` and does not implement `SQLState()`.
+
 ## Bugs P0 vivos
 
 (ninguno en este módulo; ver § Historial.)

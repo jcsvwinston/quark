@@ -55,6 +55,15 @@ var inScope = []string{
 
 const loadMode = packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps
 
+// inScopeSet answers whether a package path is one this file inventories.
+var inScopeSet = func() map[string]bool {
+	m := make(map[string]bool, len(inScope))
+	for _, p := range inScope {
+		m[p] = true
+	}
+	return m
+}()
+
 func main() {
 	// Relativa al directorio del módulo del superapp (ADR-0024).
 	out := flag.String("out", "apisurface.json", "ruta de salida")
@@ -98,6 +107,7 @@ func main() {
 // (con sus métodos exportados), vars y consts.
 func extract(pkg *packages.Package) []control.Symbol {
 	var syms []control.Symbol
+	q := qualifier(pkg.Types)
 	scope := pkg.Types.Scope()
 	for _, name := range scope.Names() {
 		obj := scope.Lookup(name)
@@ -106,17 +116,226 @@ func extract(pkg *packages.Package) []control.Symbol {
 		}
 		switch o := obj.(type) {
 		case *types.Func:
-			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "func"})
+			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "func", Sig: funcSig(o.Type().(*types.Signature), q)})
 		case *types.TypeName:
-			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "type", AliasOf: aliasTarget(o)})
-			syms = append(syms, methodsOf(pkg.PkgPath, o)...)
+			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "type", AliasOf: aliasTarget(o), Sig: typeSig(o, q)})
+			syms = append(syms, methodsOf(pkg.PkgPath, o, q)...)
 		case *types.Var:
-			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "var"})
+			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "var", Sig: types.TypeString(o.Type(), q)})
 		case *types.Const:
-			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "const"})
+			syms = append(syms, control.Symbol{Pkg: pkg.PkgPath, Name: o.Name(), Kind: "const", Sig: types.TypeString(o.Type(), q)})
 		}
 	}
 	return syms
+}
+
+// --- signatures ---------------------------------------------------------------
+//
+// The sig field is what makes this file a freeze of the contract and not of
+// its names (A11 Q6, CON-02): a parameter of Dialect.UpsertSQL that changes
+// type, a predicate added to quarkdriver.Classifier, an interface that grows
+// an unexported method — each moves one line of the file, which CI then
+// reports as stale with the diff. The rendering is deterministic and written
+// to be read in that diff:
+//
+//   - A type of the symbol's own package is not qualified. A type of another
+//     package of this module is qualified by its path inside the module
+//     (quarkdriver.LockOptions, internal/migrate.TypeOptions, quark.Client
+//     for the root), so the public migrate package and the internal one do
+//     not read the same; any other by its package name (context.Context,
+//     sql.Rows).
+//   - A signature carries the types of its parameters and results and drops
+//     their names, so renaming a parameter is not a change; a variadic last
+//     parameter is written ...T.
+//   - A struct lists its exported fields in declaration order; an interface
+//     whose methods are symbols of their own is written "interface", or
+//     "interface (sealed)" when it has an unexported method, because a third
+//     party can no longer implement it.
+//
+// internal/extbench renders the same way from the compiler's export data to
+// check what this file records (probeSurfaceFreeze); a change to the rules
+// here is a change there.
+
+// modulePath is the library module; its packages are qualified by their
+// path inside it.
+const modulePath = "github.com/jcsvwinston/quark"
+
+// qualifier writes nothing for the package being inventoried, a package of
+// this module by its path inside the module, and any other by its name.
+func qualifier(self *types.Package) types.Qualifier {
+	return func(p *types.Package) string {
+		switch path := p.Path(); {
+		case path == self.Path():
+			return ""
+		case path == modulePath:
+			return "quark"
+		case strings.HasPrefix(path, modulePath+"/"):
+			return strings.TrimPrefix(path, modulePath+"/")
+		default:
+			return p.Name()
+		}
+	}
+}
+
+// funcSig renders a function or method signature without its receiver:
+// func[T any](context.Context, ...any) (*Query[T], error).
+func funcSig(sig *types.Signature, q types.Qualifier) string {
+	return "func" + typeParamList(sig.TypeParams(), q) + sigBody(sig, q)
+}
+
+// sigBody is a signature's parameter and result lists, as an interface
+// literal writes them after the method name.
+func sigBody(sig *types.Signature, q types.Qualifier) string {
+	s := "(" + strings.Join(tupleTypes(sig.Params(), sig.Variadic(), q), ", ") + ")"
+	switch res := tupleTypes(sig.Results(), false, q); len(res) {
+	case 0:
+	case 1:
+		s += " " + res[0]
+	default:
+		s += " (" + strings.Join(res, ", ") + ")"
+	}
+	return s
+}
+
+func tupleTypes(t *types.Tuple, variadic bool, q types.Qualifier) []string {
+	out := make([]string, 0, t.Len())
+	for i := 0; i < t.Len(); i++ {
+		typ := t.At(i).Type()
+		if variadic && i == t.Len()-1 {
+			if sl, ok := typ.(*types.Slice); ok {
+				out = append(out, "..."+types.TypeString(sl.Elem(), q))
+				continue
+			}
+		}
+		out = append(out, types.TypeString(typ, q))
+	}
+	return out
+}
+
+func typeParamList(tps *types.TypeParamList, q types.Qualifier) string {
+	if tps == nil || tps.Len() == 0 {
+		return ""
+	}
+	parts := make([]string, tps.Len())
+	for i := 0; i < tps.Len(); i++ {
+		tp := tps.At(i)
+		parts[i] = tp.Obj().Name() + " " + types.TypeString(tp.Constraint(), q)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// typeSig renders the definition of a type: its type parameters and its
+// underlying type. An alias of a type an in-scope package declares renders
+// nothing — alias_of names it, and its methods are listed there. An alias of
+// a type of an internal package renders that type's whole definition,
+// methods included, because no symbol of this file lists them: quark.TypeMapper
+// and quark.TableNamer are the shape of internal types, and a third party
+// implements them by that shape.
+func typeSig(tn *types.TypeName, q types.Qualifier) string {
+	if tn.IsAlias() {
+		tparams := ""
+		if a, ok := tn.Type().(*types.Alias); ok && a.TypeParams().Len() > 0 {
+			tparams = typeParamList(a.TypeParams(), q) + " "
+		}
+		target := types.Unalias(tn.Type())
+		if named, ok := target.(*types.Named); ok && named.Obj().Pkg() != nil {
+			path := named.Obj().Pkg().Path()
+			if inScopeSet[path] {
+				return ""
+			}
+			if isOwnInternal(path) {
+				return tparams + "= " + definition(named, q)
+			}
+		}
+		return tparams + "= " + types.TypeString(target, q)
+	}
+	named, ok := tn.Type().(*types.Named)
+	if !ok {
+		return shape(tn.Type().Underlying(), q, false)
+	}
+	if named.TypeParams().Len() > 0 {
+		return typeParamList(named.TypeParams(), q) + " " + shape(named.Underlying(), q, false)
+	}
+	return shape(named.Underlying(), q, false)
+}
+
+// isOwnInternal reports whether path is an internal package of this module,
+// whose types reach the public API only through an alias.
+func isOwnInternal(path string) bool {
+	return strings.HasPrefix(path, modulePath+"/") &&
+		(strings.Contains(path, "/internal/") || strings.HasSuffix(path, "/internal"))
+}
+
+// shape renders an underlying type. full spells an interface's methods out;
+// otherwise they are symbols of their own and the interface is "interface".
+func shape(u types.Type, q types.Qualifier, full bool) string {
+	switch u := u.(type) {
+	case *types.Struct:
+		var fields []string
+		for i := 0; i < u.NumFields(); i++ {
+			f := u.Field(i)
+			if !f.Exported() {
+				continue
+			}
+			if f.Embedded() {
+				fields = append(fields, types.TypeString(f.Type(), q))
+			} else {
+				fields = append(fields, f.Name()+" "+types.TypeString(f.Type(), q))
+			}
+		}
+		return "struct{" + strings.Join(fields, "; ") + "}"
+	case *types.Interface:
+		if !u.IsMethodSet() {
+			return types.TypeString(u, q) // a constraint: its type set is the contract
+		}
+		sealed := false
+		var methods []string
+		for i := 0; i < u.NumMethods(); i++ {
+			m := u.Method(i)
+			if !m.Exported() {
+				sealed = true
+				continue
+			}
+			methods = append(methods, m.Name()+sigBody(m.Type().(*types.Signature), q))
+		}
+		switch {
+		case full && sealed:
+			return "interface{" + strings.Join(methods, "; ") + "} (sealed)"
+		case full:
+			return "interface{" + strings.Join(methods, "; ") + "}"
+		case sealed:
+			return "interface (sealed)"
+		default:
+			return "interface"
+		}
+	case *types.Signature:
+		return funcSig(u, q)
+	default:
+		return types.TypeString(u, q)
+	}
+}
+
+// definition renders a named type that no symbol of this file lists: its
+// underlying type with an interface's methods spelled out, and, for any
+// other type, the exported methods of *T.
+func definition(named *types.Named, q types.Qualifier) string {
+	s := shape(named.Underlying(), q, true)
+	if _, isIface := named.Underlying().(*types.Interface); isIface {
+		return s
+	}
+	mset := types.NewMethodSet(types.NewPointer(named))
+	var methods []string
+	for i := 0; i < mset.Len(); i++ {
+		m := mset.At(i).Obj()
+		if m.Exported() {
+			methods = append(methods, m.Name()+sigBody(m.Type().(*types.Signature), q))
+		}
+	}
+	if len(methods) == 0 {
+		return s
+	}
+	sort.Strings(methods)
+	return s + " methods{" + strings.Join(methods, "; ") + "}"
 }
 
 // aliasTarget devuelve, para un alias de un tipo NOMBRADO, la clave de ese
@@ -147,7 +366,7 @@ func aliasTarget(tn *types.TypeName) string {
 // tipo exportado tiene superficie pública relevante sólo vía promoción). Si en
 // el futuro un tipo embebe otro con métodos exportados de superficie, revisar
 // con `types.NewMethodSet(types.NewPointer(named))`.
-func methodsOf(pkgPath string, tn *types.TypeName) []control.Symbol {
+func methodsOf(pkgPath string, tn *types.TypeName, q types.Qualifier) []control.Symbol {
 	named, ok := tn.Type().(*types.Named)
 	if !ok {
 		return nil
@@ -159,7 +378,7 @@ func methodsOf(pkgPath string, tn *types.TypeName) []control.Symbol {
 		for i := 0; i < iface.NumMethods(); i++ {
 			m := iface.Method(i)
 			if m.Exported() {
-				syms = append(syms, control.Symbol{Pkg: pkgPath, Name: fmt.Sprintf("(%s).%s", recv, m.Name()), Kind: "method"})
+				syms = append(syms, control.Symbol{Pkg: pkgPath, Name: fmt.Sprintf("(%s).%s", recv, m.Name()), Kind: "method", Sig: funcSig(m.Type().(*types.Signature), q)})
 			}
 		}
 		return syms
@@ -176,7 +395,7 @@ func methodsOf(pkgPath string, tn *types.TypeName) []control.Symbol {
 				star = "*"
 			}
 		}
-		syms = append(syms, control.Symbol{Pkg: pkgPath, Name: fmt.Sprintf("(%s%s).%s", star, recv, m.Name()), Kind: "method"})
+		syms = append(syms, control.Symbol{Pkg: pkgPath, Name: fmt.Sprintf("(%s%s).%s", star, recv, m.Name()), Kind: "method", Sig: funcSig(m.Type().(*types.Signature), q)})
 	}
 	return syms
 }

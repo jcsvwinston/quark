@@ -242,7 +242,18 @@ Two guards you WILL meet on your first API change:
   matters: the allowlist reads the surface). If the symbol cannot be
   exercised by the superapp (needs a live engine, or takes `testing.TB`),
   add a REASONED entry to `acceptance/cmd/gen-allowlist/main.go`
-  and regenerate — an unclassified symbol fails the strict gate.
+  and regenerate — an unclassified symbol fails the strict gate. The
+  surface records each symbol's signature too, so a changed parameter or
+  struct field fails the same check, printing the symbol with both
+  signatures: regenerate only when the change is meant, and if the type is
+  one a third party implements, read its row on the
+  [extension contract](website/docs/reference/extension-contract.mdx) first.
+  Its stability column is a proposal pending the owner's decision; until it
+  is adopted, the v1 promise of `website/docs/operations/upgrade.mdx` covers
+  every exported type, so a method added to any implementable interface is
+  a breaking change.
+  A new type a third party can implement needs a row there in the same
+  change, or the extension bench (`CON-01`) fails.
 - **version coherence** (release PRs only): `scripts/check-version-coherence.sh`
   demands the docs bump in the same PR. release-please bumps the marked
   version lines — in SECURITY.md that is the marker line only, not the

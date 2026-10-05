@@ -17,8 +17,8 @@ import (
 // pgSQLState extracts the five-character SQLSTATE from a PostgreSQL driver
 // error, reporting whether err came from PostgreSQL at all.
 //
-// It matches on the `SQLState() string` METHOD rather than on a concrete
-// driver type, because quark supports more than one PostgreSQL driver:
+// It matches on the `SQLState() string` METHOD — quarkdriver.SQLStater —
+// rather than on a concrete driver type, because quark supports more than one PostgreSQL driver:
 // `dialect.go` accepts the driver names "postgres", "pgx", "pgx/v5" and "pq",
 // and the installation guide prescribes `lib/pq` while the events listener
 // requires `pgx/v5`. Both expose the code through this method, as do any
@@ -32,8 +32,7 @@ import (
 // under the driver the docs recommend. errors.As walks the Unwrap chain, so
 // wrapped driver errors classify identically.
 func pgSQLState(err error) (string, bool) {
-	type sqlStater interface{ SQLState() string }
-	var sse sqlStater
+	var sse quarkdriver.SQLStater
 	if errors.As(err, &sse) {
 		return sse.SQLState(), true
 	}

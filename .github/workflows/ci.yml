@@ -131,6 +131,10 @@ jobs:
         # run from inside it and write beside themselves. Its go.mod replaces
         # every Quark requirement with this tree, so no workspace is needed:
         # the surface being inventoried is the one in the pull request.
+        # Every func, method and type carries its signature (A11 Q6), so this
+        # is also the freeze of the extension contract: a parameter of
+        # Dialect.UpsertSQL that changes type fails here, and the diff below
+        # names the symbol and both signatures.
         run: |
           set -euo pipefail
           (cd acceptance && go run ./cmd/gen-apisurface && go run ./cmd/gen-allowlist)
@@ -139,6 +143,9 @@ jobs:
             echo "  make regen"
             echo "and commit the result. Drift:"
             git --no-pager diff --stat acceptance/apisurface.json acceptance/allowlist.json
+            # head may close the pipe early; under pipefail that SIGPIPE
+            # would end the step before it says why.
+            git --no-pager diff -U3 acceptance/apisurface.json acceptance/allowlist.json | head -n 400 || true
             exit 1
           fi
 

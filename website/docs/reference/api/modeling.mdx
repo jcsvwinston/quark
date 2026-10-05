@@ -14,11 +14,17 @@ the [Modeling guide](../../guides/modeling).
 | `AfterUpdate` | `AfterUpdate(ctx context.Context) error` | Hook run after a successful update. |
 | `BeforeDelete` | `BeforeDelete(ctx context.Context) error` | Hook run before a delete. |
 | `AfterDelete` | `AfterDelete(ctx context.Context) error` | Hook run after a successful delete. |
-| `TableName` | `TableName() string` | Override the default (snake-cased, pluralised) table name. |
+| `TableName` | `TableName() string` | Override the default (snake-cased, pluralised) table name. Interface: `quark.TableNamer`. |
+| `Validate` | `Validate(ctx context.Context) error` | Model-level validation, run before the `validate` tags on `Create`, `CreateBatch`, `Upsert` and `UpsertBatch`. Interface: `quark.Validator`. |
 | `GetModelMeta` | `GetModelMeta[T any]() *ModelMeta` | Return cached reflection metadata for model `T`. |
 
 Hooks are optional: implement the methods you need on the model's pointer
-receiver and Quark calls them at the matching point in the write path.
+receiver and Quark calls them at the matching point in the write path. Each
+method Quark looks for has an exported interface — `quark.BeforeCreateHook`,
+`quark.TableNamer`, `quark.Validator` and the rest — so a model can assert it
+at compile time, `var _ quark.Validator = (*User)(nil)`, instead of finding out
+that a misspelt method was never called. The
+[extension contract](../extension-contract) lists them all.
 
 ## Struct Tags
 

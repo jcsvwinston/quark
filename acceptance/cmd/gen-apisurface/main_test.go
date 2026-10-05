@@ -25,6 +25,7 @@ func TestExtractKnownSymbols(t *testing.T) {
 
 	kind := map[string]string{}
 	alias := map[string]string{}
+	sig := map[string]string{}
 	for _, p := range pkgs {
 		if p.Types == nil {
 			continue
@@ -32,6 +33,7 @@ func TestExtractKnownSymbols(t *testing.T) {
 		for _, s := range extract(p) {
 			kind[s.Key()] = s.Kind
 			alias[s.Key()] = s.AliasOf
+			sig[s.Key()] = s.Sig
 		}
 	}
 
@@ -90,6 +92,34 @@ func TestExtractKnownSymbols(t *testing.T) {
 	} {
 		if got := alias[key]; got != want {
 			t.Errorf("%s: alias_of=%q, quería %q", key, got, want)
+		}
+	}
+
+	// The signature is what the file freezes (A11 Q6, CON-02): a parameter
+	// that changes type moves the line, a renamed one does not. An alias of
+	// a type an in-scope package declares records nothing — alias_of says
+	// where — and an alias of an internal type records its whole shape,
+	// because nothing else lists it.
+	for key, want := range map[string]string{
+		leaf + "(Dialect).UpsertSQL":   "func([]string, []string, int) string",
+		leaf + "(Dialect).LockSuffix":  "func(LockOptions) (string, string, error)",
+		leaf + "(SQLStater).SQLState":  "func() string",
+		leaf + "Classifier":            "struct{UniqueViolation func(error) bool; Deadlock func(error) bool; TransientConn func(error) bool}",
+		leaf + "Dialect":               "interface",
+		leaf + "ErrUnsupportedFeature": "error",
+		root + "Dialect":               "",
+		root + "For":                   "func[T any](context.Context, ClientProvider) *Query[T]",
+		root + "New":                   "func(string, string, ...any) (*Client, error)",
+		root + "(*Query[T]).Where":     "func(string, string, any) *Query[T]",
+		root + "(Validator).Validate":  "func(context.Context) error",
+		root + "Scope":                 "[T any] func(*Query[T]) *Query[T]",
+		root + "Nullable":              "[T any] = sql.Null[T]",
+		root + "TableNamer":            "= interface{TableName() string}",
+		root + "TypeMapper":            "= func(string, internal/migrate.TypeOptions) string",
+		root + "ExecFunc":              "func(context.Context, Executor, string, []any) (sql.Result, error)",
+	} {
+		if got := sig[key]; got != want {
+			t.Errorf("%s: sig=%q, quería %q", key, got, want)
 		}
 	}
 }

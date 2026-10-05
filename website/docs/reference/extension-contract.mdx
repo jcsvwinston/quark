@@ -1,0 +1,151 @@
+---
+title: Extension contract
+description: Every type a third party can implement and hand to Quark, whether it is an extension point, its stability, and where Quark uses it.
+---
+
+# Extension contract
+
+Quark calls code you write in a few dozen places: a hook on a model, a cache
+store, a middleware, a dialect for an engine Quark does not ship. Each of those
+places is an exported interface or function type of `quark` or `quarkdriver`.
+This page lists **all of them** — every exported type of the two packages that
+code outside them can implement and hand to Quark — and says, for each one,
+whether you are meant to implement it and what Quark promises about its shape.
+
+## What the columns mean
+
+:::note The promise these columns describe is a proposal
+The *Extension point* and *Stability* columns describe the promise Quark
+intends to make for each type. That promise has not been adopted yet: until
+it is, the [versioning promise](../operations/upgrade#the-versioning-promise)
+stands as written for **every** exported type, marked *yes* or *no* — a minor
+or patch release does not break code that implements any of them. Adopting
+the proposal will be recorded in an architecture decision record and
+announced in the release notes.
+:::
+
+**Extension point.**
+
+- **yes** — Quark calls your implementation, and that is what the type is for.
+  Under the proposal, Quark would not add a method to an interface marked
+  *yes* within `v1`, nor change the signature of a function type marked
+  *yes*. A new capability would arrive as a separate, optional interface that
+  Quark checks for with a type assertion — the way `SavepointDialect` and
+  `SchemaIntrospector` extend `Dialect` — so an implementation written today
+  keeps compiling.
+- **no** — plumbing. Quark, the standard library or Quark's own types
+  implement it; your code receives it, calls its methods or passes along the
+  values Quark gives it, and that use is covered by the
+  [versioning promise](../operations/upgrade#the-versioning-promise). Under
+  the proposal, an implementation of your own would not be: Quark could add a
+  method to such an interface in a minor release.
+
+**Stability.**
+
+- **stable** — Within `v1` it changes only by addition. A change that would
+  break an implementation waits for `v2`, and is announced in the release
+  notes with a deprecation first.
+- **experimental** — Nothing breaks within `v1` either: a minor or a patch
+  release only adds. The shape is not settled yet — no implementation outside
+  Quark's repository has used it — so, under the proposal, `v2` could change
+  it without a deprecation period.
+- **internal-use** — Exported because Quark's own code needs it: what
+  `quark gen` writes, or an earlier contract kept so that code built against
+  it still works. Do not implement it by hand.
+
+Several types of `quarkdriver` are also named in package `quark` by an alias —
+`quark.Dialect` is `quarkdriver.Dialect`, the same type, not a copy. The table
+lists each type once, under the package that declares it, and gives the alias
+beside it.
+
+## The contract
+
+| Type | Extension point | Stability | How it reaches Quark, and where Quark uses it |
+| --- | --- | --- | --- |
+| `quark.TableNamer` | yes | stable | A model's `TableName() string`. Quark asks once per model type, when it builds the model's metadata; Migrate and the query builder use the answer. |
+| `quark.Validator` | yes | stable | A model's `Validate(ctx) error`. `Client.Validate` calls it before the `validate` struct tags; `Create`, `CreateBatch`, `Upsert` and `UpsertBatch` call `Client.Validate` before any SQL, and an error aborts the write. |
+| `quark.BeforeCreateHook` | yes | stable | On the model. `Create`, `CreateBatch`, `Upsert` and `UpsertBatch`, once per entity, before the `INSERT`; an error aborts it. See [Hooks](../guides/hooks). |
+| `quark.AfterCreateHook` | yes | stable | On the model. `Create`, after the `INSERT` — inside a transaction, after the commit. |
+| `quark.BeforeUpdateHook` | yes | stable | On the model. `Update`, `UpdateFields`, `UpdateBatch` and `Tracked.Save`, before the `UPDATE`. |
+| `quark.AfterUpdateHook` | yes | stable | On the model. `Update`, `UpdateFields` and `Tracked.Save`, after the `UPDATE`. |
+| `quark.BeforeDeleteHook` | yes | stable | On the model. `Delete` and `HardDelete`, before the `DELETE`. |
+| `quark.AfterDeleteHook` | yes | stable | On the model. `Delete` and `HardDelete`, after the `DELETE`. |
+| `quark.BeforeFindHook` | yes | stable | On the model. `List`, `First`, `Find`, `Iter` and `Cursor`, before the `SELECT`; an error aborts the read. |
+| `quark.AfterFindHook` | yes | stable | On the model. The same reads, once per query, after the rows are scanned. |
+| `quark.ShardKeyer` | yes | stable | A model's `ShardKey() string`, read by `WithShardKeyOf(ctx, entity)`, which puts the key where a `ShardRouter` resolves it. |
+| `quark.ClientProvider` | yes | stable | What `For[T]`, `Notify` and `NewRoutine` take. `*Client`, `*TenantRouter` and `*ShardRouter` implement it; a router of your own that returns a `*Client` for a context does too. |
+| `quark.Option` | no | stable | The values `New` takes. Build them with the `With…` constructors (`WithDialect`, `WithMiddleware`, …). |
+| `quark.Scope` | yes | stable | A reusable query modifier, `func(*Query[T]) *Query[T]`, applied by `Query[T].Apply`. |
+| `quark.Expr` | no | stable | An expression node. Build it with `Col`, `Lit`, `Eq`, `And`, `Or`, `Not`, `Func`, `Case` and the rest, and pass it to `WhereExpr` or `HavingExpr`. |
+| `quark.Middleware` | yes | stable | `WithMiddleware`. Wraps the statements of queries and writes; schema work, savepoints, `Client.Exec` and `Client.RawQuery` do not pass through it. |
+| `quark.ExecFunc` | yes | stable | What `Middleware.WrapExec` receives and returns. |
+| `quark.QueryFunc` | yes | stable | What `Middleware.WrapQuery` receives and returns. |
+| `quark.QueryRowFunc` | yes | stable | What `Middleware.WrapQueryRow` receives and returns. |
+| `quark.QueryObserver` | yes | stable | `WithQueryObserver`. Called after the statements of queries and writes, and of `Client.Exec` and `Client.RawQuery`; not after `CreateBatch`, schema work or savepoints. |
+| `quark.CacheStore` | yes | stable | `WithCacheStore`. Serves the reads of a query with `Cache(ttl)`; a write to the cached table invalidates them. |
+| `quark.CacheLocker` | yes | stable | Optional on a `CacheStore`. With `WithCacheCrossInstance()`, Quark takes its lock so that one process recomputes an expired key while the others wait and re-read it. |
+| `quark.EventBus` | yes | stable | `Client.UseEventBus`. `Publish` receives every committed `Create`, `Update` and `Delete`, after the commit. |
+| `quark.Event` | no | stable | What Quark hands `EventBus.Publish`: the kind, the table and the model value. |
+| `quark.TypeMapper` | yes | stable | `RegisterTypeMapper(reflect.Type, TypeMapper)`. Migrate and `PlanMigration` ask it for the column type of a Go type, with the dialect's name. |
+| `quark.TypedScanner` | no | internal-use | Written by `quark gen` and registered with `RegisterTypedScanner`; reads of the model scan through it instead of reflection. |
+| `quark.TypedBinder` | no | internal-use | Written by `quark gen` and registered with `RegisterTypedBinder`; writes of the model bind through it. |
+| `quark.ShardFunc` | yes | stable | The third argument of `NewShardRouter`: the shard that owns a key. `HashShardFunc` is the built-in. |
+| `quark.ShardResolver` | yes | stable | The second argument of `NewShardRouter`: the shard key of a context. `DefaultShardResolver` is the built-in. |
+| `quarkdriver.Classifier` | yes | stable | `quarkdriver.Register(engine, c)`, from a driver module's `init`. `IsUniqueViolation`, `IsDeadlock`, the deadlock retry and the read-replica failover consult it. |
+| `quarkdriver.SQLStater` | yes | stable | On a driver's error type. Quark reads its code as a PostgreSQL SQLSTATE before it consults any classifier; pgx and lib/pq implement it. A driver for another engine registers a `Classifier` instead. |
+| `quarkdriver.ListenerFactory` | yes | stable | `quarkdriver.RegisterListenerFactory(engine, f)`. Called when an application opens a listener with `NewListenerFactory(client).CreateListener()`. |
+| `quarkdriver.Listener` (`quark.EventListener`) | yes | stable | What a `ListenerFactory` returns; the application receives it as a `quark.EventListener`. See [Events](../advanced/events). |
+| `quarkdriver.IdentifierValidator` | no | stable | What Quark hands a `ListenerFactory` to validate channel names with: its `SQLGuard`. |
+| `quarkdriver.NewListenerFunc` | no | internal-use | The listener contract before `ListenerFactory`, kept so a driver built against it still registers. Deprecated; removed in `v2`. |
+| `quarkdriver.Dialect` (`quark.Dialect`) | yes | stable | `quarkdriver.RegisterDialect(name, d)`, or `WithDialect(d)`. Every statement Quark writes goes through it. See [Dialects API](api/dialects). |
+| `quarkdriver.SavepointDialect` (`quark.SavepointDialect`) | yes | stable | Optional on a `Dialect`. `Tx.Savepoint`, `Tx.RollbackTo` and `Tx.ReleaseSavepoint`; without it, the ANSI statements. |
+| `quarkdriver.ColumnTypeMapper` (`quark.ColumnTypeMapper`) | yes | stable | Optional on a `Dialect`. Translates the column type of a hand-built plan before `ApplyPlan` writes it. |
+| `quarkdriver.SchemaIntrospector` (`quark.SchemaIntrospector`) | yes | stable | Optional on a `Dialect`. `Client.IntrospectSchema`, `PlanMigration` and `Sync`; without it they return `ErrUnsupportedFeature`. |
+| `quarkdriver.MigrationLocker` (`quark.MigrationLocker`) | yes | stable | Optional on a `Dialect`. `Client.AcquireMigrationLock` and the migrator's schema lock; without it, `ErrUnsupportedFeature`. |
+| `quarkdriver.MigrationLock` (`quark.MigrationLock`) | yes | stable | What a `MigrationLocker` returns; the caller releases it. |
+| `quarkdriver.ColumnTyper` | yes | experimental | Optional on a `Dialect`. The column types `Migrate`, `Sync` and `PlanMigration` write, and those of Quark's own bookkeeping tables; without it, portable types. |
+| `quarkdriver.AutoIncrementer` | yes | experimental | Optional on a `Dialect`. The self-numbered integer primary key `Migrate` and `ApplyPlan` write. |
+| `quarkdriver.IdempotentDDL` | yes | experimental | Optional on a `Dialect`. How `Migrate` and Quark's bookkeeping tables create a table or an index only when it is missing. |
+| `quarkdriver.ColumnAlterer` | yes | experimental | Optional on a `Dialect`. The statements of `ApplyPlan`'s column changes. |
+| `quarkdriver.ObjectDropper` | yes | experimental | Optional on a `Dialect`. The statements with which `ApplyPlan` drops an index, a foreign key or a `CHECK`. |
+| `quarkdriver.TableRebuilder` | yes | experimental | Optional on a `Dialect`. Tells `ApplyPlan` to rebuild a table instead of altering it, as SQLite requires. |
+| `quarkdriver.Executor` (`quark.Executor`) | no | stable | What Quark hands `IntrospectSchema`, `AlterColumn` and the middleware functions: a `*sql.DB`, `*sql.Tx` or `*sql.Conn`. |
+| `quarkdriver.DBConnector` (`quark.DBConnector`) | no | stable | What Quark hands `AcquireMigrationLock`: an adapter over the client's pool. |
+| `quarkdriver.DBConn` (`quark.DBConn`) | no | stable | The dedicated connection a `DBConnector` returns. |
+| `quarkdriver.Result` (`quark.Result`) | no | stable | What `DBConn.ExecContext` returns. |
+| `quarkdriver.Row` (`quark.Row`) | no | stable | What `DBConn.QueryRowContext` returns. |
+
+## Implementing an extension point
+
+Assert the interface at compile time, next to the type that implements it, so
+a mismatch fails your build rather than leaving Quark to skip a method it
+cannot find:
+
+```go
+var (
+    _ quark.TableNamer       = User{}
+    _ quark.Validator        = (*User)(nil)
+    _ quark.BeforeCreateHook = (*User)(nil)
+    _ quarkdriver.Dialect    = (*VerticaDialect)(nil)
+    _ quarkdriver.SQLStater  = (*Error)(nil)
+)
+```
+
+The model conventions — `TableName`, `Validate` and the hooks — are found
+by a type assertion on the model, so a method with the wrong signature is not
+an error: Quark does not see it. The assertion is what tells you.
+
+A dialect for an engine Quark does not ship needs only `quarkdriver`; the
+[Dialects API](api/dialects) shows one registered without importing package
+`quark`, and how to check it with the conformance kit.
+
+## How this page is kept true
+
+The table is checked on every change to Quark. A test computes, from the
+compiled packages, every exported type of `quark` and `quarkdriver` that code
+outside them can implement, and fails when the table above misses one, names
+one twice, names something that is not one, or uses a value outside the
+vocabulary of this page. Quark's CI also records the signature of every method
+and function type listed here, and of the fields of `Classifier`, so a change
+to any of them cannot land without that record changing in the same pull
+request.
