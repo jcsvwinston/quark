@@ -6,6 +6,7 @@ package enterprisebench
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"log/slog"
@@ -1094,16 +1095,31 @@ func probeRlsNativeDelegatesToEngine(t *testing.T, e *env) verdict {
 // RLS-10
 // ---------------------------------------------------------------------
 
-// probeRlsNativeImplicitTxLifecycle measures the two ends of the transaction
-// the Native executor opens behind each query: a write must be committed by
-// the time the call returns (a deferred commit would lose it on the way out),
-// and the connection a read holds must go back to the pool when the request
-// context ends (a held connection is a pool slot that never comes back).
+// probeRlsNativeImplicitTxLifecycle measures the ends of the transaction the
+// Native executor opens behind each query: a write must be committed by the
+// time the call returns (a deferred commit would lose it on the way out); a
+// read's connection is held while the caller is still reading; and it goes
+// back to the pool when the read ends, with the request context still alive —
+// the implicit transaction is scoped to the operation, not to the request
+// (#252), so a connection that waited for the request would be a pool slot
+// held for as long as the request lives.
+//
+// Each fact is read where it is a fact. A cursor holds its connection until
+// Close, so that is where "held" is sampled. The hand-back is asynchronous:
+// the commit runs on the context.AfterFunc of the operation's own context,
+// which List cancels as it returns and a cursor as it closes. So the probe
+// waits for the connection to come back, with a ceiling, instead of reading
+// the pool at an instant. The previous probe sampled the pool right after
+// List returned, raced that commit, and lost now and then under -race
+// (QK-52).
 func probeRlsNativeImplicitTxLifecycle(t *testing.T, e *env) verdict {
 	rlsSetConfigShim(t)
 	shaped, _ := rlsPostgresShaped(t, e, "rls10_implicit_tx")
 	router := rlsRouter(shaped, quark.RowLevelSecurityNative)
 	pool := shaped.Raw()
+	// One connection, so a caller waiting for it is handed it the moment
+	// the read gives it back: the wait is on that event, not on a clock.
+	pool.SetMaxOpenConns(1)
 
 	// Write path: visible from ANOTHER connection the instant Create returns.
 	writeCtx, cancelWrite := context.WithCancel(rlsCtx("ta"))
@@ -1119,32 +1135,67 @@ func probeRlsNativeImplicitTxLifecycle(t *testing.T, e *env) verdict {
 	}
 	durableOnReturn := found == 1
 
-	// Read path: the connection is held for as long as the caller may still
-	// be reading, and handed back when the context ends.
+	// Read path. The request context stays alive until the end of the
+	// probe: the connection has to come back without it.
 	readCtx, cancelRead := context.WithCancel(rlsCtx("ta"))
-	if _, err := quark.For[rlsRow](readCtx, router).List(); err != nil {
-		cancelRead()
-		t.Fatalf("native list: %v", err)
+	defer cancelRead()
+
+	cur, err := quark.For[rlsRow](readCtx, router).Limit(10).Cursor()
+	if err != nil {
+		t.Fatalf("native cursor: %v", err)
 	}
-	heldDuringRequest := pool.Stats().InUse > 0
-	cancelRead()
-	released := false
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		if pool.Stats().InUse == 0 {
-			released = true
-			break
+	heldWhileReading := pool.Stats().InUse > 0
+	read := 0
+	for cur.Next() {
+		read++
+	}
+	if read == 0 {
+		t.Fatal("the native cursor read no rows: the read this control measures did not happen")
+	}
+	if err := cur.Close(); err != nil {
+		t.Fatalf("close the native cursor: %v", err)
+	}
+	releasedAfterCursor := rlsConnHandedBack(pool, readCtx)
+
+	// List reads every row before it returns, and gives the connection back
+	// on the same AfterFunc. With the one connection still out it could not
+	// get one, so it is measured only when the cursor's came back.
+	releasedAfterList := false
+	if releasedAfterCursor {
+		if _, err := quark.For[rlsRow](readCtx, router).Limit(10).List(); err != nil {
+			t.Fatalf("native list: %v", err)
 		}
-		time.Sleep(2 * time.Millisecond)
+		releasedAfterList = rlsConnHandedBack(pool, readCtx)
 	}
 
+	released := releasedAfterCursor && releasedAfterList
 	switch {
-	case durableOnReturn && heldDuringRequest && released:
+	case durableOnReturn && heldWhileReading && released:
 		return present
-	case durableOnReturn || released:
+	case durableOnReturn || releasedAfterCursor || releasedAfterList:
+		t.Logf("durable on return=%v, held while reading=%v, back after the cursor=%v, back after List=%v",
+			durableOnReturn, heldWhileReading, releasedAfterCursor, releasedAfterList)
 		return partial
 	default:
 		return absent
 	}
+}
+
+// rlsConnHandedBack waits for the pool's one connection to come back from the
+// read that held it, and reports whether it did before a ceiling. It waits on
+// the event — Conn blocks until the connection is returned and gets it at
+// once — and the ceiling only bounds a connection that never comes back. The
+// request context must still be alive when it does, or the hand-back waited
+// for the request instead of the operation.
+func rlsConnHandedBack(pool *sql.DB, request context.Context) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return request.Err() == nil
 }
 
 // ---------------------------------------------------------------------
