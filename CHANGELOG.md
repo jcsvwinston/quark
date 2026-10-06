@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0](https://github.com/jcsvwinston/quark/compare/v1.16.0...v1.17.0) (2026-10-06)
+
+
+### Added
+
+* **contract:** the extension contract published with each type's stability, the surface frozen with signatures, and interfaces for TableName, Validate and SQLState (A11 Q6) ([#443](https://github.com/jcsvwinston/quark/issues/443)) ([32d9238](https://github.com/jcsvwinston/quark/commit/32d9238249d500bedd486ade13ffa700860365b1))
+* **drivertest:** a dialect conformance kit a driver runs against its own engine, and the engine suite importable from outside (A11 Q4) ([#441](https://github.com/jcsvwinston/quark/issues/441)) ([340ac49](https://github.com/jcsvwinston/quark/commit/340ac49eb549a286b0f35699b634c0089fb384d4))
+* **observe:** every statement Quark sends — DDL, introspection, savepoints and raw — passes the middleware chain and reaches the observer (A11 Q7) ([#447](https://github.com/jcsvwinston/quark/issues/447)) ([4aec38b](https://github.com/jcsvwinston/quark/commit/4aec38b36995a387af52b4851e98610af0aceb89))
+* **query:** an opt-in statement cache, and CreateBatch keys in one round trip per chunk where SQL Server and MySQL prove them (A12 Q3) ([#452](https://github.com/jcsvwinston/quark/issues/452)) ([4be55a0](https://github.com/jcsvwinston/quark/commit/4be55a0de4a85940729807c0ee077c8b45ceb658))
+* **query:** CheckVersions holds UpdateBatch on a versioned model to the loaded versions, all or nothing, with an ErrStaleEntity per stale row; the default in 2.0 (QK-45) ([#463](https://github.com/jcsvwinston/quark/issues/463)) ([043990b](https://github.com/jcsvwinston/quark/commit/043990b2ab07d0eb05362c4c7841dda22ee50af4))
+
+
+### Fixed
+
+* **cache:** every write path drops its cache tags once it has written, so an Upsert through RETURNING no longer leaves a cached List stale, and a transaction drops them again when it commits (QK-66) ([#462](https://github.com/jcsvwinston/quark/issues/462)) ([bf86b0f](https://github.com/jcsvwinston/quark/commit/bf86b0f8813f1359106f02bf4addde96d2c123f1))
+* **migrate:** ApplyPlan's checkpoint answers only for the schema it was recorded against, so a plan applied again after a reset runs again (QK-51) ([#458](https://github.com/jcsvwinston/quark/issues/458)) ([68a2ff5](https://github.com/jcsvwinston/quark/commit/68a2ff56a782d40ee3f6a30e977522a3345d5a14))
+* **query:** an Upsert with no updateCols returns nil on a PostgreSQL or SQLite conflict, as on the other four engines, and the reference says what each engine does with it (QK-48) ([#459](https://github.com/jcsvwinston/quark/issues/459)) ([e84458c](https://github.com/jcsvwinston/quark/commit/e84458ccb9cc7672c8719ed3a35e11c59a22556c))
+* **query:** an Upsert without updateCols leaves the existing row as it was on MySQL and MariaDB, and the MERGE of SQL Server and Oracle no longer writes the key or created_at (QK-61, QK-62) ([#460](https://github.com/jcsvwinston/quark/issues/460)) ([ff652c0](https://github.com/jcsvwinston/quark/commit/ff652c047ee15240eb8be2f8cc0b1d83ed44f865))
+* **query:** CreateBatch on SQL Server returns the engine's error for a rejected row, not a scan of the NULL key (QK-53) ([#453](https://github.com/jcsvwinston/quark/issues/453)) ([f22b3b6](https://github.com/jcsvwinston/quark/commit/f22b3b6962f52a6bfeefa14a56e04af50b44cbe4))
+* **query:** UpdateBatch on a ForTx query runs in the caller's transaction, under a savepoint, instead of opening its own (QK-57) ([#455](https://github.com/jcsvwinston/quark/issues/455)) ([f740bb6](https://github.com/jcsvwinston/quark/commit/f740bb65a030b2328a1711963d82493d4c8eba4e))
+* **query:** Upsert writes into the entity the key of the row its own statement wrote, so MySQL no longer hands back another row's key and SQL Server and Oracle no longer keep the key the entity carried (QK-63, QK-64) ([#461](https://github.com/jcsvwinston/quark/issues/461)) ([d11f8d0](https://github.com/jcsvwinston/quark/commit/d11f8d0c655cd6f52aec420d76e4d5724b1092e4))
+* **schema:** a foreign key's ON DELETE and ON UPDATE are written as the engine takes them — Oracle's NO ACTION is left out, and an action the engine lacks is refused before any DDL (QK-49) ([#457](https://github.com/jcsvwinston/quark/issues/457)) ([94be356](https://github.com/jcsvwinston/quark/commit/94be3569815184fdf9c8cd5580b71fc4f99b37c8))
+
+
+### Performance
+
+* **query:** List without a JSON copy when nothing caches it, preload with = ANY on PostgreSQL, and placeholders without fmt (A12 Q2) ([#444](https://github.com/jcsvwinston/quark/issues/444)) ([d330862](https://github.com/jcsvwinston/quark/commit/d330862978d30bf35ef3f1c14ea16d35d576e4b0))
+
 ## [1.16.0](https://github.com/jcsvwinston/quark/compare/v1.15.2...v1.16.0) (2026-10-05)
 
 
