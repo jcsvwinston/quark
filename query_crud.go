@@ -1865,7 +1865,16 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 				// key is not written back.
 				return nil
 			}
-			return err
+			if err != nil {
+				return err
+			}
+			// The statement went through the single-row query primitive,
+			// which drops nothing from the cache: drop the table tag and the
+			// tag of the row it inserted or updated, whose key RETURNING
+			// just wrote into the entity. Nothing did, and a cached List
+			// kept answering what the table held before the upsert (QK-66).
+			q.invalidateInsert(ctx, getPKValue(v, q.pk))
+			return nil
 		}
 		// MySQL, and MariaDB through the MySQL dialect: the key comes from
 		// this statement's result, with the update branch made to report
@@ -1880,8 +1889,13 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 			return execErr
 		}
 		if keyAssign != "" {
-			if key, _, write := duplicateKeyRowKey(res, carried); write {
-				setPKValue(v, q.pk, key)
+			if key, found, write := duplicateKeyRowKey(res, carried); found {
+				if write {
+					setPKValue(v, q.pk, key)
+				}
+				// executeExec dropped the table tag; the row's tag can only
+				// be dropped now that its key is known (QK-66).
+				q.invalidateRowTags(ctx, getPKValue(v, q.pk))
 			}
 		}
 		return nil
@@ -2155,6 +2169,14 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		}
 
 		pks := make([]any, 0, len(entities))
+		// executeExec drops the table tag per row; the fresh row tags are
+		// dropped once for the whole batch (one call) so a cached read by PK
+		// can't go stale — parity with single Create. On the way out, so the
+		// rows before a failing one, which stay inserted, are dropped too
+		// (QK-66). No-op without a cache store.
+		if returnPK {
+			defer func() { q.invalidateBatchInsert(ctx, pks) }()
+		}
 		for _, entity := range entities {
 			v := reflect.ValueOf(entity)
 			if v.Kind() == reflect.Ptr {
@@ -2175,12 +2197,6 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 			} else if _, err := q.executeExec(ctx, execSQL, rowArgs); err != nil {
 				return err
 			}
-		}
-		// executeExec already dropped the table tag per row; also drop the fresh
-		// row tags (one call for the whole batch) so a cached read by PK can't go
-		// stale — parity with single Create. No-op without a cache store.
-		if returnPK {
-			q.invalidateBatchInsert(ctx, pks)
 		}
 		return nil
 	}
@@ -2258,6 +2274,13 @@ func (q *Query[T]) backfillPerRow(ctx context.Context, entities []*T, columns []
 	isMSSQL := q.dialect.Name() == "mssql"
 
 	pks := make([]any, 0, len(entities))
+	// MySQL's executeExec drops the table tag per row; the MSSQL query-row
+	// path drops nothing. Drop the table tag + the fresh row tags once for
+	// the whole batch — parity with the Oracle path and single Create — on
+	// the way out: the rows before a failing one stay inserted, and a batch
+	// that failed on SQL Server used to leave them out of every cached read
+	// of the table (QK-66). No-op without a cache store.
+	defer func() { q.invalidateBatchInsert(ctx, pks) }()
 	for _, entity := range entities {
 		v := reflect.ValueOf(entity)
 		if v.Kind() == reflect.Ptr {
@@ -2302,11 +2325,6 @@ func (q *Query[T]) backfillPerRow(ctx context.Context, entities []*T, columns []
 		setPKValue(v, q.pk, id)
 		pks = append(pks, id)
 	}
-	// MySQL's executeExec already dropped the table tag per row; the MSSQL
-	// query-row path invalidates nothing. Drop the table tag + the fresh row
-	// tags once for the whole batch — parity with the Oracle path and single
-	// Create. No-op without a cache store.
-	q.invalidateBatchInsert(ctx, pks)
 	return nil
 }
 
@@ -2334,6 +2352,13 @@ func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns [
 		}
 		defer rows.Close()
 		pks := make([]any, 0, len(entities))
+		// executeQueryPrimary (the RETURNING scan path) invalidates nothing,
+		// unlike executeExec, so drop the table tag + the fresh row tags here
+		// or a cached table-level read goes stale after the batch insert (the
+		// batch sibling of BB-15). On the way out, so a key that fails to
+		// scan after the statement inserted the chunk drops the table tag too
+		// (QK-66).
+		defer func() { q.invalidateBatchInsert(ctx, pks) }()
 		for i := 0; rows.Next(); i++ {
 			if i >= len(entities) {
 				break
@@ -2353,11 +2378,6 @@ func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns [
 		if err := rows.Err(); err != nil {
 			return wrapDBError(err)
 		}
-		// executeQueryPrimary (the RETURNING scan path) invalidates nothing,
-		// unlike executeExec, so drop the table tag + the fresh row tags here or
-		// a cached table-level read goes stale after the batch insert (the batch
-		// sibling of BB-15).
-		q.invalidateBatchInsert(ctx, pks)
 		return nil
 	}
 
@@ -2483,7 +2503,13 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 			args = append(chunk[:len(chunk):len(chunk)], whereArgs...)
 		}
 
-		result, err := q.executeExec(ctx, sqlStr, args)
+		// The ids are the keys of the rows the statement deletes: their row
+		// tags go with the table tag, as for Delete (QK-66).
+		rowTags := make([]string, 0, len(chunk))
+		for _, id := range chunk {
+			rowTags = append(rowTags, q.rowTag(id))
+		}
+		result, err := q.executeExec(ctx, sqlStr, args, rowTags...)
 		if err != nil {
 			return totalAffected, fmt.Errorf("delete batch failed: %w", err)
 		}
@@ -2885,13 +2911,22 @@ func (q *Query[T]) upsertBatchMSSQLBulk(
 // — it met a row and the MERGE has no update branch, or under
 // RowLevelSecurityClient met a row of another tenant — gets no key, and
 // neither does one whose conflict columns matched several rows.
-func (q *Query[T]) upsertBatchMSSQLKeys(ctx context.Context, entities []*T, mergeSQL string, args []any, hasUpdate bool) error {
+func (q *Query[T]) upsertBatchMSSQLKeys(ctx context.Context, entities []*T, mergeSQL string, args []any, hasUpdate bool) (err error) {
 	// A write that reads rows back: on the primary, never a replica. The
 	// seam drops nothing from the cache for it; invalidateBatchInsert does.
 	rows, err := q.executeQueryPrimary(ctx, mergeSQL, args)
 	if err != nil {
 		return fmt.Errorf("upsert batch (mssql) failed: %w", wrapDBError(err))
 	}
+	// A read-back that fails after the MERGE wrote still leaves the rows
+	// written: the table tag goes on the way out (QK-66). A row of another
+	// tenant fails the batch too; the caller's savepoint or transaction
+	// undoes it, and the extra drop costs nothing.
+	defer func() {
+		if err != nil {
+			q.invalidateBatchInsert(ctx, nil)
+		}
+	}()
 	keys := make([]int64, len(entities))
 	written := make([]int, len(entities))
 	for rows.Next() {

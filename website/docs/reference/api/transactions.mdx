@@ -95,6 +95,12 @@ if err := tx.Commit(); err != nil {
 }
 ```
 
+With a cache store, a successful commit invalidates again, in one call and
+before the `After*` hooks run, every cache tag the transaction's writes
+invalidated when they ran. A read from outside the transaction between a write
+and the commit caches the rows as they were, and the commit drops that entry.
+See [Caching](caching#writes-inside-a-transaction).
+
 ### `Rollback() error`
 
 Rolls back the transaction.

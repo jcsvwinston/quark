@@ -79,6 +79,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("CacheInsertInvalidation", func(t *testing.T) {
 		testCacheInsertInvalidation(ctx, t, client)
 	})
+	t.Run("CacheWritePaths", func(t *testing.T) {
+		testCacheWritePaths(ctx, t, client)
+	})
 
 	t.Run("TypeMapper", func(t *testing.T) {
 		testTypeMapper(ctx, t, client)

@@ -117,6 +117,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	}
 	tx := &Tx{tx: sqlTx, client: c, ctx: ctx}
 	c.stmts.beginTx(sqlTx)
+	c.beginTxCacheTags(sqlTx)
 	// A transaction opened on a router's BaseClient with a tenant in its
 	// context is confined to that tenant here, so router.GetClient(ctx) +
 	// client.Tx is the same door as router.Tx and not a way around it
@@ -126,6 +127,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	if c.tenantRouter != nil {
 		if err := c.tenantRouter.confineTx(ctx, tx); err != nil {
 			c.stmts.endTx(sqlTx)
+			c.endTxCacheTags(sqlTx)
 			_ = sqlTx.Rollback()
 			return nil, err
 		}
@@ -254,6 +256,12 @@ func waitDeadlockBackoff(ctx context.Context, attemptIdx int) error {
 // Regla 2). Commit failures surface the underlying database error
 // and the queued hooks are discarded.
 //
+// With a cache store ([WithCacheStore]), a successful commit drops
+// again, in one call and before the hooks run, the cache tags the
+// transaction's writes dropped when they ran: a read from outside the
+// transaction between a write and the commit caches what was committed
+// then, and would otherwise outlive the commit.
+//
 // The context each After* hook receives is the context the originating
 // Query[T] captured at construction time (the ctx passed to
 // [ForTx]). If the caller installed a deadline on that context via
@@ -264,9 +272,19 @@ func waitDeadlockBackoff(ctx context.Context, attemptIdx int) error {
 func (t *Tx) Commit() error {
 	err := t.tx.Commit()
 	t.client.stmts.endTx(t.tx)
+	cacheTags := t.client.endTxCacheTags(t.tx)
 	if err != nil {
 		t.discardAllHooks()
 		return err
+	}
+	// The cache tags the transaction's writes dropped when they ran are
+	// dropped again now that they are committed: a read from outside the
+	// transaction in between cached what was committed then (QK-66). Before
+	// the hooks, so a hook that reads through the cache sees the commit. The
+	// context keeps the transaction's values but not its cancellation: a
+	// caller whose context ended still committed.
+	if len(cacheTags) > 0 {
+		_ = t.client.cacheStore.InvalidateTags(context.WithoutCancel(t.txCtx()), cacheTags...)
 	}
 	// Drain order: model After* hooks first (ORM contract), then the
 	// user-registered OnCommit side-effects. OnRollback callbacks are
@@ -293,6 +311,7 @@ func (t *Tx) Rollback() error {
 	t.discardSavepointMarks()
 	err := t.tx.Rollback()
 	t.client.stmts.endTx(t.tx)
+	t.client.endTxCacheTags(t.tx)
 	t.drainCtxHooks(t.takeOnRollbackHooks(), "quark.hook.on_rollback_error")
 	return err
 }

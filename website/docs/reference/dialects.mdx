@@ -22,7 +22,7 @@ gets you, and where an engine still behaves differently enough to matter.
 | MariaDB | `quark.MariaDB()` | MySQL-compatible upsert behavior (`ON DUPLICATE KEY UPDATE`). Treated as a distinct dialect for DDL edge cases. |
 | SQLite | `quark.SQLite()` | In-memory friendly, `RETURNING` where supported. |
 | MSSQL | `quark.MSSQL()` | `IDENTITY`, `OFFSET/FETCH`, `MERGE` upserts. |
-| Oracle | `quark.Oracle()` | `GENERATED AS IDENTITY`, `MERGE` upserts. |
+| Oracle | `quark.Oracle()` | `GENERATED AS IDENTITY`, `MERGE` upserts (Oracle 23ai or later, see below). |
 
 **MariaDB is detected automatically** since v1.1.0. MariaDB and MySQL share the
 `"mysql"` driver, so the driver name alone can't tell them apart. On a
@@ -107,7 +107,7 @@ the measurements are in
 
 ## Oracle-specific behavior
 
-Oracle differs from the other five engines in two ways worth knowing:
+Oracle differs from the other five engines in three ways worth knowing:
 
 - **Empty strings are NULL.** Oracle stores `''` as `NULL`, so an empty
   string written to a `VARCHAR2`/`CLOB` column comes back as `NULL`. When
@@ -119,6 +119,12 @@ Oracle differs from the other five engines in two ways worth knowing:
   (`ORA-40454: path expression not a literal`). On Oracle the path is inlined
   as a literal instead. It stays injection-safe because the path is validated
   against a strict `[A-Za-z0-9_.]` grammar before it reaches the SQL.
+- **`Upsert` and `UpsertBatch` need Oracle 23ai.** The `MERGE` reads its
+  source row from a `SELECT` without `FROM` and, for a single integer key,
+  reads the key back with `MERGE … RETURNING`. Oracle accepts both from 23ai
+  on; 19c and 21c do not. Quark's Oracle lane runs Oracle Database 23ai Free,
+  and no earlier release is tested. See
+  [`Upsert`](api/crud#upsert).
 
 ## Custom dialects
 

@@ -39,9 +39,9 @@ arguments, so two tenants — or two different filters — never collide.
 
 ### Tags and invalidation
 
-`.Cache(ttl)` tags the entry with the table name **and** a per-row tag
-`<table>:<pk>` for the rows it touches. A write invalidates both, so the cache
-stays correct on its own:
+`.Cache(ttl)` tags the entry with the table name. Every write through the query
+builder invalidates that tag once its statement has written — inside a
+transaction, again when it commits — so the cache stays correct on its own:
 
 ```go
 quark.For[User](ctx, client).Create(&User{Name: "a", Active: true})
@@ -54,13 +54,16 @@ fmt.Println(len(warm), "->", len(after))
 // => 1 -> 2   (the write invalidated the cached list, so the re-read sees the new row)
 ```
 
-`Create`, `Update`, `UpdateFields`, `Tracked.Save`, and `Delete` register the
-affected primary key on top of the table tag. That per-row tag is what keeps a
-single-row write from evicting every cached query on the table.
+A write that knows the primary key of a row it changed — `Create`, `Update`,
+`UpdateFields`, `Tracked.Save`, `Delete`, `Restore`, `UpdateBatch`,
+`DeleteBatch`, and `Upsert` once it reads the key back — also invalidates that
+row's `<table>:<pk>` tag. Cache a by-key read under that tag (and the table tag)
+and a write to another row leaves it in place.
 
-Two cases fall back to the plain table tag, because their affected primary keys
-can't be enumerated: composite keys, and the bulk or WHERE-based methods
-(`UpdateBatch`, `DeleteBatch`, `DeleteBy`).
+The WHERE-based methods (`UpdateMap`, `DeleteBy`) and composite keys invalidate
+the table tag alone, because the affected keys are not enumerated. Raw SQL
+invalidates nothing. The full table is in the
+[Caching API reference](../reference/api/caching#tags).
 
 When you pass **custom** tags, include the table tag too if you still want
 automatic write-invalidation to reach the entry:

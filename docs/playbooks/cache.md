@@ -5,7 +5,7 @@ files:
   - cache.go
   - cache/memory/memory.go
   - cache/redis/redis.go
-last_review: 2026-05-10
+last_review: 2026-10-06
 related_adrs: [0004]
 related_p0: []
 phase: 0
@@ -84,9 +84,12 @@ no cuando cualquier `users` se toca. Los listings siguen cacheados con
 el tag de tabla (`users`), invalidados siempre — la coherencia para
 listings se preserva.
 
-Mutaciones que no conocen la PK (`DeleteBatch` con WHERE complejo,
-`UpdateBatch`, raw Exec, upserts no-PK-única) **sólo invalidan el tag
-de tabla** — el comportamiento histórico, seguro como fallback.
+Mutaciones que no conocen la PK (`DeleteBy` y `UpdateMap` con su WHERE,
+el `UpsertBatch` multi-fila de PG/SQLite/MySQL/MariaDB, upserts cuya clave
+no se lee de vuelta) **sólo invalidan el tag de tabla** — el comportamiento
+histórico, seguro como fallback. El SQL crudo (`Client.Exec`) no invalida
+nada (QK-66, ver abajo); la tabla completa vive en
+`website/docs/reference/api/caching.mdx`.
 **Composite PKs** caen al tag de tabla también (`rowTag()` retorna
 `""` para `HasCompositePK == true`); follow-up posible si surge
 demanda usar un encoding estable de PK compuesta para tag granular.
@@ -110,6 +113,37 @@ chunk; lo llama el path RETURNING de `createBatchStmt` y el path Oracle de
 `CreateBatch`. La regresión añade un caso `CreateBatch` a
 `testCacheInsertInvalidation`. **OJO**: el exerciser `cache` del superapp sólo
 cubre `Create` single — extenderlo a `CreateBatch` es follow-up de harness.
+
+**QK-66 — every write path, audited.** `Upsert` through RETURNING
+(PostgreSQL, SQLite, MariaDB's own dialect, and the guarded RETURNING path
+under `RowLevelSecurityClient`) dropped nothing: it reads its key through
+`executeQueryRow`, the same gap BB-15 closed for `Create`. A cached List kept
+one row after an upsert that inserted a second. Measured on the six engines
+by `internal/enginesuite/cache_write_paths_test.go` (`CacheWritePaths` in the
+SharedSuite, again with `WithStatementCache` in the MySQL/MariaDB/MSSQL/SQLite
+statement-cache suites and through the MySQL dialect on MariaDB), which
+compares a cached read with an uncached one after each write path. Also
+found and fixed: `CreateBatch` failing on a row on SQL Server left the rows
+before it out of every cached read (per-row form via SCOPE_IDENTITY, the
+final `invalidateBatchInsert` was skipped on the error return — it is now
+deferred, as in the Oracle per-row path and the RETURNING chunk);
+`Restore` and `DeleteBatch` did not drop their row tags; MySQL/MariaDB
+`Upsert` did not drop the row tag of the key it reads back
+(`invalidateRowTags`); and a write inside a transaction dropped its tags
+before the commit only, so a read from outside the transaction in between
+cached the old rows past the commit. The fix for the last one: the client
+keeps, per `*sql.Tx` it began while it has a cache store
+(`Client.txCacheTags`, the same keying as the statement cache's
+`beginTx/endTx`), the tags its writes dropped (`Client.invalidate`, called
+by the seam and by every helper), and `Tx.Commit` drops them again in one
+call before the hooks; a rollback drops nothing more. The statement-time
+drop stays, so a cached read inside the transaction does not answer from an
+entry its own write made stale. Raw SQL (`Client.Exec`, `RawQuery`,
+`quark.Call`, `Raw()`) drops nothing — documented and pinned by the
+`RawExecDropsNothing` case. Known residue: a multi-row RETURNING write under
+`RowLevelSecurityNative` (CreateBatch on PostgreSQL) commits its implicit
+transaction in the `context.AfterFunc` of `nativeRLSExecutor.QueryContext`,
+after the batch dropped its tags.
 
 ### ~~Cache key serializa args con `%v`~~ — cerrado (F4-4)
 

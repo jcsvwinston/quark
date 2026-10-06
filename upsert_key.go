@@ -136,6 +136,13 @@ func (q *BaseQuery) mergeRowKeys(ctx context.Context, mergeSQL string, args []an
 	if err != nil {
 		return 0, 0, wrapDBError(err)
 	}
+	// A read-back that fails after the MERGE wrote still leaves the row
+	// written: the table tag goes on the way out (QK-66).
+	defer func() {
+		if err != nil {
+			q.invalidateInsert(ctx, nil)
+		}
+	}()
 	for rows.Next() {
 		if err := rows.Scan(&key); err != nil {
 			_ = rows.Close()
