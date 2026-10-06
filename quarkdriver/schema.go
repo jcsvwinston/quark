@@ -302,3 +302,79 @@ type ObjectDropper interface {
 type TableRebuilder interface {
 	RebuildsTables() bool
 }
+
+// ReferentialEvent names the clause of a FOREIGN KEY a referential action goes
+// in.
+type ReferentialEvent int
+
+const (
+	// OnDelete is the ON DELETE clause: what the engine does to the
+	// referencing rows when the row they reference is deleted.
+	OnDelete ReferentialEvent = iota + 1
+	// OnUpdate is the ON UPDATE clause: what the engine does to the
+	// referencing rows when the key they reference changes.
+	OnUpdate
+)
+
+// String is the clause as SQL writes it: "ON DELETE" or "ON UPDATE".
+func (e ReferentialEvent) String() string {
+	switch e {
+	case OnDelete:
+		return "ON DELETE"
+	case OnUpdate:
+		return "ON UPDATE"
+	}
+	return "unknown"
+}
+
+// ActionSupport is a dialect's answer about one referential action in one
+// clause: whether Quark writes it, leaves it out because the engine does it
+// anyway, or refuses it.
+type ActionSupport int
+
+const (
+	// ActionWritten: the engine accepts the clause, and Quark writes it as
+	// the caller gave it. It is the zero value, and the answer for every
+	// action when the dialect does not implement ReferentialActioner.
+	ActionWritten ActionSupport = iota
+	// ActionImplied: the engine has no clause for the action, and what it
+	// does for a foreign key that names none is that action; Quark writes no
+	// clause. Only the engine's own behaviour can be implied — on every
+	// built-in engine that is NO ACTION.
+	ActionImplied
+	// ActionUnsupported: the engine has no such action. Quark refuses the
+	// foreign key with an error that wraps ErrUnsupportedFeature and names
+	// the clause and the action, before it sends any statement.
+	ActionUnsupported
+)
+
+// ReferentialActioner is the optional interface through which a dialect says
+// which referential actions its engine accepts in a FOREIGN KEY: the ON
+// DELETE and ON UPDATE that Client.AddForeignKey takes, and that ApplyPlan
+// writes for an OpAddForeignKey and for the foreign keys of an OpCreateTable.
+//
+// Quark asks ReferentialAction about every action a foreign key names — an
+// empty one writes no clause and is not asked about — with the action upper
+// case and its words single-spaced: "NO ACTION", "RESTRICT", "CASCADE",
+// "SET NULL" or "SET DEFAULT", or whatever else the caller wrote, in that
+// form. The answer is an ActionSupport. ApplyPlan asks about every foreign
+// key of the plan before it runs the first operation, so a plan with an
+// action the engine lacks changes nothing — an engine without transactional
+// DDL would otherwise keep the operations that ran before it.
+//
+// A dialect that does not implement ReferentialActioner gets every action
+// written as the caller gave it, which is right on the engines that accept
+// the SQL standard's five: PostgreSQL, SQLite, MySQL and MariaDB. SQL Server
+// has no RESTRICT, and implements the interface to refuse it. Oracle has ON
+// DELETE CASCADE and ON DELETE SET NULL only — no ON UPDATE clause, and no
+// clause for NO ACTION, which is what it does for a foreign key that names
+// no action — and implements the interface to leave NO ACTION out and refuse
+// the rest.
+//
+// MySQL and MariaDB accept SET DEFAULT and do not do it: InnoDB refuses the
+// delete or the update, as NO ACTION would, and MariaDB records RESTRICT in
+// its catalog. They keep the default all the same, because refusing the
+// action would fail a statement that succeeds today.
+type ReferentialActioner interface {
+	ReferentialAction(event ReferentialEvent, action string) ActionSupport
+}

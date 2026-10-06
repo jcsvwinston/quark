@@ -59,7 +59,7 @@ var interfaceTypes = map[string]bool{
 	// las implementan los dialectos (sus métodos concretos caen en la regla
 	// de métodos de dialecto) y las consume el ORM, nunca una aplicación.
 	"ColumnTyper": true, "AutoIncrementer": true, "IdempotentDDL": true,
-	"ColumnAlterer": true, "ObjectDropper": true, "TableRebuilder": true,
+	"ColumnAlterer": true, "ObjectDropper": true, "TableRebuilder": true, "ReferentialActioner": true,
 	"AfterCreateHook": true, "AfterUpdateHook": true, "AfterDeleteHook": true, "AfterFindHook": true,
 	"BeforeCreateHook": true, "BeforeUpdateHook": true, "BeforeDeleteHook": true, "BeforeFindHook": true,
 	// The interfaces that name a convention Quark calls on a caller's type
@@ -117,6 +117,11 @@ var manualReasons = map[string]string{
 	// no lo llama en el camino de una aplicación. Lo fija
 	// internal/migrate/classify_test.go.
 	"github.com/jcsvwinston/quark/quarkdriver.(ColumnKind).String": "contrato de dialecto (A11 Q2): String del enum ColumnKind, para mensajes y tests del autor de un dialecto; no es un entry point de aplicación (denominador S7-coverage)",
+	// The clause names of the referential-action question (QK-49): Quark
+	// writes them into a foreign key's DDL and into the error that refuses
+	// an action; the dialect kit asks with them. Not an application's entry
+	// point.
+	"github.com/jcsvwinston/quark/quarkdriver.(ReferentialEvent).String": "dialect contract (QK-49): the clause name of the referential-action question, written by Quark into foreign-key DDL and its refusal; not an application entry point (S7-coverage denominator)",
 
 	// El kit de conformidad recibe *testing.T: sólo es invocable desde un
 	// test, y lo ejecutan los cinco módulos de driver en los suyos.

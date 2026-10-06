@@ -140,7 +140,7 @@ the `quarkdriver` names are the driver author's, and they are interchangeable.
 | `SchemaIntrospector`, `Executor`, and the schema model: `Schema`, `Table`, `Column`, `Index`, `ForeignKey`, `Check` | same names |
 | `ErrUnsupportedFeature`, `ErrLockTimeout` | same names, same values: `errors.Is` matches under either |
 | `RegisterDialect(name, d)`, `LookupDialect(name)` | `quark.RegisterDialect` writes the same registry; `quark.DetectDialect` and `DetectDialectByName` read it before the built-in names |
-| `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`, `ColumnAlterer`, `ObjectDropper`, `TableRebuilder` and their types | only in `quarkdriver` |
+| `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`, `ColumnAlterer`, `ObjectDropper`, `ReferentialActioner`, `TableRebuilder` and their types | only in `quarkdriver` |
 
 `DetectDialect`, `DetectDialectByName`, `ErrDialectNotSupported` and the six
 built-in dialects stay in package `quark`: they are implementations, not
@@ -207,7 +207,8 @@ portable spelling where one exists, or `ErrUnsupportedFeature` where none does.
 It never gets DDL chosen for another engine's name.
 
 `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`, `ColumnAlterer`,
-`ObjectDropper` and `TableRebuilder` are proposed as **experimental** in the
+`ObjectDropper`, `ReferentialActioner` and `TableRebuilder` are proposed as
+**experimental** in the
 [extension contract](../extension-contract): no `v1` release breaks them, but
 no engine outside Quark has implemented them yet, and under the proposal `v2`
 could change their shape without a deprecation period.
@@ -222,6 +223,7 @@ could change their shape without a deprecation period.
 | `Dialect.SupportsTransactionalDDL()` (required) | whether `ApplyPlan` runs a plan in one transaction, and whether `Sync` wraps its changes in one | — every dialect answers |
 | `quarkdriver.ColumnAlterer` | the statements of an in-place column change (`OpAlterColumn`): type, nullability, default, primary key; it may read the catalog through the `Executor` it is given | the dialect's own `AlterTableAlterColumn` for the type, `ALTER COLUMN … SET/DROP NOT NULL`, `SET/DROP DEFAULT`, `ADD CONSTRAINT pk_<table> PRIMARY KEY`; dropping a key returns `ErrUnsupportedFeature`, since its name is in the catalog |
 | `quarkdriver.ObjectDropper` | dropping an index, a foreign key and a `CHECK` by name | `DROP INDEX <index>`, `ALTER TABLE <table> DROP CONSTRAINT <name>` |
+| `quarkdriver.ReferentialActioner` | each referential action a foreign key names in `ON DELETE` and `ON UPDATE` — `AddForeignKey`, `OpAddForeignKey`, the foreign keys of `OpCreateTable`: write it, leave it out because the engine does it without a clause, or refuse it | every action written as given |
 | `quarkdriver.TableRebuilder` | whether the engine changes a table by rebuilding it, SQLite's way | in-place `ALTER` statements |
 
 A method of `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL` or
@@ -292,6 +294,39 @@ and no `ADD`/`DROP CONSTRAINT`, so a column change, a foreign key and a `CHECK`
 rebuild the table inside the plan's transaction. The rebuild reads SQLite's own
 catalog, so only an engine that keeps that catalog can answer true.
 
+SQL Server and Oracle implement `ReferentialActioner`, because each lacks
+actions of the SQL standard's five. Quark asks about every action a foreign key
+names, upper case and single-spaced, and acts on the answer: `ActionWritten`
+writes the clause as the caller gave it, `ActionImplied` leaves it out because
+the engine does that action for a foreign key that names none, and
+`ActionUnsupported` refuses the foreign key with `ErrUnsupportedFeature`, naming
+the clause and the action, before any statement is sent. `ApplyPlan` asks about
+every foreign key of the plan before its first operation, so a refused plan
+changes nothing, on an engine without transactional DDL too.
+
+| Action | PostgreSQL, SQLite | MySQL, MariaDB | SQL Server | Oracle `ON DELETE` | Oracle `ON UPDATE` |
+| --- | --- | --- | --- | --- | --- |
+| `NO ACTION` | written | written | written | left out: the engine's default | left out: the engine's default |
+| `RESTRICT` | written | written | refused | refused | refused |
+| `CASCADE` | written | written | written | written | refused |
+| `SET NULL` | written | written | written | written | refused |
+| `SET DEFAULT` | written | written, not done (below) | written | refused | refused |
+
+Oracle has no `ON UPDATE` clause, and no clause for `NO ACTION` in either
+(ORA-02000 for both); `ON DELETE SET DEFAULT` is ORA-03001. SQL Server has no
+`RESTRICT`. Until Quark asked, each of these reached the engine and failed
+there. SQL Server also refuses a foreign key that would make a cycle or a
+second cascade path to one table (Msg 1785); that depends on the other foreign
+keys of the schema, not on one action, and the engine's error says so.
+
+MySQL and MariaDB accept `SET DEFAULT` and do not do it: InnoDB refuses the
+delete or the update, as `NO ACTION` would, and MariaDB records `RESTRICT` in
+its catalog, so a `Schema` that declares `SET DEFAULT` keeps planning the
+foreign key again there. Their
+dialects write it all the same, because refusing it would fail a statement that
+succeeds today. Declare `NO ACTION`, or `RESTRICT`, which is what the engine
+does.
+
 ### Wrapping a built-in dialect
 
 A dialect that embeds a built-in one to change a method — its name, say —
@@ -327,7 +362,9 @@ wrapper of `quark.PostgreSQL()`, like the one above, forwards `ColumnTyper`,
 `AutoIncrementer`, `ColumnAlterer` and `SchemaIntrospector` — and
 `MigrationLocker` too, for the migrator's lock, which the example leaves out. A
 wrapper of `quark.SQLite()` forwards `ColumnTyper`, `AutoIncrementer`,
-`TableRebuilder` and `SchemaIntrospector`.
+`TableRebuilder` and `SchemaIntrospector`. A wrapper of `quark.MSSQL()` or
+`quark.Oracle()` also forwards `ReferentialActioner`, or its foreign keys are
+written with the actions its engine refuses.
 
 
 ## Checking a dialect
@@ -378,7 +415,11 @@ check that needed it failing, or logged as skipped.
 The six built-in dialects run the kit against their engines in Quark's own CI,
 and the kit found two of them wrong before it shipped: MariaDB dropped a `CHECK`
 with MySQL's `DROP CHECK`, and SQL Server accepted a shared lock that skips
-locked rows, which the engine refuses.
+locked rows, which the engine refuses. `engine/ReferentialActioner` tries the
+SQL standard's five actions in each clause of a foreign key: one the dialect
+has Quark write must be accepted, one it leaves out must be what the engine
+does without a clause, and one it refuses must fail with
+`ErrUnsupportedFeature` before a statement is sent.
 
 `github.com/jcsvwinston/quark/quarkdriver/drivertest/suite` is the engine
 suite: the checks the six built-in engines run on a whole `*quark.Client` —

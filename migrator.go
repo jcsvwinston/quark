@@ -213,6 +213,15 @@ func (c *Client) createIndexOn(ctx context.Context, exec Executor, table, indexN
 // constraintName is the constraint identifier; refTable is the referenced table;
 // columns and refColumns are matched by position.
 //
+// onDelete and onUpdate are referential actions ("CASCADE", "SET NULL",
+// "SET DEFAULT", "RESTRICT", "NO ACTION"); an empty one writes no clause, and
+// the engine applies its default, NO ACTION. They are written as the
+// dialect's engine takes them (quarkdriver.ReferentialActioner): Oracle has
+// no clause for NO ACTION, so it is left out, and an action the engine does
+// not have — RESTRICT on SQL Server; on Oracle anything but ON DELETE CASCADE
+// and ON DELETE SET NULL — returns an error wrapping ErrUnsupportedFeature
+// that names it, and nothing is sent.
+//
 // Example:
 //
 //	client.AddForeignKey(ctx, "orders", "fk_orders_user", []string{"user_id"}, "users", []string{"id"}, "CASCADE", "SET NULL")
@@ -238,12 +247,11 @@ func (c *Client) addForeignKeyOn(ctx context.Context, exec Executor, table, cons
 		quotedRefCols[i] = c.dialect.Quote(col)
 	}
 
-	actions := ""
-	if onDelete != "" {
-		actions += " ON DELETE " + onDelete
-	}
-	if onUpdate != "" {
-		actions += " ON UPDATE " + onUpdate
+	// The constraint's name is in the error already; "" keeps it out of
+	// the refusal.
+	actions, err := referentialClauses(c.dialect, "", onDelete, onUpdate)
+	if err != nil {
+		return fmt.Errorf("AddForeignKey %s: %w", constraintName, err)
 	}
 
 	query := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)%s",
@@ -255,12 +263,84 @@ func (c *Client) addForeignKeyOn(ctx context.Context, exec Executor, table, cons
 		actions,
 	)
 
-	_, err := exec.ExecContext(ctx, query)
-	if err != nil {
+	if _, err := exec.ExecContext(ctx, query); err != nil {
 		if migrate.IsAlreadyExists(c.dialect, quarkdriver.ObjectConstraint, err) {
 			return nil // already exists
 		}
 		return fmt.Errorf("AddForeignKey %s: %w", constraintName, err)
+	}
+	return nil
+}
+
+// referentialClauses renders a foreign key's ON DELETE and ON UPDATE clauses
+// as the dialect's engine takes them (quarkdriver.ReferentialActioner): an
+// action it writes is written as the caller gave it, one it does without a
+// clause is left out, and one it does not have fails the foreign key with
+// ErrUnsupportedFeature naming every such action — before anything is sent.
+// Without a ReferentialActioner every action is written as given, as it
+// always was. An empty action writes no clause.
+func referentialClauses(d Dialect, constraint, onDelete, onUpdate string) (string, error) {
+	ra, asks := d.(quarkdriver.ReferentialActioner)
+	clauses := ""
+	var refused []string
+	for _, a := range []struct {
+		event  quarkdriver.ReferentialEvent
+		action string
+	}{{quarkdriver.OnDelete, onDelete}, {quarkdriver.OnUpdate, onUpdate}} {
+		if a.action == "" {
+			continue
+		}
+		support := quarkdriver.ActionWritten
+		if asks {
+			support = ra.ReferentialAction(a.event, normalizeReferentialAction(a.action))
+		}
+		switch support {
+		case quarkdriver.ActionImplied:
+			continue
+		case quarkdriver.ActionUnsupported:
+			refused = append(refused, a.event.String()+" "+normalizeReferentialAction(a.action))
+			continue
+		}
+		clauses += " " + a.event.String() + " " + a.action
+	}
+	if len(refused) > 0 {
+		name := ""
+		if constraint != "" {
+			name = " " + constraint
+		}
+		return "", fmt.Errorf("%w: foreign key%s: the %s dialect has no %s; declare an action its engine has, or none for the engine's default",
+			ErrUnsupportedFeature, name, d.Name(), strings.Join(refused, " and no "))
+	}
+	return clauses, nil
+}
+
+// normalizeReferentialAction is the form a ReferentialActioner is asked
+// about: upper case, its words single-spaced.
+func normalizeReferentialAction(action string) string {
+	return strings.Join(strings.Fields(strings.ToUpper(action)), " ")
+}
+
+// checkReferentialActions asks the dialect about every foreign key a plan
+// would write, so that a plan with an action the engine lacks is refused
+// before its first operation runs, not half-way through it on an engine
+// whose DDL commits as it goes.
+func (c *Client) checkReferentialActions(plan Plan) error {
+	if _, asks := c.dialect.(quarkdriver.ReferentialActioner); !asks {
+		return nil
+	}
+	for i, op := range plan.Ops {
+		var fks []ForeignKey
+		switch o := op.(type) {
+		case OpAddForeignKey:
+			fks = []ForeignKey{o.ForeignKey}
+		case OpCreateTable:
+			fks = o.Table.ForeignKeys
+		}
+		for _, fk := range fks {
+			if _, err := referentialClauses(c.dialect, fk.Name, fk.OnDelete, fk.OnUpdate); err != nil {
+				return fmt.Errorf("ApplyPlan: op %d (%s): %w", i, op.String(), err)
+			}
+		}
 	}
 	return nil
 }

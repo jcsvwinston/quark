@@ -41,6 +41,9 @@ var (
 	_ quarkdriver.ColumnTyper     = (*OracleDialect)(nil)
 	_ quarkdriver.AutoIncrementer = (*OracleDialect)(nil)
 	_ quarkdriver.IdempotentDDL   = (*OracleDialect)(nil)
+
+	_ quarkdriver.ReferentialActioner = (*MSSQLDialect)(nil)
+	_ quarkdriver.ReferentialActioner = (*OracleDialect)(nil)
 )
 
 // --- column types and the boolean literal (quarkdriver.ColumnTyper) ---------
@@ -209,6 +212,40 @@ func (o *OracleDialect) IsAlreadyExists(object quarkdriver.SchemaObject, err err
 		return strings.Contains(err.Error(), "ORA-02264")
 	}
 	return false
+}
+
+// --- the referential actions of a foreign key (quarkdriver.ReferentialActioner)
+
+// PostgreSQL, SQLite, MySQL and MariaDB accept the SQL standard's five
+// actions in both clauses and take the default: every action written as
+// given.
+
+// ReferentialAction: SQL Server takes NO ACTION, CASCADE, SET NULL and SET
+// DEFAULT in both clauses, and has no RESTRICT — a syntax error (Msg 156).
+// A cycle or a second cascade path to one table is refused by the engine
+// itself (Msg 1785), which no answer about one action can foresee.
+func (m *MSSQLDialect) ReferentialAction(_ quarkdriver.ReferentialEvent, action string) quarkdriver.ActionSupport {
+	switch action {
+	case "NO ACTION", "CASCADE", "SET NULL", "SET DEFAULT":
+		return quarkdriver.ActionWritten
+	}
+	return quarkdriver.ActionUnsupported
+}
+
+// ReferentialAction: Oracle has ON DELETE CASCADE and ON DELETE SET NULL. It
+// has no ON UPDATE clause and no clause for NO ACTION (ORA-02000), which is
+// what it does for a foreign key that names no action — so NO ACTION is left
+// out, in either clause, and everything else is refused: ON DELETE RESTRICT
+// (ORA-02000), ON DELETE SET DEFAULT (ORA-03001) and every ON UPDATE action
+// but NO ACTION.
+func (o *OracleDialect) ReferentialAction(event quarkdriver.ReferentialEvent, action string) quarkdriver.ActionSupport {
+	if action == "NO ACTION" {
+		return quarkdriver.ActionImplied
+	}
+	if event == quarkdriver.OnDelete && (action == "CASCADE" || action == "SET NULL") {
+		return quarkdriver.ActionWritten
+	}
+	return quarkdriver.ActionUnsupported
 }
 
 // sqlStringContent escapes s for the inside of a single-quoted SQL string.

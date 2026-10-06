@@ -410,6 +410,12 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MSSQLDialect).ReferentialAction",
+      "kind": "method",
+      "sig": "func(quarkdriver.ReferentialEvent, string) quarkdriver.ActionSupport"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MSSQLDialect).ReleaseSavepointStmt",
       "kind": "method",
       "sig": "func(string) string"
@@ -941,6 +947,12 @@
       "name": "(*OracleDialect).Quote",
       "kind": "method",
       "sig": "func(string) string"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*OracleDialect).ReferentialAction",
+      "kind": "method",
+      "sig": "func(quarkdriver.ReferentialEvent, string) quarkdriver.ActionSupport"
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
@@ -4714,6 +4726,18 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(ReferentialActioner).ReferentialAction",
+      "kind": "method",
+      "sig": "func(ReferentialEvent, string) ActionSupport"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "(ReferentialEvent).String",
+      "kind": "method",
+      "sig": "func() string"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "(Result).LastInsertId",
       "kind": "method",
       "sig": "func() (int64, error)"
@@ -4765,6 +4789,30 @@
       "name": "(TableRebuilder).RebuildsTables",
       "kind": "method",
       "sig": "func() bool"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ActionImplied",
+      "kind": "const",
+      "sig": "ActionSupport"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ActionSupport",
+      "kind": "type",
+      "sig": "int"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ActionUnsupported",
+      "kind": "const",
+      "sig": "ActionSupport"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ActionWritten",
+      "kind": "const",
+      "sig": "ActionSupport"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
@@ -5155,6 +5203,30 @@
       "name": "ObjectTable",
       "kind": "const",
       "sig": "SchemaObject"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "OnDelete",
+      "kind": "const",
+      "sig": "ReferentialEvent"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "OnUpdate",
+      "kind": "const",
+      "sig": "ReferentialEvent"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ReferentialActioner",
+      "kind": "type",
+      "sig": "interface"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
+      "name": "ReferentialEvent",
+      "kind": "type",
+      "sig": "int"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",

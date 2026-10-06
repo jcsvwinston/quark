@@ -108,6 +108,7 @@ beside it.
 | `quarkdriver.IdempotentDDL` | yes | experimental | Optional on a `Dialect`. How `Migrate` and Quark's bookkeeping tables create a table or an index only when it is missing. |
 | `quarkdriver.ColumnAlterer` | yes | experimental | Optional on a `Dialect`. The statements of `ApplyPlan`'s column changes. |
 | `quarkdriver.ObjectDropper` | yes | experimental | Optional on a `Dialect`. The statements with which `ApplyPlan` drops an index, a foreign key or a `CHECK`. |
+| `quarkdriver.ReferentialActioner` | yes | experimental | Optional on a `Dialect`. Which referential actions a foreign key's `ON DELETE` and `ON UPDATE` can name on the engine: written, left out as the engine's default, or refused before any statement is sent. |
 | `quarkdriver.TableRebuilder` | yes | experimental | Optional on a `Dialect`. Tells `ApplyPlan` to rebuild a table instead of altering it, as SQLite requires. |
 | `quarkdriver.Executor` (`quark.Executor`) | no | stable | What Quark hands `IntrospectSchema`, `AlterColumn` and the middleware functions: a `*sql.DB`, `*sql.Tx` or `*sql.Conn`. |
 | `quarkdriver.DBConnector` (`quark.DBConnector`) | no | stable | What Quark hands `AcquireMigrationLock`: an adapter over the client's pool. |

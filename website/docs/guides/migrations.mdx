@@ -135,8 +135,15 @@ err := client.CreateIndex(ctx, "users", "idx_users_email", []string{"email"}, tr
 ```go
 err := client.AddForeignKey(ctx, "orders", "fk_orders_user",
     []string{"user_id"}, "users", []string{"id"}, "CASCADE", "")
-// columns/refColumns match by position; onDelete/onUpdate appended verbatim
+// columns/refColumns match by position; onDelete/onUpdate as the engine takes them
 ```
+
+An action the engine does not have is refused before anything is sent: Oracle
+has `ON DELETE CASCADE` and `ON DELETE SET NULL` and no `ON UPDATE` clause, and
+SQL Server has no `RESTRICT`. `NO ACTION`, the default everywhere, is left out
+on Oracle, which has no clause for it. The
+[dialects reference](../reference/api/dialects#what-the-schema-path-asks-a-dialect)
+has the table per engine.
 
 `AddForeignKey` needs an engine that supports `ALTER TABLE ADD CONSTRAINT`.
 SQLite does not, so declare the foreign key at table-create time there instead —

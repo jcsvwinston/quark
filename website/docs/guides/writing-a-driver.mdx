@@ -233,6 +233,7 @@ rest.
 | `SchemaIntrospector` | always, unless the driver gives up `PlanMigration` and `Sync` | `IntrospectSchema`, `PlanMigration` and `Sync` return `ErrUnsupportedFeature` | implements it |
 | `ColumnAlterer` | a column change is not the SQL standard's `ALTER COLUMN` | `ALTER COLUMN … TYPE`, `SET/DROP NOT NULL`, `SET/DROP DEFAULT`; dropping a primary key returns `ErrUnsupportedFeature` | not asked: it rebuilds tables |
 | `ObjectDropper` | dropping an index or a constraint is spelled differently | `DROP INDEX <index>`, `ALTER TABLE … DROP CONSTRAINT <name>` | not asked: it rebuilds tables |
+| `ReferentialActioner` | the engine lacks some of the SQL standard's five referential actions, or has no clause for one it does by default | every `ON DELETE` / `ON UPDATE` action written as given | takes the default: SQLite has all five |
 | `TableRebuilder` | the engine keeps SQLite's catalog and has no `ALTER COLUMN` | in-place `ALTER` statements | implements it |
 | `ColumnTypeMapper` | a hand-built plan's column types need translating | the type is written as given | takes the default |
 | `MigrationLocker` | the engine can hold a lock across connections | `AcquireMigrationLock` returns `ErrUnsupportedFeature`, and the migrator runs without a lock | takes the default |
@@ -305,7 +306,8 @@ the template. `exec` is a `*sql.DB`, a `*sql.Tx` or a `*sql.Conn` — under
 your own.
 
 The interfaces `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`,
-`ColumnAlterer`, `ObjectDropper` and `TableRebuilder` are *experimental* in the
+`ColumnAlterer`, `ObjectDropper`, `ReferentialActioner` and `TableRebuilder`
+are *experimental* in the
 [extension contract](../reference/extension-contract): no `v1` release breaks
 them, but no engine outside Quark had implemented them when they were
 published.

@@ -99,6 +99,13 @@ import (
 //     a quarkdriver.ColumnAlterer gets ErrUnsupportedFeature for that
 //     one change. Renaming a column is not an ALTER COLUMN and is
 //     refused.
+//   - **Referential actions** — the ON DELETE and ON UPDATE of an
+//     OpAddForeignKey and of the foreign keys of an OpCreateTable — are
+//     written as the dialect's engine takes them
+//     (quarkdriver.ReferentialActioner): Oracle's NO ACTION is left out,
+//     and an action the engine does not have (SQL Server's RESTRICT,
+//     Oracle's ON UPDATE CASCADE) refuses the whole plan with
+//     ErrUnsupportedFeature before its first operation runs (QK-49).
 //   - **On SQLite** (a quarkdriver.TableRebuilder) a column change and
 //     the constraint ops rebuild the table inside the plan's
 //     transaction; a CHECK the rebuild cannot read back makes it
@@ -109,6 +116,9 @@ import (
 // passes the middleware chain and reaches the observers: what it
 // executes as StatementDDL, what it reads as StatementIntrospection.
 func (c *Client) ApplyPlan(ctx context.Context, plan Plan) error {
+	if err := c.checkReferentialActions(plan); err != nil {
+		return err
+	}
 	if c.dialect.SupportsTransactionalDDL() {
 		return c.applyPlanTx(ctx, plan)
 	}
@@ -530,13 +540,11 @@ func (c *Client) foreignKeyClause(fk ForeignKey) (string, error) {
 	}
 	clause += fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s (%s)",
 		strings.Join(quoted, ", "), c.dialect.Quote(fk.RefTable), strings.Join(quotedRef, ", "))
-	if fk.OnDelete != "" {
-		clause += " ON DELETE " + fk.OnDelete
+	actions, err := referentialClauses(c.dialect, fk.Name, fk.OnDelete, fk.OnUpdate)
+	if err != nil {
+		return "", err
 	}
-	if fk.OnUpdate != "" {
-		clause += " ON UPDATE " + fk.OnUpdate
-	}
-	return clause, nil
+	return clause + actions, nil
 }
 
 // dropIndex drops an index by name, as the dialect writes it

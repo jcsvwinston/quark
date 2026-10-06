@@ -90,13 +90,14 @@ type Routines struct {
 //   - engine: every method of quarkdriver.Dialect and every optional
 //     interface the dialect implements (SavepointDialect, ColumnTypeMapper,
 //     MigrationLocker, SchemaIntrospector, ColumnTyper, AutoIncrementer,
-//     IdempotentDDL, ColumnAlterer, ObjectDropper, TableRebuilder), driven
-//     through Quark — Create, Find, Where, Upsert, the row locks, the
-//     savepoints of a transaction, Migrate, PlanMigration, ApplyPlan, Sync
-//     and IntrospectSchema — and judged by what the engine then holds or
-//     refuses, never by the text of a statement. An optional interface the
-//     dialect does not implement is reported in the log with the default
-//     Quark uses instead, and that default is what the check exercises.
+//     IdempotentDDL, ColumnAlterer, ObjectDropper, ReferentialActioner,
+//     TableRebuilder), driven through Quark — Create, Find, Where, Upsert,
+//     the row locks, the savepoints of a transaction, Migrate,
+//     PlanMigration, ApplyPlan, AddForeignKey, Sync and IntrospectSchema —
+//     and judged by what the engine then holds or refuses, never by the
+//     text of a statement. An optional interface the dialect does not
+//     implement is reported in the log with the default Quark uses instead,
+//     and that default is what the check exercises.
 //
 // A driver module calls it from its own test:
 //
