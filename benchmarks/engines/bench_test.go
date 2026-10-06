@@ -72,11 +72,19 @@ const (
 	// asserted on the reference machine only, on the CPU models the record
 	// was taken on (see referenceEnv), and it has to absorb the differences
 	// between those models: across the ten runs of the record, on five
-	// models, the ratios moved by up to 16 % from their median. On the EPYC
-	// runner, 20 % of a single-row ratio is about 30 µs of quark's time per
-	// operation; a slowdown smaller than that is visible in the table, and the
-	// test does not fail on it — unless it allocates, which the next check
-	// sees.
+	// models, the ratios moved by up to 16 % from their median. One ratio
+	// does not stay inside it: MySQL's FindByPK against a reused statement,
+	// whose models are 20 % apart in their medians (2.68 on an EPYC 7763,
+	// 3.21 on an EPYC 9V74), and which failed the drift in three of nine
+	// runs on the 9V74 after the record and three of twelve before it, while
+	// the EPYC 7763 stayed within 5 % of the record (QK-56). A floor wide
+	// enough for it would blunt every other ratio, so that target records its
+	// ratio per CPU model instead (target.perCPU), and the floor applies
+	// around the model's own, where every run fell within 3 % of its model's
+	// median. On the EPYC runner, 20 % of a single-row ratio is about 30 µs
+	// of quark's time per operation; a slowdown smaller than that is visible
+	// in the table, and the test does not fail on it — unless it allocates,
+	// which the next check sees.
 	driftFloor = 0.20
 	// allocTolerance is how far quark's allocations per operation may move
 	// from the recorded ones. Allocations do not depend on the machine — the
@@ -93,7 +101,26 @@ const (
 // bench records for it.
 type target struct {
 	base     string  // the baseline arm
-	recorded float64 // quark ÷ base, median of the reference run
+	recorded float64 // quark ÷ base, median of the reference runs
+	// perCPU, when set, is the ratio recorded on each CPU model of the
+	// record, and a run's drift is measured from the one of the model it drew
+	// instead of from recorded. It is for a ratio whose models disagree by
+	// more than driftFloor absorbs around one median. recorded stays the
+	// figure the page's table of verdicts shows, and the catalogue checks the
+	// recorded verdict against it and against every model's; perCPU names
+	// every model in referenceCPUs, so that no model falls back to a figure
+	// it was measured not to fit (TestEngineBenchCatalogue).
+	perCPU map[string]float64
+}
+
+// recordedOn is the ratio a run on the CPU model cpu measures its drift from,
+// and the model that ratio was recorded on — "" when it is the median across
+// models.
+func (tg target) recordedOn(cpu string) (float64, string) {
+	if r, ok := tg.perCPU[cpu]; ok {
+		return r, cpu
+	}
+	return tg.recorded, ""
 }
 
 // control is one operation, with its target(s) and what the bench records.
@@ -130,21 +157,36 @@ type judged struct {
 	mad     float64 // their median absolute deviation
 	band    float64 // half-width of the band around the limit
 	outcome outcome
+	from    float64 // the recorded ratio the drift is measured from: recorded, or this CPU model's
+	fromCPU string  // the model from was recorded on; "" for the median across models
 	drift   float64 // allowed relative move from the recorded ratio
-	moved   float64 // the relative move measured: ratio/recorded - 1
+	moved   float64 // the relative move measured: ratio/from - 1
 }
 
 func (j judged) drifted() bool { return math.Abs(j.moved) > j.drift }
 
-func judge(run *opRun, c control) []judged {
+// fromText is the recorded ratio the drift was measured from, as the
+// messages and the table show it.
+func (j judged) fromText() string {
+	if j.fromCPU == "" {
+		return fmt.Sprintf("%.2f", j.from)
+	}
+	return fmt.Sprintf("%.2f on this CPU", j.from)
+}
+
+// judge measures a run of c's operation against c's targets. cpu is the CPU
+// model the run was taken on, as cpuModel names it: a target that records its
+// ratio per model measures the drift from that model's.
+func judge(run *opRun, c control, cpu string) []judged {
 	out := make([]judged, 0, len(c.targets))
 	for _, tg := range c.targets {
 		rs := run.ratios(armQuark, tg.base)
 		j := judged{target: tg, ratio: median(rs), mad: mad(rs)}
 		j.band = math.Max(bandFloor, bandMADs*j.mad)
 		j.outcome = classify(j.ratio, j.band)
+		j.from, j.fromCPU = tg.recordedOn(cpu)
 		j.drift = math.Max(driftFloor, bandMADs*j.mad/j.ratio)
-		j.moved = j.ratio/tg.recorded - 1
+		j.moved = j.ratio/j.from - 1
 		out = append(out, j)
 	}
 	return out
@@ -246,7 +288,7 @@ func TestEngineBenchCatalogue(t *testing.T) {
 		if !(c.allocs.count > 0 && c.allocs.bytes > 0) {
 			t.Fatalf("%s records no allocations for quark's arm", c.id)
 		}
-		outs := make([]outcome, 0, len(c.targets))
+		perModel := map[string]bool{}
 		for _, tg := range c.targets {
 			if op.arm(tg.base) == nil || tg.base == armQuark {
 				t.Fatalf("%s is judged against %q, which is not a baseline arm of %s", c.id, tg.base, key)
@@ -254,10 +296,55 @@ func TestEngineBenchCatalogue(t *testing.T) {
 			if !(tg.recorded > 0) {
 				t.Fatalf("%s records no ratio against %s", c.id, tg.base)
 			}
-			outs = append(outs, classify(tg.recorded, bandFloor))
+			for cpu, r := range tg.perCPU {
+				perModel[cpu] = true
+				if !slices.Contains(referenceCPUs, cpu) {
+					t.Errorf("%s records a ratio against %s on %q, which is not a CPU model of the record (referenceCPUs)", c.id, tg.base, cpu)
+				}
+				if !(r > 0) {
+					t.Errorf("%s records no ratio against %s on %s", c.id, tg.base, cpu)
+				}
+			}
+			if len(tg.perCPU) == 0 {
+				continue
+			}
+			for _, cpu := range referenceCPUs {
+				if _, ok := tg.perCPU[cpu]; !ok {
+					t.Errorf("%s records its ratio against %s per CPU model, but none for %s: a run on that model would measure its drift from the median across models, which is the figure the per-model record replaces because it does not fit every model", c.id, tg.base, cpu)
+				}
+			}
 		}
-		if vs := possible(outs); !slices.Contains(vs, c.want) {
-			t.Errorf("%s records %s, but its recorded ratios allow only %v", c.id, c.want, vs)
+		// The recorded verdict has to be one the recorded ratios allow: the
+		// medians across models, and the ratios of every model that records
+		// its own.
+		for _, cpu := range append([]string{""}, referenceCPUs...) {
+			if cpu != "" && !perModel[cpu] {
+				continue
+			}
+			outs := make([]outcome, 0, len(c.targets))
+			for _, tg := range c.targets {
+				r, _ := tg.recordedOn(cpu)
+				outs = append(outs, classify(r, bandFloor))
+			}
+			if vs := possible(outs); !slices.Contains(vs, c.want) {
+				which := "its recorded ratios"
+				if cpu != "" {
+					which = "its ratios recorded on " + cpu
+				}
+				t.Errorf("%s records %s, but %s allow only %v", c.id, c.want, which, vs)
+			}
+			if cpu == "" {
+				continue
+			}
+			// A run on this model that measures exactly what the record
+			// holds for it has not moved: judge measures it from the
+			// model's own ratios, not from the medians across models.
+			for _, j := range judge(recordedRun(op, c, cpu), c, cpu) {
+				if math.Abs(j.moved) > 1e-9 || (len(j.perCPU) > 0 && j.fromCPU != cpu) {
+					t.Errorf("%s: a run on %s that measures the recorded %.2f against %s is judged from %s (moved %+.1f %%): the per-model record is not the one it is measured from",
+						c.id, cpu, j.ratio, j.base, j.fromText(), 100*j.moved)
+				}
+			}
 		}
 	}
 	if len(referenceCPUs) == 0 {
@@ -268,6 +355,19 @@ func TestEngineBenchCatalogue(t *testing.T) {
 			t.Errorf("operation %s has no control: an operation the bench measures and never judges is a number nobody reads", key)
 		}
 	}
+}
+
+// recordedRun is a run of op, three rounds long, in which quark's arm measures
+// against every target of c exactly the ratio c records for it on cpu.
+func recordedRun(op *operation, c control, cpu string) *opRun {
+	const quarkNs = 1e5
+	run := &opRun{op: op, rounds: 3, arms: []*armRun{{name: armQuark, ns: []float64{quarkNs, quarkNs, quarkNs}}}}
+	for _, tg := range c.targets {
+		r, _ := tg.recordedOn(cpu)
+		ns := quarkNs / r
+		run.arms = append(run.arms, &armRun{name: tg.base, ns: []float64{ns, ns, ns}})
+	}
+	return run
 }
 
 // TestEngineBench measures every operation on every engine it has a DSN for
@@ -309,7 +409,7 @@ func TestEngineBench(t *testing.T) {
 				}
 				t.Run(c.id+"_"+op.name, func(t *testing.T) {
 					run := measure(t, op, admin, dsn, cfg)
-					js := judge(run, c)
+					js := judge(run, c, cpuModel())
 					report = append(report, reportRow{c: c, run: run, js: js})
 					assertControl(t, c, js)
 					assertAllocs(t, c, run)
@@ -394,10 +494,10 @@ func assertControl(t *testing.T, c control, js []judged) {
 	}
 	for _, j := range js {
 		if j.drifted() {
-			fail("control %s (%s): quark ÷ %s measures %.2f, the bench records %.2f — a move of %+.0f %%, past the %.0f %% the bench tolerates.\n\n%s\n"+
+			fail("control %s (%s): quark ÷ %s measures %.2f, the bench records %s — a move of %+.0f %%, past the %.0f %% the bench tolerates.\n\n%s\n"+
 				"A move this size is the code, not the machine: record the new\n"+
 				"ratio in cases_test.go in the same change.",
-				c.id, c.op, j.base, j.ratio, j.recorded, 100*j.moved, 100*j.drift, describe(js))
+				c.id, c.op, j.base, j.ratio, j.fromText(), 100*j.moved, 100*j.drift, describe(js))
 		}
 	}
 	if len(vs) > 1 {
@@ -437,8 +537,8 @@ func joinVerdicts(vs []verdict) string {
 func describe(js []judged) string {
 	var b strings.Builder
 	for _, j := range js {
-		fmt.Fprintf(&b, "  quark ÷ %-32s %.2f (±%.2f band, MAD %.3f) — %s; recorded %.2f\n",
-			j.base, j.ratio, j.band, j.mad, j.outcome, j.recorded)
+		fmt.Fprintf(&b, "  quark ÷ %-32s %.2f (±%.2f band, MAD %.3f) — %s; recorded %s\n",
+			j.base, j.ratio, j.band, j.mad, j.outcome, j.fromText())
 	}
 	return b.String()
 }
@@ -514,8 +614,8 @@ func renderRun(rows []reportRow, cfg config, servers map[string]string) string {
 			if j.drifted() {
 				moved = fmt.Sprintf(" (moved %+.0f %% ✗)", 100*j.moved)
 			}
-			fmt.Fprintf(&b, "| %s | %s | %.2f × %s | ±%.2f | %s | %.2f%s | %s | %s |\n",
-				id, op, j.ratio, j.base, j.band, j.outcome, j.recorded, moved, v, want)
+			fmt.Fprintf(&b, "| %s | %s | %.2f × %s | ±%.2f | %s | %s%s | %s | %s |\n",
+				id, op, j.ratio, j.base, j.band, j.outcome, j.fromText(), moved, v, want)
 		}
 	}
 	return b.String()

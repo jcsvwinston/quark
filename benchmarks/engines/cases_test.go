@@ -41,6 +41,18 @@ var referenceCPUs = []string{
 // referenceCPUs: AMD EPYC 7763 twice, AMD EPYC 9V74 twice, Intel Xeon
 // Platinum 8370C once.
 //
+// MY-01's ratio to the reused statement is also recorded per CPU model
+// (QK-56). Its median across the ten runs of 2026-10-05, 2.71, sits on the
+// EPYC 7763, which drew five of them; in the 36 runs on the five models that
+// followed, up to 2026-10-06, the EPYC 9V74 measured 3.12–3.29 and failed the
+// drift check in three of its nine (three of twelve before the record), while
+// no run on the EPYC 7763 moved more than 5 % from 2.71. The ratio is
+// Quark's over the per-call program (1.37–1.60 across those runs) times the
+// per-call program's over the reused statement (1.85–2.10), which has no
+// Quark code in it, and both move with the model: the medians per model run
+// from 2.68 to 3.21, 20 % apart, which driftFloor cannot absorb around one
+// figure. The per-model ratios are the medians of those 36 runs, per model.
+//
 // The recorded ratios are the medians of ten runs on the reference machine,
 // the CI runner (see referenceEnv), on 2026-10-05: GitHub drew five CPU models
 // for them, listed in referenceCPUs and named on the published page. The
@@ -53,7 +65,7 @@ func controls() []control {
 		{
 			id: "PG-01", engine: "postgres", op: "InsertOne",
 			title:   "Insert one row and read its generated id back",
-			targets: []target{{armSQL, 1.26}, {armPgx, 1.29}},
+			targets: []target{{base: armSQL, recorded: 1.26}, {base: armPgx, recorded: 1.29}},
 			want:    absent,
 			allocs:  memory{79, 3706},
 			note: "Over the limit against both baselines on the reference runners (1.20–1.36 against database/sql and 1.22–1.41 against pgx across ten runs). " +
@@ -66,7 +78,7 @@ func controls() []control {
 		{
 			id: "PG-02", engine: "postgres", op: "FindByPK",
 			title:   "Select one row by primary key",
-			targets: []target{{armSQL, 1.24}, {armPgx, 1.29}},
+			targets: []target{{base: armSQL, recorded: 1.24}, {base: armPgx, recorded: 1.29}},
 			want:    absent,
 			allocs:  memory{72, 4755},
 			note: "Over the limit on the reference runners: 1.10–1.25 against database/sql, inside the band, and 1.12–1.30 against pgx; on a laptop it sits on the threshold (1.09 and 1.13). " +
@@ -76,7 +88,7 @@ func controls() []control {
 		{
 			id: "PG-03", engine: "postgres", op: "List100",
 			title:   "Select 100 rows with a WHERE, an ORDER BY and a LIMIT",
-			targets: []target{{armSQL, 1.17}},
+			targets: []target{{base: armSQL, recorded: 1.17}},
 			want:    absent,
 			allocs:  memory{573, 25780},
 			note: "17 % over database/sql on the reference runners (1.14–1.29 across ten runs), inside the band, so the verdict is not asserted; 15 % on a laptop. " +
@@ -86,7 +98,7 @@ func controls() []control {
 		{
 			id: "PG-04", engine: "postgres", op: "Preload100",
 			title:   "Select 100 parents and their 500 children",
-			targets: []target{{armSQL, 1.25}},
+			targets: []target{{base: armSQL, recorded: 1.25}},
 			want:    absent,
 			allocs:  memory{2869, 156240},
 			note: "A quarter over database/sql (1.22–1.31 across ten runs); it was twice. Since A12 Q2 the children are selected with = ANY($1) and one array parameter instead of an IN list of 100 placeholders, " +
@@ -97,7 +109,7 @@ func controls() []control {
 		{
 			id: "PG-05", engine: "postgres", op: "InsertBatch1000",
 			title:   "Insert 1000 rows in one statement with their ids back",
-			targets: []target{{armSQL, 1.09}},
+			targets: []target{{base: armSQL, recorded: 1.09}},
 			want:    present,
 			allocs:  memory{13040, 1401900},
 			note: "Within the limit in every run (1.08–1.11 across ten), and inside the band, so the verdict is not asserted. It was a third over database/sql until A12 Q2 (QK-36): " +
@@ -107,7 +119,7 @@ func controls() []control {
 		{
 			id: "PG-06", engine: "postgres", op: "InsertBatch10000",
 			title:   "Insert 10 000 rows in one statement with their ids back",
-			targets: []target{{armSQL, 1.09}},
+			targets: []target{{base: armSQL, recorded: 1.09}},
 			want:    present,
 			allocs:  memory{129900, 17667762},
 			note: "The same statement as the baseline — one INSERT of 10 000 rows, 40 000 parameters, RETURNING id — and the distance PG-05 has: 1.09 (1.08–1.10 across five runs on three CPU models), inside the band, so the verdict is not asserted (A12 Q3). " +
@@ -116,18 +128,31 @@ func controls() []control {
 		},
 		{
 			id: "MY-01", engine: "mysql", op: "FindByPK",
-			title:   "Select one row by primary key",
-			targets: []target{{armSQL, 1.40}, {armSQLStmt, 2.71}},
-			want:    absent,
-			allocs:  memory{67, 4390},
-			note: "1.4 times a program that sends the query per call, and 2.7 times one that prepares the statement once. " +
+			title: "Select one row by primary key",
+			targets: []target{
+				{base: armSQL, recorded: 1.40},
+				{base: armSQLStmt, recorded: 2.71, perCPU: map[string]float64{
+					"AMD EPYC 7763 64-Core Processor":               2.68,
+					"AMD EPYC 9V45 96-Core Processor":               2.89,
+					"AMD EPYC 9V74 80-Core Processor":               3.21,
+					"Intel(R) Xeon(R) 6973P-C":                      2.75,
+					"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz": 3.10,
+				}},
+			},
+			want:   absent,
+			allocs: memory{67, 4390},
+			note: "1.4 times a program that sends the query per call, and 2.7 to 3.2 times one that prepares the statement once, depending on the CPU model the runner draws. " +
 				"With arguments and without interpolateParams, the driver prepares, executes and closes a server-side statement on every query; Quark reuses none, so every Find pays all three. " +
+				"Across 36 runs of the reference runner on its five CPU models, on 2026-10-05 and 06, the ratio to the per-call program, which pays the same three, had medians from 1.40 (AMD EPYC 7763 and 9V45) to 1.57 (EPYC 9V74), 12 % apart. " +
+				"The ratio to the reused statement multiplies that by the per-call program's own time over the reused statement's, which has no Quark code in it and moves with the model too (1.88–2.05 in medians): " +
+				"its medians run from 2.68 on the EPYC 7763 to 3.21 on the 9V74 (2.60–3.29 across the 36 runs), 20 % apart, more than the drift tolerance absorbs around one figure. " +
+				"So that ratio is recorded per CPU model, and a run is checked against the ratio of the model it drew. " +
 				"With interpolateParams=true in the DSN the driver sends one text query instead: on the EPYC runner Quark's Find drops from 268 µs to 157 µs, against 102 µs for the reused statement.",
 		},
 		{
 			id: "MY-02", engine: "mysql", op: "FindByPKStmtCache",
 			title:   "Select one row by primary key, with WithStatementCache",
-			targets: []target{{armSQLStmt, 1.65}, {armSQL, 0.81}},
+			targets: []target{{base: armSQLStmt, recorded: 1.65}, {base: armSQL, recorded: 0.81}},
 			want:    partial,
 			allocs:  memory{61, 4242},
 			note: "MY-01's operation with the option on (A12 Q3): Quark prepares each statement once per connection and reuses it, as the reused-statement baseline does. " +
@@ -137,7 +162,7 @@ func controls() []control {
 		{
 			id: "MY-03", engine: "mysql", op: "InsertBatch1000",
 			title:   "Insert 1000 rows with their ids back (innodb_autoinc_lock_mode=1)",
-			targets: []target{{armSQL, 1.10}},
+			targets: []target{{base: armSQL, recorded: 1.10}},
 			want:    present,
 			allocs:  memory{11954, 857862},
 			note: "Measured on a server started with innodb_autoinc_lock_mode=1, the setting under which MySQL documents that a multi-row INSERT's keys are consecutive (A12 Q3): CreateBatch sends one INSERT for the chunk and computes the keys, as the baseline does. 1.10 (1.04–1.12 across five runs), inside the band, so the verdict is not asserted. " +

@@ -102,9 +102,19 @@ within none.
 | `PG-04` | PostgreSQL | Select 100 parents and their 500 children | `database/sql` | 1.25 | **absent** | 2869 · 156240 |
 | `PG-05` | PostgreSQL | Insert 1000 rows in one statement with their ids back | `database/sql` | 1.09 | **present** | 13040 · 1401900 |
 | `PG-06` | PostgreSQL | Insert 10 000 rows in one statement with their ids back | `database/sql` | 1.09 | **present** | 129900 · 17667762 |
-| `MY-01` | MySQL | Select one row by primary key | `database/sql` · `database/sql`, statement reused | 1.40 · 2.71 | **absent** | 67 · 4390 |
+| `MY-01` | MySQL | Select one row by primary key | `database/sql` · `database/sql`, statement reused | 1.40 · 2.71 (2.68–3.21 by CPU model) | **absent** | 67 · 4390 |
 | `MY-02` | MySQL | Select one row by primary key, with WithStatementCache | `database/sql`, statement reused · `database/sql` | 1.65 · 0.81 | **partial** | 61 · 4242 |
 | `MY-03` | MySQL | Insert 1000 rows with their ids back (innodb_autoinc_lock_mode=1) | `database/sql` | 1.10 | **present** | 11954 · 857862 |
+
+Recorded per CPU model as well, because the reference runner's models are further apart on these ratios than the drift tolerance absorbs around one figure. A run on one of these models is checked against its own model's ratio; the figure in the table above is the median of the record's runs on all models together:
+
+| control | judged against | CPU model | recorded ratio |
+|---|---|---|---:|
+| `MY-01` | `database/sql`, statement reused | AMD EPYC 7763 64-Core Processor | 2.68 |
+| `MY-01` | `database/sql`, statement reused | AMD EPYC 9V45 96-Core Processor | 2.89 |
+| `MY-01` | `database/sql`, statement reused | AMD EPYC 9V74 80-Core Processor | 3.21 |
+| `MY-01` | `database/sql`, statement reused | Intel(R) Xeon(R) 6973P-C | 2.75 |
+| `MY-01` | `database/sql`, statement reused | Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz | 3.10 |
 
 What each distance is made of, as measured:
 
@@ -114,7 +124,7 @@ What each distance is made of, as measured:
 - **`PG-04`** (Preload100) — A quarter over database/sql (1.22–1.31 across ten runs); it was twice. Since A12 Q2 the children are selected with = ANY($1) and one array parameter instead of an IN list of 100 placeholders, and assembled onto their parents with one growth per parent instead of a reflect.Append per row (QK-35). The informational arm keeps the old shape: the hand-written program sending the IN list took 1.25 ms on the EPYC runner where = ANY($1) took 0.79 ms. What remains: the parent list (PG-03), and mapping the 500 children — each row's key read through reflection and looked up, the row copied — about 15 % of the client's CPU besides the driver's Next and Scan.
 - **`PG-05`** (InsertBatch1000) — Within the limit in every run (1.08–1.11 across ten), and inside the band, so the verdict is not asserted. It was a third over database/sql until A12 Q2 (QK-36): each of the 4000 placeholders was formatted with fmt.Sprintf, the validator walked every struct of the batch although the model declares no rule, and each row's placeholders went through a slice and a join. Quark allocates 13 000 times per batch against 9 000 for database/sql; reading each field through reflection to bind it is 8 % of the client's CPU in a profile.
 - **`PG-06`** (InsertBatch10000) — The same statement as the baseline — one INSERT of 10 000 rows, 40 000 parameters, RETURNING id — and the distance PG-05 has: 1.09 (1.08–1.10 across five runs on three CPU models), inside the band, so the verdict is not asserted (A12 Q3). The informational arm is pgx's CopyFrom, COPY in binary format, which reads no ids back: 25.9 ms against 66.8 ms for Quark and 61.4 ms for database/sql on the EPYC 7763 runner, so 2.6 times faster than any form that hands each entity its key. Quark does not use COPY: it cannot return the generated keys CreateBatch promises, and for rows whose keys the caller supplies it is not the same operation — it ignores rules, refuses tables under row-level security, and needs a binary encoding for every column type. An opt-in bulk load is what would close that distance, and it is not built.
-- **`MY-01`** (FindByPK) — 1.4 times a program that sends the query per call, and 2.7 times one that prepares the statement once. With arguments and without interpolateParams, the driver prepares, executes and closes a server-side statement on every query; Quark reuses none, so every Find pays all three. With interpolateParams=true in the DSN the driver sends one text query instead: on the EPYC runner Quark's Find drops from 268 µs to 157 µs, against 102 µs for the reused statement.
+- **`MY-01`** (FindByPK) — 1.4 times a program that sends the query per call, and 2.7 to 3.2 times one that prepares the statement once, depending on the CPU model the runner draws. With arguments and without interpolateParams, the driver prepares, executes and closes a server-side statement on every query; Quark reuses none, so every Find pays all three. Across 36 runs of the reference runner on its five CPU models, on 2026-10-05 and 06, the ratio to the per-call program, which pays the same three, had medians from 1.40 (AMD EPYC 7763 and 9V45) to 1.57 (EPYC 9V74), 12 % apart. The ratio to the reused statement multiplies that by the per-call program's own time over the reused statement's, which has no Quark code in it and moves with the model too (1.88–2.05 in medians): its medians run from 2.68 on the EPYC 7763 to 3.21 on the 9V74 (2.60–3.29 across the 36 runs), 20 % apart, more than the drift tolerance absorbs around one figure. So that ratio is recorded per CPU model, and a run is checked against the ratio of the model it drew. With interpolateParams=true in the DSN the driver sends one text query instead: on the EPYC runner Quark's Find drops from 268 µs to 157 µs, against 102 µs for the reused statement.
 - **`MY-02`** (FindByPKStmtCache) — MY-01's operation with the option on (A12 Q3): Quark prepares each statement once per connection and reuses it, as the reused-statement baseline does. In the same rounds, Find took 46–48 % less time with the cache than without it on every reference runner (145 µs against 270 µs on the EPYC 7763); 0.81 times the program that sends the query per call (0.74–0.83 across five runs) and 1.65 times the one that reuses its statement (1.44–1.73). What remains over that baseline is MY-01's CPU share — the SELECT assembled by the query builder and the row through the generic scanner — not the protocol. The option is off by default; with it off, Find is MY-01.
 - **`MY-03`** (InsertBatch1000) — Measured on a server started with innodb_autoinc_lock_mode=1, the setting under which MySQL documents that a multi-row INSERT's keys are consecutive (A12 Q3): CreateBatch sends one INSERT for the chunk and computes the keys, as the baseline does. 1.10 (1.04–1.12 across five runs), inside the band, so the verdict is not asserted. Quark adds three round trips the baseline does not take — BEGIN, the read of auto_increment_increment on the INSERT's connection, COMMIT — so that a failed chunk can be undone and run row by row. Under MySQL 8's default, 2, the manual does not promise consecutive keys and CreateBatch keeps one INSERT per row: the informational arm, 237–245 ms on the EPYC 7763 runner against 9.6–9.7 ms for Quark.
 
@@ -145,6 +155,35 @@ which is the point of recording ratios.
 | --- | ---: | ---: | ---: | ---: |
 | time | 193.6 µs | 101.7 µs | 268.5 µs | 157.0 µs |
 | Quark ÷ baseline | 1.40 (1.37–1.55) | 2.71 (2.61–3.15) | | |
+
+**One ratio recorded per CPU model.** Of the ten runs above, five drew an
+AMD EPYC 7763, and the median against the reused statement, 2.71, sits on
+that model. The 36 runs on the five models that followed, on 2026-10-05 and
+06, measured the two ratios of `FindByPK` on MySQL like this (medians, with
+their range); the changes merged in between left its allocations where they
+were, and no run on the EPYC 7763 moved more than 5 % from the record:
+
+| CPU model | runs | Quark ÷ `database/sql` | Quark ÷ `database/sql`, statement reused | `database/sql` ÷ statement reused |
+| --- | ---: | ---: | ---: | ---: |
+| AMD EPYC 7763 | 18 | 1.40 (1.37–1.42) | 2.68 (2.60–2.74) | 1.91 |
+| AMD EPYC 9V45 | 5 | 1.40 (1.38–1.47) | 2.89 (2.84–2.95) | 2.05 |
+| AMD EPYC 9V74 | 9 | 1.57 (1.54–1.60) | 3.21 (3.12–3.29) | 2.04 |
+| Intel Xeon 6973P-C | 2 | 1.46 (1.45–1.46) | 2.75 (2.72–2.77) | 1.88 |
+| Intel Xeon Platinum 8370C | 2 | 1.54 (1.54–1.55) | 3.10 (3.08–3.13) | 2.01 |
+
+Every run of a model fell within 3 % of its model's median, but the medians
+against the reused statement are 20 % apart, and three of the nine runs on the
+EPYC 9V74 moved more than the 20 % the drift check tolerates from 2.71 — as
+three of the twelve before the record had from the one before it. That
+ratio is the first column times the last, and the last — the per-call program
+over the reused statement, two round trips against one — has no Quark code in
+it, yet moves with the model as well. A tolerance wide enough for it would
+blunt every other check, so the bench records that ratio per model — the
+medians above — and a run on one of these models is measured from its own.
+The median of the ten runs stays the figure the recorded verdicts show. Two
+runs drew a sixth model, an Intel Xeon Platinum 8573C, which no reference run
+had drawn: 3.03 and 3.10 against the reused statement, reported and not
+asserted.
 
 **Three controls added on 2026-10-06** — `PG-06`, `MY-02` and `MY-03` — are
 recorded from five runs of the same runner that day, which drew three of the
@@ -276,6 +315,9 @@ only on the machine the record was taken on:
 - **Around the recorded ratio**, a drift of ±20 %, or twice the run's relative
   scatter if that is wider. A ratio that moves further fails the test and asks
   for the record to move in the same change. Asserted on the CI runner only.
+  One ratio — MySQL's `FindByPK` against the reused statement — is recorded
+  per CPU model, because its models are further apart than that (see
+  *Reference runs*), and a run's drift is measured from its own model's.
 - Both time checks are asserted only when the runner's CPU is a model the
   record was taken on. GitHub draws the runner's CPU from a pool, and the model
   moves whole runs: across 34 runs on 2026-10-04 and 05, before this record, the

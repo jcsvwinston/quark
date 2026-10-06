@@ -243,7 +243,10 @@ sets `QUARK_BENCH_REFERENCE=1`), and the verdict and the ratio drift are
 asserted only there, and only on a CPU model the record was taken on
 (`referenceCPUs` in `engines/cases_test.go`): GitHub draws the runner's CPU
 from a pool, and a model no reference run drew moved ratios by up to 24 % with
-the code unchanged. A laptop measures single-row ratios 10–20 % lower, so a
+the code unchanged. Even among the models of the record, one ratio — `MY-01`
+against the reused statement — is 20 % apart from one model to another, more
+than the drift tolerance absorbs, so it is recorded per model and a run is
+checked against its own model's (`target.perCPU`). A laptop measures single-row ratios 10–20 % lower, so a
 local run — or a runner on another CPU — reports them against the record
 without failing, and asserts only quark's allocations, which are the same on
 every machine. The recorded verdicts, ratios and what each distance is made
