@@ -180,18 +180,45 @@ _ = tx.Commit()
 
 ## Batch operations in a transaction
 
-`UpdateBatch` already wraps its updates in one transaction. To make `CreateBatch`
-and `DeleteBatch` share a transaction, use `ForTx`:
+Every write of a query built with `ForTx` runs in that transaction, on its
+connection — the batch writers included. The caller's rollback undoes them and
+the caller's commit keeps them:
 
 ```go
 err := client.Tx(ctx, func(tx *quark.Tx) error {
     if err := quark.ForTx[Order](ctx, tx).CreateBatch(newOrders); err != nil {
         return err
     }
+    if err := quark.ForTx[Order](ctx, tx).UpdateBatch(repriced); err != nil {
+        return err
+    }
     _, err := quark.ForTx[Order](ctx, tx).DeleteBatch(cancelledIDs)
     return err
 })
 ```
+
+| Write | Outside a transaction (`For`) | On a query bound with `ForTx` |
+| --- | --- | --- |
+| `CreateBatch` | No transaction of its own; on MySQL each multi-row chunk runs in one | The caller's transaction; on MySQL each multi-row chunk runs in a savepoint of it, so a chunk that fails is undone and sent one row at a time |
+| `UpsertBatch` | No transaction of its own | The caller's transaction |
+| `UpsertBatch` under `RowLevelSecurityClient` | A transaction of its own: all or nothing | A savepoint of the caller's: all or nothing |
+| `UpdateBatch` | A transaction of its own: all or nothing | A savepoint of the caller's: all or nothing |
+| `DeleteBatch`, `DeleteBy`, `UpdateMap`, `Tracked.Save` and the single-row writes | No transaction of their own | The caller's transaction |
+
+A write that is all or nothing on its own keeps that inside your transaction
+with a savepoint, not with a second transaction: when it fails, the savepoint
+undoes the rows it wrote, and your transaction stays usable — on PostgreSQL,
+where an error otherwise aborts the whole transaction, too. Until QK-57,
+`UpdateBatch` opened a transaction of its own even on a `ForTx` query. That
+one ran on another connection of the pool: it committed apart from yours, so
+your rollback did not undo it, and it waited for any lock your transaction
+held on its rows — on SQLite, whose single writer lock your transaction holds
+after its first write, until the query timeout.
+
+Schema work — `Migrate`, `Sync`, `ApplyPlan` and the migrator — is not built
+from a query and takes no `*Tx`: it runs on the client's pool, and `Sync`,
+`ApplyPlan` and the migrator open their own transactions there. Do not call it
+from inside a transaction that holds locks on the tables it changes.
 
 ## Retrying deadlocks
 

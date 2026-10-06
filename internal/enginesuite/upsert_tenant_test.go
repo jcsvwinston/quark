@@ -156,6 +156,26 @@ func testUpsertTenant(ctx context.Context, t *testing.T, client *quark.Client) {
 		}
 	})
 
+	// Inside the caller's transaction the batch is all or nothing too: the
+	// rows it wrote before it met tb's row are undone by a savepoint, so they
+	// are not in the commit of a caller that goes on (QK-57).
+	t.Run("BatchMeetingAForeignKeyInTheCallersTransaction", func(t *testing.T) {
+		before := reseed(t)
+		err := router.Tx(ta, func(tx *quark.Tx) error {
+			batch := []*uteRow{{Code: "y", Name: "a-y2"}, {Code: "w", Name: "a-w"}, {Code: "x", Name: "a-x"}}
+			if err := quark.ForTx[uteRow](ta, tx).UpsertBatch(batch, []string{"code"}, []string{"name"}); !errors.Is(err, quark.ErrConstraintViolation) {
+				t.Errorf("UpsertBatch with tb's code under ta inside router.Tx on %s = %v, want ErrConstraintViolation", engine, err)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("router.Tx on %s: %v", engine, err)
+		}
+		if got := uteRows(t, ctx, client); !sameUteRows(got, before) {
+			t.Errorf("a failed UpsertBatch inside a committed transaction on %s left writes behind: before %+v, after %+v", engine, before, got)
+		}
+	})
+
 	t.Run("UpdateMapKeepsTheTenantColumn", func(t *testing.T) {
 		reseed(t)
 		n, err := quark.For[uteRow](ta, router).Where("code", "=", "y").

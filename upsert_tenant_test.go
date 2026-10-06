@@ -137,6 +137,21 @@ func TestUpsertBatchUnderTenantIsAllOrNothing(t *testing.T) {
 		t.Fatalf("a failed UpsertBatch inside a transaction left writes behind: %+v", got)
 	}
 
+	// And when the caller goes on and commits: a savepoint undid the batch,
+	// so its writes are not in the commit (QK-57).
+	txErr = router.Tx(ta, func(tx *Tx) error {
+		if err := ForTx[utRow](ta, tx).UpsertBatch(batch(), []string{"code"}, []string{"name"}); !errors.Is(err, ErrConstraintViolation) {
+			t.Errorf("UpsertBatch inside router.Tx = %v, want ErrConstraintViolation", err)
+		}
+		return nil
+	})
+	if txErr != nil {
+		t.Fatalf("router.Tx: %v", txErr)
+	}
+	if got := utRows(t, c); !reflect.DeepEqual(got, before) {
+		t.Fatalf("a failed UpsertBatch inside a committed transaction left writes behind: %+v", got)
+	}
+
 	// Without the foreign key the batch goes through.
 	ok := []*utRow{{Code: "y", Name: "a-y2"}, {Code: "w", Name: "a-w", TenantID: "tb"}}
 	if err := For[utRow](ta, router).UpsertBatch(ok, []string{"code"}, []string{"name"}); err != nil {

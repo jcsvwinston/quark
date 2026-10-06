@@ -506,9 +506,12 @@ Empty input returns `nil`. All entities are validated before any SQL is built.
 
 Under `RowLevelSecurityClient` each row's update branch is confined to the
 tenant as for [`Upsert`](#upserts-under-rowlevelsecurityclient), and the
-batch is all or nothing: it runs in a transaction — the caller's, when there
-is one — and a row whose conflict key belongs to another tenant fails the
-whole batch with `ErrConstraintViolation`. MySQL and MariaDB upsert one row
+batch is all or nothing: it runs in a transaction of its own — or, on a query
+bound with [`ForTx`](transactions), in a savepoint of the caller's — and a
+row whose conflict key belongs to another tenant fails the whole batch with
+`ErrConstraintViolation`. Inside the caller's transaction the savepoint undoes
+the rows the batch wrote, so they are not in the commit of a caller that goes
+on. MySQL and MariaDB upsert one row
 at a time under this strategy: a multi-row statement reports one count for
 the batch, which cannot tell a row of another tenant from a row of this one
 that already held its values.
@@ -533,6 +536,13 @@ written, the way an entity whose key does not exist is not written.
 `UpdateBatch` returns no count, so when you need to know which rows were
 written, call `Update` per entity. If any row fails, the transaction rolls
 back.
+
+On a query bound with [`ForTx`](transactions) the batch runs in the caller's
+transaction, inside a savepoint: if a row fails, the batch's rows are undone
+and the caller's transaction stays usable, and the caller's commit or rollback
+decides the rest. Before QK-57 it opened a transaction of its own on another
+connection there too — which waited for the caller's locks (on SQLite, until
+the query timeout) and committed apart from the caller.
 
 `UpdateBatch` returns `nil` for empty input.
 

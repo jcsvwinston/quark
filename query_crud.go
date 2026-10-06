@@ -95,6 +95,28 @@ func (q *BaseQuery) queueOrRunAfterHook(fn func() error) error {
 	return fn()
 }
 
+// atomically runs fn as one unit that either applies whole or not at all,
+// for a write that spans several statements (UpdateBatch, UpsertBatch under
+// RowLevelSecurityClient).
+//
+// On a query bound to a transaction ([ForTx]) the unit is a savepoint of
+// that transaction ([Tx.Tx]): fn runs on the caller's connection, a failure
+// rolls back to the savepoint — undoing fn's statements and the hooks they
+// queued, and leaving the caller's transaction usable — and the caller's
+// commit or rollback decides the rest. Otherwise the unit is a transaction
+// of its own ([Client.Tx]).
+//
+// Never a transaction of its own inside the caller's (QK-57): that one runs
+// on another connection of the pool, so it waits for the locks the caller
+// holds — until the query timeout on SQLite, whose writer lock the caller
+// has — and what it commits stays when the caller rolls back.
+func (q *BaseQuery) atomically(ctx context.Context, fn func(tx *Tx) error) error {
+	if q.tx != nil {
+		return q.tx.Tx(ctx, fn)
+	}
+	return q.client.Tx(ctx, fn)
+}
+
 // emitEvent publishes a CRUD lifecycle [Event] to the Client's
 // EventBus (F5-6), if one is configured. The timing mirrors the
 // After* hook contract:
@@ -2550,10 +2572,11 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 	// Under RowLevelSecurityClient the batch is all or nothing: a conflict
 	// with another tenant's row is found after the statement that met it,
 	// and the rows that statement and the earlier chunks wrote must not
-	// stay (QK-43). Inside a caller's transaction the error is returned and
-	// the caller's rollback undoes them.
-	if q.tenantGuarded() && q.tx == nil {
-		return q.client.Tx(ctx, func(tx *Tx) error {
+	// stay (QK-43). Inside a caller's transaction they are undone by a
+	// savepoint, so they do not stay either when the caller goes on and
+	// commits (QK-57).
+	if q.tenantGuarded() {
+		return q.atomically(ctx, func(tx *Tx) error {
 			tq := *q
 			tq.exec = tx.tx
 			tq.tx = tx
@@ -2801,6 +2824,13 @@ func (q *Query[T]) upsertBatchOracle(
 // Each entity undergoes a partial update: zero-value fields are skipped (same semantics as Update).
 // A transaction is used to guarantee atomicity across all rows.
 //
+// On a query bound to a transaction ([ForTx]) the batch runs in that
+// transaction, inside a savepoint: a failing row undoes the rows before it
+// and leaves the caller's transaction usable, and the caller's rollback
+// undoes the whole batch. It used to open a transaction of its own on another
+// connection even there, which waited for the caller's locks — until the
+// query timeout on SQLite — or committed apart from the caller (QK-57).
+//
 // The query's conditions are ANDed with each entity's key, as in Update
 // (QK-40): an entity whose row does not satisfy them is not written, the way
 // an entity whose key does not exist is not written. UpdateBatch returns no
@@ -2827,7 +2857,7 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	return q.client.Tx(ctx, func(tx *Tx) error {
+	return q.atomically(ctx, func(tx *Tx) error {
 		for _, entity := range entities {
 			// BeforeUpdate runs before buildUpdate so a hook that touches
 			// UpdatedAt / derived columns is reflected in the SET clause — the
