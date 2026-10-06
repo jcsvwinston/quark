@@ -107,19 +107,24 @@ type BaseQuery struct {
 	// own row is written; loaded belongs_to/has_one/has_many/m2m fields are
 	// left untouched in the database.
 	skipAssociations bool
-	unscoped         bool   // if true, soft-delete filter is dropped (WithTrashed semantics)
-	onlyTrashed      bool   // if true, the soft-delete filter is inverted to IS NOT NULL
-	tenantID         string // for RowLevelSecurityClient isolation
-	tenantCol        string // column name for tenant isolation
-	cache            CacheConfig
-	groupBy          []string          // GROUP BY columns
-	having           []condition       // HAVING conditions
-	distinct         bool              // SELECT DISTINCT
-	lock             LockOptions       // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
-	ctes             []cteEntry        // common table expressions (WITH ...) prepended to the SELECT
-	selectExprs      []selectExprEntry // AST projections rendered in the SELECT list (window funcs, scalar subqueries, aliased computations)
-	setOps           []setOpEntry      // UNION / INTERSECT / EXCEPT operands appended after the base SELECT
-	err              error             // stores initialization error from ClientProvider
+	// checkVersions makes UpdateBatch on a versioned model report a row its
+	// version predicate did not match (set by CheckVersions, QK-45): the
+	// batch is rolled back and ErrStaleEntity names every such row. Off, the
+	// batch keeps its v1 behaviour and the miss goes unreported.
+	checkVersions bool
+	unscoped      bool   // if true, soft-delete filter is dropped (WithTrashed semantics)
+	onlyTrashed   bool   // if true, the soft-delete filter is inverted to IS NOT NULL
+	tenantID      string // for RowLevelSecurityClient isolation
+	tenantCol     string // column name for tenant isolation
+	cache         CacheConfig
+	groupBy       []string          // GROUP BY columns
+	having        []condition       // HAVING conditions
+	distinct      bool              // SELECT DISTINCT
+	lock          LockOptions       // pessimistic locking (ForUpdate / ForShare / SkipLocked / NoWait)
+	ctes          []cteEntry        // common table expressions (WITH ...) prepended to the SELECT
+	selectExprs   []selectExprEntry // AST projections rendered in the SELECT list (window funcs, scalar subqueries, aliased computations)
+	setOps        []setOpEntry      // UNION / INTERSECT / EXCEPT operands appended after the base SELECT
+	err           error             // stores initialization error from ClientProvider
 
 	// typedScanResolved memoizes the F6-2 generated-scanner lookup so the
 	// reflect.Type lookup + registry read happen once per query rather than
@@ -287,6 +292,35 @@ func (q *Query[T]) PreloadWhere(relation, column, operator string, value any) *Q
 func (q *Query[T]) WithoutAssociations() *Query[T] {
 	c := q.clone()
 	c.skipAssociations = true
+	return c
+}
+
+// CheckVersions makes [Query.UpdateBatch] on a model with a quark:"version"
+// field hold every row to the version it was loaded with, as Update,
+// UpdateFields and Tracked.Save already do for one row:
+//
+//	err := quark.For[Account](ctx, client).CheckVersions().UpdateBatch(accounts)
+//	if errors.Is(err, quark.ErrStaleEntity) {
+//	    // nothing was written; err names every row whose version moved
+//	}
+//
+// The batch is all or nothing. A row whose UPDATE matches nothing is stale —
+// another writer moved its version, or its key does not exist — unless the
+// query's conditions exclude it, which skips it without error, as Update
+// does. Every stale row is collected, the whole batch is rolled back, and
+// the error joins one ErrStaleEntity per stale row, each naming its key.
+// When the batch is written, each entity's in-memory version is bumped, so
+// the next Update of the same struct does not report a conflict that did not
+// happen; a batch that fails bumps none.
+//
+// Without CheckVersions, UpdateBatch keeps its v1 behaviour: the version
+// predicate is sent, a row it does not match is not written, the call
+// returns nil, and the in-memory versions are not bumped. Quark 2.0 makes
+// the checked behaviour the default for UpdateBatch (DEP-2026-003). On a
+// model without a version column CheckVersions changes nothing.
+func (q *Query[T]) CheckVersions() *Query[T] {
+	c := q.clone()
+	c.checkVersions = true
 	return c
 }
 

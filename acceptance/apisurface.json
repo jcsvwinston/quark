@@ -1202,6 +1202,12 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*Query[T]).CheckVersions",
+      "kind": "method",
+      "sig": "func() *Query[T]"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*Query[T]).Count",
       "kind": "method",
       "sig": "func() (int64, error)"

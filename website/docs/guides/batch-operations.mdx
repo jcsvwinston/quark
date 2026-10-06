@@ -13,7 +13,7 @@ generates the right dialect-specific SQL and chunks large inputs for you.
 |---|---|---|
 | `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked; for generated keys without `RETURNING`: a `MERGE` per chunk on SQL Server, a multi-row `INSERT` per chunk on MySQL where the server's settings allow it, one row at a time otherwise | One statement per chunk |
 | `UpsertBatch` | Dialect-specific bulk upsert, chunked | One statement per chunk (N `MERGE` on Oracle) |
-| `UpdateBatch` | N `UPDATE` statements | Single transaction — a savepoint of the caller's on a `ForTx` query |
+| `UpdateBatch` | N `UPDATE` statements | Single transaction — a savepoint of the caller's on a `ForTx` query; all or nothing over the versions with `CheckVersions()` |
 | `DeleteBatch` | `DELETE … WHERE pk IN (…)`, chunked | One statement per chunk |
 
 ## CreateBatch
@@ -174,6 +174,42 @@ and your commit or rollback decides the rest. See
 [Batch operations in a transaction](transactions#batch-operations-in-a-transaction).
 
 To write an explicit zero value, use `UpdateMap` on the individual row.
+
+### Versioned models
+
+On a model with a `quark:"version"` field, each `UPDATE` carries the version
+predicate, but `UpdateBatch` does not report a row it did not match: a row
+another writer moved since you loaded it is left alone, the rest of the batch
+is written, and the call returns `nil`. Chain `CheckVersions()` to make the
+batch all or nothing over the versions:
+
+```go
+accounts, _ := quark.For[Account](ctx, client).Where("owner", "=", owner).List()
+
+ptrs := make([]*Account, len(accounts))
+for i := range accounts {
+    accounts[i].Balance += 10
+    ptrs[i] = &accounts[i]
+}
+
+err := quark.For[Account](ctx, client).CheckVersions().UpdateBatch(ptrs)
+if errors.Is(err, quark.ErrStaleEntity) {
+    // nothing was written; err names every account that moved:
+    // stale entity (optimistic-locking conflict): table accounts pk=7
+    return err // reload the accounts and try again
+}
+```
+
+Under `CheckVersions` every row is tried, every stale row is collected, and
+then the whole batch is rolled back; a key that does not exist counts as stale
+unless the query has `Where` conditions, and a row the conditions exclude is
+skipped. A batch that is written bumps every entity's in-memory version, so
+the same structs can be updated again. Without `CheckVersions` the in-memory
+versions are not bumped, and the next `Update` of a struct the batch wrote
+returns `ErrStaleEntity`. Quark 2.0 makes `CheckVersions` the default for
+`UpdateBatch`. See
+[`UpdateBatch`](../reference/api/crud#versioned-models-and-checkversions) for
+the full table.
 
 ## DeleteBatch
 

@@ -22,6 +22,7 @@ see [Getting Started](../../guides/getting-started) and
 | `DeleteBatch` | `DeleteBatch(ids []any) (int64, error)` | Hard-delete rows by primary-key values. |
 | `DeleteBatchOf` | `DeleteBatchOf[T, V](q *Query[T], ids []V) (int64, error)` | Package-level typed-slice form of `DeleteBatch`. |
 | `WithoutAssociations` | `WithoutAssociations() *Query[T]` | Disable the recursive association save for this `Create`/`Update`. |
+| `CheckVersions` | `CheckVersions() *Query[T]` | Make `UpdateBatch` on a versioned model fail with `ErrStaleEntity`, all or nothing, when a row's version moved. |
 | `Upsert` | `Upsert(entity *T, conflictCols, updateCols []string) error` | Insert or update one entity on conflict. |
 | `UpsertBatch` | `UpsertBatch(entities []*T, conflictCols, updateCols []string) error` | Bulk insert-or-update. |
 | `UpdateBatch` | `UpdateBatch(entities []*T) error` | Update many entities by PK in one transaction. |
@@ -188,7 +189,7 @@ When no row with the key satisfies the conditions:
 | Nothing is written, and `(0, nil)` is returned. | The same answer `UpdateMap` and `DeleteBy` give when their conditions match nothing; check the count. |
 | `AfterUpdate` / `AfterDelete` do not run, no audit row is written, no event is emitted. | Nothing happened. `BeforeUpdate` / `BeforeDelete` have already run: they run before the statement. |
 | Loaded associations are not written either. | `Update` checks the row before writing a `belongs_to` association, which it writes ahead of the entity's row. |
-| A versioned model returns `(0, nil)`, not `ErrStaleEntity`. | `ErrStaleEntity` means the row satisfies the conditions and its version moved. |
+| A versioned model returns `(0, nil)`, not `ErrStaleEntity`. | `ErrStaleEntity` means the row satisfies the conditions and its version moved. `UpdateBatch` under `CheckVersions` skips such a row the same way. |
 
 The answer does not say whether the row exists outside the conditions: a row
 of another tenant and a row that does not exist look the same. An entity
@@ -636,6 +637,39 @@ connection there too — which waited for the caller's locks (on SQLite, until
 the query timeout) and committed apart from the caller.
 
 `UpdateBatch` returns `nil` for empty input.
+
+### Versioned models and `CheckVersions`
+
+On a model with a `quark:"version"` field every `UPDATE` of the batch carries
+the version predicate, as `Update` does. What the batch does when a row's
+version moved depends on `CheckVersions()`:
+
+```go
+err := quark.For[Account](ctx, client).CheckVersions().UpdateBatch(accounts)
+if errors.Is(err, quark.ErrStaleEntity) {
+    // nothing was written: reload, replay, retry
+}
+```
+
+| Case | `UpdateBatch` | `CheckVersions().UpdateBatch` |
+| --- | --- | --- |
+| A row whose version moved | not written; the rest of the batch is | the whole batch is rolled back |
+| A key that does not exist | not written | stale, as for `Update`, when the query has no conditions |
+| A row the query's conditions exclude | not written | not written, and not an error |
+| Error | `nil` | one `ErrStaleEntity` per stale row, joined, each naming its key: `stale entity (optimistic-locking conflict): table accounts pk=7` |
+| In-memory version of a written row | unchanged, so the next `Update` of the same struct returns `ErrStaleEntity` | bumped once the batch is through; a batch that fails bumps none |
+
+Every row is tried before the batch is rolled back, so the error names every
+stale row, not just the first. `errors.Is(err, quark.ErrStaleEntity)` holds
+for the joined error. On a [`ForTx`](transactions) query "the batch is
+through" means its savepoint was released without error; the caller's own
+rollback afterwards does not take the in-memory versions back, as it does not
+for `Update`. On a model without a version column `CheckVersions` changes
+nothing.
+
+Quark 2.0 makes the `CheckVersions` behaviour the default for `UpdateBatch`.
+Until then the default stays as it was, because a batch that returned `nil`
+would start returning an error.
 
 ## Composite Primary Keys
 
