@@ -46,6 +46,7 @@ import (
 	"time"
 
 	"github.com/jcsvwinston/quark"
+	"github.com/jcsvwinston/quark/internal/observe"
 )
 
 // castIdentifier matches a PostgreSQL type cast token: a single
@@ -236,8 +237,11 @@ func InstallRLSPolicies(ctx context.Context, client *quark.Client, opts InstallO
 	if err != nil {
 		return stmts, fmt.Errorf("quarktenant: begin apply tx: %w", err)
 	}
+	// Through the client's execution seam, as schema work: the middleware
+	// chain wraps each statement and the observers get a ddl event.
+	exec := observe.Executor(client, tx, observe.KindDDL, observe.KindIntrospection)
 	for i, stmt := range stmts {
-		if _, execErr := tx.ExecContext(ctx, stmt); execErr != nil {
+		if _, execErr := exec.ExecContext(ctx, stmt); execErr != nil {
 			_ = tx.Rollback()
 			return stmts, fmt.Errorf("quarktenant: apply stmt %d/%d %q: %w",
 				i+1, len(stmts), truncateForError(stmt, 80), execErr)

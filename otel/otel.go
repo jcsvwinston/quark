@@ -1,5 +1,9 @@
 // Package otel provides a Quark Middleware that emits OpenTelemetry
-// tracing spans and metrics for every database operation.
+// tracing spans and metrics for every statement Quark sends to the engine —
+// the query builder's, schema work, introspection, savepoints and raw SQL.
+// Each span and data point carries the statement's kind
+// (quark.statement.kind: query, exec, ddl, introspection, savepoint, raw),
+// so a backend can tell schema work from the application's traffic.
 //
 // Activation:
 //
@@ -177,20 +181,30 @@ func (m *Middleware) initInstruments() {
 
 // commonAttrs returns the attribute slice shared by every span and every
 // metric data point. db.system is added when set; db.operation is always
-// added with the caller-supplied label.
+// added with the caller-supplied label; quark.statement.kind is added when
+// the context came through a Quark client's chain, which is where Quark
+// puts it (quark.StatementKindFromContext).
 //
 // db.table is intentionally omitted: the Middleware sits below the query
 // builder and only sees the parameterised SQL string, not the parsed
 // table. Adding it would require parsing or threading the table down
 // through the Executor contract — out of scope for F4-1.
-func (m *Middleware) commonAttrs(op string) []attribute.KeyValue {
-	attrs := make([]attribute.KeyValue, 0, 2)
+func (m *Middleware) commonAttrs(op string, kind quark.StatementKind) []attribute.KeyValue {
+	attrs := make([]attribute.KeyValue, 0, 3)
 	attrs = append(attrs, attribute.String("db.operation", op))
 	if m.dbSystem != "" {
 		attrs = append(attrs, attribute.String("db.system", m.dbSystem))
 	}
+	if kind != "" {
+		attrs = append(attrs, attribute.String(StatementKindKey, string(kind)))
+	}
 	return attrs
 }
+
+// StatementKindKey is the attribute every span and metric data point carries
+// with the statement's quark.StatementKind, when the statement came through a
+// Quark client.
+const StatementKindKey = "quark.statement.kind"
 
 // startSpan opens a span for one operation and applies the redaction
 // policy: with RedactArgs, only the parameterised SQL reaches the span;
@@ -200,7 +214,7 @@ func (m *Middleware) commonAttrs(op string) []attribute.KeyValue {
 // db.statement.args attribute under either mode — emitting an empty
 // slice would be noise, not signal.
 func (m *Middleware) startSpan(ctx context.Context, name, op, sqlStr string, args []any) (context.Context, trace.Span) {
-	attrs := m.commonAttrs(op)
+	attrs := m.commonAttrs(op, quark.StatementKindFromContext(ctx))
 	attrs = append(attrs, attribute.String("db.statement", sqlStr))
 	if m.redaction == IncludeArgs && len(args) > 0 {
 		attrs = append(attrs, attribute.StringSlice("db.statement.args", argsToStrings(args)))
@@ -226,7 +240,7 @@ func (m *Middleware) recordOp(ctx context.Context, op string, start time.Time, r
 	if m.metricsErr != nil {
 		return
 	}
-	attrSet := metric.WithAttributes(m.commonAttrs(op)...)
+	attrSet := metric.WithAttributes(m.commonAttrs(op, quark.StatementKindFromContext(ctx))...)
 	m.queries.Add(ctx, 1, attrSet)
 	m.durations.Record(ctx, float64(time.Since(start).Microseconds())/1000.0, attrSet)
 	if hasRows {
@@ -242,7 +256,7 @@ func argsToStrings(args []any) []string {
 	return out
 }
 
-// WrapExec instruments INSERT / UPDATE / DELETE / DDL: span + counter +
+// WrapExec instruments INSERT / UPDATE / DELETE / DDL / savepoints: span + counter +
 // duration histogram + rows histogram (from sql.Result.RowsAffected when
 // available).
 func (m *Middleware) WrapExec(next quark.ExecFunc) quark.ExecFunc {

@@ -564,11 +564,26 @@ func (t *Tx) Savepoint(name string) error {
 	if err := t.client.guard.ValidateIdentifier(name); err != nil {
 		return err
 	}
-	if _, err := t.tx.Exec(t.savepointStmt(name)); err != nil {
+	if err := t.savepointExec(t.savepointStmt(name)); err != nil {
 		return err
 	}
 	t.markSavepoint(name)
 	return nil
+}
+
+// savepointExec sends a savepoint statement on the transaction through the
+// execution seam, so the middleware chain and the observers see it, as a
+// statement of kind savepoint. The context carries the values of the one the
+// transaction was opened with — a trace span, a request id — but not its
+// cancellation: the statement used to run on context.Background(), and a
+// transaction whose context ends is rolled back by database/sql anyway.
+func (t *Tx) savepointExec(stmtSQL string) error {
+	ctx := context.Background()
+	if t.ctx != nil {
+		ctx = context.WithoutCancel(t.ctx)
+	}
+	_, err := t.client.execStmt(ctx, t.tx, stmt{kind: StatementSavepoint, op: "EXEC"}, stmtSQL, nil)
+	return err
 }
 
 // savepointStmt / rollbackToStmt / releaseSavepointStmt resolve the per-dialect
@@ -609,7 +624,7 @@ func (t *Tx) RollbackTo(name string) error {
 	if err := t.client.guard.ValidateIdentifier(name); err != nil {
 		return err
 	}
-	if _, err := t.tx.Exec(t.rollbackToStmt(name)); err != nil {
+	if err := t.savepointExec(t.rollbackToStmt(name)); err != nil {
 		return err
 	}
 	t.rollbackHooksTo(name)
@@ -623,8 +638,8 @@ func (t *Tx) ReleaseSavepoint(name string) error {
 	if err := t.client.guard.ValidateIdentifier(name); err != nil {
 		return err
 	}
-	if stmt := t.releaseSavepointStmt(name); stmt != "" {
-		if _, err := t.tx.Exec(stmt); err != nil {
+	if release := t.releaseSavepointStmt(name); release != "" {
+		if err := t.savepointExec(release); err != nil {
 			return err
 		}
 	}

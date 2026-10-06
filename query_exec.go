@@ -192,16 +192,21 @@ func ScanTarget(ptr any) any {
 	return scanDestForPtr(ptr, nil)
 }
 
-// executeQuery runs a multi-row SELECT through the middleware chain, routing to
+// executeQuery runs a multi-row SELECT through the execution seam, routing to
 // a read replica when one is configured (F6-5, ADR-0015). readExec returns the
 // primary/tx exec unchanged when routing does not apply.
+//
+// The caller reports the statement once it has the rows (op is the
+// QueryEvent.Operation it reports it under, table its table); the seam reports
+// it only if it fails, so a failed attempt on a replica is reported too.
 //
 // IMPORTANT: this is for genuine reads only. A write path that reads rows back
 // with a multi-row shape — INSERT ... RETURNING in CreateBatch — must NOT route
 // to a replica; it calls executeQueryPrimary instead.
-func (q *BaseQuery) executeQuery(ctx context.Context, sqlStr string, args []any) (*sql.Rows, error) {
+func (q *BaseQuery) executeQuery(ctx context.Context, op, table, sqlStr string, args []any) (*sql.Rows, error) {
+	st := stmt{kind: StatementQuery, op: op, table: table, reported: true}
 	exec := q.readExec(ctx)
-	rows, err := q.executeQueryOn(ctx, exec, sqlStr, args)
+	rows, err := q.executeQueryOn(ctx, exec, st, sqlStr, args)
 	// Replica failover (F6-6): if the read was routed to a replica (exec is a
 	// *sql.DB other than the primary) and it failed with a transient connection
 	// error, take that replica out of rotation and retry once on the primary.
@@ -211,39 +216,30 @@ func (q *BaseQuery) executeQuery(ctx context.Context, sqlStr string, args []any)
 	if err != nil && q.client != nil && exec != Executor(q.exec) {
 		if rdb, ok := exec.(*sql.DB); ok && isTransientConnErr(err) {
 			q.client.markReplicaDown(rdb)
-			return q.executeQueryOn(ctx, q.exec, sqlStr, args)
+			return q.executeQueryOn(ctx, q.exec, st, sqlStr, args)
 		}
 	}
 	return rows, err
 }
 
 // executeQueryPrimary runs a multi-row query on the primary connection (q.exec)
-// without replica routing. Used by write paths that read rows back (RETURNING).
+// without replica routing. Used by write paths that read rows back (RETURNING);
+// the seam reports the statement as a "QUERY".
 func (q *BaseQuery) executeQueryPrimary(ctx context.Context, sqlStr string, args []any) (*sql.Rows, error) {
-	return q.executeQueryOn(ctx, q.exec, sqlStr, args)
+	return q.executeQueryOn(ctx, q.exec, stmt{kind: StatementQuery, op: "QUERY", table: q.table}, sqlStr, args)
 }
 
-// executeQueryOn runs a QueryContext on the given exec through the middleware
-// chain. The exec selection (replica vs primary) is the caller's decision.
-func (q *BaseQuery) executeQueryOn(ctx context.Context, exec Executor, sqlStr string, args []any) (*sql.Rows, error) {
+// executeQueryOn runs a QueryContext on the given exec through the execution
+// seam. The exec selection (replica vs primary) is the caller's decision.
+func (q *BaseQuery) executeQueryOn(ctx context.Context, exec Executor, st stmt, sqlStr string, args []any) (*sql.Rows, error) {
 	if q.err != nil {
 		return nil, q.err
 	}
-	// Base handler: direct execution
-	handler := QueryFunc(func(ctx context.Context, exec Executor, s string, a []any) (*sql.Rows, error) {
-		return exec.QueryContext(ctx, s, a...)
-	})
-
-	// Wrap with middleware in reverse order
-	for i := len(q.client.middleware) - 1; i >= 0; i-- {
-		handler = q.client.middleware[i].WrapQuery(handler)
-	}
-
-	return handler(ctx, exec, sqlStr, args)
+	return q.client.queryStmt(ctx, exec, st, sqlStr, args)
 }
 
 // executeQueryRow runs a single-row QueryRowContext on the primary (q.exec)
-// through the middleware chain. It is the WRITE-path single-row primitive:
+// through the execution seam. It is the WRITE-path single-row primitive:
 // INSERT ... RETURNING and MSSQL SCOPE_IDENTITY() read one row back but must
 // never touch a read replica. Genuine single-row reads (Count / aggregates)
 // use [BaseQuery.executeReadRow] instead, which is replica-routed (ADR-0015).
@@ -274,8 +270,9 @@ func (q *BaseQuery) executeReadRow(ctx context.Context, sqlStr string, args []an
 	return err
 }
 
-// queryRowOn runs a QueryRowContext on the given exec through the middleware
-// chain. The exec selection (replica vs primary) is the caller's decision.
+// queryRowOn runs a QueryRowContext on the given exec through the execution
+// seam, which reports it as a "QUERY_ROW". The exec selection (replica vs
+// primary) is the caller's decision.
 func (q *BaseQuery) queryRowOn(ctx context.Context, exec Executor, sqlStr string, args []any) *sql.Row {
 	// A build error (q.err) has to be minted into the row here: *sql.Row is
 	// opaque, and the comment that used to sit here — "it surfaces naturally
@@ -285,31 +282,7 @@ func (q *BaseQuery) queryRowOn(ctx context.Context, exec Executor, sqlStr string
 	if q.err != nil {
 		return errorRow(q.err)
 	}
-	// Base handler: direct execution
-	handler := QueryRowFunc(func(ctx context.Context, exec Executor, s string, a []any) *sql.Row {
-		start := time.Now()
-		row := exec.QueryRowContext(ctx, s, a...)
-		duration := time.Since(start)
-
-		// Notify observers (we don't know the rows yet, but it's always 1 for Row)
-		q.notifyObservers(QueryEvent{
-			SQL:       s,
-			Args:      a,
-			Duration:  duration,
-			Table:     q.table,
-			Operation: "QUERY_ROW",
-			Rows:      1,
-		})
-
-		return row
-	})
-
-	// Wrap with middleware in reverse order
-	for i := len(q.client.middleware) - 1; i >= 0; i-- {
-		handler = q.client.middleware[i].WrapQueryRow(handler)
-	}
-
-	return handler(ctx, exec, sqlStr, args)
+	return q.client.queryRowStmt(ctx, exec, stmt{kind: StatementQuery, op: "QUERY_ROW", table: q.table}, sqlStr, args)
 }
 
 // List executes the query and returns all matching rows.
@@ -372,7 +345,9 @@ func (q *Query[T]) List() ([]T, error) {
 	// by the uncached path. Wrapping it once keeps the observer / log
 	// semantics identical: exactly one observer event per actual SQL trip,
 	// regardless of how many concurrent callers were collapsed by
-	// singleflight.
+	// singleflight. A statement that fails is reported by the seam; one
+	// that reached the engine and then failed to scan is reported here,
+	// with the error.
 	//
 	// It does not serialize the result: only the two cache paths need the
 	// JSON form, and they marshal it themselves. The uncached path used to
@@ -380,7 +355,7 @@ func (q *Query[T]) List() ([]T, error) {
 	// CPU and about a third of its bytes (QK-34).
 	computeFromDB := func(ctx context.Context) ([]T, error) {
 		start := time.Now()
-		rows, err := q.executeQuery(ctx, sqlStr, args)
+		rows, err := q.executeQuery(ctx, "SELECT", q.table, sqlStr, args)
 		duration := time.Since(start)
 		if err != nil {
 			return nil, fmt.Errorf("query failed: %w", wrapDBError(err))
@@ -398,25 +373,34 @@ func (q *Query[T]) List() ([]T, error) {
 			capHint = 1024
 		}
 		results := make([]T, 0, capHint)
+		var readErr error
 		for rows.Next() {
 			var entity T
-			if scanErr := q.scanRow(rows, &entity); scanErr != nil {
-				return nil, scanErr
+			if readErr = q.scanRow(rows, &entity); readErr != nil {
+				break
 			}
 			results = append(results, entity)
 		}
-		if rerr := rows.Err(); rerr != nil {
-			return nil, wrapDBError(rerr)
+		if readErr == nil {
+			readErr = wrapDBError(rows.Err())
 		}
 
-		q.notifyObservers(QueryEvent{
+		ev := QueryEvent{
 			SQL:       sqlStr,
 			Args:      args,
 			Duration:  duration,
+			Error:     readErr,
 			Table:     q.table,
 			Operation: "SELECT",
-			Rows:      int64(len(results)),
-		})
+			Kind:      StatementQuery,
+		}
+		if readErr == nil {
+			ev.Rows = int64(len(results))
+		}
+		q.notifyObservers(ev)
+		if readErr != nil {
+			return nil, readErr
+		}
 		return results, nil
 	}
 
@@ -642,7 +626,9 @@ func (q *Query[T]) Cursor() (*Cursor[T], error) {
 	}
 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
-	rows, err := q.executeQuery(ctx, sqlStr, args)
+	// The cursor reports the statement when it is closed; the seam reports
+	// it if it fails here.
+	rows, err := q.executeQuery(ctx, "SELECT (cursor)", q.table, sqlStr, args)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("query failed: %w", wrapDBError(err))
@@ -696,22 +682,22 @@ func (q *Query[T]) Iter(fn func(T) error) error {
 	defer cancel()
 
 	start := time.Now()
-	rows, err := q.executeQuery(ctx, sqlStr, args)
+	rows, err := q.executeQuery(ctx, "SELECT (stream)", q.table, sqlStr, args)
 	duration := time.Since(start)
+	if err != nil {
+		// The seam has reported the failed statement.
+		return fmt.Errorf("query failed: %w", wrapDBError(err))
+	}
+	defer rows.Close()
 
 	q.notifyObservers(QueryEvent{
 		SQL:       sqlStr,
 		Args:      args,
 		Duration:  duration,
-		Error:     err,
 		Table:     q.table,
 		Operation: "SELECT (stream)",
+		Kind:      StatementQuery,
 	})
-
-	if err != nil {
-		return fmt.Errorf("query failed: %w", wrapDBError(err))
-	}
-	defer rows.Close()
 
 	for rows.Next() {
 		var entity T

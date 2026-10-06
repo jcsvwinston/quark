@@ -252,7 +252,7 @@ func (r *TenantRouter) confineTx(ctx context.Context, tx *Tx) error {
 			return fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
 				ErrUnsupportedFeature, tx.client.dialect.Name())
 		}
-		if _, err := tx.tx.ExecContext(ctx, "SELECT set_config($1, $2, true)", r.config.defaultNativeRLSVar(), tenantID); err != nil {
+		if _, err := tx.client.execStmt(ctx, tx.tx, stmt{kind: StatementExec, op: "EXEC"}, "SELECT set_config($1, $2, true)", []any{r.config.defaultNativeRLSVar(), tenantID}); err != nil {
 			return fmt.Errorf("native rls: set_config: %w", err)
 		}
 	}
@@ -285,11 +285,11 @@ func (r *TenantRouter) verifyNativePolicy(ctx context.Context, client *Client, t
 	}
 	var enabled bool
 	var policies int
-	err := client.db.QueryRowContext(ctx, `
+	err := client.queryRowStmt(ctx, client.db, stmt{kind: StatementIntrospection, op: "QUERY_ROW"}, `
 		SELECT c.relrowsecurity, (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid)
 		  FROM pg_class c
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE c.relname = $1 AND c.relkind = 'r' AND n.nspname = current_schema()`, table).Scan(&enabled, &policies)
+		 WHERE c.relname = $1 AND c.relkind = 'r' AND n.nspname = current_schema()`, []any{table}).Scan(&enabled, &policies)
 	switch {
 	case err != nil:
 		return fmt.Errorf("%w: cannot confirm the policies on %q from the catalog (%v); set TenantConfig.SkipPolicyVerification to serve anyway",

@@ -3,6 +3,7 @@ package exercise
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -42,6 +43,21 @@ type obsMissing struct {
 }
 
 func (obsMissing) TableName() string { return "obs_missing_xyz" }
+
+// kindTap es un middleware que anota la clase de cada sentencia tal como
+// quark.StatementKindFromContext se la dice: la DDL de Migrate debe llegar
+// al chain como StatementDDL (A11 Q7).
+type kindTap struct {
+	quark.BaseMiddleware
+	kinds map[quark.StatementKind]int
+}
+
+func (k *kindTap) WrapExec(next quark.ExecFunc) quark.ExecFunc {
+	return func(ctx context.Context, ex quark.Executor, s string, a []any) (sql.Result, error) {
+		k.kinds[quark.StatementKindFromContext(ctx)]++
+		return next(ctx, ex, s, a)
+	}
+}
 
 // OBSERVABILITY ejerce la pila de observabilidad EN PROCESO, sin backends
 // externos (la versión Docker-real con Jaeger+Redis vive en
@@ -86,13 +102,16 @@ var OBSERVABILITY = Exerciser{Name: "observability", Fn: func(ctx context.Contex
 	// --- Client instrumentado: OTel (redactado) + logger narrando todo. -----
 	rec.Note(OTL("New"), OTL("WithDBSystem"), OTL("Middleware"), OTL("Option"),
 		OTL("RedactionMode"), OTL("RedactArgs"),
-		QF("WithMiddleware"), QF("WithLogger"), QF("WithSlowQueryThreshold"))
+		QF("WithMiddleware"), QF("WithLogger"), QF("WithSlowQueryThreshold"),
+		QF("StatementKindFromContext"))
+	tap := &kindTap{kinds: map[quark.StatementKind]int{}}
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	l := quark.DefaultLimits()
 	l.SafeMigrations = false
 	obsClient, err := quark.New(conn.Driver, conn.DSN, append(rec.Options(),
 		quark.WithMiddleware(quarkotel.New(quarkotel.WithDBSystem(string(conn.Engine)))),
+		quark.WithMiddleware(tap),
 		quark.WithLogger(logger),
 		quark.WithSlowQueryThreshold(time.Nanosecond),
 		quark.WithLimits(l))...)
@@ -103,6 +122,11 @@ var OBSERVABILITY = Exerciser{Name: "observability", Fn: func(ctx context.Contex
 
 	if err := obsClient.Migrate(ctx, &obsProbe{}); err != nil {
 		return fmt.Errorf("migrate obs_probes: %w", err)
+	}
+	// La DDL de Migrate pasa el chain (A11 Q7): el middleware la ve con su
+	// clase, y el span de OTel la lleva en quark.statement.kind.
+	if tap.kinds[quark.StatementDDL] == 0 {
+		return fmt.Errorf("la DDL de Migrate no llegó al middleware como StatementDDL: %v", tap.kinds)
 	}
 	defer func() { _, _ = obsClient.Raw().ExecContext(context.Background(), "DROP TABLE obs_probes") }()
 	_, _ = obsClient.Raw().ExecContext(ctx, "DELETE FROM obs_probes")
@@ -137,13 +161,13 @@ var OBSERVABILITY = Exerciser{Name: "observability", Fn: func(ctx context.Contex
 	// --- Asserts de spans (lado redactado). ----------------------------------
 	spans := sr.Ended()
 	if len(spans) < 5 {
-		return fmt.Errorf("esperaba ≥5 spans (create/first/update/list/error), got %d", len(spans))
+		return fmt.Errorf("esperaba ≥5 spans (migrate/create/first/update/list/error), got %d", len(spans))
 	}
 	// Set exhaustivo HOY: el middleware sólo envuelve las 3 vías del pipeline
 	// (los pings/Begin del driver no pasan por él). Si quark añadiera
 	// WrapPing/WrapBeginTx al contrato Middleware, ampliar este set.
 	validNames := map[string]bool{"quark.exec": true, "quark.query": true, "quark.query_row": true}
-	var sawStatement, sawError bool
+	var sawStatement, sawError, sawDDL bool
 	for _, s := range spans {
 		if !validNames[s.Name()] {
 			return fmt.Errorf("span con nombre inesperado %q", s.Name())
@@ -158,6 +182,10 @@ var OBSERVABILITY = Exerciser{Name: "observability", Fn: func(ctx context.Contex
 				}
 			case "db.statement.args":
 				return fmt.Errorf("FUGA: db.statement.args presente bajo RedactArgs (span %s)", s.Name())
+			case quarkotel.StatementKindKey:
+				if kv.Value.AsString() == string(quark.StatementDDL) {
+					sawDDL = true
+				}
 			case "db.system":
 				hasSystem = true
 				if kv.Value.AsString() != string(conn.Engine) {
@@ -177,6 +205,9 @@ var OBSERVABILITY = Exerciser{Name: "observability", Fn: func(ctx context.Contex
 	}
 	if !sawError {
 		return fmt.Errorf("el error del motor no marcó ningún span con codes.Error")
+	}
+	if !sawDDL {
+		return fmt.Errorf("ningún span llevó %s=ddl: la DDL de Migrate no pasó por el middleware OTel", quarkotel.StatementKindKey)
 	}
 
 	// --- Asserts de métricas: quark.queries.total suma las operaciones. ------

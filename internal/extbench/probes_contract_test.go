@@ -654,40 +654,45 @@ func probeModelHooks(t *testing.T, e *env) verdict {
 
 // --- CON-04 -------------------------------------------------------------------
 
-// seeingMiddleware records the statements that pass through it, and the
-// nesting order of the chain on the first statement.
+// seeingMiddleware records the statements that pass through it, the kind
+// Quark says each is (quark.StatementKindFromContext), and the nesting order
+// of the chain on the first statement.
 type seeingMiddleware struct {
 	quark.BaseMiddleware
 	name  string
 	mu    *sync.Mutex
 	seen  *[]string
+	kinds *[]quark.StatementKind
 	order *[]string
 }
 
-func (m seeingMiddleware) note(s string) {
+func (m seeingMiddleware) note(ctx context.Context, s string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	*m.seen = append(*m.seen, s)
+	if m.kinds != nil {
+		*m.kinds = append(*m.kinds, quark.StatementKindFromContext(ctx))
+	}
 	*m.order = append(*m.order, m.name)
 }
 
 func (m seeingMiddleware) WrapExec(next quark.ExecFunc) quark.ExecFunc {
 	return func(ctx context.Context, ex quark.Executor, s string, args []any) (sql.Result, error) {
-		m.note(s)
+		m.note(ctx, s)
 		return next(ctx, ex, s, args)
 	}
 }
 
 func (m seeingMiddleware) WrapQuery(next quark.QueryFunc) quark.QueryFunc {
 	return func(ctx context.Context, ex quark.Executor, s string, args []any) (*sql.Rows, error) {
-		m.note(s)
+		m.note(ctx, s)
 		return next(ctx, ex, s, args)
 	}
 }
 
 func (m seeingMiddleware) WrapQueryRow(next quark.QueryRowFunc) quark.QueryRowFunc {
 	return func(ctx context.Context, ex quark.Executor, s string, args []any) *sql.Row {
-		m.note(s)
+		m.note(ctx, s)
 		return next(ctx, ex, s, args)
 	}
 }
@@ -789,11 +794,19 @@ func firstWords(stmts []string) []string {
 	return out
 }
 
+// allKinds are the statement kinds the battery has to produce, each at least
+// once: a battery that stops exercising one would stop measuring it.
+var allKinds = []quark.StatementKind{
+	quark.StatementQuery, quark.StatementExec, quark.StatementDDL,
+	quark.StatementIntrospection, quark.StatementSavepoint, quark.StatementRaw,
+}
+
 func probeInterception(t *testing.T, e *env) verdict {
 	registerWireDriver()
 	var mu sync.Mutex
 	var seenA, seenB, order []string
-	a := seeingMiddleware{name: "first", mu: &mu, seen: &seenA, order: &order}
+	var kindsA []quark.StatementKind
+	a := seeingMiddleware{name: "first", mu: &mu, seen: &seenA, kinds: &kindsA, order: &order}
 	b := seeingMiddleware{name: "second", mu: &mu, seen: &seenB, order: &order}
 	limits := quark.DefaultLimits()
 	limits.AllowRawQueries = true
@@ -809,32 +822,60 @@ func probeInterception(t *testing.T, e *env) verdict {
 	mu.Lock()
 	defer mu.Unlock()
 	observed := rec.sql()
+	observedKinds := rec.kinds()
 	missedByMiddleware := multisetMinus(wire, seenA)
 	missedByObserver := multisetMinus(wire, observed)
-	bothChains := len(multisetMinus(seenA, seenB)) == 0 && len(multisetMinus(seenB, seenA)) == 0
+	bothChains := slicesEqual(seenA, seenB)
 	firstOutermost := len(order) >= 2 && order[0] == "first" && order[1] == "second"
 
 	t.Logf("statements that reached the engine: %d; through the middleware: %d; through the observer: %d",
 		len(wire), len(seenA), len(observed))
 	t.Logf("reached the engine without passing the middleware: %d %v", len(missedByMiddleware), firstWords(missedByMiddleware))
 	t.Logf("reached the engine without reaching the observer: %d %v", len(missedByObserver), firstWords(missedByObserver))
-	t.Logf("both middlewares saw the same statements: %v; the first registered is the outermost: %v", bothChains, firstOutermost)
+	t.Logf("both middlewares saw the same statements in the same order: %v; the first registered is the outermost: %v", bothChains, firstOutermost)
 
 	if len(wire) == 0 || len(seenA) == 0 {
 		t.Fatal("nothing recorded: the recording driver or the middleware is not wired, and the probe would measure that")
 	}
-	if len(missedByMiddleware) == 0 && len(missedByObserver) == 0 && bothChains && firstOutermost {
-		return present
+
+	// In order: what the middleware saw, and what the observer saw, is the
+	// engine's own sequence, statement for statement.
+	inOrder := true
+	if i, ok := firstDivergence(wire, seenA); !ok {
+		inOrder = false
+		t.Logf("the middleware's sequence leaves the engine's at statement %d: engine %q, middleware %q", i, at(wire, i), at(seenA, i))
 	}
-	// The partial is recorded down to what each extension point misses: a
-	// path that starts or stops reaching one of them changes the note.
-	want := interceptionRecorded
-	if len(missedByMiddleware) != want.middlewareMisses || len(missedByObserver) != want.observerMisses ||
-		!slicesEqual(firstWords(missedByMiddleware), want.middlewareClasses) ||
-		!slicesEqual(firstWords(missedByObserver), want.observerClasses) {
-		t.Errorf("what the middleware and the observer miss moved:\n  measured middleware %d %q\n           observer   %d %q\n  recorded middleware %d %q\n           observer   %d %q\nupdate interceptionRecorded and CON-04's note together",
-			len(missedByMiddleware), firstWords(missedByMiddleware), len(missedByObserver), firstWords(missedByObserver),
-			want.middlewareMisses, want.middlewareClasses, want.observerMisses, want.observerClasses)
+	if i, ok := firstDivergence(wire, observed); !ok {
+		inOrder = false
+		t.Logf("the observer's sequence leaves the engine's at statement %d: engine %q, observer %q", i, at(wire, i), at(observed, i))
+	}
+
+	// The kinds: the middleware is told the kind the observer's event
+	// carries, every statement has one, and the battery produces all six.
+	kindsAgree := len(kindsA) == len(observedKinds)
+	for i := 0; kindsAgree && i < len(kindsA); i++ {
+		if kindsA[i] != observedKinds[i] || kindsA[i] == "" {
+			kindsAgree = false
+			t.Logf("statement %d %q: the middleware is told kind %q, the observer's event says %q", i, at(seenA, i), kindsA[i], observedKinds[i])
+		}
+	}
+	count := map[quark.StatementKind]int{}
+	for _, k := range observedKinds {
+		count[k]++
+	}
+	var missingKinds []string
+	for _, k := range allKinds {
+		if count[k] == 0 {
+			missingKinds = append(missingKinds, string(k))
+		}
+	}
+	t.Logf("statements by kind: %v; the middleware and the observer agree on every kind: %v", count, kindsAgree)
+	if len(missingKinds) > 0 {
+		t.Logf("kinds the battery produced none of: %v", missingKinds)
+	}
+
+	if inOrder && bothChains && firstOutermost && kindsAgree && len(missingKinds) == 0 {
+		return present
 	}
 	if len(missedByMiddleware) == len(wire) {
 		return absent
@@ -842,36 +883,26 @@ func probeInterception(t *testing.T, e *env) verdict {
 	return partial
 }
 
-func slicesEqual(a, b []string) bool {
-	return strings.Join(a, "\x00") == strings.Join(b, "\x00")
+// firstDivergence returns the index of the first statement where got leaves
+// want, and whether there is none (the sequences are equal).
+func firstDivergence(want, got []string) (int, bool) {
+	for i := 0; i < len(want) || i < len(got); i++ {
+		if i >= len(want) || i >= len(got) || want[i] != got[i] {
+			return i, false
+		}
+	}
+	return 0, true
 }
 
-// interceptionRecorded is what CON-04 records the middleware and the
-// observer missing on the battery: how many statements, and of which kinds
-// (the first two words of each).
-var interceptionRecorded = struct {
-	middlewareMisses, observerMisses   int
-	middlewareClasses, observerClasses []string
-}{
-	middlewareMisses: 17,
-	middlewareClasses: []string{
-		"ALTER TABLE", "CREATE TABLE",
-		`PRAGMA foreign_key_list("obs_rows")`, `PRAGMA index_info("sqlite_autoindex_obs_rows_1")`,
-		`PRAGMA index_list("obs_rows")`, `PRAGMA table_info("obs_rows")`,
-		"ROLLBACK TO", `SAVEPOINT "sp"`,
-		`SELECT "id"`,       // client.RawQuery
-		"SELECT name",       // the sqlite_master listing of introspection
-		`UPDATE "obs_rows"`, // client.Exec
-	},
-	observerMisses: 16,
-	observerClasses: []string{
-		"ALTER TABLE", "CREATE TABLE",
-		"INSERT INTO", // CreateBatch
-		`PRAGMA foreign_key_list("obs_rows")`, `PRAGMA index_info("sqlite_autoindex_obs_rows_1")`,
-		`PRAGMA index_list("obs_rows")`, `PRAGMA table_info("obs_rows")`,
-		"ROLLBACK TO", `SAVEPOINT "sp"`,
-		"SELECT name",
-	},
+func at(s []string, i int) string {
+	if i < len(s) {
+		return s[i]
+	}
+	return "(nothing)"
+}
+
+func slicesEqual(a, b []string) bool {
+	return strings.Join(a, "\x00") == strings.Join(b, "\x00")
 }
 
 // --- CON-05 -------------------------------------------------------------------

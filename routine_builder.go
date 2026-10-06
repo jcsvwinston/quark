@@ -47,10 +47,9 @@ func (r *Routine[T]) execute() (*sql.Rows, *Client, error) {
 
 	sqlStr := client.dialect.BuildRoutineQuery(r.routine, len(r.args))
 
-	// We use the basic exec flow, but it bypasses the standard Query middleware since it's a Routine.
-	// For production, we should wrap this in a RoutineFunc or reuse QueryFunc if possible.
-	// Here we just execute directly for simplicity.
-	rows, err := client.db.QueryContext(r.ctx, sqlStr, r.args...)
+	// Through the execution seam: the middleware chain wraps the call and
+	// the observers get a QUERY event of kind query.
+	rows, err := client.queryStmt(r.ctx, client.db, stmt{kind: StatementQuery, op: "QUERY"}, sqlStr, r.args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -137,6 +136,6 @@ func Call(ctx context.Context, provider ClientProvider, procedure string, args .
 
 	sqlStr := client.dialect.BuildProcedureCall(procedure, len(args))
 
-	_, err = client.db.ExecContext(ctx, sqlStr, args...)
+	_, err = client.execStmt(ctx, client.db, stmt{kind: StatementExec, op: "EXEC"}, sqlStr, args)
 	return err
 }

@@ -326,6 +326,8 @@ rows, err := client.RawQuery(ctx,
 
 Raw queries are disabled by default. `RawQuery` also asks SQLGuard to validate
 that placeholders are present and that obvious injection patterns are absent.
+The statement passes the middleware chain and reaches the observers as a
+`RAW_QUERY` of kind `raw`.
 
 ## Exec
 
@@ -339,7 +341,9 @@ err := client.Exec(ctx,
 )
 ```
 
-`Exec` requires `AllowRawQueries: true` and runs raw-query validation.
+`Exec` requires `AllowRawQueries: true` and runs raw-query validation. The
+statement passes the middleware chain and reaches the observers as a
+`RAW_EXEC` of kind `raw`.
 
 ## Raw
 

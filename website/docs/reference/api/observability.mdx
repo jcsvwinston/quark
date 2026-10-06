@@ -1,24 +1,89 @@
 # Observability API Reference
 
 The four ways to see what Quark is doing: query observers (one event per
-operation), middleware (wrap the execution path), the OpenTelemetry integration,
-and the slow-query log.
+statement), middleware (wrap the execution path), the OpenTelemetry integration,
+and the slow-query log. All four see every statement Quark sends to the engine
+— the query builder's, schema work, catalog reads, savepoints and raw SQL — and
+each statement carries a [kind](#what-is-observed) saying what it is for.
 
 For a worked setup, see
 [Caching & Observability](../../advanced/caching-observability).
 
 | Symbol | Signature | Purpose |
 | --- | --- | --- |
-| `QueryObserver` | interface — `ObserveQuery(event QueryEvent)` | Receives a `QueryEvent` per operation. |
+| `QueryObserver` | interface — `ObserveQuery(event QueryEvent)` | Receives a `QueryEvent` per statement. |
 | `WithQueryObserver` | `WithQueryObserver(o QueryObserver) Option` | Registers an observer on a client. |
 | `Middleware` | interface — `WrapExec` / `WrapQuery` / `WrapQueryRow` | Wraps execution functions. |
-| `WithMiddleware` | `WithMiddleware(m Middleware) Option` | Registers middleware on a client. |
+| `WithMiddleware` | `WithMiddleware(m Middleware) Option` | Registers middleware on a client; the first registered is the outermost. |
+| `StatementKind` | `type StatementKind string` | What a statement is for: `query`, `exec`, `ddl`, `introspection`, `savepoint`, `raw`. |
+| `StatementKindFromContext` | `StatementKindFromContext(ctx context.Context) StatementKind` | The kind of the statement a middleware is wrapping. |
 | `WithSlowQueryThreshold` | `WithSlowQueryThreshold(d time.Duration) Option` | Logs a WARN line for operations slower than `d`. |
 | `quarkotel.New` | `New(opts ...Option) *Middleware` | OpenTelemetry spans + metrics middleware. |
 | `quarkotel.WithSpanRedaction` | `WithSpanRedaction(mode RedactionMode) Option` | `RedactArgs` (default) or `IncludeArgs`. |
 | `quarkotel.WithDBSystem` | `WithDBSystem(name string) Option` | Sets the `db.system` attribute. |
+| `quarkotel.StatementKindKey` | `const StatementKindKey = "quark.statement.kind"` | The span and metric attribute that carries the kind. |
 | `Notify` | `Notify(ctx, provider ClientProvider, channel, payload string) error` | Sends a DB notification (PG only). |
 | `NewListenerFactory` | `NewListenerFactory(client *Client) *ListenerFactory` | Builds the inbound LISTEN/NOTIFY factory. |
+
+## What is observed
+
+Every statement Quark sends to the engine goes through one execution path,
+which runs it inside the middleware chain and then hands its `QueryEvent` to
+the slow-query log and to every observer. The middleware and the observers
+therefore see the same statements, in the order the engine receives them.
+The extension bench measures this with a recording driver underneath Quark
+(control `CON-04`), and a test of the repository fails on code that sends a
+statement any other way.
+
+Each statement has a `StatementKind`. `query` and `exec` are told apart by the
+`database/sql` method the statement goes through, which is the same split as
+`WrapQuery`/`WrapQueryRow` versus `WrapExec`. The other four kinds say what the
+statement is for, whichever method it uses.
+
+| Kind | What sends it |
+| --- | --- |
+| `query` | The query builder through `QueryContext` or `QueryRowContext`: `List`, `Find`, `First`, `Iter`, `Cursor`, `Count`, the aggregates, preloads, the check a guarded write reads first, and a write that reads its result back (`INSERT … RETURNING`, SQL Server's `OUTPUT`, the key a `Create` reads after its `INSERT`). Also `Routine` and the batch reads of `Backfill`. |
+| `exec` | The query builder through `ExecContext`: `INSERT`, `UPDATE`, `DELETE`, upserts and batches. Also `Call`, `Notify`, audit rows, and the tenant variable a `RowLevelSecurityNative` transaction sets when it opens. |
+| `ddl` | Schema work: the `CREATE`, `ALTER` and `DROP` of `Migrate`, `Sync`, `ApplyPlan`, `CreateIndex` and `AddForeignKey`, and the statements that serve it — the migration lock, writes to Quark's bookkeeping tables (`quark_migration_state`, `quark_backfill_state`, `quark_migrations`), the PRAGMAs and row copy of SQLite's table rebuild, and the policies `quarktenant` installs. |
+| `introspection` | Reads of what the schema is: the catalog queries of the dialect's `SchemaIntrospector` under `IntrospectSchema`, `PlanMigration` and `Sync`; the catalog reads of `ApplyPlan`; the `RowLevelSecurityNative` policy checks; reads of the bookkeeping tables; and the server version a client on the `mysql` driver reads to tell MariaDB apart. |
+| `savepoint` | `SAVEPOINT`, `ROLLBACK TO SAVEPOINT` and `RELEASE SAVEPOINT`, from `Tx.Savepoint`, `Tx.RollbackTo`, `Tx.ReleaseSavepoint` and the nested `Tx.Tx`. |
+| `raw` | SQL you wrote, sent with `Client.Exec` or `Client.RawQuery`. |
+
+A middleware reads the kind from the context it receives. An observer reads
+it from `QueryEvent.Kind`:
+
+```go
+func (m *AuditMiddleware) WrapExec(next quark.ExecFunc) quark.ExecFunc {
+    return func(ctx context.Context, exec quark.Executor, sqlStr string, args []any) (sql.Result, error) {
+        if quark.StatementKindFromContext(ctx) == quark.StatementDDL {
+            log.Printf("schema change: %s", sqlStr)
+        }
+        return next(ctx, exec, sqlStr, args)
+    }
+}
+```
+
+`StatementKindFromContext` returns `""` for a context that did not come
+through a client's chain, such as a middleware function a test calls
+directly.
+
+The following are not observed:
+
+- **Transaction control.** `BEGIN`, `COMMIT` and `ROLLBACK` are sent by the
+  driver through `database/sql`'s `BeginTx`, `Commit` and `Rollback`, not as
+  statements.
+- **What your code sends on handles Quark gives it.** That covers
+  `Client.Raw()` and the `*sql.Tx` that `migrate.Migration.UpTx` and `DownTx`
+  receive; the migrator's own ledger statements are still observed. A
+  migration's `Up` and `Down` get the client, and whatever they send through
+  it is observed.
+- **The `set_config` of `RowLevelSecurityNative` outside a transaction.**
+  This travels with the statement it confines, inside the same call. The
+  middleware's timing covers both, but neither the middleware nor the
+  observer sees `set_config` as a statement of its own. Inside a transaction,
+  the variable is set once when the transaction opens, as an `exec`.
+- **The `LISTEN` connection** that a driver's `ListenerFactory` opens for
+  inbound notifications.
 
 ## QueryObserver
 
@@ -53,11 +118,23 @@ type QueryEvent struct {
     Error     error
     Table     string
     Operation string
+    Kind      StatementKind
 }
 ```
 
-Operations include values such as `SELECT`, `EXEC`, `QUERY_ROW`,
-`SELECT (stream)`, `SELECT (cursor)`, `PRELOAD`, `RAW_QUERY`, and `RAW_EXEC`.
+`Kind` says what the statement is for ([above](#what-is-observed)).
+`Operation` says how it was sent:
+
+| Operation | Sent by |
+| --- | --- |
+| `SELECT`, `SELECT (stream)`, `SELECT (cursor)`, `PRELOAD` | The query builder's reads: `List` (and `Find`, `First`), `Iter`, `Cursor`, preloads. The event is emitted once the caller has the rows; if the statement fails, the event is emitted with its error. |
+| `QUERY_ROW` | Any statement sent through `QueryRowContext`. `Rows` is 1, and the error surfaces on `Scan`, not on the event. |
+| `EXEC` | Any statement sent through `ExecContext` other than raw SQL. `Rows` is the affected-row count when the driver reports one. |
+| `QUERY` | A statement sent through `QueryContext` outside the read families above: catalog reads, `CreateBatch` reading its keys back, `Routine`. |
+| `RAW_QUERY`, `RAW_EXEC` | `Client.RawQuery` and `Client.Exec`. |
+
+`Table` is set when Quark knows it: a model's table, a bookkeeping table, or
+the audit table. It is empty for raw SQL and catalog reads.
 
 `PRELOAD` covers the batched eager-loading SELECTs that `Preload` issues
 (`… WHERE fk IN (…)`, or `… WHERE fk = ANY($1)` on PostgreSQL — join-table
@@ -120,7 +197,8 @@ Fields on the log record:
 | --- | --- | --- |
 | `duration_ms` | int64 | The observed duration in milliseconds. |
 | `threshold_ms` | int64 | The configured threshold in milliseconds. |
-| `operation` | string | The `QueryEvent.Operation` value — `SELECT`, `SELECT (stream)`, `SELECT (cursor)`, `PRELOAD`, `QUERY_ROW`, `EXEC`, `RAW_QUERY`, or `RAW_EXEC`. |
+| `operation` | string | The `QueryEvent.Operation` value — `SELECT`, `SELECT (stream)`, `SELECT (cursor)`, `PRELOAD`, `QUERY_ROW`, `EXEC`, `QUERY`, `RAW_QUERY`, or `RAW_EXEC`. |
+| `kind` | string | The `QueryEvent.Kind` value — `query`, `exec`, `ddl`, `introspection`, `savepoint`, or `raw`. |
 | `table` | string | The Quark-managed table, when known (raw queries leave it empty). |
 | `rows` | int64 | Rows affected for `EXEC` / rows returned for `QUERY_ROW`; zero otherwise. |
 | `sql` | string | The parameterised SQL. **Bind arguments are NOT included** — the same redaction principle as OTel spans (below). |
@@ -142,7 +220,8 @@ client, err := quark.New("postgres", dsn,
 )
 ```
 
-The middleware emits **spans** and **metrics** for every database operation.
+The middleware emits **spans** and **metrics** for every statement Quark
+sends, schema work and savepoints included.
 Both tracer and meter are resolved lazily from the OTel global providers
 at query-execution time — install your `TracerProvider` / `MeterProvider`
 before the first query.
@@ -156,8 +235,11 @@ before the first query.
 | `QueryRowContext` | `quark.query_row` |
 
 Attributes: `db.statement` (parameterised SQL with placeholders), `db.operation`
-(`EXEC` / `SELECT` / `SELECT_ROW`), and — when `WithDBSystem` is set —
-`db.system`. Bind arguments are **not** attached to spans by default.
+(`EXEC` / `SELECT` / `SELECT_ROW`), `quark.statement.kind` (the statement's
+kind — `query`, `exec`, `ddl`, `introspection`, `savepoint` or `raw`), and —
+when `WithDBSystem` is set — `db.system`. Bind arguments are **not** attached
+to spans by default. A `CREATE TABLE` from `Migrate` is a `quark.exec` span
+with kind `ddl`; a `SAVEPOINT` is a `quark.exec` span with kind `savepoint`.
 
 ### Span redaction (`WithSpanRedaction`)
 
@@ -181,12 +263,13 @@ meter:
 
 | Instrument | Kind | Unit | Description |
 | --- | --- | --- | --- |
-| `quark.queries.total` | counter (Int64) | — | Every Quark operation increments this. |
+| `quark.queries.total` | counter (Int64) | — | Every statement Quark sends increments this. |
 | `quark.queries.duration` | histogram (Float64) | `ms` | Wall-clock time of the operation, including middleware overhead. |
 | `quark.queries.rows` | histogram (Int64) | — | Rows affected, **Exec only** — emitted when `sql.Result.RowsAffected()` succeeds. `SELECT` / `SELECT_ROW` do not emit (counting them would require wrapping `*sql.Rows`, a future enhancement). |
 
-Every data point carries `db.operation` and — when `WithDBSystem` is set —
-`db.system`.
+Every data point carries `db.operation`, `quark.statement.kind`, and — when
+`WithDBSystem` is set — `db.system`. Filtering on `quark.statement.kind`
+keeps schema work and catalog reads out of an application's query metrics.
 
 ### `WithDBSystem`
 

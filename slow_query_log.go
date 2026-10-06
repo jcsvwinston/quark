@@ -5,15 +5,15 @@ package quark
 
 // Slow-query logging (F4-3).
 //
-// Every Quark operation already feeds a QueryEvent into the observer
-// pipeline (notifyObservers, query_builder.go). Slow-query logging
+// Every statement Quark sends feeds a QueryEvent into the observer
+// pipeline (Client.observe, observe.go). Slow-query logging
 // piggybacks on that signal: when WithSlowQueryThreshold is configured
 // and an operation's duration crosses the threshold, the Client emits a
 // structured WARN through its slog logger before invoking the observer
 // callbacks.
 //
-// The log line carries duration / threshold / operation / table / rows
-// / sql. Bind arguments are NOT emitted — the parameterised SQL is the
+// The log line carries duration / threshold / operation / kind / table /
+// rows / sql. Bind arguments are NOT emitted — the parameterised SQL is the
 // observable surface, the same redaction principle as F4-2 spans. A
 // caller that wants args in their pipeline can register their own
 // QueryObserver and format them under their own retention policy.
@@ -39,6 +39,7 @@ func (c *Client) logSlowQueryIfNeeded(e QueryEvent) {
 		"duration_ms", e.Duration.Milliseconds(),
 		"threshold_ms", c.slowQueryThreshold.Milliseconds(),
 		"operation", e.Operation,
+		"kind", string(e.Kind),
 		"table", e.Table,
 		"rows", e.Rows,
 		"sql", e.SQL,

@@ -38,8 +38,9 @@ var referenceCPUs = []string{
 // the CI runner (see referenceEnv), on 2026-10-05: GitHub drew five CPU models
 // for them, listed in referenceCPUs and named on the published page. The
 // allocations are machine-independent and were the same on the runner and on
-// a laptop. TestEngineBenchCatalogue checks that each recorded verdict is one
-// its recorded ratios allow.
+// a laptop; PG-01's were retaken on 2026-10-06 (A11 Q7), on a laptop that
+// measured the old figures on the code before it. TestEngineBenchCatalogue
+// checks that each recorded verdict is one its recorded ratios allow.
 func controls() []control {
 	return []control{
 		{
@@ -47,11 +48,12 @@ func controls() []control {
 			title:   "Insert one row and read its generated id back",
 			targets: []target{{armSQL, 1.26}, {armPgx, 1.29}},
 			want:    absent,
-			allocs:  memory{81, 4360},
+			allocs:  memory{79, 3706},
 			note: "Over the limit against both baselines on the reference runners (1.20–1.36 against database/sql and 1.22–1.41 against pgx across ten runs). " +
-				"Quark allocates 81 times and 4.4 KB per insert, against 21 times and 1.1 KB for database/sql and 13 times and 0.6 KB for pgx: " +
+				"Quark allocates 79 times and 3.7 KB per insert, against 21 times and 1.1 KB for database/sql and 13 times and 0.6 KB for pgx: " +
 				"the INSERT is built from the struct on every call, 9 % of the client's CPU in a profile. " +
 				"Validating a model that declares no rule and reading the clock for one with no timestamp columns no longer happen (A12 Q2); they were five allocations, and no move a run can see in the ratio. " +
+				"Since A11 Q7 the single-row read of the generated id goes through the execution seam, which calls the engine directly when no middleware is registered: the per-call func value that captured the query is gone, and with it the heap copy of the query Create makes for the insert — two allocations and 0.65 KB (81 and 4.4 KB before, measured on the same machine). " +
 				"Quark's share costs about 30 µs per insert on the EPYC runner and a few µs on a laptop, where the same code sits on the threshold (1.14 and 1.16).",
 		},
 		{

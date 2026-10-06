@@ -112,9 +112,9 @@ This orchestration ensures data integrity and reduces boilerplate code for manua
 
 ## Observability & Telemetry
 
-Quark v1.0 features a centralized observability pipeline built directly into the low-level execution path (`BaseQuery`).
+Quark sends every statement through one execution seam (`observe.go`: `execStmt`, `queryStmt`, `queryRowStmt`). The seam runs the statement inside the middleware chain, then hands its `QueryEvent` to the slow-query log and the observers. Since A11 Q7 this covers the query builder, raw SQL, schema work, introspection and savepoints; before that, schema work and savepoints went past both, and raw SQL went past the middleware.
 
-1. **Unified Event Streams**: Every database interaction (CRUD, Raw SQL, Migrations, Preloads) triggers a `QueryEvent` sent to registered `QueryObserver` instances.
+1. **Unified Event Streams**: Every statement (CRUD, raw SQL, migrations, introspection, savepoints, preloads) passes the `Middleware` chain and triggers a `QueryEvent`, sent to the registered `QueryObserver` instances. `QueryEvent.Kind`, and `StatementKindFromContext` inside a middleware, say what the statement is for: query, exec, ddl, introspection, savepoint or raw. Code that is handed an `Executor` (a dialect's `SchemaIntrospector`, `ColumnAlterer` and `TableRebuilder`, the migration lock, and the `migrate` and `quarktenant` packages through `internal/observe`) gets one that goes through the seam. `seam_guard_test.go` fails on a statement that is sent past it.
 2. **Detailed Metrics**: Events include raw SQL, positional arguments, execution duration, rows affected, and errors.
 3. **Audit-Grade Logging**: Pre-built `SQLQueryLogger` provides structured logging (via `slog`) suitable for production audit trails.
 

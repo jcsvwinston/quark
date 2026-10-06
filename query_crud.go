@@ -156,8 +156,8 @@ func (q *BaseQuery) emitEvent(kind string, entity any) error {
 	return nil
 }
 
-// executeExec runs an ExecContext through the middleware chain.
-// This is used for INSERT, UPDATE, DELETE operations.
+// executeExec runs an ExecContext through the execution seam, which reports
+// it as an "EXEC". This is used for INSERT, UPDATE, DELETE operations.
 //
 // extraTags are additional invalidation tags emitted alongside q.table
 // when the mutation succeeds. Callers that know the affected primary
@@ -166,57 +166,19 @@ func (q *BaseQuery) emitEvent(kind string, entity any) error {
 // blowing away every listing on the table (F4-6, per docs/playbooks/cache.md).
 // Mutations that don't know the affected rows up-front (DeleteBatch
 // WHERE-complex, raw Exec) pass nothing and fall back to the
-// table-only invalidation that has been the historical default.
+// table-only invalidation that has been the historical default. The
+// invalidation runs inside the chain, next to the engine (see stmt.write).
 func (q *BaseQuery) executeExec(ctx context.Context, sqlStr string, args []any, extraTags ...string) (sql.Result, error) {
 	if q.err != nil {
 		return nil, q.err
 	}
-	// Base handler: direct execution
-	handler := ExecFunc(func(ctx context.Context, exec Executor, s string, a []any) (sql.Result, error) {
-		start := time.Now()
-		res, execErr := exec.ExecContext(ctx, s, a...)
-		duration := time.Since(start)
-		err := wrapDBError(execErr)
-
-		// Automatic Cache Invalidation (Maintain data freshness).
-		// One InvalidateTags call carries the table tag plus any
-		// caller-supplied row tag, so backing stores see a single
-		// invalidation batch per mutation.
-		if err == nil && q.client.cacheStore != nil && q.table != "" {
-			tags := make([]string, 0, 1+len(extraTags))
-			tags = append(tags, q.table)
-			for _, t := range extraTags {
-				if t != "" {
-					tags = append(tags, t)
-				}
-			}
-			_ = q.client.cacheStore.InvalidateTags(ctx, tags...)
-		}
-
-		// Notify observers
-		rowsAffected := int64(0)
-		if err == nil {
-			rowsAffected, _ = res.RowsAffected()
-		}
-		q.notifyObservers(QueryEvent{
-			SQL:       s,
-			Args:      a,
-			Duration:  duration,
-			Error:     err,
-			Table:     q.table,
-			Operation: "EXEC",
-			Rows:      rowsAffected,
-		})
-
-		return res, err
-	})
-
-	// Wrap with middleware in reverse order
-	for i := len(q.client.middleware) - 1; i >= 0; i-- {
-		handler = q.client.middleware[i].WrapExec(handler)
-	}
-
-	return handler(ctx, q.exec, sqlStr, args)
+	return q.client.execStmt(ctx, q.exec, stmt{
+		kind:    StatementExec,
+		op:      "EXEC",
+		table:   q.table,
+		write:   true,
+		rowTags: extraTags,
+	}, sqlStr, args)
 }
 
 // isZeroPKValue checks if a primary key value is its zero value.

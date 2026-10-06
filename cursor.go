@@ -60,6 +60,7 @@ func (c *Cursor[T]) Close() error {
 		Duration:  duration,
 		Table:     c.query.table,
 		Operation: "SELECT (cursor)",
+		Kind:      StatementQuery,
 	})
 
 	if closeErr != nil {

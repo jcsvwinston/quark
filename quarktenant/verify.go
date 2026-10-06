@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/jcsvwinston/quark"
+	"github.com/jcsvwinston/quark/internal/observe"
 )
 
 // ErrRLSNotEnforced reports that at least one registered model's table does
@@ -138,13 +139,14 @@ func VerifyRLSPolicies(ctx context.Context, client *quark.Client, opts InstallOp
 		// on its apply path. Requiring AllowRawQueries here made the
 		// guardrail unusable from the very client the package documents
 		// (QCD-QK-1): the preflight failed indistinguishably from a real
-		// outage.
+		// outage. It still goes through the client's execution seam, so the
+		// middleware chain and the observers see it, as introspection.
 		var (
 			qual      sql.NullString
 			withCheck sql.NullString
 			cmd       sql.NullString
 		)
-		row := client.Raw().QueryRowContext(ctx, `
+		row := observe.Executor(client, client.Raw(), observe.KindIntrospection, observe.KindIntrospection).QueryRowContext(ctx, `
 			SELECT c.relrowsecurity, c.relforcerowsecurity,
 			       p.polname IS NOT NULL,
 			       pg_get_expr(p.polqual,      p.polrelid),

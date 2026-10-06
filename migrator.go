@@ -17,19 +17,23 @@ import (
 // This is a simplistic auto-migration tool for development.
 // It uses the "db" and "pk" tags to generate CREATE TABLE statements.
 // It also creates join tables for many-to-many relations.
+//
+// Its statements pass the middleware chain and reach the observers as
+// schema work (StatementDDL).
 func (c *Client) Migrate(ctx context.Context, models ...any) error {
+	exec := c.schemaExec(c.db)
 	for _, model := range models {
-		if err := c.createTable(ctx, model); err != nil {
+		if err := c.createTable(ctx, exec, model); err != nil {
 			return err
 		}
-		if err := c.createJoinTables(ctx, model); err != nil {
+		if err := c.createJoinTables(ctx, exec, model); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *Client) createTable(ctx context.Context, model any) error {
+func (c *Client) createTable(ctx context.Context, exec Executor, model any) error {
 	t := reflect.TypeOf(model)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -119,7 +123,7 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 		return fmt.Errorf("no database columns found for model %s", t.Name())
 	}
 
-	if err := c.createTableIfNotExists(ctx, c.db, meta.Table, strings.Join(columns, ",\n  ")); err != nil {
+	if err := c.createTableIfNotExists(ctx, exec, meta.Table, strings.Join(columns, ",\n  ")); err != nil {
 		return fmt.Errorf("failed to create table %s: %w", meta.Table, err)
 	}
 
@@ -128,7 +132,7 @@ func (c *Client) createTable(ctx context.Context, model any) error {
 	// PlanMigration read the same declaration, so a freshly migrated model
 	// plans to nothing (A8 S3).
 	for _, idx := range modelIndexes(meta) {
-		if err := c.createIndexOn(ctx, c.db, meta.Table, idx.Name, idx.Columns, idx.Unique); err != nil {
+		if err := c.createIndexOn(ctx, exec, meta.Table, idx.Name, idx.Columns, idx.Unique); err != nil {
 			return fmt.Errorf("failed to create index %s on %s: %w", idx.Name, meta.Table, err)
 		}
 	}
@@ -175,7 +179,7 @@ func modelIndexes(meta *ModelMeta) []Index {
 //
 //	client.CreateIndex(ctx, "users", "idx_users_email", []string{"email"}, true)
 func (c *Client) CreateIndex(ctx context.Context, table, indexName string, columns []string, unique bool) error {
-	return c.createIndexOn(ctx, c.db, table, indexName, columns, unique)
+	return c.createIndexOn(ctx, c.schemaExec(c.db), table, indexName, columns, unique)
 }
 
 // createIndexOn is the [Executor]-parameterised variant of
@@ -213,7 +217,7 @@ func (c *Client) createIndexOn(ctx context.Context, exec Executor, table, indexN
 //
 //	client.AddForeignKey(ctx, "orders", "fk_orders_user", []string{"user_id"}, "users", []string{"id"}, "CASCADE", "SET NULL")
 func (c *Client) AddForeignKey(ctx context.Context, table, constraintName string, columns []string, refTable string, refColumns []string, onDelete, onUpdate string) error {
-	return c.addForeignKeyOn(ctx, c.db, table, constraintName, columns, refTable, refColumns, onDelete, onUpdate)
+	return c.addForeignKeyOn(ctx, c.schemaExec(c.db), table, constraintName, columns, refTable, refColumns, onDelete, onUpdate)
 }
 
 // addForeignKeyOn is the [Executor]-parameterised variant of
@@ -262,7 +266,7 @@ func (c *Client) addForeignKeyOn(ctx context.Context, exec Executor, table, cons
 }
 
 // createJoinTables creates join tables for many-to-many relations.
-func (c *Client) createJoinTables(ctx context.Context, model any) error {
+func (c *Client) createJoinTables(ctx context.Context, exec Executor, model any) error {
 	t := reflect.TypeOf(model)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -297,7 +301,7 @@ func (c *Client) createJoinTables(ctx context.Context, model any) error {
 		pkConstraint := fmt.Sprintf("PRIMARY KEY (%s, %s)", c.dialect.Quote(rel.JoinFK), c.dialect.Quote(rel.JoinRefFK))
 		columns = append(columns, pkConstraint)
 
-		if err := c.createTableIfNotExists(ctx, c.db, rel.JoinTable, strings.Join(columns, ",\n  ")); err != nil {
+		if err := c.createTableIfNotExists(ctx, exec, rel.JoinTable, strings.Join(columns, ",\n  ")); err != nil {
 			return fmt.Errorf("failed to create join table %s: %w", rel.JoinTable, err)
 		}
 	}

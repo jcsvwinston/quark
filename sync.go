@@ -25,16 +25,20 @@ type SyncOptions struct {
 // and writes column types through its quarkdriver.ColumnTyper, like
 // [Client.Migrate]; a dialect without a SchemaIntrospector cannot be synced
 // and Sync returns ErrUnsupportedFeature.
+//
+// Its statements pass the middleware chain and reach the observers: the
+// catalog reads as StatementIntrospection, the CREATE and ALTER TABLE as
+// StatementDDL.
 func (c *Client) Sync(ctx context.Context, opts SyncOptions, models ...any) error {
 	// Execute within a transaction if supported and not disabled
 	if !opts.NoTransaction && c.dialect.SupportsTransactionalDDL() {
 		return c.Tx(ctx, func(tx *Tx) error {
 			// syncModels runs the column changes on the transaction's
 			// executor; the client itself is not rebound.
-			return c.syncModels(ctx, opts, tx.tx, models)
+			return c.syncModels(ctx, opts, c.schemaExec(tx.tx), models)
 		})
 	}
-	return c.syncModels(ctx, opts, c.db, models)
+	return c.syncModels(ctx, opts, c.schemaExec(c.db), models)
 }
 
 // syncModels creates the models' missing tables, reads the schema once, and
@@ -72,7 +76,7 @@ func (c *Client) syncModels(ctx context.Context, opts SyncOptions, executor Exec
 		return fmt.Errorf("%w: Sync reads the current columns through the dialect's SchemaIntrospector, and dialect %s does not implement it",
 			ErrUnsupportedFeature, c.dialect.Name())
 	}
-	schema, err := introspector.IntrospectSchema(ctx, c.db)
+	schema, err := introspector.IntrospectSchema(ctx, c.observed(c.db, StatementIntrospection, StatementIntrospection))
 	if err != nil {
 		return fmt.Errorf("introspection failed: %w", err)
 	}

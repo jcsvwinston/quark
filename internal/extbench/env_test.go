@@ -49,6 +49,17 @@ func (r *recorder) reset() {
 	r.events = nil
 }
 
+// kinds returns the statement kind of each event, in order.
+func (r *recorder) kinds() []quark.StatementKind {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]quark.StatementKind, 0, len(r.events))
+	for _, ev := range r.events {
+		out = append(out, ev.Kind)
+	}
+	return out
+}
+
 func (r *recorder) sql() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
