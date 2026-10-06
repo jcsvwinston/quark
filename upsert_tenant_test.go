@@ -84,9 +84,12 @@ func TestUpsertUnderTenantLeavesAnotherTenantsRow(t *testing.T) {
 		t.Errorf("the update branch carries no tenant predicate: %v", rec.all)
 	}
 
-	// Without updateCols there is no update branch (DO NOTHING): whatever it
-	// answers, tb's row stays as it was.
-	_ = For[utRow](ta, router).Upsert(&utRow{Code: "x", Name: "a-x"}, []string{"code"}, nil)
+	// Without updateCols there is no update branch (DO NOTHING): tb's row
+	// stays as it was, and nothing is reported — it used to be sql.ErrNoRows
+	// from the RETURNING that had no row (QK-48).
+	if err := For[utRow](ta, router).Upsert(&utRow{Code: "x", Name: "a-x"}, []string{"code"}, nil); err != nil {
+		t.Errorf("Upsert without updateCols under ta on tb's key = %v, want nil", err)
+	}
 	if got := utRows(t, c); !reflect.DeepEqual(got, before) {
 		t.Fatalf("Upsert without updateCols under ta changed the table: %+v", got)
 	}

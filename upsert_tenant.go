@@ -278,8 +278,13 @@ func (q *BaseQuery) upsertGuardedInsertStyle(ctx context.Context, v reflect.Valu
 	}
 	if returning != "" {
 		err := q.scanReturning(q.executeQueryRow(ctx, insertSQL+clause+returning, args), v)
-		if hasUpdate && errors.Is(err, sql.ErrNoRows) {
-			return q.errUpsertOutsideTenant()
+		if errors.Is(err, sql.ErrNoRows) {
+			if hasUpdate {
+				return q.errUpsertOutsideTenant()
+			}
+			// DO NOTHING on a conflict, with the tenant's row or another's:
+			// nothing written, nothing to report (QK-48).
+			return nil
 		}
 		return err
 	}

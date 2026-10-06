@@ -198,6 +198,25 @@ transaction and goes row by row on MySQL/MariaDB. QK-44: `UpdateMap` passes
 its map through `confineTenantColumn`. Regression: `upsert_tenant_test.go` and
 `internal/enginesuite/upsert_tenant_test.go` (`UpsertTenant`, six engines).
 
+### An empty `updateCols` is not one behaviour (QK-48)
+
+`Upsert`/`UpsertBatch` with no `updateCols`: PostgreSQL and SQLite write
+`ON CONFLICT … DO NOTHING`, MySQL and MariaDB `ON DUPLICATE KEY UPDATE
+<first conflict col> = VALUES(<it>)` — the conflicting row stays as it was —
+while the MERGE of SQL Server and Oracle (`buildMerge`,
+`upsertBatchMSSQLBulk`) overwrites every column the insert writes except the
+conflict columns. The godoc promised the MERGE behaviour everywhere; making
+the engines agree changes what callers see on one side, so it is a decision
+for the major (QADR-0010). Until then
+`internal/enginesuite/upsert_empty_update_cols_test.go`
+(`UpsertEmptyUpdateCols`) pins each engine. What QK-48 did fix: on
+PostgreSQL and SQLite the RETURNING after DO NOTHING had no row and `Upsert`
+returned `sql.ErrNoRows` — the other four answered nil — in both the plain
+path and `upsertGuardedInsertStyle`. Known edges, documented in the CRUD
+reference: MySQL/MariaDB's assignment writes the incoming first conflict
+column when the duplicate is on another unique key, and the MERGE engines
+include a non-zero integer key in the update set, which the engine refuses.
+
 ### Scopes AND with the caller's whole expression
 
 The soft-delete filter and the tenant predicate are scopes. Before QK-41
