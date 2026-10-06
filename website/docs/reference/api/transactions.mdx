@@ -263,3 +263,9 @@ users, _ := quark.ForTx[User](ctx, tx).
 
 tx.Commit()
 ```
+
+Every write of the query runs in the transaction, the batch writers included.
+`UpdateBatch`, and `UpsertBatch` under `RowLevelSecurityClient`, which are all
+or nothing, take a savepoint of it rather than a transaction of their own: a
+failure undoes their rows and leaves the transaction usable. See
+[Batch operations in a transaction](../../guides/transactions#batch-operations-in-a-transaction).

@@ -13,7 +13,7 @@ generates the right dialect-specific SQL and chunks large inputs for you.
 |---|---|---|
 | `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked; for generated keys without `RETURNING`: a `MERGE` per chunk on SQL Server, a multi-row `INSERT` per chunk on MySQL where the server's settings allow it, one row at a time otherwise | One statement per chunk |
 | `UpsertBatch` | Dialect-specific bulk upsert, chunked | One statement per chunk (N `MERGE` on Oracle) |
-| `UpdateBatch` | N `UPDATE` statements | Single transaction |
+| `UpdateBatch` | N `UPDATE` statements | Single transaction — a savepoint of the caller's on a `ForTx` query |
 | `DeleteBatch` | `DELETE … WHERE pk IN (…)`, chunked | One statement per chunk |
 
 ## CreateBatch
@@ -154,6 +154,11 @@ if err := quark.For[User](ctx, client).UpdateBatch(ptrs); err != nil {
     return err // every change rolled back
 }
 ```
+
+On a query bound with `ForTx` the updates run in your transaction, inside a
+savepoint: a failing row undoes the batch and leaves your transaction usable,
+and your commit or rollback decides the rest. See
+[Batch operations in a transaction](transactions#batch-operations-in-a-transaction).
 
 To write an explicit zero value, use `UpdateMap` on the individual row.
 
