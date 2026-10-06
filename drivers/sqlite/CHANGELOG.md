@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/jcsvwinston/quark/compare/drivers/sqlite/v0.2.5...drivers/sqlite/v0.3.0) (2026-10-06)
+
+
+### Added
+
+* **drivertest:** a dialect conformance kit a driver runs against its own engine, and the engine suite importable from outside (A11 Q4) ([#441](https://github.com/jcsvwinston/quark/issues/441)) ([340ac49](https://github.com/jcsvwinston/quark/commit/340ac49eb549a286b0f35699b634c0089fb384d4))
+
 ## [0.2.5](https://github.com/jcsvwinston/quark/compare/drivers/sqlite/v0.2.4...drivers/sqlite/v0.2.5) (2026-10-05)
 
 
