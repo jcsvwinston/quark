@@ -421,8 +421,30 @@ err := quark.For[Product](ctx, client).Upsert(
 
 `conflictCols` should match a unique constraint or primary key (empty
 `conflictCols` returns `ErrInvalidQuery`). Pass `updateCols` explicitly for
-portable behavior. Empty `updateCols` is dialect specific and should not be
-treated as “update all columns”.
+portable behavior.
+
+**An empty `updateCols` does not mean the same on every engine.** On four
+engines the conflicting row is left as it was — insert-or-ignore; on the two
+whose upsert is a `MERGE`, every non-conflict column is overwritten:
+
+| Dialect | Empty `updateCols`, the key conflicts | Error | Key written back |
+| --- | --- | --- | --- |
+| PostgreSQL, SQLite | the row is left as it was (`ON CONFLICT … DO NOTHING`) | `nil` | no |
+| MySQL, MariaDB | the row is left as it was (`ON DUPLICATE KEY UPDATE` rewrites the first conflict column with the value it holds) | `nil` | MariaDB: yes; MySQL: insert branch only |
+| SQL Server, Oracle | every column the insert writes, except the conflict columns, is overwritten (`MERGE … WHEN MATCHED THEN UPDATE SET …`) | `nil` | SQL Server: yes; Oracle: no |
+
+What “every column the insert writes” includes on SQL Server and Oracle: a
+`created_at` the timestamp convention stamped on the entity, which overwrites
+the row's, and a non-zero integer primary key, which the engine refuses to
+update — the statement fails (Msg 8102, ORA-32796) even when the key would
+have been inserted. On MySQL and MariaDB the assignment is the incoming value
+of the first conflict column, so when the duplicate is on another unique key —
+the primary key, say — that column of the existing row takes the incoming
+value. A new key is inserted on every engine.
+
+`UpsertBatch` does the same per row. Bringing the engines together changes
+what callers see on one side or the other, so it waits for the next major
+release; until then, pass `updateCols`.
 
 **Generated-key back-fill:** when the entity's single integer PK is zero,
 `Upsert` writes the generated key back on PostgreSQL/SQLite/MariaDB
@@ -467,8 +489,10 @@ if errors.Is(err, quark.ErrConstraintViolation) {
 
 Without an update branch — empty `updateCols` on PostgreSQL, SQLite, MySQL
 and MariaDB — a conflict with another tenant's row writes nothing and is not
-reported, as a conflict with the tenant's own row is not. A unique key that
-includes the tenant column (`(tenant_id, sku)`) avoids the collision
+reported, as a conflict with the tenant's own row is not: `Upsert` returns
+`nil`. On SQL Server and Oracle an empty `updateCols` is an update branch, and
+a conflict with another tenant's row returns `ErrConstraintViolation`. A
+unique key that includes the tenant column (`(tenant_id, sku)`) avoids the collision
 altogether. On MySQL and MariaDB the upsert reads the row back by its
 conflict key within the tenant, which is also how the key of an updated row
 is written back to the entity. A dialect Quark has no guarded form for
@@ -503,6 +527,9 @@ Behavior:
 | Oracle | One `MERGE` per entity. |
 
 Empty input returns `nil`. All entities are validated before any SQL is built.
+An empty `updateCols` leaves a conflicting row as it was on PostgreSQL,
+SQLite, MySQL and MariaDB, and overwrites its non-conflict columns on SQL
+Server and Oracle — see [`Upsert`](#upsert).
 
 Under `RowLevelSecurityClient` each row's update branch is confined to the
 tenant as for [`Upsert`](#upserts-under-rowlevelsecurityclient), and the

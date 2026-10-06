@@ -1697,7 +1697,17 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 }
 
 // Upsert inserts or updates a record depending on whether a conflict occurs on conflictCols.
-// updateCols specifies which columns to update on conflict; if empty, all non-conflict columns are updated.
+// updateCols specifies which columns to update on conflict.
+//
+// An empty updateCols does not mean the same on every engine (QK-48). On
+// PostgreSQL, SQLite, MySQL and MariaDB the conflicting row is left as it
+// was — insert-or-ignore — and Upsert returns nil; on PostgreSQL and SQLite
+// the entity's key is then not written back. On SQL Server and Oracle the
+// MERGE updates every column the insert writes except the conflict columns:
+// every non-conflict column, a created_at the timestamp convention stamped
+// included — and a non-zero integer key too, so the engine refuses the
+// statement. Pass updateCols for behaviour that does not depend on the
+// engine.
 //
 // Under RowLevelSecurityClient the update branch only touches a row of the
 // resolved tenant (QK-43). When the conflicting row belongs to another
@@ -1826,7 +1836,17 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 
 		if q.dialect.SupportsReturning() && q.pk.Column != "" {
 			row := q.executeQueryRow(ctx, fullSQL, args)
-			return q.scanReturning(row, v)
+			err := q.scanReturning(row, v)
+			if len(updateCols) == 0 && errors.Is(err, sql.ErrNoRows) {
+				// No update branch: on a conflict PostgreSQL and SQLite do
+				// nothing, and RETURNING has no row to hand back. The row
+				// stays as it was, which is what the upsert asked for; it
+				// used to surface as sql.ErrNoRows here while MySQL, MariaDB,
+				// SQL Server and Oracle answered nil (QK-48). The entity's
+				// key is not written back.
+				return nil
+			}
+			return err
 		}
 		_, execErr := q.executeExec(ctx, fullSQL, args)
 		if execErr != nil {
@@ -2440,7 +2460,10 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 
 // UpsertBatch inserts or updates multiple records in a single batch operation.
 // conflictCols defines uniqueness (e.g. primary key or unique index columns).
-// updateCols defines which columns to update on conflict; empty = all non-conflict columns.
+// updateCols defines which columns to update on conflict. An empty updateCols
+// leaves a conflicting row as it was on PostgreSQL, SQLite, MySQL and
+// MariaDB, and updates every non-conflict column on SQL Server and Oracle,
+// as for [Query.Upsert].
 //
 // Dialect strategies:
 //   - Postgres / SQLite / MySQL / MariaDB: multi-row INSERT … ON CONFLICT / ON DUPLICATE KEY
