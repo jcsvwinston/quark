@@ -319,7 +319,19 @@ dialect's `SupportsTransactionalDDL()` reports it:
   rolls the whole plan back.
 - **MySQL, MariaDB, Oracle** — DDL auto-commits, so the apply is **resumable**
   instead: re-running the same plan picks up from the first operation that
-  hasn't been applied.
+  hasn't been applied. Each applied operation is recorded in a checkpoint
+  table, `quark_migration_state`, under the plan's `Hash()`.
+
+The checkpoint is only valid for the schema it was recorded against. Before
+skipping recorded operations, `ApplyPlan` reads the schema. It may find that a
+recorded operation is not there: the table it created is gone, the column it
+dropped is back, or the column it altered still has its old definition. Then
+`ApplyPlan` discards that plan's checkpoint and applies the plan from the
+first operation. So a plan applied again after its tables were dropped and
+recreated runs again; applied again over a schema that already holds it, it
+changes nothing. Only a schema that shows an operation missing counts. An
+operation the catalog cannot settle either way is taken as applied, so a plan
+that failed half-way and was fixed by hand still resumes where it stopped.
 
 A dialect of your own takes the path its `SupportsTransactionalDDL()` answers,
 and the statements of each operation are its answers to the optional interfaces

@@ -52,6 +52,22 @@ import (
 //     that prevents "resume from op 3" against a plan whose op 3
 //     means something different.
 //
+//     Schema check (QK-51): a checkpoint answers only for the schema
+//     it was recorded against. Before skipping anything, ApplyPlan
+//     reads the live schema through the dialect's SchemaIntrospector,
+//     and when it shows that an op the checkpoint records as applied
+//     is not there — the table the op created is missing, the column
+//     it dropped is back, the column it altered still reads as the
+//     op's Old — it discards the plan's rows and applies the plan
+//     from op 0. Before, the same plan applied again after the schema
+//     was put back (tables dropped and recreated, a restore) was
+//     skipped whole and ApplyPlan returned nil. Only evidence of
+//     absence counts: an op whose effect the catalog does not settle
+//     is taken as applied, so a mid-plan failure fixed by hand still
+//     resumes, and a plan applied again over a schema that holds it
+//     is still a no-op. A dialect without a SchemaIntrospector keeps
+//     the checkpoint as recorded.
+//
 //     **Concurrency**: on non-transactional engines, two processes
 //     calling ApplyPlan against the same plan simultaneously race
 //     on the state table — both read `resumeFrom = -1`, both try
@@ -154,6 +170,11 @@ func (c *Client) applyPlanTx(ctx context.Context, plan Plan) error {
 // from op 3" against a plan whose op 3 means something different
 // from the original.
 //
+// Schema check (QK-51): when the plan has recorded ops, the live
+// schema is read and checkpointStillHolds decides whether they are
+// still there; when they are not, the plan's rows are discarded and
+// it runs from op 0. See ApplyPlan.
+//
 // Empty plans skip the state table entirely (no ops to record,
 // no resume to perform) so the noop case stays cheap.
 func (c *Client) applyPlanNoTx(ctx context.Context, plan Plan) error {
@@ -168,6 +189,27 @@ func (c *Client) applyPlanNoTx(ctx context.Context, plan Plan) error {
 	resumeFrom, err := c.lastAppliedOpIndex(ctx, exec, planHash)
 	if err != nil {
 		return fmt.Errorf("ApplyPlan: %w", err)
+	}
+	if resumeFrom >= len(plan.Ops) {
+		resumeFrom = len(plan.Ops) - 1
+	}
+	// A checkpoint answers only for the schema it was recorded against
+	// (QK-51). When the live schema shows an op it records as applied is
+	// not there, the rows of this plan are discarded and the plan runs from
+	// its first op, as on a database that never saw it.
+	if resumeFrom >= 0 {
+		holds, reason, err := c.checkpointStillHolds(ctx, plan.Ops[:resumeFrom+1])
+		if err != nil {
+			return fmt.Errorf("ApplyPlan: %w", err)
+		}
+		if !holds {
+			c.Logger().Info("apply plan: the checkpoint no longer matches the schema; applying the plan from its first op",
+				"plan_hash", planHash, "recorded_ops", resumeFrom+1, "reason", reason)
+			if err := c.discardCheckpoint(ctx, exec, planHash); err != nil {
+				return fmt.Errorf("ApplyPlan: %w", err)
+			}
+			resumeFrom = -1
+		}
 	}
 	// resumeFrom is the highest op_index already applied, or -1
 	// if none. The first op to (re-)apply is resumeFrom + 1.

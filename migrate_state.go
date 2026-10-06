@@ -109,6 +109,20 @@ func (c *Client) recordOpApplied(ctx context.Context, exec Executor, planHash st
 	return nil
 }
 
+// discardCheckpoint removes every row recorded for the plan identified by
+// `planHash`. The resumable ApplyPlan path calls it when the live schema no
+// longer holds what those rows say was applied (QK-51): the plan then runs
+// from op 0 and records its ops again, which the primary key would refuse
+// while the old rows stood.
+func (c *Client) discardCheckpoint(ctx context.Context, exec Executor, planHash string) error {
+	q := fmt.Sprintf(`DELETE FROM %s WHERE plan_hash = %s`,
+		c.dialect.Quote(migrationStateTableName), c.dialect.Placeholder(1))
+	if _, err := exec.ExecContext(ctx, q, planHash); err != nil {
+		return fmt.Errorf("discardCheckpoint: %w", err)
+	}
+	return nil
+}
+
 // lastAppliedOpIndex returns the highest `op_index` that's been
 // recorded as applied for the given `planHash`, or -1 if no rows
 // exist for that hash. The caller uses `result + 1` as the
