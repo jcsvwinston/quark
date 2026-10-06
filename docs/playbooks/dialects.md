@@ -166,7 +166,10 @@ contract is born in the leaf), for its column types (`ColumnTyper`), its
 auto-increment key (`AutoIncrementer`) and how it creates only what is missing
 (`IdempotentDDL`); ApplyPlan asks `SupportsTransactionalDDL()`, and for its
 statements `ColumnAlterer`, `ObjectDropper` and `TableRebuilder` (SQLite's
-rebuild), implemented in `dialect_alter.go`. Oracle's
+rebuild), implemented in `dialect_alter.go`; and every foreign key's actions
+go through `ReferentialActioner` (QK-49: SQL Server has no RESTRICT, Oracle
+only ON DELETE CASCADE / SET NULL with NO ACTION left out), answered in
+`dialect_schema.go` and checked for a whole plan before its first op. Oracle's
 `SupportsTransactionalDDL()` answered true until Q2 made it matter; it is
 false. The six built-ins implement them in `dialect_schema.go` by
 passing their own ENGINE constant to `internal/migrate/engines.go` — never by

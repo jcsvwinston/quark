@@ -5,9 +5,11 @@ package drivertest
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -704,6 +706,136 @@ func checkObjectDropper(t *testing.T, k *kit) {
 	})
 }
 
+// referentialActions are the SQL standard's five, which the kit asks about in
+// each clause of a foreign key.
+var referentialActions = []string{"NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"}
+
+// stmtCounter is a QueryObserver that counts the statements a client sends.
+type stmtCounter struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (c *stmtCounter) ObserveQuery(quark.QueryEvent) {
+	c.mu.Lock()
+	c.n++
+	c.mu.Unlock()
+}
+
+func (c *stmtCounter) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
+}
+
+// checkReferentialActioner: each of the SQL standard's five actions in each
+// clause of a foreign key, judged by the engine. An action the dialect has
+// Quark write is accepted and the foreign key holds; one it has Quark leave
+// out is what the engine does without a clause, so deleting a referenced row
+// is refused; one it refuses never reaches the engine — ApplyPlan and
+// AddForeignKey fail with ErrUnsupportedFeature naming it, having sent
+// nothing, so not even the operation before it in the plan ran.
+func checkReferentialActioner(t *testing.T, k *kit) {
+	ra, asks := k.d.(quarkdriver.ReferentialActioner)
+	if !asks {
+		t.Log("the dialect does not implement quarkdriver.ReferentialActioner: every action is written as given, and the engine is checked to accept the SQL standard's five in both clauses")
+	}
+	parent, child, pid := parentChild(t, k)
+	n := 0
+	for _, event := range []quarkdriver.ReferentialEvent{quarkdriver.OnDelete, quarkdriver.OnUpdate} {
+		for _, action := range referentialActions {
+			n++
+			support := quarkdriver.ActionWritten
+			if asks {
+				support = ra.ReferentialAction(event, action)
+			}
+			fk := quark.ForeignKey{Name: fmt.Sprintf("qk_kit_fk_ra%d", n), Columns: []string{"parent_id"}, RefTable: parent, RefColumns: []string{"id"}}
+			if event == quarkdriver.OnDelete {
+				fk.OnDelete = action
+			} else {
+				fk.OnUpdate = action
+			}
+			clause := event.String() + " " + action
+			t.Run(clause, func(t *testing.T) {
+				if support == quarkdriver.ActionUnsupported {
+					k.refusedBeforeSending(t, child, fk, clause)
+					return
+				}
+				who := "ReferentialActioner.ReferentialAction answered ActionWritten"
+				if support == quarkdriver.ActionImplied {
+					who = "ReferentialActioner.ReferentialAction answered ActionImplied"
+				} else if !asks {
+					who = "the dialect writes every action as given"
+				}
+				if err := k.apply(quark.Plan{Ops: []quark.Operation{quark.OpAddForeignKey{Table: child, ForeignKey: fk}}}); err != nil {
+					t.Fatalf("%s for %s, and the engine refused the foreign key: %v", who, clause, err)
+				}
+				defer func() {
+					if err := k.apply(quark.Plan{Ops: []quark.Operation{quark.OpDropForeignKey{Table: child, ForeignKey: fk.Name}}}); err != nil {
+						t.Errorf("cleanup: drop the foreign key %s: %v", fk.Name, err)
+					}
+				}()
+				if !k.fkHolds(t, fk.Name) {
+					t.Errorf("%s for %s: the engine accepted the foreign key, and it admits an orphan and the catalog lists none", who, clause)
+				}
+				if support != quarkdriver.ActionImplied {
+					return
+				}
+				switch action {
+				case "NO ACTION", "RESTRICT":
+					if event != quarkdriver.OnDelete {
+						return // the kit's parent key is generated, and not every engine lets it change
+					}
+					if err := k.exec("DELETE FROM "+k.q(parent)+" WHERE "+k.q("id")+" = "+k.d.Placeholder(1), pid); err == nil {
+						t.Errorf("%s for %s, so Quark wrote no clause, and the engine deleted a row a child references: what it does without a clause is not %s", who, clause, action)
+					}
+				default:
+					t.Errorf("%s for %s: Quark leaves the clause out, and an engine does %s for a foreign key that names no action only if that is its default, which is NO ACTION", who, clause, action)
+				}
+			})
+		}
+	}
+}
+
+// refusedBeforeSending checks an action the dialect answers
+// ActionUnsupported for: ApplyPlan — with an added column as its first
+// operation — and AddForeignKey both fail with ErrUnsupportedFeature naming
+// the clause, and send nothing. The calls go through a client of their own
+// that counts what reaches the engine.
+func (k *kit) refusedBeforeSending(t *testing.T, child string, fk quark.ForeignKey, clause string) {
+	t.Helper()
+	driverName := k.c.DriverName
+	if driverName == "" {
+		driverName = "drivertest"
+	}
+	sent := &stmtCounter{}
+	counted, err := quark.NewWithDB(driverName, k.db, quark.WithDialect(k.d), quark.WithLogger(quiet), quark.WithQueryObserver(sent))
+	if err != nil {
+		t.Fatalf("quark.NewWithDB with the dialect under test: %v", err)
+	}
+	defer func() { _ = counted.Close() }() // a borrowed pool is not closed
+	before := sent.count()
+
+	probe := quark.Column{Name: "qk_kit_ra", Type: k.columnType(quarkdriver.ColumnSpec{Kind: quarkdriver.KindInt64}), Nullable: true}
+	plan := quark.Plan{Ops: []quark.Operation{quark.OpAddColumn{Table: child, Column: probe}, quark.OpAddForeignKey{Table: child, ForeignKey: fk}}}
+	k.clearCheckpoint(plan)
+	err = counted.ApplyPlan(k.ctx, plan)
+	if !errors.Is(err, quarkdriver.ErrUnsupportedFeature) || !strings.Contains(err.Error(), clause) {
+		t.Errorf("ReferentialActioner.ReferentialAction answered ActionUnsupported for %s: ApplyPlan should fail with ErrUnsupportedFeature naming it, got %v", clause, err)
+	}
+	err = counted.AddForeignKey(k.ctx, child, fk.Name, fk.Columns, fk.RefTable, fk.RefColumns, fk.OnDelete, fk.OnUpdate)
+	if !errors.Is(err, quarkdriver.ErrUnsupportedFeature) || !strings.Contains(err.Error(), clause) {
+		t.Errorf("ReferentialActioner.ReferentialAction answered ActionUnsupported for %s: AddForeignKey should fail with ErrUnsupportedFeature naming it, got %v", clause, err)
+	}
+	if n := sent.count() - before; n != 0 {
+		t.Errorf("ReferentialActioner.ReferentialAction answered ActionUnsupported for %s, and Quark sent %d statements before refusing it", clause, n)
+	}
+	if k.columnExists(child, probe.Name) {
+		t.Errorf("ReferentialActioner.ReferentialAction answered ActionUnsupported for %s, and the operation before it in the plan ran", clause)
+		_ = k.apply(quark.Plan{Ops: []quark.Operation{quark.OpDropColumn{Table: child, Column: probe.Name}}})
+	}
+}
+
 // checkTableRebuilder: a dialect that rebuilds tables keeps what the table
 // had — rows, indexes, foreign keys — through the rebuild.
 func checkTableRebuilder(t *testing.T, k *kit) {
@@ -765,5 +897,6 @@ var engineChecks = []engineCheck{
 	{"ApplyPlan", checkApplyPlan},
 	{"ColumnAlterer", checkColumnAlterer},
 	{"ObjectDropper", checkObjectDropper},
+	{"ReferentialActioner", checkReferentialActioner},
 	{"TableRebuilder", checkTableRebuilder},
 }

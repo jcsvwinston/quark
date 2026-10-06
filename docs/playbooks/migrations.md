@@ -196,7 +196,8 @@ methods under another name and compares nine schema steps with SQLite's. Any
 `internal/migrate` or `migrate/` turns a step red: the dialect has to be ASKED,
 through `SupportsTransactionalDDL()` or an optional interface of
 `quarkdriver` (`ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`, and for
-ApplyPlan `ColumnAlterer`, `ObjectDropper`, `TableRebuilder`). The built-in dialects answer by passing
+ApplyPlan `ColumnAlterer`, `ObjectDropper`, `TableRebuilder`, and for a foreign key's
+actions `ReferentialActioner`). The built-in dialects answer by passing
 their own engine constant to the tables in `internal/migrate/engines.go`; the
 name-keyed `SQLTypeWithOpts`/`PKColumnSQL`/`NormalizeBoolDefault` remain only
 for the CLI, which plans for the six built-in engines from source.
