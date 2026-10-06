@@ -347,13 +347,9 @@ func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		dropTable(baseClient, "resume_probe_b")
 		defer dropTable(baseClient, "resume_probe_a")
 		defer dropTable(baseClient, "resume_probe_b")
-		// Also clean the state table after the test so subsequent
-		// runs see a fresh slate. Use raw DDL because the state
-		// table is internal and not exposed via the Client API.
-		defer func() {
-			_, _ = baseClient.Raw().ExecContext(ctx,
-				"DELETE FROM quark_migration_state")
-		}()
+		// The checkpoint rows this test records stay: a later run against
+		// the same database finds them, sees that the tables they describe
+		// were dropped, and applies the plan from op 0 (QK-51).
 
 		// 3-op plan where op 1 will fail (DROP non-existent),
 		// surrounded by ops 0 and 2 which would succeed in
@@ -439,6 +435,81 @@ func testPlanMigration(ctx context.Context, t *testing.T, baseClient *quark.Clie
 		if !sawB {
 			t.Errorf("after resume, resume_probe_b should exist (op 2 ran on second invocation)")
 		}
+	})
+
+	t.Run("ApplyPlan_ReappliesAfterSchemaReset", func(t *testing.T) {
+		// QK-51: on an engine without transactional DDL the checkpoint
+		// recorded every op of the plan, and the same plan applied again
+		// after the schema was put back found them all "already applied":
+		// ApplyPlan returned nil and changed nothing. It now reads the
+		// schema before trusting a checkpoint. On the transactional
+		// engines there is no checkpoint and the plan simply applies
+		// again; the assertions hold on all six.
+		const base, created = "reset_probe_base", "reset_probe_new"
+		reset := func() {
+			t.Helper()
+			dropTable(baseClient, created)
+			dropTable(baseClient, base)
+			if _, err := baseClient.Raw().ExecContext(ctx,
+				"CREATE TABLE "+baseClient.Dialect().Quote(base)+" (id INTEGER PRIMARY KEY)"); err != nil {
+				t.Fatalf("seed %s: %v", base, err)
+			}
+		}
+		reset()
+		defer dropTable(baseClient, created)
+		defer dropTable(baseClient, base)
+
+		plan := quark.Plan{Ops: []quark.Operation{
+			quark.OpCreateTable{Table: quark.Table{
+				Name:    created,
+				Columns: []quark.Column{{Name: "id", Type: "INTEGER", Nullable: false}},
+			}},
+			quark.OpAddColumn{Table: base, Column: quark.Column{Name: "note", Type: "TEXT", Nullable: true}},
+		}}
+		holds := func(when string) {
+			t.Helper()
+			schema, err := baseClient.IntrospectSchema(ctx)
+			if err != nil {
+				t.Fatalf("%s: introspect: %v", when, err)
+			}
+			var sawCreated, sawNote bool
+			for _, tbl := range schema.Tables {
+				switch {
+				case strings.EqualFold(tbl.Name, created):
+					sawCreated = true
+				case strings.EqualFold(tbl.Name, base):
+					for _, col := range tbl.Columns {
+						if strings.EqualFold(col.Name, "note") {
+							sawNote = true
+						}
+					}
+				}
+			}
+			if !sawCreated || !sawNote {
+				t.Fatalf("%s: table %s exists=%v, column %s.note exists=%v — want both", when, created, sawCreated, base, sawNote)
+			}
+		}
+
+		if err := baseClient.ApplyPlan(ctx, plan); err != nil {
+			t.Fatalf("first ApplyPlan: %v", err)
+		}
+		holds("after the first apply")
+
+		reset()
+		if err := baseClient.ApplyPlan(ctx, plan); err != nil {
+			t.Fatalf("ApplyPlan after the schema was reset: %v", err)
+		}
+		holds("after the reset and the second apply")
+
+		if baseClient.Dialect().SupportsTransactionalDDL() {
+			return
+		}
+		// Over a schema that holds the plan the checkpoint still answers:
+		// applying it again is a no-op, not a "table already exists".
+		if err := baseClient.ApplyPlan(ctx, plan); err != nil {
+			t.Fatalf("ApplyPlan over a schema that already holds the plan: %v", err)
+		}
+		holds("after the third apply")
 	})
 
 	t.Run("ApplyPlan_AddColumnRoundTrip", func(t *testing.T) {

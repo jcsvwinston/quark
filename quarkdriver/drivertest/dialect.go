@@ -38,7 +38,8 @@ type DialectCase struct {
 	// releases a migration lock named qk_kit, and on an engine without
 	// transactional DDL leaves the rows ApplyPlan records in Quark's own
 	// checkpoint table (quark_migration_state). Give it a database it may
-	// write to. The kit does not close DB.
+	// write to; it may be the one an earlier run of the kit used. The kit
+	// does not close DB.
 	//
 	// nil runs the checks that need no engine and skips the others, with
 	// the reason in the test log.
@@ -278,23 +279,13 @@ func (k *kit) columnType(spec quarkdriver.ColumnSpec) string {
 	return "TEXT"
 }
 
-// clearCheckpoint removes what ApplyPlan's resumable path recorded for plan.
-// On an engine without transactional DDL ApplyPlan skips every op it once
-// recorded under the plan's hash, so a second run of the kit against the
-// same database — after the kit dropped and recreated its tables — would
-// find its plans "already applied" and change nothing. The table and its
-// columns are Quark's (migrate_state.go); the error of a missing table is
-// ignored.
-func (k *kit) clearCheckpoint(plan quark.Plan) {
-	if k.d.SupportsTransactionalDDL() || plan.IsEmpty() {
-		return
-	}
-	_ = k.exec("DELETE FROM "+k.q("quark_migration_state")+" WHERE plan_hash = "+k.d.Placeholder(1), plan.Hash())
-}
-
-// apply clears the plan's checkpoint and applies it.
+// apply applies plan. On an engine without transactional DDL a second run
+// of the kit against the same database applies the same plans again, after
+// the kit dropped and recreated its tables, and finds their checkpoints
+// recorded: ApplyPlan reads the schema, sees the ops are not there, and
+// applies them again (QK-51). The kit leaves the checkpoint alone so that
+// every second run checks that too.
 func (k *kit) apply(plan quark.Plan) error {
-	k.clearCheckpoint(plan)
 	return k.client.ApplyPlan(k.ctx, plan)
 }
 

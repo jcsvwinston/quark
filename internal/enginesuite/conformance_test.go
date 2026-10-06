@@ -22,12 +22,19 @@ import (
 func runConformance(t *testing.T, client *quark.Client, driverName string) {
 	t.Helper()
 	t.Run("DialectKit", func(t *testing.T) {
-		drivertest.VerifyDialect(t, drivertest.DialectCase{
+		kc := drivertest.DialectCase{
 			Dialect:    client.Dialect(),
 			DB:         client.Raw(),
 			DriverName: driverName,
 			Routines:   kitRoutines(t, client),
-		})
+		}
+		drivertest.VerifyDialect(t, kc)
+		// Again, against the same database, as a driver's CI that keeps
+		// its database between runs does. On the engines without
+		// transactional DDL the second run applies the first run's plans
+		// over tables the kit dropped and recreated, and ApplyPlan has to
+		// see that their checkpoints no longer hold (QK-51).
+		t.Run("again", func(t *testing.T) { drivertest.VerifyDialect(t, kc) })
 	})
 	t.Run("EngineSuite", func(t *testing.T) { suite.Run(t, client) })
 }

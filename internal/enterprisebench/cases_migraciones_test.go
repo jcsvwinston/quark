@@ -69,7 +69,9 @@ func controlsMigraciones() []control {
 			title:  "Applying a plan detects that the schema changed between planning and applying",
 			want:   absent,
 			note: "The plan's digest is a function of its ops alone, so it does not move when the database " +
-				"does, and ApplyPlan re-reads nothing. Measured twice: a plan stale against a table it does " +
+				"does, and on the transactional path ApplyPlan re-reads nothing (without transactional DDL " +
+				"it reads the schema only to check the checkpoint of a plan it already applied in part, QK-51). " +
+				"Measured twice: a plan stale against a table it does " +
 				"not touch applies with no error and with no log line about it at any level — the probe " +
 				"installs a Debug-level sink rather than assuming the silence — and a plan that collides " +
 				"with the change is stopped by SQLite's own \"table already exists\", not by anything that " +
