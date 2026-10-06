@@ -430,17 +430,17 @@ whose upsert is a `MERGE`, the non-conflict columns are overwritten:
 | Dialect | Empty `updateCols`, the key conflicts | Error | Key written back |
 | --- | --- | --- | --- |
 | PostgreSQL, SQLite | the row is left as it was (`ON CONFLICT … DO NOTHING`) | `nil` | no |
-| MySQL, MariaDB | the row is left as it was (`ON DUPLICATE KEY UPDATE` assigns the first conflict column to itself) | `nil` | MariaDB: yes; MySQL: insert branch only |
-| SQL Server, Oracle | every column the insert writes is overwritten, except the conflict columns, the primary key and `created_at` (`MERGE … WHEN MATCHED THEN UPDATE SET …`) | `nil` | SQL Server: yes; Oracle: no |
+| MySQL, MariaDB | the row is left as it was (`ON DUPLICATE KEY UPDATE` assigns the first conflict column to itself) | `nil` | the conflicting row's |
+| SQL Server, Oracle | every column the insert writes is overwritten, except the conflict columns, the primary key and `created_at` (`MERGE … WHEN MATCHED THEN UPDATE SET …`) | `nil` | the updated row's |
 
 On SQL Server and Oracle the update branch leaves the row's key and its
 `created_at` as they were, as `Update` does, and writes `updated_at` with the
 rest. An entity that carries a non-zero integer key is upserted like one that
 does not: the key is an identity column there, which the update branch does
 not set and the insert branch does not write. A new row gets the key the
-engine assigns, and the entity keeps the one it carried — re-query by the
-conflict columns if you need the row's. The other four engines insert the
-entity's key. A new key is inserted on every engine.
+engine assigns, and that key is written into the entity — see
+[the key written into the entity](#the-key-written-into-the-entity). The other
+four engines insert the entity's key. A new key is inserted on every engine.
 
 `UpsertBatch` does the same per row. Bringing the engines together changes
 what callers see on one side or the other, so it waits for the next major
@@ -458,18 +458,11 @@ it is:
 | --- | --- |
 | PostgreSQL, SQLite | `ErrConstraintViolation`; nothing is written |
 | MySQL, MariaDB | `nil`; with `updateCols`, that row's `updateCols` are written; without, the row is left as it was |
-| SQL Server, Oracle | `nil`; a new row is inserted, with a key the engine assigns |
+| SQL Server, Oracle | `nil`; a new row is inserted, with a key the engine assigns, which the entity gets |
 
 `conflictCols` does not choose the row on MySQL and MariaDB. When a table has
 more than one unique key, upsert entities whose other keys do not collide with
 another row's, or use `Create` and `Update`.
-
-**Generated-key back-fill:** when the entity's single integer PK is zero,
-`Upsert` writes the generated key back on PostgreSQL/SQLite/MariaDB
-(`RETURNING`), MySQL (`LAST_INSERT_ID`, insert branch only), and SQL Server
-(`MERGE … OUTPUT INSERTED.<pk>`, both branches). **Oracle is the exception**:
-its `MERGE` has no `RETURNING` clause, so the PK stays zero — re-query by the
-conflict columns if you need it.
 
 | Dialect | Shape |
 | --- | --- |
@@ -481,6 +474,35 @@ conflict columns if you need it.
 
 Validation runs before the SQL is built.
 
+#### The key written into the entity
+
+When `Upsert` returns `nil` and the model's key is one integer column, the
+entity's key is the key of the row the statement inserted or updated, read
+from that same statement, whether the entity carried a key or not. Where the
+statement does not say which row that is, the entity keeps the key it
+carried. It is never set to the key of another row.
+
+| Dialect | Row inserted | Row updated | Conflict, nothing written | Read with |
+| --- | --- | --- | --- | --- |
+| PostgreSQL, SQLite | its key | its key | kept: `DO NOTHING` returns no row | `RETURNING` |
+| MySQL | its key | its key | the conflicting row's | the statement's own insert id; the clause ends with `<pk> = LAST_INSERT_ID(<pk>)`, which changes no value |
+| MariaDB | its key | its key | the conflicting row's | `RETURNING` |
+| SQL Server | its key, the one the identity assigned | its key | kept: a `MERGE` with no column to update has no update branch | `MERGE … OUTPUT INSERTED.<pk> INTO` a table variable |
+| Oracle | its key, the one the identity assigned | its key | kept, as on SQL Server | `MERGE … RETURNING <pk> BULK COLLECT INTO` |
+
+"Conflict, nothing written" is an empty `updateCols` on PostgreSQL and
+SQLite, an update branch that changes no value on MySQL and MariaDB, and a
+model with no column outside the key and the conflict columns on SQL Server
+and Oracle. When the conflict columns match more than one row — they are not
+a unique key — SQL Server and Oracle update all of them and the entity keeps
+its key. MySQL reads the key from the statement's result, not from
+`SELECT LAST_INSERT_ID()`: that value belongs to a pooled connection, and on
+the update branch it is the last key that connection generated, not the
+conflicting row's. The same holds for a MariaDB server driven through
+`quark.MySQL()`. A key of another type or of more than one column is not
+read back on MySQL, SQL Server and Oracle; the entity keeps the one it
+carried.
+
 ### Upserts under `RowLevelSecurityClient`
 
 The update branch only touches a row of the resolved tenant, and the row is
@@ -489,7 +511,7 @@ inserted under the resolved tenant whatever the entity's tenant field holds:
 | Dialect | Update branch under the tenant |
 | --- | --- |
 | PostgreSQL, SQLite | `ON CONFLICT (...) DO UPDATE SET ... WHERE <table>.tenant_id = ?` |
-| MySQL, MariaDB | `ON DUPLICATE KEY UPDATE c = IF(tenant_id = ?, VALUES(c), c), ...` |
+| MySQL, MariaDB | `ON DUPLICATE KEY UPDATE c = IF(tenant_id = ?, VALUES(c), c), ..., id = IF(tenant_id = ?, LAST_INSERT_ID(id), id)` |
 | SQL Server | `MERGE ... WHEN MATCHED AND target.tenant_id = @p THEN UPDATE ...` |
 | Oracle | `MERGE ... WHEN MATCHED THEN UPDATE SET ... WHERE target.tenant_id = :n` |
 
@@ -511,11 +533,15 @@ reported, as a conflict with the tenant's own row is not: `Upsert` returns
 `nil`. On SQL Server and Oracle an empty `updateCols` is an update branch, and
 a conflict with another tenant's row returns `ErrConstraintViolation`. A
 unique key that includes the tenant column (`(tenant_id, sku)`) avoids the collision
-altogether. On MySQL and MariaDB the upsert reads the row back by its
-conflict key within the tenant, which is also how the key of an updated row
-is written back to the entity. A dialect Quark has no guarded form for
-refuses the upsert under this strategy with `ErrUnsupportedFeature`, and so
-does a model without the tenant column.
+altogether. On MySQL and MariaDB the last assignment reports the key of
+the tenant's row the statement met, and no key for another tenant's row:
+that is how the two are told apart when no value changed, and the key
+written into the entity is the one [the table](#the-key-written-into-the-entity)
+gives. A model whose key is not one integer column reads the row back by
+its conflict key within the tenant instead. On every engine a conflict with
+another tenant's row leaves the entity's key as it was. A dialect Quark has
+no guarded form for refuses the upsert under this strategy with
+`ErrUnsupportedFeature`, and so does a model without the tenant column.
 
 ## UpsertBatch
 
@@ -548,6 +574,15 @@ Empty input returns `nil`. All entities are validated before any SQL is built.
 An empty `updateCols` leaves a conflicting row as it was on PostgreSQL,
 SQLite, MySQL and MariaDB, and overwrites its non-conflict columns on SQL
 Server and Oracle — see [`Upsert`](#upsert).
+
+The key written into each entity, for a model whose key is one integer
+column:
+
+| Dialect | Key written back |
+| --- | --- |
+| PostgreSQL, SQLite, MySQL, MariaDB | none: the multi-row `INSERT` reports no key per row, and each entity keeps the one it carried. Under `RowLevelSecurityClient` MySQL and MariaDB upsert one row at a time and write each key as `Upsert` does. |
+| SQL Server | each entity gets its row's key, as `Upsert` does: the `MERGE` reads the keys back next to each row's position in the statement (`OUTPUT src.quark_ord, INSERTED.<pk>`). |
+| Oracle | each entity gets its row's key, as `Upsert` does, from its own `MERGE … RETURNING`. |
 
 Under `RowLevelSecurityClient` each row's update branch is confined to the
 tenant as for [`Upsert`](#upserts-under-rowlevelsecurityclient), and the

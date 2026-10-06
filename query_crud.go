@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -1720,6 +1721,19 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 // tenant, nothing is written and Upsert returns an error wrapping
 // ErrConstraintViolation — what a Create of the same key returns.
 //
+// The key written into the entity (QK-63, QK-64). When Upsert returns nil
+// and the model's key is one integer column, the entity's key is the key of
+// the row the statement inserted or updated, read from that statement,
+// whether the entity carried a key or not: RETURNING on PostgreSQL, SQLite
+// and MariaDB; the statement's own insert id on MySQL, whose clause ends
+// with `<pk> = LAST_INSERT_ID(<pk>)` so that the update branch reports the
+// row it met; MERGE … OUTPUT on SQL Server and MERGE … RETURNING on Oracle,
+// where an inserted row has the key the identity assigned, not the one the
+// entity carried. When nothing is written on a conflict — DO NOTHING on
+// PostgreSQL and SQLite, a MERGE with no update branch — the entity keeps
+// its key; MySQL and MariaDB report the conflicting row's. A row of another
+// tenant gives no key. The entity is never given the key of another row.
+//
 // Example:
 //
 //	quark.For[User](ctx, client).Upsert(&user, []string{"email"}, []string{"name", "updated_at"})
@@ -1796,27 +1810,25 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 		foreign := q.tenantGuarded() && hasUpdate
 		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 		defer cancel()
-		// SQL Server: back-fill the generated PK via `OUTPUT INSERTED.<pk>`
-		// (QK-P1-6). The OUTPUT clause sits after the last WHEN clause; in a
-		// MERGE, INSERTED exposes the post-operation row for BOTH branches,
-		// so the id comes back whether the row was inserted or updated —
-		// parity with the RETURNING engines. Only for an auto-generated
-		// integer single PK that is still zero (the same condition
-		// buildMerge uses to skip the IDENTITY column). Oracle's MERGE has
-		// no RETURNING clause, so the PK stays zero there — a documented
-		// limitation (see the Upsert docs).
-		if dialectName == "mssql" && upsertShouldBackfillPK(q, v) {
-			outSQL := strings.TrimSuffix(mergeSQL, ";") +
-				"\nOUTPUT INSERTED." + q.dialect.Quote(q.pk.Column) + ";"
-			var id int64
-			// executeQueryRow pins to q.exec (primary/tx) — this is a write.
-			if scanErr := q.executeQueryRow(ctx, outSQL, mergeArgs).Scan(&id); scanErr != nil {
-				if foreign && errors.Is(scanErr, sql.ErrNoRows) {
-					return q.errUpsertOutsideTenant()
-				}
-				return wrapDBError(scanErr)
+		// The key of the row the MERGE inserted or updated, read back from
+		// the MERGE itself (OUTPUT on SQL Server, RETURNING on Oracle):
+		// whatever key the entity carried, as the identity assigns the key
+		// of an inserted row (QK-64). See upsert_key.go.
+		if q.upsertIntegerKey() {
+			n, key, err := q.mergeRowKeys(ctx, mergeSQL, mergeArgs)
+			if err != nil {
+				return err
 			}
-			setPKValue(v, q.pk, id)
+			switch {
+			case n == 0 && foreign:
+				return q.errUpsertOutsideTenant()
+			case n == 1:
+				setPKValue(v, q.pk, key)
+			}
+			// n == 0 without the guard: the MERGE met a row and has no
+			// update branch, nothing was written and no key is written
+			// back, as on PostgreSQL and SQLite. n > 1: the conflict
+			// columns matched several rows, and the entity's is not known.
 			return nil
 		}
 		res, execErr := q.executeExec(ctx, mergeSQL, mergeArgs)
@@ -1839,6 +1851,7 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 
 		upsertFragment := q.dialect.UpsertSQL(conflictCols, updateCols, argOffset)
 		fullSQL := insertSQL + upsertFragment + returningClause
+		carried := q.pk.Column != "" && !isZeroPKValue(v.Field(q.pk.Index))
 
 		if q.dialect.SupportsReturning() && q.pk.Column != "" {
 			row := q.executeQueryRow(ctx, fullSQL, args)
@@ -1854,35 +1867,24 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 			}
 			return err
 		}
-		_, execErr := q.executeExec(ctx, fullSQL, args)
+		// MySQL, and MariaDB through the MySQL dialect: the key comes from
+		// this statement's result, with the update branch made to report
+		// the key of the row it met (QK-63, see upsert_key.go). It used to
+		// come from SELECT LAST_INSERT_ID() on whichever connection the
+		// pool handed out, which on the update branch is that connection's
+		// last generated key. A dialect quark has no such clause for gets
+		// no key back.
+		keyAssign, _ := q.duplicateKeyKeyAssignment(upsertFragment, argOffset)
+		res, execErr := q.executeExec(ctx, insertSQL+upsertFragment+keyAssign+returningClause, args)
 		if execErr != nil {
 			return execErr
 		}
-		if q.dialect.SupportsLastInsertID() && isZeroPKValue(v.Field(q.pk.Index)) {
-			idRow := q.executeQueryRow(ctx, q.dialect.LastInsertIDQuery(q.table, q.pk.Column), nil)
-			var id int64
-			if scanErr := idRow.Scan(&id); scanErr == nil {
-				setPKValue(v, q.pk, id)
+		if keyAssign != "" {
+			if key, _, write := duplicateKeyRowKey(res, carried); write {
+				setPKValue(v, q.pk, key)
 			}
 		}
 		return nil
-	}
-}
-
-// upsertShouldBackfillPK reports whether an MSSQL Upsert should read the
-// generated key back: a single (non-composite) integer PK whose value is
-// still zero — the same condition under which buildMerge omits the IDENTITY
-// column from the INSERT branch.
-func upsertShouldBackfillPK[T any](q *Query[T], v reflect.Value) bool {
-	if q.pk.Column == "" || q.meta.HasCompositePK || !isZeroPKValue(v.Field(q.pk.Index)) {
-		return false
-	}
-	switch q.pk.Kind {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -2500,6 +2502,13 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 // MariaDB, and updates every non-conflict column but the primary key and
 // created_at on SQL Server and Oracle, as for [Query.Upsert].
 //
+// On SQL Server and Oracle each entity whose key is one integer column gets
+// the key of the row it inserted or updated, as with [Query.Upsert] (QK-64).
+// The multi-row INSERT of PostgreSQL, SQLite, MySQL and MariaDB reports no
+// key per row, and the entities keep the keys they carried; under
+// RowLevelSecurityClient MySQL and MariaDB upsert one row at a time and
+// write each key as Upsert does.
+//
 // Dialect strategies:
 //   - Postgres / SQLite / MySQL / MariaDB: multi-row INSERT … ON CONFLICT / ON DUPLICATE KEY
 //   - MSSQL: single MERGE … USING (VALUES …) AS src(…)
@@ -2752,20 +2761,29 @@ func (q *Query[T]) upsertBatchMSSQLBulk(
 		conflictSet[cc] = true
 	}
 
+	// With a single integer key the MERGE reads back each row's key next
+	// to the row's position in the statement, as CreateBatch does (QK-36):
+	// the position is a literal first column of the source, and OUTPUT
+	// names it (QK-64).
+	readKeys := q.upsertIntegerKey()
+
 	// Build USING (VALUES …) rows
 	var valueRows []string
 	var args []any
 	argIndex := 1
-	for _, entity := range entities {
+	for ord, entity := range entities {
 		v := reflect.ValueOf(entity)
 		if v.Kind() == reflect.Ptr {
 			v = v.Elem()
 		}
 		q.ensureTenantID(v)
 
-		phs := make([]string, len(cols))
-		for j, c := range cols {
-			phs[j] = q.dialect.Placeholder(argIndex)
+		phs := make([]string, 0, len(cols)+1)
+		if readKeys {
+			phs = append(phs, strconv.Itoa(ord))
+		}
+		for _, c := range cols {
+			phs = append(phs, q.dialect.Placeholder(argIndex))
 			args = append(args, q.bindColumnArg(c.dbTag, v.Field(c.index).Interface()))
 			argIndex++
 		}
@@ -2773,9 +2791,12 @@ func (q *Query[T]) upsertBatchMSSQLBulk(
 	}
 
 	// Source column aliases (quoted) used in the USING table alias header
-	srcCols := make([]string, len(cols))
-	for i, c := range cols {
-		srcCols[i] = c.quoted
+	srcCols := make([]string, 0, len(cols)+1)
+	if readKeys {
+		srcCols = append(srcCols, "quark_ord")
+	}
+	for _, c := range cols {
+		srcCols = append(srcCols, c.quoted)
 	}
 	const srcAlias = "src"
 
@@ -2824,6 +2845,9 @@ func (q *Query[T]) upsertBatchMSSQLBulk(
 	}
 
 	var sqlBuf strings.Builder
+	if readKeys {
+		sqlBuf.WriteString("SET NOCOUNT ON;\nDECLARE @quark_keys TABLE (quark_ord INT NOT NULL, quark_key BIGINT NOT NULL);\n")
+	}
 	sqlBuf.WriteString(fmt.Sprintf("MERGE INTO %s AS target\n", table))
 	sqlBuf.WriteString(fmt.Sprintf("USING (VALUES %s) AS %s (%s)\n",
 		strings.Join(valueRows, ", "), srcAlias, strings.Join(srcCols, ", ")))
@@ -2831,8 +2855,14 @@ func (q *Query[T]) upsertBatchMSSQLBulk(
 	if len(updateParts) > 0 {
 		sqlBuf.WriteString(q.mergeMatchedClause(strings.Join(updateParts, ", "), argIndex, &args))
 	}
-	sqlBuf.WriteString(fmt.Sprintf("WHEN NOT MATCHED THEN INSERT (%s) VALUES (%s);",
+	sqlBuf.WriteString(fmt.Sprintf("WHEN NOT MATCHED THEN INSERT (%s) VALUES (%s)",
 		strings.Join(insCols, ", "), strings.Join(insSrc, ", ")))
+	if readKeys {
+		sqlBuf.WriteString("\nOUTPUT " + srcAlias + ".quark_ord, INSERTED." + q.dialect.Quote(q.pk.Column) +
+			" INTO @quark_keys (quark_ord, quark_key);\nSELECT quark_ord, quark_key FROM @quark_keys;")
+		return q.upsertBatchMSSQLKeys(ctx, entities, sqlBuf.String(), args, len(updateParts) > 0)
+	}
+	sqlBuf.WriteString(";")
 
 	res, err := q.executeExec(ctx, sqlBuf.String(), args)
 	if err != nil {
@@ -2845,6 +2875,63 @@ func (q *Query[T]) upsertBatchMSSQLBulk(
 			return q.errUpsertOutsideTenant()
 		}
 	}
+	return nil
+}
+
+// upsertBatchMSSQLKeys runs the bulk MERGE of upsertBatchMSSQLBulk that
+// reads back each row's key with its position, and writes the keys into
+// the entities (QK-64): the key of the row each source row inserted or
+// updated, whatever key the entity carried. A source row that wrote no row
+// — it met a row and the MERGE has no update branch, or under
+// RowLevelSecurityClient met a row of another tenant — gets no key, and
+// neither does one whose conflict columns matched several rows.
+func (q *Query[T]) upsertBatchMSSQLKeys(ctx context.Context, entities []*T, mergeSQL string, args []any, hasUpdate bool) error {
+	// A write that reads rows back: on the primary, never a replica. The
+	// seam drops nothing from the cache for it; invalidateBatchInsert does.
+	rows, err := q.executeQueryPrimary(ctx, mergeSQL, args)
+	if err != nil {
+		return fmt.Errorf("upsert batch (mssql) failed: %w", wrapDBError(err))
+	}
+	keys := make([]int64, len(entities))
+	written := make([]int, len(entities))
+	for rows.Next() {
+		var ord, key int64
+		if err := rows.Scan(&ord, &key); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("upsert batch (mssql) failed: %w", wrapDBError(err))
+		}
+		if ord < 0 || ord >= int64(len(entities)) {
+			_ = rows.Close()
+			return fmt.Errorf("%w: UpsertBatch read back key %d for row %d of a statement of %d", ErrInvalidQuery, key, ord, len(entities))
+		}
+		keys[ord] = key
+		written[ord]++
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("upsert batch (mssql) failed: %w", wrapDBError(err))
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("upsert batch (mssql) failed: %w", wrapDBError(err))
+	}
+	// A source row the guarded WHEN MATCHED skipped met another tenant's
+	// row (QK-43).
+	if q.tenantGuarded() && hasUpdate {
+		for _, w := range written {
+			if w == 0 {
+				return q.errUpsertOutsideTenant()
+			}
+		}
+	}
+	pks := make([]any, 0, len(entities))
+	for i, entity := range entities {
+		if written[i] != 1 {
+			continue
+		}
+		setPKValue(reflect.ValueOf(entity).Elem(), q.pk, keys[i])
+		pks = append(pks, keys[i])
+	}
+	q.invalidateBatchInsert(ctx, pks)
 	return nil
 }
 
@@ -2864,6 +2951,21 @@ func (q *Query[T]) upsertBatchOracle(
 		mergeSQL, mergeArgs, hasUpdate, err := q.buildMerge(v, conflictCols, updateCols)
 		if err != nil {
 			return err
+		}
+		// A single integer key is read back from each MERGE, as Upsert does
+		// (QK-64).
+		if q.upsertIntegerKey() {
+			n, key, err := q.mergeRowKeys(ctx, mergeSQL, mergeArgs)
+			if err != nil {
+				return fmt.Errorf("upsert batch (oracle) failed: %w", err)
+			}
+			if n == 0 && q.tenantGuarded() && hasUpdate {
+				return q.errUpsertOutsideTenant()
+			}
+			if n == 1 {
+				setPKValue(v, q.pk, key)
+			}
+			continue
 		}
 		res, err := q.executeExec(ctx, mergeSQL, mergeArgs)
 		if err != nil {

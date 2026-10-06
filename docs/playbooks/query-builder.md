@@ -190,10 +190,12 @@ RowLevelSecurityClient (`checkTenantUpsert`). A conflict with another
 tenant's row is reported as `ErrConstraintViolation`: PostgreSQL/SQLite see
 no RETURNING row or zero rows affected, SQL Server/Oracle zero rows from the
 MERGE, and MySQL/MariaDB — whose zero also means "own row already held the
-values" — read the row back by conflict key within the tenant
-(`finishGuardedDuplicateKey`), which also back-fills the key of an updated
-row; RETURNING is not used there under the guard because MariaDB would hand
-back the other tenant's id. `UpsertBatch` under the guard runs in a
+values" — end the clause with `<pk> = IF(<tenant> = ?, LAST_INSERT_ID(<pk>),
+<pk>)`, so the statement reports the tenant's row it met and no key (0) for
+another tenant's (QK-63, `duplicateKeyKeyAssignment`); a model without a
+single integer key still reads the row back by conflict key within the
+tenant (`finishGuardedDuplicateKey`). RETURNING is not used there under the
+guard because MariaDB would hand back the other tenant's id. `UpsertBatch` under the guard runs in a
 transaction and goes row by row on MySQL/MariaDB. QK-44: `UpdateMap` passes
 its map through `confineTenantColumn`. Regression: `upsert_tenant_test.go` and
 `internal/enginesuite/upsert_tenant_test.go` (`UpsertTenant`, six engines).
@@ -230,6 +232,37 @@ stamped. Neither is in it now; `updated_at` is, as in `Update`. An explicit
 `updateCols` is written as given. Regression:
 `internal/enginesuite/upsert_engine_edges_test.go` (`UpsertEngineEdges`, six
 engines).
+
+### The key an upsert writes into the entity (QK-63, QK-64)
+
+Rule: with a single integer key, the entity ends with the key of the row the
+statement inserted or updated, read from THAT statement; where the statement
+does not say, the key is left as it was; never another row's
+(`upsert_key.go`). QK-63: MySQL read `SELECT LAST_INSERT_ID()` as a second
+statement on whichever pooled connection came up — per-connection, and on the
+update branch the connection's last generated key, so an upsert that met row
+1 wrote 2. Now `res.LastInsertId()` of the INSERT itself, with
+`, <pk> = LAST_INSERT_ID(<pk>)` appended LAST to the ON DUPLICATE KEY UPDATE
+clause (it sees a key an `updateCols` rewrote; it changes no value, so rows
+affected stay 1/2/0). With a carried key and rows affected 1 nothing is read:
+the insert wrote the carried key, and the insert id names the AUTO_INCREMENT
+column. A dialect outside the `duplicate_key` family without RETURNING gets
+no key (the old fallback ran the same second-statement read). MariaDB keeps
+RETURNING, which answers the conflicting row, measured. QK-64: on SQL Server
+and Oracle the key is an identity the MERGE's insert branch does not write,
+so a carried non-zero key stayed on the entity while the row got another.
+`mergeRowKeys` reads the key back whatever the entity carried: SQL Server
+`OUTPUT INSERTED.<pk> INTO @quark_keys` + `SELECT` (an OUTPUT without INTO
+is Msg 334 on a table with a trigger), Oracle a PL/SQL block with
+`RETURNING <pk> BULK COLLECT INTO` (scalar INTO fails on two rows; measured
+on 23.4, 23.5 and 23.26 — the MERGE quark writes already needs 23ai for its
+`SELECT` without `FROM`). Zero rows back = nothing written (no update
+branch, or another tenant's row: the guard's error); more than one = key
+unknown, left. `UpsertBatch` on SQL Server numbers its source rows
+(`quark_ord`) as CreateBatch does and writes each key; Oracle per row; the
+multi-row INSERT of the other four writes none. Regression:
+`internal/enginesuite/upsert_key_test.go` (`UpsertKey`, six engines plus
+the MySQL dialect over MariaDB) and `upsert_key_test.go`.
 
 ### Scopes AND with the caller's whole expression
 

@@ -136,6 +136,14 @@ database assigns it, just like `CreateBatch`. Each dialect gets its native form:
 | SQL Server | `MERGE INTO products … WHEN MATCHED … WHEN NOT MATCHED …` |
 | Oracle | N individual `MERGE INTO … USING (SELECT …)` (identity columns aren't compatible with the multi-row MERGE shape) |
 
+SQL Server and Oracle write each row's key into its entity — the key the
+identity assigned to an inserted row, whatever key the entity carried. The
+multi-row `INSERT` of the other four reports no key per row, so there the
+entities keep what they carried; call `Upsert` per entity inside a
+transaction when you need the keys. The
+[CRUD reference](../reference/api/crud#the-key-written-into-the-entity) has the
+table.
+
 Like `CreateBatch`, `UpsertBatch` runs `BeforeCreate` per entity (insert-prep);
 on conflict the `updateCols` win.
 

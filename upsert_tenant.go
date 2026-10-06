@@ -161,13 +161,15 @@ func (q *BaseQuery) guardedConflictClause(conflictCols, updateCols []string, arg
 }
 
 // finishGuardedDuplicateKey completes a tenant-guarded MySQL or MariaDB
-// upsert of one row. n is the statement's rows affected: 1 for an insert, 2
-// for an update, and 0 both when the tenant's own row already held the values
-// and when the conflicting row belongs to another tenant — the guard kept its
-// values. Those two are told apart by reading the row back by its conflict
-// key within the tenant, which also returns the key of an updated row:
-// LAST_INSERT_ID does not, and RETURNING (MariaDB) would hand back the other
-// tenant's id, so neither is used under the guard.
+// upsert of one row whose model has no single integer key; one with such a
+// key reads it from the statement instead (duplicateKeyKeyAssignment). n is
+// the statement's rows affected: 1 for an insert, 2 for an update, and 0
+// both when the tenant's own row already held the values and when the
+// conflicting row belongs to another tenant — the guard kept its values.
+// Those two are told apart by reading the row back by its conflict key
+// within the tenant, which also returns the key of an updated row:
+// RETURNING (MariaDB) would hand back the other tenant's id, so it is not
+// used under the guard.
 func (q *BaseQuery) finishGuardedDuplicateKey(ctx context.Context, v reflect.Value, conflictCols []string, n int64, hasUpdate bool) error {
 	needPK := q.pk.Column != "" && (q.meta == nil || !q.meta.HasCompositePK) && isZeroPKValue(v.Field(q.pk.Index))
 	if n != 0 && !needPK {
@@ -272,12 +274,33 @@ func (q *BaseQuery) upsertGuardedInsertStyle(ctx context.Context, v reflect.Valu
 	}
 	args = append(args, guardArgs...)
 	if q.upsertFamily() == "duplicate_key" {
-		res, err := q.executeExec(ctx, insertSQL+clause, args)
+		// A single integer key: the statement reports the key of the row it
+		// inserted or met, and none for a row of another tenant (QK-63,
+		// see duplicateKeyKeyAssignment).
+		carried := q.pk.Column != "" && !isZeroPKValue(v.Field(q.pk.Index))
+		keyAssign, keyArgs := q.duplicateKeyKeyAssignment(clause, len(args)+1)
+		args = append(args, keyArgs...)
+		res, err := q.executeExec(ctx, insertSQL+clause+keyAssign, args)
 		if err != nil {
 			return err
 		}
 		n, _ := res.RowsAffected()
-		return q.finishGuardedDuplicateKey(ctx, v, conflictCols, n, hasUpdate)
+		if keyAssign == "" {
+			return q.finishGuardedDuplicateKey(ctx, v, conflictCols, n, hasUpdate)
+		}
+		key, found, write := duplicateKeyRowKey(res, carried)
+		if !found {
+			// No row of the tenant was inserted or met: the conflicting
+			// row is another tenant's, and the guard kept its values.
+			if n == 0 && hasUpdate {
+				return q.errUpsertOutsideTenant()
+			}
+			return nil
+		}
+		if write {
+			setPKValue(v, q.pk, key)
+		}
+		return nil
 	}
 	if returning != "" {
 		err := q.scanReturning(q.executeQueryRow(ctx, insertSQL+clause+returning, args), v)
