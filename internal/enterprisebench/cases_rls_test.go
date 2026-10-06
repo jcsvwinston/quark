@@ -131,7 +131,7 @@ func controlsRls() []control {
 		{
 			id:     "RLS-10",
 			family: "rls",
-			title:  "The implicit transaction behind a native query commits the write before returning and gives its connection back when the request context ends",
+			title:  "The implicit transaction behind a native query commits a write before returning, holds a read's connection while the caller reads, and gives it back when the read ends, without waiting for the request context",
 			want:   present,
 			probe:  probeRlsNativeImplicitTxLifecycle,
 		},
