@@ -16,7 +16,23 @@ Quark follows semantic versioning:
 
 - **Patch and minor releases (`v1.x.y`) keep API compatibility.** Code that
   compiles against `v1.3` compiles against every later `v1.x`. New features
-  arrive as new options and methods, not as changed signatures.
+  arrive as new options, methods and types, not as changed signatures.
+- **Your implementations of Quark's interfaces: extension points are frozen,
+  plumbing is not.** The promise above covers code that calls Quark, and code
+  that implements an *extension point* — an interface or function type Quark
+  calls, such as a dialect, a model hook, a cache store, a middleware or an
+  observer. Within `v1`, Quark adds no method to an extension point and
+  changes none; a new capability arrives as a separate, optional interface
+  with a default for code that does not implement it. It does **not** cover
+  your own implementation of a *plumbing* interface — one Quark implements
+  and hands to you, such as `Executor`, `Event` or `Expr`: Quark may add a
+  method to one of those in a minor release, never in a patch, and the
+  release notes name it. Code that only calls it is unaffected. The
+  [extension contract](../reference/extension-contract) marks every type
+  as one or the other, and shows how to write your own implementation of
+  plumbing so that it keeps compiling; the
+  [decision record](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0029-extension-points-do-not-grow-in-v1.md)
+  has the reasoning.
 - **Breaking changes go to `v2`.** If that day comes, `v2` will be a new
   module path (`github.com/jcsvwinston/quark/v2`, per Go convention), released
   with a migration guide — you will never be broken by a routine `go get -u`.

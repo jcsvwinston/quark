@@ -14,44 +14,51 @@ whether you are meant to implement it and what Quark promises about its shape.
 
 ## What the columns mean
 
-:::note The promise these columns describe is a proposal
-The *Extension point* and *Stability* columns describe the promise Quark
-intends to make for each type. That promise has not been adopted yet: until
-it is, the [versioning promise](../operations/upgrade#the-versioning-promise)
-stands as written for **every** exported type, marked *yes* or *no* — a minor
-or patch release does not break code that implements any of them. Adopting
-the proposal will be recorded in an architecture decision record and
-announced in the release notes.
-:::
+The two columns are Quark's compatibility promise for each type. They narrow
+the [versioning promise](../operations/upgrade#the-versioning-promise) in one
+place — your own implementations of a type marked *no* — and the project
+recorded the rule, with its reasons, in a
+[decision record](https://github.com/jcsvwinston/quark/blob/main/docs/adr/0029-extension-points-do-not-grow-in-v1.md)
+on 2026-10-06.
 
 **Extension point.**
 
 - **yes** — Quark calls your implementation, and that is what the type is for.
-  Under the proposal, Quark would not add a method to an interface marked
-  *yes* within `v1`, nor change the signature of a function type marked
-  *yes*. A new capability would arrive as a separate, optional interface that
-  Quark checks for with a type assertion — the way `SavepointDialect` and
-  `SchemaIntrospector` extend `Dialect` — so an implementation written today
-  keeps compiling.
+  Within `v1`, Quark does not add a method to an interface marked *yes*, nor
+  remove one or change its signature; it does not change the signature of a
+  function type marked *yes*; and it does not add, remove or change a field of
+  `quarkdriver.Classifier`, whose predicates are all required. A type marked
+  *yes* stays an extension point for all of `v1`. A new capability arrives as
+  a separate, optional interface that Quark checks for with a type assertion,
+  and a type that does not implement it gets a documented default — the way
+  `SavepointDialect` and `SchemaIntrospector` extend `Dialect`, and
+  `CacheLocker` extends `CacheStore` — so an implementation written today keeps
+  compiling and keeps working.
 - **no** — plumbing. Quark, the standard library or Quark's own types
   implement it; your code receives it, calls its methods or passes along the
-  values Quark gives it, and that use is covered by the
-  [versioning promise](../operations/upgrade#the-versioning-promise). Under
-  the proposal, an implementation of your own would not be: Quark could add a
-  method to such an interface in a minor release.
+  values Quark gives it, and that use is covered by the versioning promise:
+  within `v1` no method you call is removed or changes its signature, and the
+  function types marked *no* keep theirs. Your own implementation of an
+  interface marked *no* is not covered: Quark may add a method to that
+  interface in a minor release — never in a patch — and the release notes
+  name the interface and the method.
 
 **Stability.**
 
-- **stable** — Within `v1` it changes only by addition. A change that would
-  break an implementation waits for `v2`, and is announced in the release
-  notes with a deprecation first.
+- **stable** — Within `v1` it changes only as the column above allows. A
+  change that would break an implementation waits for `v2`, and is announced
+  in the release notes with a deprecation first.
 - **experimental** — Nothing breaks within `v1` either: a minor or a patch
   release only adds. The shape is not settled yet — no implementation outside
-  Quark's repository has used it — so, under the proposal, `v2` could change
-  it without a deprecation period.
+  Quark's repository has used it — so `v2` may change it without a
+  deprecation period.
 - **internal-use** — Exported because Quark's own code needs it: what
   `quark gen` writes, or an earlier contract kept so that code built against
-  it still works. Do not implement it by hand.
+  it still works. Do not implement it by hand. Within `v1` it keeps its
+  shape, so code an earlier `quark gen` wrote keeps compiling.
+
+Only `v2` may add, remove or change a method of an extension point; within
+`v2.x` the same rules apply again, to the `v2` contract.
 
 Several types of `quarkdriver` are also named in package `quark` by an alias —
 `quark.Dialect` is `quarkdriver.Dialect`, the same type, not a copy. The table
@@ -136,6 +143,24 @@ The model conventions — `TableName`, `Validate` and the hooks — are found
 by a type assertion on the model, so a method with the wrong signature is not
 an error: Quark does not see it. The assertion is what tells you.
 
+If you need your own implementation of a type marked *no* — a test double of
+an `Executor`, say, or an executor a middleware passes on in place of the one
+it was handed — embed the interface in your type. A method Quark adds to it in
+a minor release is then promoted from the value you embed, and your type keeps
+compiling:
+
+```go
+type countingExecutor struct {
+    quark.Executor // the value Quark handed you
+    statements atomic.Int64
+}
+
+func (c *countingExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+    c.statements.Add(1)
+    return c.Executor.ExecContext(ctx, query, args...)
+}
+```
+
 A dialect for an engine Quark does not ship needs only `quarkdriver`; the
 [Dialects API](api/dialects) shows one registered without importing package
 `quark`, and how to check it with the conformance kit.
@@ -152,4 +177,7 @@ one twice, names something that is not one, or uses a value outside the
 vocabulary of this page. Quark's CI also records the signature of every method
 and function type listed here, and of the fields of `Classifier`, so a change
 to any of them cannot land without that record changing in the same pull
-request.
+request. A second test holds the rows marked *yes* to the rule above: it keeps
+the shape of every extension point as it was when the rule was adopted — or,
+for a newer one, when it was added — and fails when one of them gains, loses
+or changes a method or a field, or stops being marked *yes*.

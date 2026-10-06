@@ -250,12 +250,18 @@ Two guards you WILL meet on your first API change:
   signatures: regenerate only when the change is meant, and if the type is
   one a third party implements, read its row on the
   [extension contract](website/docs/reference/extension-contract.mdx) first.
-  Its stability column is a proposal pending the owner's decision; until it
-  is adopted, the v1 promise of `website/docs/operations/upgrade.mdx` covers
-  every exported type, so a method added to any implementable interface is
-  a breaking change.
+  Within v1 a type marked as an extension point (*yes*) gains no method or
+  field and changes none of its members
+  ([ADR-0029](docs/adr/0029-extension-points-do-not-grow-in-v1.md)):
+  add the capability as a new optional interface that Quark checks for with
+  a type assertion, with a default when it is absent.
+  `TestExtensionPointsFrozen` (`internal/extbench`) fails otherwise, and
+  `make regen` does not silence it. A plumbing interface (*no*) may gain a
+  method in a minor release; say so in the release notes.
   A new type a third party can implement needs a row there in the same
-  change, or the extension bench (`CON-01`) fails.
+  change, or the extension bench (`CON-01`) fails; a new extension point
+  also needs its lines in `internal/extbench/testdata/extension-points.txt`,
+  which that test's failure prints.
 - **version coherence** (release PRs only): `scripts/check-version-coherence.sh`
   demands the docs bump in the same PR. release-please bumps the marked
   version lines — in SECURITY.md that is the marker line only, not the

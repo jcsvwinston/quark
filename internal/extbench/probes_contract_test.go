@@ -249,12 +249,9 @@ var (
 	extensionValues = map[string]bool{"yes": true, "no": true}
 )
 
-func probeContractPage(t *testing.T, e *env) verdict {
-	api := e.loadAPI(t)
-	census := implementable(api)
-	if len(census) == 0 {
-		t.Fatal("the census of implementable types is empty: the probe is broken, not the contract")
-	}
+// censusNames maps every name a page may write for a census entry — its bare
+// name, its qualified name, and its alias in package quark — to the entry.
+func censusNames(api *apiTypes, census []censusEntry) map[string]censusEntry {
 	known := map[string]censusEntry{}
 	for _, c := range census {
 		known[c.name] = c
@@ -269,6 +266,16 @@ func probeContractPage(t *testing.T, e *env) verdict {
 			known[alias] = c
 		}
 	}
+	return known
+}
+
+func probeContractPage(t *testing.T, e *env) verdict {
+	api := e.loadAPI(t)
+	census := implementable(api)
+	if len(census) == 0 {
+		t.Fatal("the census of implementable types is empty: the probe is broken, not the contract")
+	}
+	known := censusNames(api, census)
 
 	// The contract is ONE table: the tables with a stability column that
 	// name at least one census type. Anything else with a stability column
