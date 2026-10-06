@@ -1,8 +1,8 @@
 # Dependency update proposals, weekly, grouped so a Monday brings one pull
 # request per family of modules rather than one per module and one per
-# dependency. Quark is twelve Go modules — the library at the root, the CLI,
-# the five driver modules, four local harnesses and the integration
-# fixtures — so each family is listed
+# dependency. Quark is thirteen Go modules — the library at the root, the CLI,
+# the five driver modules, four local harnesses, the integration fixtures and
+# the driver template — so each family is listed
 # on its own, with the reason for every `ignore` written next to it. Every go.mod in the tree has an entry here, and
 # the lint job fails if one appears without it.
 version: 2
@@ -133,6 +133,25 @@ updates:
       # A sibling suite module: its requirement is a floor raised by hand,
       # not by a bot, like every require of a suite module in this file.
       - dependency-name: github.com/jcsvwinston/nucleus
+
+  # The driver template: a driver for SQLite through modernc.org/sqlite,
+  # written against quarkdriver alone, never published, with the guide
+  # "Writing a driver" checked against it. What ages here is the engine's Go
+  # driver, which is what a driver module started from the template requires
+  # besides Quark; a bump is built and run through the conformance kit and the
+  # engine suite before it merges.
+  - package-ecosystem: gomod
+    directories:
+      - /internal/drivertemplate
+    schedule:
+      interval: weekly
+    groups:
+      driver-template:
+        patterns: ["*"]
+    ignore:
+      # Replaced by this tree in the module's go.mod, as in the fixtures
+      # above: its version is never resolved.
+      - dependency-name: github.com/jcsvwinston/quark
 
   # Grouped for the same reason as the modules above: without a group this
   # ecosystem opens one pull request per action, and the workflows here use

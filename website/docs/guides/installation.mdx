@@ -61,6 +61,10 @@ error. `quark.New` logs a WARN (`quark.driver.no_classifier`) when it detects
 that, naming the module to import. Opening without any driver at all fails
 with an error that names the `go get` and the import line.
 
+For an engine Quark does not ship, you write a driver module of your own: the
+`database/sql` driver, its error classifier and a dialect, registered under one
+name. See [Writing a driver](writing-a-driver).
+
 SQLite is the easiest place to start — there's no external service to run. Three
 engines have a wrinkle worth knowing before you pick a driver:
 

@@ -8,6 +8,7 @@ files:
   - quarkdriver/migration_lock.go
   - quarkdriver/schema_model.go
   - quarkdriver/schema.go
+  - internal/drivertemplate/dialect.go
 last_review: 2026-10-05
 related_adrs: [0005, 0023, 0026]
 related_p0: []
@@ -215,6 +216,36 @@ Rules that follow:
   `-tags pinnedquark`. The tag becomes unnecessary once the release train
   raises the floors to the release that ships the kit.
 
+### The driver template and its guide (A11 Q5)
+
+`internal/drivertemplate` is a driver module for SQLite through
+`modernc.org/sqlite`, registered as `templite`, written against
+`quarkdriver` alone: the `database/sql` driver, the classifier and the
+dialect registered from one `init`, the dialect implementing
+`AutoIncrementer`, `TableRebuilder` and `SchemaIntrospector` and taking every
+other default. It is a module of its own, never published, whose path is
+`example.com/drivertemplate` — outside this repository's, so the toolchain
+refuses it Quark's `internal/` packages as it would a third party's — with a
+`replace` to this tree. Its tests run `drivertest.Verify`,
+`drivertest.VerifyDialect`, `suite.Run`, an import check (the driver's code
+imports no package of Quark but `quarkdriver`) and
+`TestGuideMatchesTemplate`, which holds every Go block of
+`website/docs/guides/writing-a-driver.mdx` to the template's code. CI's
+`driver-template` lane runs them with `GOWORK=off`, and `DRV-08` in
+`internal/extbench` measures the same; `make check` runs it as a fixture
+module. The bench's `testdata/extdriver` stays: `DRV-05` breaks its dialect on
+purpose, which the template must never be.
+
+Rules that follow:
+
+- **The template and the guide change together.** A block on the page that is
+  not the template's code fails the template's tests.
+- **A kit check the template does not pass is a template change in the same
+  PR** — or the check is wrong. The template is what a driver author copies.
+- **A new module of the repository is named in `knownModules`**
+  (`internal/extbench/probes_drivers_test.go`, `DRV-08`) and in
+  `.github/dependabot.yml`; the probe fails on a module it does not know.
+
 ## Anti-patterns a vigilar
 
 ### Branching on `Dialect.Name()` where an interface can answer
@@ -282,20 +313,16 @@ Mezcla SQL builder + DDL + procedures + JSON. Cuando MariaDB añade `CreateSeque
 - **Fase 1**: tipos ricos — `decimal.Decimal`, `uuid.UUID`, `time.Duration`, `[]byte`/`bytea`, `JSON[T]` genérico, arrays Postgres.
 - **Fase 2**: AST permite expresar window functions, locking, CTEs por dialecto.
 - **Fase 3**: introspección completa (tipos, NOT NULL, defaults, índices, FKs, checks) por dialecto.
-- **A11 Q5 (driver template and "Writing a driver")** builds on the kit:
-  the reference implementation is `internal/extbench/testdata/extdriver` — a
-  dialect written against `quarkdriver` alone that passes `VerifyDialect` and
-  `suite.Run` (it needed `AutoIncrementer`, `TableRebuilder` and an
-  introspector that reads indexes and foreign keys). A template module with
-  its own `go.mod` built `GOWORK=off` needs a quark that ships the kit (the
-  release after A11 Q4) or a `replace` as the fixture has; it is a new module,
-  so the umbrella's `align-module-floors.sh`, Dependabot's list and `DRV-08`'s
-  `knownModules` have to learn it. What the guide must say that the contract
-  cannot express yet: the query path still branches on the names `mssql` and
-  `oracle` (`query_crud.go`, `query_exec.go`) and the LIKE escape tail on
-  `mysql`/`mariadb`/`mssql` (`like.go`); referential actions reach the DDL as
-  written (Oracle refuses `ON UPDATE` and `ON DELETE NO ACTION`); and Oracle's
-  `VARCHAR2(n)` counts bytes, not characters.
+- **The gaps "Writing a driver" lists** are the next candidates for optional
+  interfaces (each with today's behaviour as its default): the query path's
+  branches on the names `mssql` and `oracle` (`query_crud.go`,
+  `query_exec.go`: generated keys, MERGE upserts, the implicit ORDER BY of
+  OFFSET/FETCH, the RECURSIVE keyword, Oracle's lock with a row limit), the
+  LIKE escape tail and `[` escaping by name (`like.go`), the batch
+  bind-parameter ceiling by name, referential actions written unasked (Oracle
+  refuses `ON UPDATE` and `ON DELETE NO ACTION`), and the unit of a length
+  (`VARCHAR2(n)` counts bytes). Closing one removes its bullet from the guide
+  in the same change.
 
 ## Tests críticos a no romper
 

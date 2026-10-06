@@ -608,6 +608,41 @@ jobs:
           go vet ./...
           go test ./... -count=1 -timeout 10m
 
+  # The driver template (internal/drivertemplate) is a module of its own,
+  # never published, whose path is not this repository's: a driver for SQLite
+  # through modernc.org/sqlite written against quarkdriver alone, the way a
+  # driver module outside the repository writes one. Its tests run both halves
+  # of the conformance kit (the classifier and the dialect) and the engine
+  # suite on its engine, check that the driver's code imports no package of
+  # Quark but quarkdriver, and hold the guide "Writing a driver" to its code.
+  # With no workspace, as the extension bench (DRV-08) builds it — its replace
+  # directive points Quark at this tree — and a go.mod a tidy would change
+  # fails here, as in the fixtures lane above.
+  driver-template:
+    name: Driver template (own module)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: internal/drivertemplate/go.sum
+
+      - name: Tidy, vet and test the template standalone
+        working-directory: internal/drivertemplate
+        env:
+          GOWORK: "off"
+        run: |
+          set -euo pipefail
+          if ! go mod tidy -diff; then
+            echo "::error::internal/drivertemplate/go.mod or go.sum is not tidy on its own (run: cd internal/drivertemplate && GOWORK=off go mod tidy)" >&2
+            exit 1
+          fi
+          go vet ./...
+          go test ./... -count=1 -timeout 10m
+
   # F6-8: the benchmark harness is its own module (separate go.mod with a
   # local `replace` directive), so the root `go test ./...` above does not
   # build it. This job compiles and smoke-runs it to keep it from rotting.
@@ -886,6 +921,7 @@ jobs:
       - race
       - benchmarks
       - integrations
+      - driver-template
       - integration
       - superapp
 

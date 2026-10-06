@@ -76,7 +76,7 @@ docs: add comparison table justifications
 
 > **Version-neutral scopes:** PRs that only touch the test-harness areas
 > (`acceptance/`, `bugbash/`, `benchmarks/`, `internal/integrations/`,
-> `TASKS.md`) must use the
+> `internal/drivertemplate/`, `TASKS.md`) must use the
 > `test` or `chore` types — a `feat`/`fix` there bumps the library version and
 > enters the library CHANGELOG, which records library-level changes only.
 > (`release-please-config.json` also lists these paths under `exclude-paths`
@@ -104,7 +104,8 @@ go mod download
 The repository is several Go modules, not one: the library at the root, the
 CLI under `cmd/quark`, the five driver modules under `drivers/`, the engine
 suites under `internal/enginesuite`, the framework fixtures under
-`internal/integrations`, and the harnesses. A
+`internal/integrations`, the driver template under `internal/drivertemplate`,
+and the harnesses. A
 `go test ./...` at the root reaches the first of those only — `make check`
 walks the rest, and the sections below say which directory each command runs
 in.
@@ -125,13 +126,14 @@ go test ./... -run TestSQLite
 go test ./...                                  # the library's own tests
 cd internal/enginesuite && go test ./...       # the engine suites, on SQLite
 cd internal/integrations && GOWORK=off go test ./...  # net/http, chi, Echo, Gin, gRPC and Nucleus fixtures, and the frameworks guide checked against them
+cd internal/drivertemplate && GOWORK=off go test ./... # the driver template: the conformance kit and the engine suite on its engine, and the guide "Writing a driver" checked against it
 ```
 
 The engine suites live in a module of their own so that the drivers and the
 container modules they need stay out of the library's `go.mod`
 ([ADR-0024](docs/adr/0024-cli-en-modulo-propio.md)). The test names did not
 change with the move, so every `-run` filter below still says what it said —
-it is the directory you run it from that moved. `make test` runs all three.
+it is the directory you run it from that moved. `make test` runs all four.
 
 ### PostgreSQL
 
@@ -282,3 +284,14 @@ And one you will meet the first time you edit an integration fixture:
   `cmd/quark/commands/templates/integrations`, and
   `TestInitWithTemplatesAreTheFixtures` fails when a fixture changes and its
   copy does not — `make regen` rewrites them.
+
+And one you will meet the first time you touch the driver contract or the
+driver template:
+
+- **The guide "Writing a driver"**: every Go block of
+  `website/docs/guides/writing-a-driver.mdx` must be code of
+  `internal/drivertemplate`, line for line, and the template's
+  `TestGuideMatchesTemplate` fails when one is not. Change the template and
+  the page together; the template's tests also run both halves of the
+  conformance kit, so a change to the kit that the template does not pass
+  shows up there first.

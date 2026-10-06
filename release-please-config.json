@@ -67,6 +67,7 @@
         "bugbash",
         "benchmarks",
         "internal/integrations",
+        "internal/drivertemplate",
         "TASKS.md"
       ],
       "extra-files": [

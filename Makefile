@@ -4,9 +4,10 @@
 #
 # El árbol son varios módulos de Go (ADR-0023, ADR-0024): la biblioteca en la
 # raíz, el CLI en cmd/quark, los cinco drivers, las suites por motor en
-# internal/enginesuite, las fixtures de integración en internal/integrations y
-# los arneses. `go build ./...` desde la raíz sólo ve el primero, así que los
-# targets de aquí entran en cada módulo.
+# internal/enginesuite, las fixtures de integración en internal/integrations,
+# la plantilla de driver en internal/drivertemplate y los arneses. `go build
+# ./...` desde la raíz sólo ve el primero, así que los targets de aquí entran
+# en cada módulo.
 
 .DEFAULT_GOAL := help
 
@@ -17,7 +18,9 @@ NESTED_MODULES := cmd/quark internal/enginesuite acceptance
 # como las corre la lane "Integration fixtures" de CI y como las mide el banco
 # de extensibilidad: su go.mod reemplaza quark por este árbol, y meterlas en el
 # go.work subiría las dependencias de los frameworks a todos los módulos de él.
-FIXTURE_MODULES := internal/integrations
+# La plantilla de driver (internal/drivertemplate, A11 Q5) va igual: se construye
+# como la construiría un tercero, sin workspace, y su path no es el del repo.
+FIXTURE_MODULES := internal/integrations internal/drivertemplate
 
 .PHONY: help check lint test test-race test-all fuzz docs-guards regen superapp oracle-up workspace
 
@@ -67,10 +70,11 @@ docs-guards: ## Los guards de docs de CI (voz de producto, deriva, archivo, marc
 	bash scripts/ci/check_versioned_docs_markers.sh
 	bash scripts/lint-docs.sh
 
-test: workspace ## Tests de la biblioteca, de las suites por motor y de las fixtures de integración (los de Redis se saltan sin QUARK_TEST_REDIS_ADDR)
+test: workspace ## Tests de la biblioteca, de las suites por motor, de las fixtures de integración y de la plantilla de driver (los de Redis se saltan sin QUARK_TEST_REDIS_ADDR)
 	go test ./... -count=1 -timeout 5m
 	cd internal/enginesuite && go test ./... -count=1 -timeout 15m
 	cd internal/integrations && GOWORK=off go test ./... -count=1 -timeout 10m
+	cd internal/drivertemplate && GOWORK=off go test ./... -count=1 -timeout 10m
 
 test-race: workspace ## La lane -race de CI (~5 min)
 	go test -race -short -count=1 -timeout 15m ./...

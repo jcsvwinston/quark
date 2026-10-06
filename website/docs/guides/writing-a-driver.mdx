@@ -1,0 +1,477 @@
+---
+sidebar_position: 13
+title: Writing a driver
+description: From an empty module to a driver Quark opens by name — the database/sql driver, the error classifier and the dialect registered under one name — checked by the conformance kit and the engine suite, and what the contract cannot express yet.
+---
+
+# Writing a driver
+
+Quark ships drivers for SQLite, PostgreSQL, MySQL, MariaDB, SQL Server and
+Oracle. For any other engine you write a **driver module**: a Go module that an
+application imports for its side effect, and that registers three things under
+one name — the `database/sql` driver, a classifier for the engine's errors, and
+a dialect that writes the engine's SQL. An application then opens the engine by
+that name, with `quark.New(name, dsn)`, and uses Quark as it would on a
+built-in engine.
+
+This page builds one, from an empty module to a driver that passes Quark's
+conformance kit. The code on it is not a sketch: it is the
+[driver template](https://github.com/jcsvwinston/quark/tree/main/internal/drivertemplate)
+in Quark's repository, a driver for SQLite through `modernc.org/sqlite`
+registered under the name `templite`. SQLite needs no server, so the kit's
+engine checks run on any machine. CI builds and tests the template as a module
+of its own, with no workspace, and a test of the template fails when a block on
+this page stops being its code.
+
+Everything a driver implements is declared in
+`github.com/jcsvwinston/quark/quarkdriver`. The
+[extension contract](../reference/extension-contract) lists each of those types
+with its stability; the [Dialects API](../reference/api/dialects) documents the
+dialect interface method by method. If your engine speaks the SQL of a built-in
+one — CockroachDB and PostgreSQL, say — your dialect can wrap the built-in one
+instead of writing every method: see
+[Wrapping a built-in dialect](../reference/api/dialects#wrapping-a-built-in-dialect).
+
+## The module
+
+```bash
+mkdir mydriver && cd mydriver
+go mod init example.com/mydriver
+go get github.com/jcsvwinston/quark@latest
+go get modernc.org/sqlite   # the engine's Go driver: modernc's, for the template
+```
+
+Require Quark at the version of this page or later: the dialect half of the
+conformance kit and the engine suite are not in v1.16.0 or earlier. The
+template's own `go.mod` replaces Quark with the repository it lives in, so that
+it is tested against the code under review; a driver module requires a
+published release and has no `replace`.
+
+The driver is one package. It imports `quarkdriver`, where the contract is
+declared, and never package `quark`, which is the application's. Its `init`
+makes the three registrations:
+
+```go
+import (
+    "database/sql"
+
+    "github.com/jcsvwinston/quark/quarkdriver"
+
+    "modernc.org/sqlite"
+)
+
+// Name is the name the driver registers under in all three registries:
+// database/sql's drivers, Quark's error classifiers and Quark's dialects.
+// quark.New(Name, dsn) finds all three by it.
+const Name = "templite"
+
+func init() {
+    sql.Register(Name, &sqlite.Driver{})
+    quarkdriver.MustRegister(Name, Classifier)
+    quarkdriver.RegisterDialect(Name, Dialect{})
+}
+```
+
+| Registration | What Quark does with it |
+| --- | --- |
+| `sql.Register(name, driver)` | `quark.New(name, dsn)` opens the pool through it. Most Go drivers register themselves under a name of their own when imported; then the module skips this call and uses that name for the other two. The template registers modernc's driver a second time because it needs a name that is not `sqlite`. |
+| `quarkdriver.MustRegister(name, classifier)` | `quark.IsUniqueViolation`, `quark.IsDeadlock`, the retry of a deadlocked transaction and the failover of a read replica consult it. It panics on an empty name, a nil predicate, or a name registered twice. |
+| `quarkdriver.RegisterDialect(name, dialect)` | `quark.New(name, dsn)` resolves the dialect by the name, before the built-in names, with no `quark.WithDialect`. Every statement Quark writes goes through it. |
+
+## The classifier
+
+Quark cannot tell a duplicate key from a deadlock from a dropped connection
+without the driver's error types, and those are the driver module's to know:
+
+```go
+var Classifier = quarkdriver.Classifier{
+    UniqueViolation: uniqueViolation,
+    Deadlock:        deadlock,
+    TransientConn:   transientConn,
+}
+
+// uniqueViolation matches SQLite's extended result codes 2067
+// (SQLITE_CONSTRAINT_UNIQUE) and 1555 (SQLITE_CONSTRAINT_PRIMARYKEY), and no
+// other constraint: a NOT NULL, CHECK or foreign-key failure is not "already
+// taken".
+func uniqueViolation(err error) bool {
+    var e *sqlite.Error
+    if errors.As(err, &e) {
+        return e.Code() == 2067 || e.Code() == 1555
+    }
+    return false
+}
+```
+
+Three rules hold for every predicate:
+
+- **Match the code, through `errors.As`.** Never the message: PostgreSQL, MySQL,
+  Oracle and SQL Server translate their messages when the server runs in
+  another language. Callers wrap errors, so a type assertion misses them.
+- **Answer false for an error that is not yours.** Quark consults every
+  registered classifier in turn; one that claims a foreign error answers for
+  another engine.
+- **A false is not a failure, so nothing reports it.** A `Deadlock` that never
+  answers true turns contention Quark would have retried into failed requests;
+  a `TransientConn` that never answers true keeps reads on a replica that is
+  down. Answer false only where the engine cannot produce the error, as here:
+
+```go
+func deadlock(error) bool { return false }
+```
+
+Do not give the driver's error type a `SQLState() string` method with codes of
+your own engine: Quark reads any `SQLState()` as a PostgreSQL SQLSTATE, before it
+consults the classifiers.
+
+## The dialect
+
+The dialect is a value that implements `quarkdriver.Dialect`. The template's is
+an empty struct; a dialect that needs configuration carries it in its fields.
+
+```go
+type Dialect struct{}
+
+var _ quarkdriver.Dialect = Dialect{}
+
+// Name is the name the dialect is registered and found under. What the
+// engine can do Quark asks through the methods and the optional interfaces;
+// the few places where it still reads a built-in engine's name take their
+// default path for any other name.
+func (Dialect) Name() string { return Name }
+
+// Placeholder is the bind marker of the index-th argument, from 1. SQLite
+// takes "?" for every one; an engine with numbered markers writes "$1",
+// "@p1" or ":1" here.
+func (Dialect) Placeholder(int) string { return "?" }
+
+func (d Dialect) Placeholders(n int) []string {
+    out := make([]string, n)
+    for i := range out {
+        out[i] = d.Placeholder(i + 1)
+    }
+    return out
+}
+
+// Quote quotes an identifier, doubling the quote character inside it, so a
+// name can never close its quotes and continue as SQL.
+func (Dialect) Quote(identifier string) string {
+    return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+```
+
+What Quark does with each method of the interface:
+
+| Method | Where Quark uses it |
+| --- | --- |
+| `Name` | The key the dialect is registered and found under. |
+| `Placeholder`, `Placeholders` | Every bound argument of every statement. |
+| `Quote` | Every table and column name. |
+| `LimitOffset` | `Limit`, `Offset`, `Paginate` and the implicit cap of `List`. |
+| `SupportsReturning`, `Returning` | The key the engine generates, read back by `Create`, `CreateBatch` and `Upsert`. `Returning` answers `""` when `SupportsReturning` is false. |
+| `SupportsLastInsertID`, `LastInsertIDQuery` | The generated key on an engine without `RETURNING`. |
+| `CurrentTimestamp` | The time a soft delete writes into `deleted_at`. |
+| `BuildRoutineQuery`, `BuildProcedureCall` | `quark.NewRoutine` and `quark.Call`. |
+| `JSONExtract` | `WhereJSON` and the `quark.JSONExtract` expression. |
+| `AlterTableAddColumn`, `AlterTableDropColumn` | `Sync`, and `ApplyPlan`'s added and dropped columns. |
+| `AlterTableAlterColumn` | `ApplyPlan`'s type change, for a dialect with no `ColumnAlterer` and no table rebuild. |
+| `RenameColumn` | `Sync`, for a field that names its old column. |
+| `RenameTable` | No operation of Quark writes it; the kit checks the engine accepts it. |
+| `SupportsTransactionalDDL` | Whether `ApplyPlan` runs a plan in one transaction or step by step with a checkpoint table, and whether `Sync` wraps its changes in one. |
+| `LockSuffix` | `ForUpdate`, `ForShare`, `SkipLocked` and `NoWait`. |
+| `UpsertSQL` | The conflict clause of `Upsert` and `UpsertBatch`. |
+
+Two methods carry rules the type system cannot. `LockSuffix` must answer nothing
+for the zero options, and refuse what the engine cannot do with
+`quarkdriver.ErrUnsupportedFeature` — the same value an application matches as
+`quark.ErrUnsupportedFeature`:
+
+```go
+func (Dialect) LockSuffix(opts quarkdriver.LockOptions) (tableHint, suffix string, err error) {
+    if opts.IsZero() {
+        return "", "", nil
+    }
+    return "", "", fmt.Errorf("%w: %s has no row-level locks", quarkdriver.ErrUnsupportedFeature, Name)
+}
+```
+
+`JSONExtract` receives the path as the caller wrote it. Quark's own validator is
+internal, so the dialect validates the path itself, and binds it:
+
+```go
+var jsonPath = regexp.MustCompile(`^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$`)
+
+// JSONExtract writes the expression that reads a value out of a JSON column.
+// The "?" in the fragment is not the engine's placeholder: it is a neutral
+// marker that Quark replaces with Placeholder(n) for the argument's
+// position. The path travels as that bound argument, never inside the SQL.
+func (d Dialect) JSONExtract(column, path string) (string, []any, error) {
+    if len(path) > 256 || !jsonPath.MatchString(path) {
+        return "", nil, fmt.Errorf("%s: JSON path %q must be a dotted chain of identifiers", Name, path)
+    }
+    return fmt.Sprintf("JSON_EXTRACT(%s, ?)", d.Quote(column)), []any{"$." + path}, nil
+}
+```
+
+## The optional interfaces
+
+The rest Quark asks through optional interfaces, found on the dialect by a type
+assertion: how the engine spells savepoints, column types, keys and schema
+changes, how it reads its own schema, and whether it can lock a migration. Most
+of them serve the schema path — `Migrate`, `PlanMigration`, `ApplyPlan`, `Sync`
+and the tables Quark keeps for itself. A dialect that does not implement one
+gets a documented default: a portable spelling, or `ErrUnsupportedFeature` where
+there is none. Implement the ones your engine spells differently and take the
+rest.
+
+| Interface | Implement it when | Without it | The template |
+| --- | --- | --- | --- |
+| `SavepointDialect` | the engine's savepoint statements are not the SQL standard's | `SAVEPOINT`, `ROLLBACK TO SAVEPOINT`, `RELEASE SAVEPOINT` | takes the default |
+| `ColumnTyper` | the portable column types do not fit the engine | portable types (`VARCHAR(255)`, `BIGINT`, `TIMESTAMP`, …) | takes the default |
+| `AutoIncrementer` | the engine has no SQL-standard identity column | `BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY` | implements it |
+| `IdempotentDDL` | the engine has no `IF NOT EXISTS` | `CREATE TABLE IF NOT EXISTS`, `CREATE [UNIQUE] INDEX IF NOT EXISTS` | takes the default |
+| `SchemaIntrospector` | always, unless the driver gives up `PlanMigration` and `Sync` | `IntrospectSchema`, `PlanMigration` and `Sync` return `ErrUnsupportedFeature` | implements it |
+| `ColumnAlterer` | a column change is not the SQL standard's `ALTER COLUMN` | `ALTER COLUMN … TYPE`, `SET/DROP NOT NULL`, `SET/DROP DEFAULT`; dropping a primary key returns `ErrUnsupportedFeature` | not asked: it rebuilds tables |
+| `ObjectDropper` | dropping an index or a constraint is spelled differently | `DROP INDEX <index>`, `ALTER TABLE … DROP CONSTRAINT <name>` | not asked: it rebuilds tables |
+| `TableRebuilder` | the engine keeps SQLite's catalog and has no `ALTER COLUMN` | in-place `ALTER` statements | implements it |
+| `ColumnTypeMapper` | a hand-built plan's column types need translating | the type is written as given | takes the default |
+| `MigrationLocker` | the engine can hold a lock across connections | `AcquireMigrationLock` returns `ErrUnsupportedFeature`, and the migrator runs without a lock | takes the default |
+
+`MigrationLocker` deserves a decision rather than a default. Without it, two
+processes that run migrations at once on an engine with more than one writer can
+both apply the same migration; the migrator logs at debug level and proceeds.
+SQLite has one writer, which is why the template does without.
+
+The template implements three of them. A self-numbered key, because SQLite
+rejects the standard identity column, and a table rebuild, because SQLite has
+no `ALTER COLUMN` and no `ADD` or `DROP CONSTRAINT`:
+
+```go
+var (
+    _ quarkdriver.AutoIncrementer    = Dialect{}
+    _ quarkdriver.TableRebuilder     = Dialect{}
+    _ quarkdriver.SchemaIntrospector = Dialect{}
+)
+
+// AutoIncrementColumn is how the engine declares a single-column integer key
+// it numbers itself: what Migrate writes for `ID int64` with pk:"true". Only
+// INTEGER PRIMARY KEY aliases SQLite's rowid, and the catalog then reports the
+// column as INTEGER. The default — the SQL standard's identity column — is
+// one SQLite rejects.
+func (Dialect) AutoIncrementColumn() (definition, dataType string) {
+    return "INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER"
+}
+
+// RebuildsTables: SQLite has no ALTER COLUMN and no ADD or DROP CONSTRAINT,
+// so ApplyPlan changes a column, a foreign key or a check by rebuilding the
+// table. The rebuild reads SQLite's own catalog, so only an engine that keeps
+// that catalog answers true; any other implements quarkdriver.ColumnAlterer
+// and quarkdriver.ObjectDropper, or takes their defaults.
+func (Dialect) RebuildsTables() bool { return true }
+```
+
+And the schema as the engine's catalog holds it, which `PlanMigration` diffs a
+model against. Read the indexes and foreign keys too: a schema that reports none
+makes `PlanMigration` propose, on every run, the index a model declares.
+
+```go
+func (Dialect) IntrospectSchema(ctx context.Context, exec quarkdriver.Executor) (quarkdriver.Schema, error) {
+    names, err := tableNames(ctx, exec)
+    if err != nil {
+        return quarkdriver.Schema{}, err
+    }
+    var s quarkdriver.Schema
+    for _, name := range names {
+        t := quarkdriver.Table{Name: name}
+        if t.Columns, err = columns(ctx, exec, name); err != nil {
+            return quarkdriver.Schema{}, err
+        }
+        if t.Indexes, err = indexes(ctx, exec, name); err != nil {
+            return quarkdriver.Schema{}, err
+        }
+        if t.ForeignKeys, err = foreignKeys(ctx, exec, name); err != nil {
+            return quarkdriver.Schema{}, err
+        }
+        s.Tables = append(s.Tables, t)
+    }
+    return s, nil
+}
+```
+
+The helpers read SQLite's catalog (`sqlite_master` and the `table_info`,
+`index_list`, `index_info` and `foreign_key_list` pragmas); see `schema.go` in
+the template. `exec` is a `*sql.DB`, a `*sql.Tx` or a `*sql.Conn` — under
+`ApplyPlan`, the plan's transaction — so read through it, not through a pool of
+your own.
+
+The interfaces `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`,
+`ColumnAlterer`, `ObjectDropper` and `TableRebuilder` are *experimental* in the
+[extension contract](../reference/extension-contract): no `v1` release breaks
+them, but no engine outside Quark had implemented them when they were
+published.
+
+## The tests
+
+A driver module runs both halves of the conformance kit — the classifier's and
+the dialect's — and the engine suite from its own tests, against its own engine.
+The template's engine runs in memory, so its tests open a database by name and
+never skip:
+
+```go
+func dsn(name string) string {
+    return "file:" + name + "?mode=memory&cache=shared&_pragma=foreign_keys(1)"
+}
+```
+
+A driver for an engine behind a network reads its DSN from an environment
+variable and skips when it is not set, as the example in
+[Checking a dialect](../reference/api/dialects#checking-a-dialect) does, and
+gives its CI a server to run against.
+
+**The classifier.** `drivertest.Verify` checks the classifier against errors
+the engine raised — prefer real ones over values you construct — and against
+errors from the same driver that it must not claim:
+
+```go
+func TestClassifier(t *testing.T) {
+    db := open(t, "classifier")
+    if _, err := db.Exec(`CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL UNIQUE)`); err != nil {
+        t.Fatal(err)
+    }
+    if _, err := db.Exec(`INSERT INTO notes (title) VALUES ('a')`); err != nil {
+        t.Fatal(err)
+    }
+    _, unique := db.Exec(`INSERT INTO notes (title) VALUES ('a')`)
+    _, notNull := db.Exec(`INSERT INTO notes (title) VALUES (NULL)`)
+    _, syntax := db.Exec(`INSERT INTO`)
+    if unique == nil || notNull == nil || syntax == nil {
+        t.Fatalf("the engine accepted a statement it must refuse: unique=%v notNull=%v syntax=%v", unique, notNull, syntax)
+    }
+    drivertest.Verify(t, drivertest.Case{
+        Engine:     drivertemplate.Name,
+        Classifier: drivertemplate.Classifier,
+        Unique:     unique,
+        Neither:    []error{notNull, syntax},
+    })
+}
+```
+
+An engine that deadlocks also passes a deadlock error in `Case.Deadlock`. The
+kit checks that the classifier is registered under the engine's name, too:
+Quark logs a warning when it builds a client for a built-in engine that has no
+classifier registered, but it does not know your engine, so nothing else would
+notice.
+
+**The dialect.** `drivertest.VerifyDialect` checks every method of the dialect
+and every optional interface it implements, through Quark's queries and its
+schema path, and judges each by what the engine then holds or refuses — never
+by the text of a statement:
+
+```go
+func TestDialect(t *testing.T) {
+    drivertest.VerifyDialect(t, drivertest.DialectCase{
+        Dialect:    drivertemplate.Dialect{},
+        DB:         open(t, "dialect"),
+        DriverName: drivertemplate.Name,
+    })
+}
+```
+
+Its subtests are named after the member they check — `engine/Placeholder`,
+`engine/UpsertSQL`, `engine/AutoIncrementer` — so a failure names the method to
+fix. An optional interface the dialect does not implement is logged with the
+default Quark uses instead, and the check exercises that default. With
+`DriverName` set, the kit also checks that Quark finds the dialect by the
+driver's name. The template leaves `DialectCase.Routines` nil, because SQLite
+has no stored routines; the kit then skips `BuildRoutineQuery` and
+`BuildProcedureCall` and says so in the log.
+
+**The engine.** The engine suite runs the checks Quark's own engines run —
+CRUD, the query builder, transactions and savepoints, hooks, soft deletes,
+optimistic locking, preloads and joins, subqueries and window functions, batch
+writes, JSON and arrays, time zones, `Sync` and reversible migrations — on a
+client opened the way an application opens one:
+
+```go
+func TestEngineSuite(t *testing.T) {
+    client, err := quark.New(drivertemplate.Name, dsn("engine_suite"))
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer client.Close()
+    suite.Run(t, client)
+}
+```
+
+The tests import package `quark` — they play the application. The driver's own
+code does not, and the template holds it to that:
+
+```go
+func TestDriverImportsOnlyQuarkdriver(t *testing.T) {
+    pkg, err := build.ImportDir(".", 0)
+    if err != nil {
+        t.Fatal(err)
+    }
+    const quarkModule = "github.com/jcsvwinston/quark"
+    for _, imp := range pkg.Imports {
+        if (imp == quarkModule || strings.HasPrefix(imp, quarkModule+"/")) && imp != quarkModule+"/quarkdriver" {
+            t.Errorf("the driver imports %s: a driver is written against quarkdriver, and package quark is the application's", imp)
+        }
+    }
+}
+```
+
+`go test ./...` in the module runs them all. A subtest of the suite that your
+engine cannot pass for a reason of the engine — it has no window functions, say
+— is skipped by name with `go test -skip`, and the driver's documentation says
+why. The kit and the suite grow with the contract: a Quark release that adds an
+optional interface adds its check, so raising the Quark your module requires
+may bring a check it did not run before.
+
+## What the contract does not express yet
+
+The dialect contract decides what Quark writes for most of what an application
+does, but not for all of it. In the places below Quark still branches on the
+name of a built-in engine, or has no question to ask the dialect. A dialect
+under any other name takes the default branch, and an engine that needs the
+other one cannot get it from its dialect today.
+
+- **Inserts, upserts and pagination of SQL Server and Oracle.** Quark chooses
+  by the names `mssql` and `oracle`: Oracle's generated key through an `OUT`
+  bind, SQL Server's through a batch with `LastInsertIDQuery`, an upsert written
+  as a `MERGE` instead of an `INSERT` with `UpsertSQL`'s clause, the `ORDER BY`
+  that `OFFSET … FETCH` requires when the caller gave none, a recursive CTE
+  without the `RECURSIVE` keyword, and Oracle's refusal to combine a row limit
+  with a row lock. Any other dialect gets the `INSERT` with `UpsertSQL`; the
+  key through `Returning`, or through the driver's `LastInsertId()` and
+  `LastInsertIDQuery`; `LimitOffset` with no `ORDER BY` added; and
+  `WITH RECURSIVE`. An engine whose upsert is a `MERGE`,
+  or whose row limit needs an `ORDER BY`, cannot express that in a dialect.
+- **The escape clause of `LIKE`.** `WhereLike`, `WhereContains`, `WhereStartsWith`
+  and `WhereEndsWith` declare a backslash as the escape character. The clause is
+  chosen by name: `ESCAPE '\\'` for `mysql` and `mariadb`, whose string literals
+  read a backslash as an escape, and `ESCAPE '\'` for every other dialect;
+  SQL Server's `[` is escaped in the text only under the name `mssql`. An engine
+  whose literals treat a backslash as MySQL's do, or with metacharacters of its
+  own, gets a clause or a pattern it does not read as Quark means.
+- **Referential actions.** The `ON DELETE` and `ON UPDATE` a model declares reach
+  the DDL as written. No interface lets a dialect refuse or translate one, so an
+  engine that does not accept an action fails the statement. Oracle is the
+  built-in example: it refuses `ON UPDATE` and `ON DELETE NO ACTION`.
+- **The unit of a length.** `ColumnSpec.Size` is the `size=N` of a field's tag,
+  and the contract does not say whether `N` counts characters or bytes. The
+  dialect's type decides — Oracle's built-in `VARCHAR2(n)` counts bytes, so a
+  string of `n` characters that are not all ASCII can be refused there — and the
+  kit does not check which.
+- **Features tied to one engine.** The `LISTEN`/`NOTIFY` listener is
+  PostgreSQL's only: `CreateListener` refuses any other dialect before it looks
+  for a `quarkdriver.ListenerFactory`, so a factory a driver registers for its
+  own engine is never called. `RowLevelSecurityNative` is PostgreSQL's only.
+  `Upsert` under `RowLevelSecurityClient` is refused with `ErrUnsupportedFeature` for a dialect
+  Quark does not know how to confine to a tenant. And `CreateBatch` keeps each
+  statement under a bind-parameter ceiling Quark knows per built-in engine,
+  which for any other dialect is 2000 parameters.
+
+Each of these is a candidate for an optional interface: a new question for the
+dialect, with today's behaviour as its default, so that a dialect written now
+keeps compiling when it arrives.
