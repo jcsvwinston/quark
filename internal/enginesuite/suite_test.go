@@ -47,6 +47,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("UpsertEmptyUpdateCols", func(t *testing.T) {
 		testUpsertEmptyUpdateCols(ctx, t, client)
 	})
+	t.Run("UpsertEngineEdges", func(t *testing.T) {
+		testUpsertEngineEdges(ctx, t, client)
+	})
 	t.Run("BatchInCallerTx", func(t *testing.T) {
 		testBatchInCallerTx(ctx, t, client)
 	})

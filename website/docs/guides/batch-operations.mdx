@@ -117,11 +117,13 @@ err := quark.For[Product](ctx, client).UpsertBatch(
 
 **Always pass `updateCols` explicitly.** An empty slice is not a portable "update
 everything" signal. PostgreSQL, SQLite, MySQL and MariaDB leave a conflicting
-row as it was (`DO NOTHING`, or a rewrite of the first conflict column with the
-value it holds); SQL Server and Oracle, whose upsert is a `MERGE`, overwrite
-every non-conflict column. The
+row as it was (`DO NOTHING`, or an assignment of the first conflict column to
+itself); SQL Server and Oracle, whose upsert is a `MERGE`, overwrite every
+non-conflict column but the primary key and `created_at`. On MySQL and MariaDB
+a duplicate of any unique key takes the update branch, not only one of the
+conflict columns. The
 [CRUD reference](../reference/api/crud#upsert)
-has the table per engine.
+has the tables per engine.
 
 When the first entity has a zero primary key, Quark omits the PK column so the
 database assigns it, just like `CreateBatch`. Each dialect gets its native form:

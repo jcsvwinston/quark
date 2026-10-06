@@ -104,9 +104,9 @@ func (q *BaseQuery) checkTenantUpsert() error {
 // tenant. argIndex is the next placeholder index after the INSERT's own
 // arguments; the tenant binds come back in args. hasUpdate reports whether
 // there is an update branch at all: without updateCols, PostgreSQL and SQLite
-// do nothing on a conflict and MySQL rewrites the first conflict column with
-// its own value — insert-or-ignore, which writes no row of another tenant
-// and is not reported as a conflict.
+// do nothing on a conflict and MySQL assigns the first conflict column to
+// itself — insert-or-ignore, which writes no row of another tenant and is
+// not reported as a conflict.
 func (q *BaseQuery) guardedConflictClause(conflictCols, updateCols []string, argIndex int) (clause string, args []any, hasUpdate bool, err error) {
 	for _, c := range append(append([]string{}, conflictCols...), updateCols...) {
 		if err := q.guard.ValidateIdentifier(c); err != nil {
@@ -134,10 +134,13 @@ func (q *BaseQuery) guardedConflictClause(conflictCols, updateCols []string, arg
 				q.dialect.Quote(q.table), tenant, q.dialect.Placeholder(argIndex)),
 			[]any{q.tenantID}, true, nil
 	case "duplicate_key":
-		cols := updateCols
-		hasUpdate = len(updateCols) > 0
-		if !hasUpdate {
-			cols = conflictCols[:1]
+		if len(updateCols) == 0 {
+			// The no-op of the unguarded clause, which writes no row of any
+			// tenant. It was IF(<tenant> = ?, VALUES(<col>), <col>), which on
+			// a duplicate of another unique key wrote the incoming value into
+			// the tenant's own row (QK-61).
+			qc := q.dialect.Quote(conflictCols[0])
+			return " ON DUPLICATE KEY UPDATE " + qc + " = " + qc, nil, false, nil
 		}
 		// Every assignment keeps the existing value unless the existing row
 		// is the tenant's. MySQL evaluates the assignments left to right and
@@ -145,13 +148,13 @@ func (q *BaseQuery) guardedConflictClause(conflictCols, updateCols []string, arg
 		// only column the condition reads is the tenant column, and an
 		// assignment to it writes the resolved tenant onto a row that already
 		// holds it.
-		sets := make([]string, len(cols))
-		for i, c := range cols {
+		sets := make([]string, len(updateCols))
+		for i, c := range updateCols {
 			qc := q.dialect.Quote(c)
 			sets[i] = fmt.Sprintf("%s = IF(%s = %s, VALUES(%s), %s)", qc, tenant, q.dialect.Placeholder(argIndex+i), qc, qc)
 			args = append(args, q.tenantID)
 		}
-		return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", "), args, hasUpdate, nil
+		return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", "), args, true, nil
 	default:
 		return "", nil, false, fmt.Errorf("%w: no tenant-guarded conflict clause for dialect %q", ErrUnsupportedFeature, q.dialect.Name())
 	}

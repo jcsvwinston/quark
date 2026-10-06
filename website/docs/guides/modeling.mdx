@@ -290,7 +290,9 @@ var _ quark.Validator = (*Member)(nil)
 ## Automatic timestamps
 
 `created_at` and `updated_at` maintain themselves. `Create` fills both when they
-are zero, and `Update` refreshes `updated_at` on every write, in UTC. The fields
+are zero, and `Update` refreshes `updated_at` on every write, in UTC. `Upsert`
+stamps the entity as `Create` does, and when it updates a row instead it leaves
+that row's `created_at` as it was, unless `updateCols` names it. The fields
 must be `time.Time` mapped to exactly those column names; the scaffolded models
 already qualify.
 
