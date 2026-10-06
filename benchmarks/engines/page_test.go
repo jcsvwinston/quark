@@ -5,6 +5,7 @@ package engines
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,16 +63,36 @@ func renderPageBlock() string {
 	var b strings.Builder
 	b.WriteString("| control | engine | operation | judged against | recorded ratio | verdict | Quark allocs/op · B/op |\n")
 	b.WriteString("|---|---|---|---|---:|---|---:|\n")
+	var perCPU strings.Builder
 	for _, c := range controls() {
 		bases := make([]string, len(c.targets))
 		ratios := make([]string, len(c.targets))
 		for i, tg := range c.targets {
 			bases[i] = armTitle(tg.base)
 			ratios[i] = fmt.Sprintf("%.2f", tg.recorded)
+			if len(tg.perCPU) == 0 {
+				continue
+			}
+			lo, hi := math.Inf(1), math.Inf(-1)
+			for _, cpu := range referenceCPUs {
+				r, ok := tg.perCPU[cpu]
+				if !ok {
+					continue
+				}
+				lo, hi = math.Min(lo, r), math.Max(hi, r)
+				fmt.Fprintf(&perCPU, "| `%s` | %s | %s | %.2f |\n", c.id, mdCell(armTitle(tg.base)), mdCell(cpu), r)
+			}
+			ratios[i] += fmt.Sprintf(" (%.2f–%.2f by CPU model)", lo, hi)
 		}
 		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s | **%s** | %.0f · %.0f |\n",
 			c.id, engineTitle(c.engine), mdCell(c.title), mdCell(strings.Join(bases, " · ")),
 			strings.Join(ratios, " · "), c.want, c.allocs.count, c.allocs.bytes)
+	}
+	if perCPU.Len() > 0 {
+		b.WriteString("\nRecorded per CPU model as well, because the reference runner's models are further apart on these ratios than the drift tolerance absorbs around one figure. " +
+			"A run on one of these models is checked against its own model's ratio; the figure in the table above is the median of the record's runs on all models together:\n\n")
+		b.WriteString("| control | judged against | CPU model | recorded ratio |\n|---|---|---|---:|\n")
+		b.WriteString(perCPU.String())
 	}
 	b.WriteString("\nWhat each distance is made of, as measured:\n\n")
 	for _, c := range controls() {

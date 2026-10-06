@@ -19,11 +19,14 @@
 // same stretch of wall clock; the bench publishes the median over the rounds.
 // A slower machine slows all arms together, so the ratio survives a change of
 // runner far better than a time does: across the CPU models GitHub's runners
-// drew, absolute times differed by 40–50 % and ratios by at most 16 %. Not
-// entirely, though, so the time checks are asserted only on the machine the
-// record was taken on — the CI runner, and on it only the CPU models the
-// reference runs drew — and allocations, which do not depend on the machine
-// at all, are asserted everywhere.
+// drew, absolute times differed by 40–50 % and, in the ten runs of the
+// record, ratios by at most 16 % from their median. Not entirely, though, so
+// the time checks are asserted only on the machine the record was taken on —
+// the CI runner, and on it only the CPU models the reference runs drew — and
+// allocations, which do not depend on the machine at all, are asserted
+// everywhere. One ratio moves with the CPU model further than the drift
+// tolerance absorbs — MySQL's FindByPK against a reused statement, 2.68 on
+// one model and 3.21 on another — and the record keeps that one per model.
 //
 // The benchmarks themselves live in the _test.go files: run.sh starts the
 // engines and runs them the way the published page describes, and the
