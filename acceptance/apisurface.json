@@ -4132,6 +4132,12 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "WithStatementCache",
+      "kind": "func",
+      "sig": "func(int) Option"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "WithStrictColumns",
       "kind": "func",
       "sig": "func() Option"

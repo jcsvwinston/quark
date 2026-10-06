@@ -116,6 +116,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	tx := &Tx{tx: sqlTx, client: c, ctx: ctx}
+	c.stmts.beginTx(sqlTx)
 	// A transaction opened on a router's BaseClient with a tenant in its
 	// context is confined to that tenant here, so router.GetClient(ctx) +
 	// client.Tx is the same door as router.Tx and not a way around it
@@ -124,6 +125,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	// client.
 	if c.tenantRouter != nil {
 		if err := c.tenantRouter.confineTx(ctx, tx); err != nil {
+			c.stmts.endTx(sqlTx)
 			_ = sqlTx.Rollback()
 			return nil, err
 		}
@@ -260,7 +262,9 @@ func waitDeadlockBackoff(ctx context.Context, attemptIdx int) error {
 // that need a fresh context can derive one from
 // [context.Background] inside their implementation.
 func (t *Tx) Commit() error {
-	if err := t.tx.Commit(); err != nil {
+	err := t.tx.Commit()
+	t.client.stmts.endTx(t.tx)
+	if err != nil {
 		t.discardAllHooks()
 		return err
 	}
@@ -288,6 +292,7 @@ func (t *Tx) Rollback() error {
 	t.discardOnCommitHooks()
 	t.discardSavepointMarks()
 	err := t.tx.Rollback()
+	t.client.stmts.endTx(t.tx)
 	t.drainCtxHooks(t.takeOnRollbackHooks(), "quark.hook.on_rollback_error")
 	return err
 }

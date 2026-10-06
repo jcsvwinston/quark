@@ -51,6 +51,60 @@ err := quark.For[User](ctx, client).Upsert(
 | MSSQL | `MERGE INTO ... USING ... WHEN MATCHED ...` |
 | Oracle | `MERGE INTO ... USING ... WHEN MATCHED ...` |
 
+## MySQL: statements per query
+
+Given a query with arguments, `go-sql-driver/mysql` prepares it on the server,
+executes it and closes it — three commands and two round trips, on every call,
+unless the DSN sets `interpolateParams=true`. By default Quark keeps no
+statement, so every `Find` pays all three. There are two ways to stop paying
+them, and they do different things:
+
+| | `quark.WithStatementCache(n)` | `interpolateParams=true` in the DSN |
+| --- | --- | --- |
+| What travels | the same prepared statement as without it; prepared once per connection, then one execute per call | one text query: the driver writes the arguments into the SQL |
+| Applies to | the query builder's statements that carry arguments | every statement of the pool, raw SQL included |
+| Server-side state | up to `n` statements per connection, counted against `max_prepared_stmt_count` (16382 per server by default) | none |
+| Inside a transaction | each statement prepared once per transaction and reused in it | as outside |
+| Behind a proxy that multiplexes sessions | keep it off: a prepared statement belongs to one session | works |
+
+Measured on the engine bench ([Benchmarks](benchmarks), controls `MY-01` and
+`MY-02`), `FindByPK` against mysql:8.4 over loopback, medians of ten rounds of
+one run on each machine — the CI runner (AMD EPYC 7763, 4 vCPUs) and a laptop
+(Apple M4 Pro, Docker Desktop's Linux VM):
+
+| Arm | CI runner | laptop |
+| --- | ---: | ---: |
+| Quark, default | 268.1 µs | 102.6 µs |
+| Quark, `interpolateParams=true` | 157.9 µs | 63.4 µs |
+| Quark, `WithStatementCache(64)` | 144.9 µs | 59.9 µs |
+| `database/sql`, statement prepared once and reused | 100.3 µs | 44.5 µs |
+
+The cache and `interpolateParams` buy about the same. What is left over the
+reused statement is Quark's own work on the query — building the `SELECT`,
+scanning the row — not the protocol.
+
+```go
+client, err := quark.New("mysql", dsn, quark.WithStatementCache(256))
+```
+
+Size the cache so that `size × MaxOpenConns`, summed over every instance of the
+application, fits under the server's `max_prepared_stmt_count`. The option is
+off by default: it changes how statements travel, and holds server-side state
+an application should choose to hold. It also works on MariaDB, SQL Server and
+SQLite. It is ignored on PostgreSQL, whose pgx driver keeps a statement cache
+per connection already, and on Oracle: with go-ora v2.9.0, a prepared query
+re-executed after other statements on the same connection answered from a
+stale result — a count of 0 for a row that existed — and Quark relies on such
+counts to tell a stale entity from an excluded one.
+
+## MySQL: CreateBatch keys and `innodb_autoinc_lock_mode`
+
+`CreateBatch` with a generated key sends one multi-row `INSERT` per chunk on
+MySQL only when the server runs `innodb_autoinc_lock_mode` 0 or 1, and one
+`INSERT` per row on MySQL 8's default, 2. The reason, the other conditions and
+the measurements are in
+[Batch Operations](../guides/batch-operations#createbatch).
+
 ## Oracle-specific behavior
 
 Oracle differs from the other five engines in two ways worth knowing:

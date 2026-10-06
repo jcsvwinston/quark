@@ -185,6 +185,19 @@ type Client struct {
 	// router.Tx (QK-26). nil for a client no router shares. If two routers
 	// share one BaseClient the last one wins, as with nativeTenantResolver.
 	tenantRouter *TenantRouter
+
+	// stmtCacheSize is what WithStatementCache asked for; stmts is the cache
+	// New built from it, one LRU per pool (QK-37, ADR-0027). nil — the
+	// default, and always on PostgreSQL and Oracle — sends every statement
+	// the way the driver does it on its own.
+	stmtCacheSize int
+	stmts         *stmtCache
+
+	// batchIDsProvable remembers, per table, whether CreateBatch can read the
+	// generated keys of a whole chunk back in one round trip on an engine
+	// without RETURNING (QK-36): the answer of one catalog probe per client
+	// and table. See createBatchBackfill.
+	batchIDsProvable sync.Map // dialect + table + key column → bool
 }
 
 // warnRawUnderNativeRLS emits a developer-experience warning when a raw
@@ -480,6 +493,21 @@ func newClient(db *sql.DB, driverName, dataSource string, borrowed bool, opts []
 		}
 	}
 
+	// The statement cache (QK-37, ADR-0027), once the replica pools exist:
+	// each pool gets an LRU of its own. Not on PostgreSQL, where pgx keeps
+	// one per connection already, nor on Oracle, where go-ora answered a
+	// re-executed statement from a stale result (see WithStatementCache).
+	if c.stmtCacheSize > 0 {
+		if why := stmtCacheRefusal(c.dialect.Name()); why != "" {
+			c.logger.Info("WithStatementCache is ignored on this engine: "+why,
+				"event", "quark.stmtcache.ignored",
+				"dialect", c.dialect.Name(),
+			)
+		} else {
+			c.stmts = newStmtCache(c.stmtCacheSize, c.db, c.replicas)
+		}
+	}
+
 	// Install the stampede protection wrapper around any caller-supplied
 	// CacheStore (F4-5, ADR-0011). This is "todo o nada" per the cache
 	// playbook: singleflight + jitter + (optionally) XFetch are layered
@@ -719,6 +747,7 @@ func (c *Client) Raw() *sql.DB {
 // pools quark itself opened.
 func (c *Client) Close() error {
 	var err error
+	c.stmts.close()
 	if !c.borrowedDB {
 		err = c.db.Close()
 	}

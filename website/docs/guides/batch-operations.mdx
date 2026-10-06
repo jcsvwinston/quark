@@ -11,7 +11,7 @@ generates the right dialect-specific SQL and chunks large inputs for you.
 
 | Method | SQL shape | Atomicity |
 |---|---|---|
-| `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked; per-row back-fill for auto-PKs on Oracle/MySQL/SQL Server | One statement per chunk |
+| `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked; for generated keys without `RETURNING`: a `MERGE` per chunk on SQL Server, a multi-row `INSERT` per chunk on MySQL where the server's settings allow it, one row at a time otherwise | One statement per chunk |
 | `UpsertBatch` | Dialect-specific bulk upsert, chunked | One statement per chunk (N `MERGE` on Oracle) |
 | `UpdateBatch` | N `UPDATE` statements | Single transaction |
 | `DeleteBatch` | `DELETE … WHERE pk IN (…)`, chunked | One statement per chunk |
@@ -52,11 +52,43 @@ err := client.Tx(ctx, func(tx *quark.Tx) error {
 })
 ```
 
-:::note Auto-generated keys on Oracle, MySQL, SQL Server
-These engines can't read a generated key back from a multi-row `INSERT`. So when
-the primary key is auto-generated, Quark inserts one row at a time and back-fills
-each key — Oracle via `RETURNING … INTO`, MySQL via `LastInsertId`, SQL Server via
-`SCOPE_IDENTITY`. The result is the same; it just costs more round-trips.
+:::note Generated keys on Oracle, MySQL and SQL Server
+These engines have no `RETURNING` for a multi-row `INSERT`, and handing an
+entity another row's key would corrupt the next write to it. So Quark leaves
+the one-row-at-a-time form only where the engine can prove which key each row
+got:
+
+- **SQL Server** — each chunk is one `MERGE` whose `OUTPUT` returns every key
+  next to its row's position (a plain `INSERT … OUTPUT` does not promise the
+  order of its rows). One round trip per chunk, on tables whose key is an
+  `IDENTITY` column without an `INSTEAD OF` trigger — the ones Quark's
+  migrator creates.
+- **MySQL** — each chunk is one multi-row `INSERT`, and the keys are computed
+  from the first one, only when the server runs with
+  `innodb_autoinc_lock_mode` 0 or 1, the setting under which MySQL documents
+  that a statement's keys are consecutive; the table is InnoDB with the key as
+  its `AUTO_INCREMENT` column and no `INSERT` trigger. **MySQL 8's default is
+  2**, where the manual does not promise it, so a default MySQL 8 server keeps
+  one `INSERT` per row. The setting is read-only at runtime:
+  `--innodb-autoinc-lock-mode=1` on the server's command line or
+  `innodb_autoinc_lock_mode=1` in its configuration file. It is a server-wide
+  trade: under 1, statements whose row count is not known in advance
+  (`INSERT … SELECT`, `LOAD DATA`) hold a table-level lock on the counter
+  until they finish, which 2 avoids.
+- **Oracle** — one row at a time, with `RETURNING … INTO`.
+
+Where a chunk goes in one statement and a row of it fails, the statement is
+undone and the chunk runs again one row at a time, so you see what the
+row-at-a-time form leaves: the rows before the failing one inserted, with their
+keys set, and the same error.
+
+What it buys, 1000 rows with their keys. On MySQL 8.4 the engine bench
+([Benchmarks](../reference/benchmarks), control `MY-03`) measures it on every
+change: on the CI runner (AMD EPYC 7763) 9.6 ms in one `INSERT` against 237 ms
+for one `INSERT` per row over loopback. SQL Server is not in the bench;
+measured once on an Apple M4 Pro through Docker Desktop's published port, with
+the amd64 image of SQL Server 2022 emulated, 81 ms in one `MERGE` against 636 ms
+row by row.
 
 Supply the primary keys yourself and every engine keeps the chunked multi-row
 form.

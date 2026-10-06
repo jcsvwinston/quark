@@ -168,7 +168,14 @@ func (c *Client) execStmt(ctx context.Context, exec Executor, st stmt, sqlStr st
 
 func (c *Client) execEngine(ctx context.Context, exec Executor, st *stmt, sqlStr string, args []any) (sql.Result, error) {
 	start := time.Now()
-	res, err := exec.ExecContext(ctx, sqlStr, args...)
+	var res sql.Result
+	var err error
+	if l := c.stmts.lease(ctx, exec, st, sqlStr, args); l.stmt != nil {
+		res, err = l.stmt.ExecContext(ctx, args...)
+		l.release()
+	} else {
+		res, err = exec.ExecContext(ctx, sqlStr, args...)
+	}
 	duration := time.Since(start)
 	if st.write {
 		err = wrapDBError(err)
@@ -221,7 +228,16 @@ func (c *Client) queryStmt(ctx context.Context, exec Executor, st stmt, sqlStr s
 
 func (c *Client) queryEngine(ctx context.Context, exec Executor, st *stmt, sqlStr string, args []any) (*sql.Rows, error) {
 	start := time.Now()
-	rows, err := exec.QueryContext(ctx, sqlStr, args...)
+	var rows *sql.Rows
+	var err error
+	if l := c.stmts.lease(ctx, exec, st, sqlStr, args); l.stmt != nil {
+		// The lease ends here, not when the rows close: database/sql keeps
+		// the driver's statement alive while rows read from it are open.
+		rows, err = l.stmt.QueryContext(ctx, args...)
+		l.release()
+	} else {
+		rows, err = exec.QueryContext(ctx, sqlStr, args...)
+	}
 	if err != nil || !st.reported {
 		c.observe(QueryEvent{
 			SQL:       sqlStr,
@@ -255,7 +271,13 @@ func (c *Client) queryRowStmt(ctx context.Context, exec Executor, st stmt, sqlSt
 
 func (c *Client) queryRowEngine(ctx context.Context, exec Executor, st *stmt, sqlStr string, args []any) *sql.Row {
 	start := time.Now()
-	row := exec.QueryRowContext(ctx, sqlStr, args...)
+	var row *sql.Row
+	if l := c.stmts.lease(ctx, exec, st, sqlStr, args); l.stmt != nil {
+		row = l.stmt.QueryRowContext(ctx, args...)
+		l.release()
+	} else {
+		row = exec.QueryRowContext(ctx, sqlStr, args...)
+	}
 	c.observe(QueryEvent{
 		SQL:       sqlStr,
 		Args:      args,

@@ -28,11 +28,18 @@ var referenceCPUs = []string{
 // database/sql than through pgx), so 15 % from pgx would ask quark to beat
 // the interface it is built on.
 //
-// MySQL's one control is judged against both ways a hand-written program can
-// send the query: per call (the driver prepares, executes and closes) and
-// with the statement prepared once and reused. The proposed target names
+// MySQL's FindByPK controls are judged against both ways a hand-written
+// program can send the query: per call (the driver prepares, executes and
+// closes) and with the statement prepared once and reused — MY-01 with
+// Quark's defaults, MY-02 with WithStatementCache. MY-03, the batch, is judged
+// against the same multi-row INSERT written by hand. The proposed target names
 // PostgreSQL only; the same 15 % is applied here so that the statement work
 // has a number to move, and it is as open as the rest.
+//
+// PG-06, MY-02 and MY-03 (A12 Q3) record the medians of five runs on the
+// reference machine on 2026-10-06, which drew three of the five models in
+// referenceCPUs: AMD EPYC 7763 twice, AMD EPYC 9V74 twice, Intel Xeon
+// Platinum 8370C once.
 //
 // The recorded ratios are the medians of ten runs on the reference machine,
 // the CI runner (see referenceEnv), on 2026-10-05: GitHub drew five CPU models
@@ -98,6 +105,16 @@ func controls() []control {
 				"Quark allocates 13 000 times per batch against 9 000 for database/sql; reading each field through reflection to bind it is 8 % of the client's CPU in a profile.",
 		},
 		{
+			id: "PG-06", engine: "postgres", op: "InsertBatch10000",
+			title:   "Insert 10 000 rows in one statement with their ids back",
+			targets: []target{{armSQL, 1.09}},
+			want:    present,
+			allocs:  memory{129900, 17667762},
+			note: "The same statement as the baseline — one INSERT of 10 000 rows, 40 000 parameters, RETURNING id — and the distance PG-05 has: 1.09 (1.08–1.10 across five runs on three CPU models), inside the band, so the verdict is not asserted (A12 Q3). " +
+				"The informational arm is pgx's CopyFrom, COPY in binary format, which reads no ids back: 25.9 ms against 66.8 ms for Quark and 61.4 ms for database/sql on the EPYC 7763 runner, so 2.6 times faster than any form that hands each entity its key. " +
+				"Quark does not use COPY: it cannot return the generated keys CreateBatch promises, and for rows whose keys the caller supplies it is not the same operation — it ignores rules, refuses tables under row-level security, and needs a binary encoding for every column type. An opt-in bulk load is what would close that distance, and it is not built.",
+		},
+		{
 			id: "MY-01", engine: "mysql", op: "FindByPK",
 			title:   "Select one row by primary key",
 			targets: []target{{armSQL, 1.40}, {armSQLStmt, 2.71}},
@@ -106,6 +123,26 @@ func controls() []control {
 			note: "1.4 times a program that sends the query per call, and 2.7 times one that prepares the statement once. " +
 				"With arguments and without interpolateParams, the driver prepares, executes and closes a server-side statement on every query; Quark reuses none, so every Find pays all three. " +
 				"With interpolateParams=true in the DSN the driver sends one text query instead: on the EPYC runner Quark's Find drops from 268 µs to 157 µs, against 102 µs for the reused statement.",
+		},
+		{
+			id: "MY-02", engine: "mysql", op: "FindByPKStmtCache",
+			title:   "Select one row by primary key, with WithStatementCache",
+			targets: []target{{armSQLStmt, 1.65}, {armSQL, 0.81}},
+			want:    partial,
+			allocs:  memory{61, 4242},
+			note: "MY-01's operation with the option on (A12 Q3): Quark prepares each statement once per connection and reuses it, as the reused-statement baseline does. " +
+				"In the same rounds, Find took 46–48 % less time with the cache than without it on every reference runner (145 µs against 270 µs on the EPYC 7763); 0.81 times the program that sends the query per call (0.74–0.83 across five runs) and 1.65 times the one that reuses its statement (1.44–1.73). " +
+				"What remains over that baseline is MY-01's CPU share — the SELECT assembled by the query builder and the row through the generic scanner — not the protocol. The option is off by default; with it off, Find is MY-01.",
+		},
+		{
+			id: "MY-03", engine: "mysql", op: "InsertBatch1000",
+			title:   "Insert 1000 rows with their ids back (innodb_autoinc_lock_mode=1)",
+			targets: []target{{armSQL, 1.10}},
+			want:    present,
+			allocs:  memory{11954, 857862},
+			note: "Measured on a server started with innodb_autoinc_lock_mode=1, the setting under which MySQL documents that a multi-row INSERT's keys are consecutive (A12 Q3): CreateBatch sends one INSERT for the chunk and computes the keys, as the baseline does. 1.10 (1.04–1.12 across five runs), inside the band, so the verdict is not asserted. " +
+				"Quark adds three round trips the baseline does not take — BEGIN, the read of auto_increment_increment on the INSERT's connection, COMMIT — so that a failed chunk can be undone and run row by row. " +
+				"Under MySQL 8's default, 2, the manual does not promise consecutive keys and CreateBatch keeps one INSERT per row: the informational arm, 237–245 ms on the EPYC 7763 runner against 9.6–9.7 ms for Quark.",
 		},
 	}
 }

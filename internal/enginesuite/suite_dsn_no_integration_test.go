@@ -24,6 +24,13 @@ func resolveMySQLDSN(_ *testing.T) string {
 	return os.Getenv("QUARK_TEST_MYSQL_DSN")
 }
 
+// resolveMySQLConsecutiveDSN names a MySQL server started with
+// innodb_autoinc_lock_mode=1, where CreateBatch reads a multi-row INSERT's
+// keys back as one consecutive run (QK-36).
+func resolveMySQLConsecutiveDSN(_ *testing.T) string {
+	return os.Getenv("QUARK_TEST_MYSQL_AUTOINC1_DSN")
+}
+
 func resolveMariaDBDSN(_ *testing.T) string {
 	return os.Getenv("QUARK_TEST_MARIADB_DSN")
 }

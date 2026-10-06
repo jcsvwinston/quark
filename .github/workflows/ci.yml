@@ -741,15 +741,15 @@ jobs:
             run: 'TestSuitePostgres|TestPostgresReplicaRouting|TestDeadlockRetryPostgres|TestPgListener_RoundTrip|TestRowLevelSecurityNativePostgresIsolation|TestInstallRLSPolicies_Postgres|TestInstallRLSPolicies_Postgres_NoTenantColumn|TestTenantProvisionSchemaPerTenantPostgres'
             leg: Postgres
           - engine: mysql
-            run: 'TestSuiteMySQL|TestDeadlockRetryMySQL'
+            run: 'TestSuiteMySQL|TestSuiteMySQLStatementCache|TestDeadlockRetryMySQL'
             leg: MySQL
           - engine: mariadb
             # QK6-1: TestMariaDBOtel and TestMariaDBStress were outside
             # the filter (and read the raw env var) — never executed.
-            run: 'TestSuiteMariaDB|TestMariaDBCache|TestMariaDBOtel|TestMariaDBStress|TestDeadlockRetryMariaDB'
+            run: 'TestSuiteMariaDB|TestSuiteMariaDBStatementCache|TestMariaDBCache|TestMariaDBOtel|TestMariaDBStress|TestDeadlockRetryMariaDB'
             leg: MariaDB
           - engine: mssql
-            run: TestSuiteMSSQL
+            run: 'TestSuiteMSSQL|TestSuiteMSSQLStatementCache'
             leg: MSSQL
           - engine: oracle
             run: TestSuiteOracle
@@ -838,7 +838,7 @@ jobs:
           # immune to any go.work another step leaves in the repo root — which
           # is exactly what broke this lane.
           GOWORK: "off"
-        run: go test -tags=integration -timeout 14m -count=1 -run '^(TestCacheAllEngines|TestOtelAllEngines|TestBenchmarkEngines)$/^${{ matrix.leg }}$' -v .
+        run: go test -tags=integration -timeout 14m -count=1 -run '^(TestCacheAllEngines|TestOtelAllEngines|TestBenchmarkEngines|TestStatementCacheAllEngines|TestCreateBatchKeysAllEngines)$/^${{ matrix.leg }}$' -v .
 
   # S7-coverage: the superapp acceptance harness exercises Quark's public API
   # surface across all 6 engines in one process and gates on a manifest

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jcsvwinston/quark"
 
@@ -32,6 +33,7 @@ const (
 	postsPerUser = 5
 	listN        = 100
 	batchN       = 1000
+	bigBatchN    = 10000
 	minAge       = 18
 )
 
@@ -166,6 +168,11 @@ const (
 	armQuark = "quark"
 	// armSQLInList is informational: no control is judged against it.
 	armSQLInList = "database/sql, IN list"
+	// armPgxCopy is informational: pgx's CopyFrom, which sends the rows in
+	// COPY's binary format and reads no ids back. It is the distance to the
+	// fastest way PostgreSQL loads rows, not something quark could match
+	// while it hands every entity its key.
+	armPgxCopy = "pgx CopyFrom, no ids"
 )
 
 const (
@@ -194,11 +201,18 @@ var pgPostsInList = func() string {
 
 // pgBatchSQL is the multi-row INSERT the baselines send for InsertBatch1000:
 // one statement, 4000 parameters, the ids back through RETURNING — the same
-// shape quark's CreateBatch sends on PostgreSQL.
-var pgBatchSQL = func() string {
+// shape quark's CreateBatch sends on PostgreSQL. pgBigBatchSQL is the same
+// for InsertBatch10000: 40 000 parameters, still one statement, as quark
+// sends it (its chunk on PostgreSQL is 65 000 parameters).
+var (
+	pgBatchSQL    = pgBatchInsertSQL(batchN)
+	pgBigBatchSQL = pgBatchInsertSQL(bigBatchN)
+)
+
+func pgBatchInsertSQL(rows int) string {
 	var b strings.Builder
 	b.WriteString("INSERT INTO bench_users_w (name, email, age, active) VALUES ")
-	for r := 0; r < batchN; r++ {
+	for r := 0; r < rows; r++ {
 		if r > 0 {
 			b.WriteString(", ")
 		}
@@ -206,7 +220,7 @@ var pgBatchSQL = func() string {
 	}
 	b.WriteString(" RETURNING id")
 	return b.String()
-}()
+}
 
 // rowScanner is what both baselines' result sets share, so the hand-written
 // scanning below is written once for both.
@@ -267,11 +281,13 @@ func scanList(rows rowScanner) (int, error) {
 	return len(out), rows.Err()
 }
 
-func batchArgs(i int) ([]*benchUserW, []any) {
-	users := make([]*benchUserW, batchN)
-	args := make([]any, 0, batchN*4)
+func batchArgs(i int) ([]*benchUserW, []any) { return batchArgsN(i, batchN) }
+
+func batchArgsN(i, n int) ([]*benchUserW, []any) {
+	users := make([]*benchUserW, n)
+	args := make([]any, 0, n*4)
 	for j := range users {
-		u := mkUser(i*batchN + j)
+		u := mkUser(i*n + j)
 		users[j] = &u
 		args = append(args, u.Name, u.Email, u.Age, u.Active)
 	}
@@ -496,6 +512,57 @@ func pgOperations() []*operation {
 						}
 						if users[0].ID == 0 || users[batchN-1].ID == 0 {
 							return fmt.Errorf("CreateBatch left an id at zero")
+						}
+						return nil
+					}
+				}},
+			},
+		},
+		{
+			engine: "postgres", name: "InsertBatch10000",
+			what:  "insert 10 000 rows in one statement and read the 10 000 generated ids back",
+			reset: pgTruncate,
+			arms: []arm{
+				{armSQL, func(tb testing.TB, dsn string) stepFunc {
+					db := openPgSQL(tb, dsn)
+					return func(ctx context.Context, i int) error {
+						users, args := batchArgsN(i, bigBatchN)
+						rows, err := db.QueryContext(ctx, pgBigBatchSQL, args...)
+						if err != nil {
+							return err
+						}
+						return scanIDs(sqlRows{rows}, users)
+					}
+				}},
+				{armQuark, func(tb testing.TB, dsn string) stepFunc {
+					c := openQuark(tb, "pgx", dsn)
+					return func(ctx context.Context, i int) error {
+						users, _ := batchArgsN(i, bigBatchN)
+						if err := quark.For[benchUserW](ctx, c).CreateBatch(users); err != nil {
+							return err
+						}
+						if users[0].ID == 0 || users[bigBatchN-1].ID == 0 {
+							return fmt.Errorf("CreateBatch left an id at zero")
+						}
+						return nil
+					}
+				}},
+				// Not a baseline: COPY, which returns no ids (see armPgxCopy).
+				{armPgxCopy, func(tb testing.TB, dsn string) stepFunc {
+					p := openPgx(tb, dsn)
+					cols := []string{"name", "email", "age", "active"}
+					return func(ctx context.Context, i int) error {
+						users, _ := batchArgsN(i, bigBatchN)
+						rows := make([][]any, len(users))
+						for k, u := range users {
+							rows[k] = []any{u.Name, u.Email, u.Age, u.Active}
+						}
+						n, err := p.CopyFrom(ctx, pgx.Identifier{"bench_users_w"}, cols, pgx.CopyFromRows(rows))
+						if err != nil {
+							return err
+						}
+						if n != bigBatchN {
+							return fmt.Errorf("COPY wrote %d rows, want %d", n, bigBatchN)
 						}
 						return nil
 					}

@@ -4,7 +4,8 @@ Two harnesses share this module:
 
 - **The engine bench** ([`./engines`](engines/)) — Quark against
   `database/sql` over pgx and against pgx's native pool on a real
-  PostgreSQL 16, plus one MySQL read with and without a reused statement.
+  PostgreSQL 16, plus MySQL's FindByPK with and without a reused statement
+  (and with Quark's statement cache) and a MySQL batch insert.
   One control per operation with a recorded verdict and recorded ratios,
   checked by `TestEngineBench`; a CI lane runs it on every pull request and
   every push to main and publishes the table. This is the one that is kept

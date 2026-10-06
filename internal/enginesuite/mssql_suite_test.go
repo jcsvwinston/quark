@@ -12,6 +12,26 @@ import (
 )
 
 func TestSuiteMSSQL(t *testing.T) {
+	dsn := mssqlSuiteDSN(t)
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	client, err := quark.New("sqlserver", dsn,
+		quark.WithQueryObserver(NewSQLQueryLogger(logger)),
+		quark.WithMiddleware(quarkotel.New()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	runConformance(t, client, "sqlserver")
+	SharedSuite(t, client)
+}
+
+// mssqlSuiteDSN resolves the SQL Server DSN, creates the quark_test database
+// when it is missing, and returns the DSN pointed at it — or skips.
+func mssqlSuiteDSN(t *testing.T) string {
+	t.Helper()
 	dsn := resolveMSSQLDSN(t)
 	if dsn == "" {
 		t.Skip("QUARK_TEST_MSSQL_DSN not set (rebuild with -tags=integration to spin up a container)")
@@ -35,17 +55,5 @@ func TestSuiteMSSQL(t *testing.T) {
 	} else {
 		dsn = strings.Replace(dsn, "database=master", "database=quark_test", 1)
 	}
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	client, err := quark.New("sqlserver", dsn,
-		quark.WithQueryObserver(NewSQLQueryLogger(logger)),
-		quark.WithMiddleware(quarkotel.New()),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-
-	runConformance(t, client, "sqlserver")
-	SharedSuite(t, client)
+	return dsn
 }
