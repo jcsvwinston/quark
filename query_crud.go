@@ -3032,6 +3032,13 @@ func (q *Query[T]) upsertBatchOracle(
 // count, so a caller that needs to know which rows were written calls Update
 // per entity.
 //
+// On a model with a quark:"version" field each UPDATE carries the version
+// predicate, but by default a row it does not match is skipped in silence:
+// the call returns nil and no in-memory version is bumped. Chain
+// [Query.CheckVersions] to have the batch rolled back with ErrStaleEntity
+// for every such row instead, and the versions of the written rows bumped
+// (QK-45). That becomes the default in Quark 2.0 (DEP-2026-003).
+//
 // Example:
 //
 //	err := quark.For[User](ctx, client).UpdateBatch(users)
@@ -3052,7 +3059,21 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	return q.atomically(ctx, func(tx *Tx) error {
+	// Under CheckVersions on a versioned model (QK-45) every row's count is
+	// read: the rows written are bumped in memory once the batch is through,
+	// and the stale ones fail it. vfm stays nil otherwise, and the batch is
+	// the v1 one, statement for statement.
+	var vfm *FieldMeta
+	if q.checkVersions {
+		vfm = versionFieldOf(q.meta)
+	}
+	var written []reflect.Value
+
+	err := q.atomically(ctx, func(tx *Tx) error {
+		// Client.Tx runs this again after a deadlock: only the last attempt's
+		// rows are the ones written.
+		written = written[:0]
+		var stale []error
 		for _, entity := range entities {
 			// BeforeUpdate runs before buildUpdate so a hook that touches
 			// UpdatedAt / derived columns is reflected in the SET clause — the
@@ -3105,12 +3126,55 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 			if !bq.meta.HasCompositePK {
 				pkTag = bq.rowTag(getPKValue(v, q.pk))
 			}
-			if _, err := bq.executeExec(ctx, sqlStr, args, pkTag); err != nil {
+			res, err := bq.executeExec(ctx, sqlStr, args, pkTag)
+			if err != nil {
 				return fmt.Errorf("update batch failed: %w", err)
 			}
+			if vfm == nil {
+				continue
+			}
+
+			// The SET bumps the version, so a row the statement matched is a
+			// row it changed, on MySQL and MariaDB too: zero means the
+			// predicate matched nothing. Under conditions that is either the
+			// conditions excluding the key — skipped, as Update skips it — or
+			// the version; without them it is the version or a missing key,
+			// both stale, as for Update.
+			var n int64
+			if res != nil {
+				if n, err = res.RowsAffected(); err != nil {
+					return fmt.Errorf("update batch failed: rows affected: %w", err)
+				}
+			}
+			if n > 0 {
+				written = append(written, v)
+				continue
+			}
+			if len(q.where) > 0 {
+				passes, err := bq.keyPassesWhere(ctx, bq.pkValueOf(v))
+				if err != nil {
+					return fmt.Errorf("update batch failed: %w", err)
+				}
+				if !passes {
+					continue
+				}
+			}
+			stale = append(stale, fmt.Errorf("%w: table %s pk=%v", ErrStaleEntity, q.meta.Table, bq.pkValueOf(v)))
 		}
-		return nil
+		// All or nothing: one stale row undoes the rows written before and
+		// after it, and the caller learns every key that conflicted.
+		return errors.Join(stale...)
 	})
+	if err != nil {
+		return err
+	}
+	// The batch is through — committed, or its savepoint released inside the
+	// caller's transaction — so the rows written now carry the version the
+	// database holds.
+	for _, v := range written {
+		bumpVersion(v, vfm)
+	}
+	return nil
 }
 
 // linkM2M creates a record in the join table if it doesn't exist.

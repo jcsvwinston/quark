@@ -76,7 +76,7 @@ types, and timezones.
 | `db:"-"` | parser | Ignores the field. |
 | `default:"value"` | `Migrate` | Emits `DEFAULT value` verbatim; **bool defaults are normalized per dialect** (below). |
 | `nullable:"false"` | `Migrate` | Also emits `NOT NULL`. |
-| `quark:"version"` | `Update`, `Tracked.Save` | Optimistic-locking column (see below). |
+| `quark:"version"` | `Update`, `UpdateFields`, `Tracked.Save`, `UpdateBatch` under `CheckVersions` | Optimistic-locking column (see below). |
 | `quark:"rename:old_col"` | `Sync` | Renames `old_col` to the current column on the next sync. |
 
 ```go
@@ -255,6 +255,49 @@ if errors.Is(err, quark.ErrStaleEntity) {
 On success, Quark bumps the in-memory version so the next `Update` sees the new
 value without a re-read. The version column is automatically `NOT NULL`, and one
 model may carry the tag on only one field.
+
+#### Batches: `CheckVersions`
+
+`UpdateBatch` sends the same version predicate for every row, but by default it
+does not read the result: a row whose version moved is not written, the rest of
+the batch is, the call returns `nil`, and no in-memory version is bumped — so
+the next `Update` of a struct the batch wrote returns `ErrStaleEntity` although
+nobody else touched the row. Chain `CheckVersions()` to hold the batch to the
+same contract as `Update`:
+
+```go
+err := quark.For[Account](ctx, client).CheckVersions().UpdateBatch(accounts)
+if errors.Is(err, quark.ErrStaleEntity) {
+    // the whole batch was rolled back; err names every stale row:
+    // stale entity (optimistic-locking conflict): table accounts pk=7
+}
+```
+
+Under `CheckVersions` a stale row — or, without `Where` conditions, a key that
+does not exist — rolls back the whole batch, and the error joins one
+`ErrStaleEntity` per stale row. A row the query's `Where` conditions exclude is
+skipped, as `Update` skips it. When the batch is written, every entity's
+in-memory version is bumped. See
+[`UpdateBatch`](../reference/api/crud#versioned-models-and-checkversions) for
+the details inside a transaction.
+
+Quark 2.0 makes this the default for `UpdateBatch`; until then the default
+stays as it was.
+
+#### Which writes check the version
+
+| Write | Version predicate | When the entity's row moved since it was loaded |
+| --- | --- | --- |
+| `Update`, `UpdateFields`, `Tracked.Save` | yes | `ErrStaleEntity`, nothing written |
+| `UpdateBatch` with `CheckVersions()` | yes | `ErrStaleEntity`, the whole batch rolled back |
+| `UpdateBatch` | yes | that row not written, `nil` returned |
+| `Upsert`, `UpsertBatch`, `Delete`, `HardDelete`, `Restore` | no | the row is written, deleted or restored all the same |
+
+`UpdateMap`, `DeleteBatch` and `DeleteBy` take conditions or keys, not loaded
+entities, so there is no loaded version for them to check. A write without the
+predicate does what it would do on a model without a version column: a
+`Delete` of an entity loaded before another writer moved its row still
+deletes the row.
 
 ## Validation
 

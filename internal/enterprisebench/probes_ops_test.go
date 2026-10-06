@@ -721,6 +721,36 @@ func probeOptimisticLocking(t *testing.T, e *env) verdict {
 	}
 	updateBatchReports := batchErr != nil
 
+	// UpdateBatch under CheckVersions (QK-45): the same stale entity, next to
+	// a fresh row, so "reported" and "all or nothing" are measured together —
+	// the stale row is named, and the fresh row is not left written.
+	if err := quark.For[opsAccount](ctx, c).Create(&opsAccount{ID: 3, Owner: "checked", Balance: 30, Version: 1}); err != nil {
+		t.Fatalf("seed the checked-batch row: %v", err)
+	}
+	freshForChecked, err := quark.For[opsAccount](ctx, c).Find(3)
+	if err != nil {
+		t.Fatalf("load the checked-batch row: %v", err)
+	}
+	freshForChecked.Balance = 31
+	staleForChecked := stale
+	staleForChecked.Balance = 666
+	checkedErr := quark.For[opsAccount](ctx, c).CheckVersions().
+		UpdateBatch([]*opsAccount{&freshForChecked, &staleForChecked})
+	afterChecked, err := quark.For[opsAccount](ctx, c).Find(1)
+	if err != nil {
+		t.Fatalf("reload after the checked batch: %v", err)
+	}
+	if afterChecked.Balance != fresh.Balance {
+		t.Fatalf("UpdateBatch under CheckVersions wrote the stale entity (balance %d): that is a lost update, "+
+			"not a grade of the verdict", afterChecked.Balance)
+	}
+	freshAfterChecked, err := quark.For[opsAccount](ctx, c).Find(3)
+	if err != nil {
+		t.Fatalf("reload the checked-batch row: %v", err)
+	}
+	updateBatchCheckedReports := errors.Is(checkedErr, quark.ErrStaleEntity) &&
+		strings.Contains(checkedErr.Error(), "pk=1") && freshAfterChecked.Balance == 30
+
 	// DeleteBatch, on a row of its own so the stale-delete leg below still
 	// has one to lose.
 	if err := quark.For[opsAccount](ctx, c).Create(&opsAccount{ID: 2, Owner: "batch", Version: 1}); err != nil {
@@ -760,16 +790,21 @@ func probeOptimisticLocking(t *testing.T, e *env) verdict {
 	// and only their conjunction is the gap the note publishes. Left out of
 	// the switch, a UpdateBatch that lost its predicate entirely would read as
 	// the same `partial` as the one that carries it and stays quiet.
+	// updateBatchCheckedReports is the third: under CheckVersions the miss IS
+	// reported and the batch undone. The note publishes it, so a CheckVersions
+	// that stopped reporting has to fail here, not stay `partial`; and the
+	// default turning checked (2.0) moves updateBatchReports, which no
+	// recorded split absorbs either.
 	switch {
-	case deleteGuarded && updateMapGuarded && deleteBatchGuarded && updateBatchGuarded && updateBatchReports:
+	case deleteGuarded && updateMapGuarded && deleteBatchGuarded && updateBatchGuarded && updateBatchReports && updateBatchCheckedReports:
 		return present
-	case !deleteGuarded && !updateMapGuarded && !deleteBatchGuarded && updateBatchGuarded && !updateBatchReports:
+	case !deleteGuarded && !updateMapGuarded && !deleteBatchGuarded && updateBatchGuarded && !updateBatchReports && updateBatchCheckedReports:
 		return partial
 	default:
 		t.Fatalf("the version predicate moved on some paths and not others: "+
-			"delete=%v updateMap=%v deleteBatch=%v updateBatchGuarded=%v updateBatchReports=%v — "+
+			"delete=%v updateMap=%v deleteBatch=%v updateBatchGuarded=%v updateBatchReports=%v updateBatchCheckedReports=%v — "+
 			"update the recorded verdict and the note in the same change",
-			deleteGuarded, updateMapGuarded, deleteBatchGuarded, updateBatchGuarded, updateBatchReports)
+			deleteGuarded, updateMapGuarded, deleteBatchGuarded, updateBatchGuarded, updateBatchReports, updateBatchCheckedReports)
 		return absent // unreachable; t.Fatalf stops the probe
 	}
 }

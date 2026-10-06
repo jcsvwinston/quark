@@ -34,6 +34,16 @@ Generated code is out of scope by construction: markers under a
 `Code generated ... DO NOT EDIT.` header are written by the generator, and
 rewriting them would be lost on the next run.
 
+## Behaviour changes
+
+A behaviour that changes at the major with no symbol going away gets a notice
+here too, with `Scope: behaviour` and an "Earliest change" line in place of
+"Earliest removal". There is no `// Deprecated:` marker to carry it — the
+method stays — so the guard above has nothing to read; the notice and the
+godoc of the affected method are the announcement, and the tests that pin the
+v1 behaviour are named in the notice so the change at the major is a diff to
+them. See [`DEP-2026-003`](DEP-2026-003-updatebatch-version-check-default.md).
+
 ## Removal rules
 
 - **Removals are major-only.** A stable surface is not removed in `v1.x`; that
@@ -66,3 +76,4 @@ specification and a changelog entry. Quark has neither home:
 |---|---|---|---|
 | [`DEP-2026-001`](DEP-2026-001-rowlevelsecurity-alias.md) | `quark.RowLevelSecurity` | `v0.9.0` | `v2.0.0`, no earlier than 2026-12-08 |
 | [`DEP-2026-002`](DEP-2026-002-listener-registration-contract.md) | `quarkdriver` listener registration, previous shape (4 symbols) | `v1.11.0` | `v2.0.0`, no earlier than 2026-12-08 |
+| [`DEP-2026-003`](DEP-2026-003-updatebatch-version-check-default.md) | `UpdateBatch` on a versioned model checks versions by default (behaviour; the opt-in `CheckVersions` becomes the default) | the minor after `v1.16.0` | `v2.0.0`, no earlier than 2027-01-04 |

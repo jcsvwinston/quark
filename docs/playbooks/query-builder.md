@@ -161,6 +161,33 @@ let the caller see, so it cannot tell another tenant's row from a missing
 one. Regression: `where_guard_test.go` and
 `internal/enginesuite/where_guard_test.go` (`WhereGuards`).
 
+### `UpdateBatch` and the version column (QK-45)
+
+`buildUpdate` puts the version predicate and `version = version + 1` into
+every row's UPDATE, so `UpdateBatch` on a versioned model has always sent
+them — and, until QK-45, never read the count: a stale row was skipped in
+silence, a missing key too, and the written rows' in-memory versions stayed
+behind, so the next `Update` of the same struct returned a false
+`ErrStaleEntity`. The owner's decision (2026-10-06): an opt-in now,
+`CheckVersions()` (field `checkVersions` on `BaseQuery`), and the default in
+2.0 (`docs/deprecations/DEP-2026-003-updatebatch-version-check-default.md`). Under it `UpdateBatch` reads each
+row's count: zero is skipped when the query has conditions and
+`keyPassesWhere` says they exclude the key, stale otherwise; the stale rows
+are collected and `errors.Join`ed, which makes `atomically` roll the whole
+batch back (a savepoint inside a `ForTx` query); the written rows'
+`bumpVersion` runs only after `atomically` returns nil, and the list is reset
+at the start of the closure because `Client.Tx` re-runs it after a deadlock.
+The SET bumps the version, so a matched row is a changed row on MySQL and
+MariaDB too — no "matched, nothing changed" case. Without `CheckVersions` the
+batch is the v1 one statement for statement (no count read, no probe), and
+`TestUpdateBatchWithoutCheckVersionsKeepsTheV1Behaviour` plus
+`UpdateBatchVersions/WithoutCheckVersionsKeepsTheV1Behaviour` pin it: the 2.0
+flip is a diff to them and to `OPS-04` of the enterprise bench.
+
+Still without a version predicate, and outside the decision until M0 says
+otherwise (QK-58): `UpdateMap`, the update branch of `Upsert`/`UpsertBatch`,
+`Delete` and `HardDelete` of an entity, the soft delete and `Restore`.
+
 ### Reads by key stay inside the tenant
 
 Before QK-42, `Find(id)` assigned `q.where = [key]` on its receiver: the
@@ -322,6 +349,7 @@ Since A12 Q3 (QK-36, ADR-0028) the per-row form is the fallback, not the rule: `
 - `write_where_test.go` and `internal/enginesuite/write_where_test.go` — the write paths and PreloadWhere select the same rows as a SELECT with the same conditions (QK-39).
 - `upsert_tenant_test.go` and `internal/enginesuite/upsert_tenant_test.go` — the upserts' update branch and UpdateMap stay inside the tenant (QK-43, QK-44).
 - `where_guard_test.go` and `internal/enginesuite/where_guard_test.go` — reads by key stay inside the tenant and inserts/updates store the resolved tenant (QK-42); the writes by key honour the query's conditions and the tenant, report nothing when excluded, keep `ErrStaleEntity` for real conflicts (QK-40); the scopes AND with the caller's whole expression (QK-41).
+- `update_batch_versions_test.go` and `internal/enginesuite/update_batch_versions_test.go` — `CheckVersions().UpdateBatch` is all or nothing over the versions, names every stale key, skips what the conditions exclude and bumps in memory only after the batch; without it the v1 batch is pinned (QK-45).
 
 Cualquier cambio en `Query[T]` debe pasar la suite completa, no sólo SQLite.
 

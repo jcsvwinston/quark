@@ -55,7 +55,10 @@ var (
 	// since the entity was loaded. The caller should reload the row, replay
 	// the change against the fresh state, and retry — or surface the
 	// conflict to the user. Returned by Update / UpdateFields / Tracked.Save
-	// when the model carries a quark:"version" field.
+	// when the model carries a quark:"version" field, and by UpdateBatch under
+	// [Query.CheckVersions], joined once per stale row with that row's key
+	// (QK-45). UpdateBatch without CheckVersions does not return it; Quark 2.0
+	// makes the check the default (DEP-2026-003).
 	ErrStaleEntity = errors.New("stale entity (optimistic-locking conflict)")
 
 	// ErrUnsupportedFeature indicates that a feature is not supported by the
