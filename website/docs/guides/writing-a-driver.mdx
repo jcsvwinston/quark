@@ -310,7 +310,10 @@ The interfaces `ColumnTyper`, `AutoIncrementer`, `IdempotentDDL`,
 are *experimental* in the
 [extension contract](../reference/extension-contract): no `v1` release breaks
 them, but no engine outside Quark had implemented them when they were
-published.
+published, so `v2` may change their shape without a deprecation period. A
+question Quark starts asking a dialect later arrives the same way, as another
+optional interface with a default: within `v1`, Quark adds no method to
+`Dialect` or to any of these, so the driver you write today keeps compiling.
 
 ## The tests
 

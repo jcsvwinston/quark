@@ -75,14 +75,16 @@ interface Quark asserts on a dialect, `Classifier`, `SQLStater`, the listener
 contract and the adapters handed to a migration lock — each marked as an
 extension point or plumbing, with its stability (`stable`, `experimental`,
 `internal-use`) and where Quark uses it. The six schema-path interfaces of Q2
-are `experimental`: no engine outside this repository has implemented them yet.
+are `experimental`: no engine outside this repository has implemented them
+yet, and neither has `ReferentialActioner`, added after them (QK-49, quark#457).
 
-**The promise those two columns describe is a PROPOSAL pending the owner's
-decision**, and the page says so. Until it is adopted — which will be recorded
-in an ADR — the v1 promise of `website/docs/operations/upgrade.mdx` ("code that
-compiles against v1.3 compiles against every later v1.x") stands for EVERY
-exported type, extension point or plumbing: adding a method to any interface a
-third party can implement is a breaking change, whatever its row says.
+**The promise those two columns describe is ADOPTED** — the owner's decision
+of 2026-10-06, recorded in
+[ADR-0029](../adr/0029-extension-points-do-not-grow-in-v1.md). It narrows the
+v1 promise of `website/docs/operations/upgrade.mdx` ("code that compiles
+against v1.3 compiles against every later v1.x") in one place: a third
+party's own implementation of a PLUMBING interface is no longer covered.
+Everything else stands.
 
 Rules that follow:
 
@@ -91,17 +93,27 @@ Rules that follow:
   fails when the table misses a type, names one twice (an alias and its
   target are one type), names something outside the census, or uses a value
   outside the page's vocabulary.
-- **An extension point gains no method within v1** (part of the proposal,
-  and already true under the adopted v1 promise). A new capability of a
-  dialect is a new optional interface Quark type-asserts (the Q2 pattern),
-  never a method added to `Dialect`; adding one breaks every dialect outside
-  the repository. What the proposal would add — that a plumbing interface
-  may gain a method in a minor — is NOT in force: do not rely on it until the
-  ADR exists.
+- **An extension point gains no method within v1** — nor loses or changes
+  one; a function type marked *yes* keeps its signature, and `Classifier`
+  keeps its three fields (all required: a fourth would make every existing
+  driver fail to register). Experimental ones included. A new capability of
+  a dialect is a new optional interface Quark type-asserts, with a
+  documented default when it is absent (the Q2 pattern; `ReferentialActioner`
+  is the latest), never a method added to `Dialect`. A row does not move from
+  *yes* to *no* within v1. `TestExtensionPointsFrozen`
+  (`internal/extbench/frozen_points_test.go`) enforces it against the record
+  `internal/extbench/testdata/extension-points.txt` (41 types, 76 members on
+  2026-10-06); the record has no generator and `make regen` does not touch
+  it. A NEW extension point adds its lines there — the test's failure prints
+  them.
+- **A plumbing interface may gain a method in a minor** (never a patch), and
+  the release notes name it. Its existing methods do not change, and the
+  plumbing function types (`Option`, `TypedScanner`, `TypedBinder`,
+  `NewListenerFunc`) keep their signatures within v1.
 - **Signatures are frozen.** `acceptance/apisurface.json` records the `sig`
   of every func, method and type; changing a parameter of a contract method
   makes CI's freshness check fail with the diff, and `CON-02` checks that the
-  file holds the compiler's signature for the 94 symbols an implementation
+  file holds the compiler's signature for the 95 symbols an implementation
   depends on. Regenerate with `make regen` only when the change is meant.
 - **A convention Quark calls on a caller's type has an exported interface.**
   `quarkdriver.SQLStater` is the one for a driver's errors: Quark reads its

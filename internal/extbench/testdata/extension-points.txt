@@ -1,0 +1,99 @@
+# The extension points of Quark v1 and their shape — the record ADR-0029
+# (docs/adr/0029-extension-points-do-not-grow-in-v1.md) holds them to.
+#
+# An extension point is a type the contract page
+# (website/docs/reference/extension-contract.mdx) marks "yes": a third party
+# implements it and hands it to Quark. Within v1 none of them gains a method
+# or a field, and none of their members changes; TestExtensionPointsFrozen
+# (internal/extbench/frozen_points_test.go) fails when the compiled API and
+# this record disagree.
+#
+# One line per member, "<type>[.<method>]<TAB><signature>", with the
+# signature rendered as acceptance/apisurface.json records it. A line without
+# a method is the whole type: a function type, the record of functions
+# (quarkdriver.Classifier), or an alias of an internal interface.
+#
+# How this file changes within v1:
+#   - A NEW extension point (a new optional interface, the way the ADR adds
+#     capability) adds its lines; the test's failure prints them.
+#   - A line already here does not change and is not removed, and no line is
+#     added to a type already here. There is no generator: an edit to an
+#     existing type is an edit by hand against an accepted ADR.
+# v2 re-cuts the file for the v2 contract.
+
+quark.AfterCreateHook.AfterCreate	func(context.Context) error
+quark.AfterDeleteHook.AfterDelete	func(context.Context) error
+quark.AfterFindHook.AfterFind	func(context.Context) error
+quark.AfterUpdateHook.AfterUpdate	func(context.Context) error
+quark.BeforeCreateHook.BeforeCreate	func(context.Context) error
+quark.BeforeDeleteHook.BeforeDelete	func(context.Context) error
+quark.BeforeFindHook.BeforeFind	func(context.Context) error
+quark.BeforeUpdateHook.BeforeUpdate	func(context.Context) error
+quark.CacheLocker.AcquireLock	func(context.Context, string, time.Duration) (bool, func() error, error)
+quark.CacheStore.Delete	func(context.Context, string) error
+quark.CacheStore.Get	func(context.Context, string) ([]byte, error)
+quark.CacheStore.InvalidateTags	func(context.Context, ...string) error
+quark.CacheStore.Set	func(context.Context, string, []byte, time.Duration, ...string) error
+quark.ClientProvider.GetClient	func(context.Context) (*Client, error)
+quark.EventBus.Publish	func(context.Context, Event) error
+quark.ExecFunc	func(context.Context, Executor, string, []any) (sql.Result, error)
+quark.Middleware.WrapExec	func(ExecFunc) ExecFunc
+quark.Middleware.WrapQuery	func(QueryFunc) QueryFunc
+quark.Middleware.WrapQueryRow	func(QueryRowFunc) QueryRowFunc
+quark.QueryFunc	func(context.Context, Executor, string, []any) (*sql.Rows, error)
+quark.QueryObserver.ObserveQuery	func(QueryEvent)
+quark.QueryRowFunc	func(context.Context, Executor, string, []any) *sql.Row
+quark.Scope	[T any] func(*Query[T]) *Query[T]
+quark.ShardFunc	func(string) string
+quark.ShardKeyer.ShardKey	func() string
+quark.ShardResolver	func(context.Context) string
+quark.TableNamer	= interface{TableName() string}
+quark.TypeMapper	= func(string, internal/migrate.TypeOptions) string
+quark.Validator.Validate	func(context.Context) error
+quarkdriver.AutoIncrementer.AutoIncrementColumn	func() (string, string)
+quarkdriver.Classifier	struct{UniqueViolation func(error) bool; Deadlock func(error) bool; TransientConn func(error) bool}
+quarkdriver.ColumnAlterer.AlterColumn	func(context.Context, Executor, ColumnChange) ([]string, error)
+quarkdriver.ColumnTypeMapper.MapColumnType	func(string) string
+quarkdriver.ColumnTyper.BoolLiteral	func(bool) string
+quarkdriver.ColumnTyper.ColumnType	func(ColumnSpec) string
+quarkdriver.Dialect.AlterTableAddColumn	func(string, string, string) string
+quarkdriver.Dialect.AlterTableAlterColumn	func(string, string, string) string
+quarkdriver.Dialect.AlterTableDropColumn	func(string, string) string
+quarkdriver.Dialect.BuildProcedureCall	func(string, int) string
+quarkdriver.Dialect.BuildRoutineQuery	func(string, int) string
+quarkdriver.Dialect.CurrentTimestamp	func() string
+quarkdriver.Dialect.JSONExtract	func(string, string) (string, []any, error)
+quarkdriver.Dialect.LastInsertIDQuery	func(string, string) string
+quarkdriver.Dialect.LimitOffset	func(int, int) string
+quarkdriver.Dialect.LockSuffix	func(LockOptions) (string, string, error)
+quarkdriver.Dialect.Name	func() string
+quarkdriver.Dialect.Placeholder	func(int) string
+quarkdriver.Dialect.Placeholders	func(int) []string
+quarkdriver.Dialect.Quote	func(string) string
+quarkdriver.Dialect.RenameColumn	func(string, string, string) string
+quarkdriver.Dialect.RenameTable	func(string, string) string
+quarkdriver.Dialect.Returning	func(...string) string
+quarkdriver.Dialect.SupportsLastInsertID	func() bool
+quarkdriver.Dialect.SupportsReturning	func() bool
+quarkdriver.Dialect.SupportsTransactionalDDL	func() bool
+quarkdriver.Dialect.UpsertSQL	func([]string, []string, int) string
+quarkdriver.IdempotentDDL.CreateIndexIfNotExists	func(string, string, []string, bool) string
+quarkdriver.IdempotentDDL.CreateTableIfNotExists	func(string, string) string
+quarkdriver.IdempotentDDL.IsAlreadyExists	func(SchemaObject, error) bool
+quarkdriver.Listener.Close	func() error
+quarkdriver.Listener.Listen	func(context.Context, string) error
+quarkdriver.Listener.Receive	func(context.Context) (EventPayload, error)
+quarkdriver.Listener.Unlisten	func(context.Context, string) error
+quarkdriver.ListenerFactory	func(*sql.DB, IdentifierValidator) (Listener, error)
+quarkdriver.MigrationLock.Release	func(context.Context) error
+quarkdriver.MigrationLocker.AcquireMigrationLock	func(context.Context, DBConnector, string, time.Duration) (MigrationLock, error)
+quarkdriver.ObjectDropper.DropCheck	func(string, string) string
+quarkdriver.ObjectDropper.DropForeignKey	func(string, string) string
+quarkdriver.ObjectDropper.DropIndex	func(string, string) string
+quarkdriver.ReferentialActioner.ReferentialAction	func(ReferentialEvent, string) ActionSupport
+quarkdriver.SQLStater.SQLState	func() string
+quarkdriver.SavepointDialect.ReleaseSavepointStmt	func(string) string
+quarkdriver.SavepointDialect.RollbackToSavepointStmt	func(string) string
+quarkdriver.SavepointDialect.SavepointStmt	func(string) string
+quarkdriver.SchemaIntrospector.IntrospectSchema	func(context.Context, Executor) (Schema, error)
+quarkdriver.TableRebuilder.RebuildsTables	func() bool

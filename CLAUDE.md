@@ -123,9 +123,9 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 
 ### Capa 1 — Decisiones arquitectónicas (`docs/adr/`)
 
-28 ADRs en formato MADR. Léelos cuando necesites **justificar o cuestionar** un patrón de Quark. Una decisión aceptada no se reabre sin un ADR sucesor.
+29 ADRs en formato MADR. Léelos cuando necesites **justificar o cuestionar** un patrón de Quark. Una decisión aceptada no se reabre sin un ADR sucesor.
 
-- [`docs/adr/README.md`](docs/adr/README.md) — índice (28 ADRs, 0001-0028).
+- [`docs/adr/README.md`](docs/adr/README.md) — índice (29 ADRs, 0001-0029).
 - ADR 0001 — Active Record, no Data Mapper.
 - ADR 0002 — Reflect default, codegen opt-in (Fase 6, v1.0.0; gate ≥3× retirado por 0017).
 - ADR 0003 — RLS cliente vía WHERE-injection (superseded por 0012).
@@ -154,6 +154,7 @@ cd website && npm run docusaurus docs:version X.Y.Z   # congela versión actual
 - ADR 0026 — Successor of 0023: the dialect contract moves to `quarkdriver` and package `quark` keeps every name as a type alias (additive, nothing deprecated); new dialect contract is declared in the leaf from its first commit.
 - ADR 0027 — Prepared statements are reused only on request (`WithStatementCache`): one LRU per pool, statements prepared once per transaction, never on PostgreSQL (pgx caches) nor on Oracle (go-ora v2.9.0 answered a re-executed statement from a stale result) (QK-37).
 - ADR 0028 — `CreateBatch` without `RETURNING` leaves the per-row form only where the engine proves each key: `MERGE` with the row's position on SQL Server, multi-row `INSERT` on MySQL only under `innodb_autoinc_lock_mode` 0/1; a failed chunk is undone and runs row by row (QK-36).
+- ADR 0029 — Within v1 an extension point (a `yes` row of `website/docs/reference/extension-contract.mdx`) gains no method, loses none and changes none — new capability is a new optional interface with a default; a plumbing interface (`no`) may gain a method in a minor. Owner's decision of 2026-10-06; `TestExtensionPointsFrozen` (`internal/extbench`) holds the extension points to `internal/extbench/testdata/extension-points.txt`, which has no generator.
 
 ### Capa 2 — Playbooks operativos por módulo (`docs/playbooks/`)
 
