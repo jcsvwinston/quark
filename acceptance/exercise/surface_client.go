@@ -56,6 +56,9 @@ func runSurfaceClient(ctx context.Context, client *quark.Client, rec *recorder.R
 	if err := surfaceTxMethods(ctx, client, rec); err != nil {
 		return err
 	}
+	if err := surfaceStatementCache(ctx, client, rec, conn); err != nil {
+		return err
+	}
 	if err := surfaceEventsCodegenOptions(ctx, rec, conn); err != nil {
 		return err
 	}
@@ -326,6 +329,55 @@ func surfaceEventsCodegenOptions(ctx context.Context, rec *recorder.Recorder, co
 		QF("GeneratedBinderRegistered"), QF("GetModelMeta"), QF("HashModelFields"),
 		QF("WithCacheJitter"), QF("WithCacheXFetchBeta"), QF("WithCacheCrossInstance"), QF("WithQueryObserver"),
 	)
+	return nil
+}
+
+// surfaceStatementCache reads the same accounts through a client with
+// WithStatementCache — twice, so the second read runs a statement the cache
+// already holds — and inside one of its transactions, and checks that they
+// are the rows the harness's own client reads. On PostgreSQL and Oracle the
+// option is ignored; the reads still have to agree.
+func surfaceStatementCache(ctx context.Context, client *quark.Client, rec *recorder.Recorder, conn Conn) error {
+	want, err := quark.For[domain.Account](ctx, client).OrderBy("id", "ASC").Limit(20).List()
+	if err != nil {
+		return fmt.Errorf("surface statement cache: reference read: %w", err)
+	}
+	sc, err := quark.New(conn.Driver, conn.DSN, quark.WithStatementCache(4))
+	if err != nil {
+		return fmt.Errorf("surface statement cache client: %w", err)
+	}
+	defer sc.Close()
+	same := func(got []domain.Account) error {
+		if len(got) != len(want) {
+			return fmt.Errorf("surface statement cache: %d accounts, the client without it reads %d", len(got), len(want))
+		}
+		for i := range got {
+			if got[i].ID != want[i].ID {
+				return fmt.Errorf("surface statement cache: account %d is id %d, the client without it reads %d", i, got[i].ID, want[i].ID)
+			}
+		}
+		return nil
+	}
+	for i := 0; i < 2; i++ {
+		got, err := quark.For[domain.Account](ctx, sc).Where("id", ">", 0).OrderBy("id", "ASC").Limit(20).List()
+		if err != nil {
+			return fmt.Errorf("surface statement cache: read %d: %w", i+1, err)
+		}
+		if err := same(got); err != nil {
+			return err
+		}
+	}
+	err = sc.Tx(ctx, func(tx *quark.Tx) error {
+		got, err := quark.ForTx[domain.Account](ctx, tx).Where("id", ">", 0).OrderBy("id", "ASC").Limit(20).List()
+		if err != nil {
+			return err
+		}
+		return same(got)
+	})
+	if err != nil {
+		return fmt.Errorf("surface statement cache: inside a transaction: %w", err)
+	}
+	rec.Note(QF("WithStatementCache"))
 	return nil
 }
 

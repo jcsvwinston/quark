@@ -119,6 +119,11 @@ var seamAllowed = map[string]string{
 	"github.com/jcsvwinston/quark nativeRLSExecutor.ExecContext":     "beneath the seam: the chain's innermost link calls this Executor, and the statement it runs is the one the chain wraps; the set_config before it travels with it",
 	"github.com/jcsvwinston/quark nativeRLSExecutor.QueryContext":    "beneath the seam, as ExecContext",
 	"github.com/jcsvwinston/quark nativeRLSExecutor.QueryRowContext": "beneath the seam, as ExecContext",
+	"github.com/jcsvwinston/quark Client.execEngine":                 "the chain's innermost link: with WithStatementCache it runs the statement the chain wraps on a cached *sql.Stmt, with the same text and arguments (ADR-0027)",
+	"github.com/jcsvwinston/quark Client.queryEngine":                "the chain's innermost link, as Client.execEngine",
+	"github.com/jcsvwinston/quark Client.queryRowEngine":             "the chain's innermost link, as Client.execEngine",
+	"github.com/jcsvwinston/quark stmtLRU.acquire":                   "prepares, for the innermost link, the statement the chain is wrapping; the prepare is not a statement of its own (ADR-0027)",
+	"github.com/jcsvwinston/quark txStmts.get":                       "prepares on a transaction, for the innermost link, the statement the chain is wrapping (ADR-0027)",
 	"github.com/jcsvwinston/quark valueRow":                          "an in-process driver that mints a *sql.Row from values already read; nothing reaches the engine",
 	"github.com/jcsvwinston/quark errorRow":                          "an in-process driver that mints a *sql.Row carrying an error; nothing reaches the engine",
 }

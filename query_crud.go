@@ -2113,9 +2113,13 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 	// CreateBatch silently leaves every entity.ID == 0 — the MySQL/MSSQL sibling
 	// of the Oracle Finding C (Finding G). Provided or composite PKs fall through
 	// to the faster chunked multi-row INSERT below.
+	//
+	// Since A12 Q3 the per-row form is the fallback, not the rule: where the
+	// engine can PROVE which key each row got, a chunk goes in one round trip
+	// with the same rows and the same keys (createBatchBackfill, QK-36).
 	if !q.dialect.SupportsReturning() &&
 		q.pk.Column != "" && !q.meta.HasCompositePK && isZeroPKValue(first.Field(q.pk.Index)) {
-		return q.createBatchBackfillPerRow(entities, columns, colIndexes, colTags)
+		return q.createBatchBackfill(entities, columns, colIndexes, colTags)
 	}
 
 	// Chunk the multi-row INSERT so each statement stays within THIS dialect's
@@ -2160,7 +2164,12 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 func (q *Query[T]) createBatchBackfillPerRow(entities []*T, columns []string, colIndexes []int, colTags []string) error {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
+	return q.backfillPerRow(ctx, entities, columns, colIndexes, colTags)
+}
 
+// backfillPerRow is createBatchBackfillPerRow on a context the caller owns,
+// so the one-round-trip paths can hand it a chunk under the batch's timeout.
+func (q *Query[T]) backfillPerRow(ctx context.Context, entities []*T, columns []string, colIndexes []int, colTags []string) error {
 	colList := strings.Join(columns, ", ")
 	phs := make([]string, len(colIndexes))
 	for j := range colIndexes {
@@ -2213,10 +2222,62 @@ func (q *Query[T]) createBatchBackfillPerRow(entities []*T, columns []string, co
 // dialects that support RETURNING, generated primary keys are scanned back into
 // the chunk (which aliases the caller's slice, so PKs reach the caller).
 func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns []string, colIndexes []int, colTags []string) error {
+	// RETURNING for dialects that support it
+	returning := q.dialect.SupportsReturning() && q.pk.Column != ""
+	suffix := ""
+	if returning {
+		suffix = " " + q.dialect.Returning(q.pk.Column)
+	}
+	sqlStr, args := q.buildBatchInsert(entities, columns, colIndexes, colTags, suffix)
+
+	if returning {
+		// INSERT ... RETURNING is a write: pin to the primary, never a replica
+		// (F6-5, ADR-0015), even though it reads rows back.
+		rows, err := q.executeQueryPrimary(ctx, sqlStr, args)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		pks := make([]any, 0, len(entities))
+		for i := 0; rows.Next(); i++ {
+			if i >= len(entities) {
+				break
+			}
+			v := reflect.ValueOf(entities[i])
+			if v.Kind() == reflect.Ptr {
+				v = v.Elem()
+			}
+			pkField := v.Field(q.pk.Index)
+			if pkField.CanAddr() {
+				if err := rows.Scan(pkField.Addr().Interface()); err != nil {
+					return wrapDBError(err)
+				}
+				pks = append(pks, pkField.Interface())
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return wrapDBError(err)
+		}
+		// executeQueryPrimary (the RETURNING scan path) invalidates nothing,
+		// unlike executeExec, so drop the table tag + the fresh row tags here or
+		// a cached table-level read goes stale after the batch insert (the batch
+		// sibling of BB-15).
+		q.invalidateBatchInsert(ctx, pks)
+		return nil
+	}
+
+	_, err := q.executeExec(ctx, sqlStr, args)
+	return err
+}
+
+// buildBatchInsert writes the multi-row INSERT of one chunk — the columns
+// computed once by CreateBatch, one parenthesised row of placeholders per
+// entity — followed by suffix, and returns it with its arguments.
+func (q *Query[T]) buildBatchInsert(entities []*T, columns []string, colIndexes []int, colTags []string, suffix string) (string, []any) {
 	var sqlBuf strings.Builder
 	// About seven bytes per placeholder ("$1234, ") and four per row's
 	// parentheses and separator, so the builder grows once, not a dozen times.
-	sqlBuf.Grow(128 + len(entities)*(7*len(colIndexes)+4))
+	sqlBuf.Grow(128 + len(suffix) + len(entities)*(7*len(colIndexes)+4))
 	sqlBuf.WriteString("INSERT INTO ")
 	sqlBuf.WriteString(q.fullTableName())
 	sqlBuf.WriteString(" (")
@@ -2250,51 +2311,8 @@ func (q *Query[T]) createBatchStmt(ctx context.Context, entities []*T, columns [
 		}
 		sqlBuf.WriteByte(')')
 	}
-
-	// RETURNING for dialects that support it
-	if q.dialect.SupportsReturning() && q.pk.Column != "" {
-		sqlBuf.WriteString(" ")
-		sqlBuf.WriteString(q.dialect.Returning(q.pk.Column))
-	}
-
-	if q.dialect.SupportsReturning() && q.pk.Column != "" {
-		// INSERT ... RETURNING is a write: pin to the primary, never a replica
-		// (F6-5, ADR-0015), even though it reads rows back.
-		rows, err := q.executeQueryPrimary(ctx, sqlBuf.String(), args)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		pks := make([]any, 0, len(entities))
-		for i := 0; rows.Next(); i++ {
-			if i >= len(entities) {
-				break
-			}
-			v := reflect.ValueOf(entities[i])
-			if v.Kind() == reflect.Ptr {
-				v = v.Elem()
-			}
-			pkField := v.Field(q.pk.Index)
-			if pkField.CanAddr() {
-				if err := rows.Scan(pkField.Addr().Interface()); err != nil {
-					return wrapDBError(err)
-				}
-				pks = append(pks, pkField.Interface())
-			}
-		}
-		if err := rows.Err(); err != nil {
-			return wrapDBError(err)
-		}
-		// executeQueryPrimary (the RETURNING scan path) invalidates nothing,
-		// unlike executeExec, so drop the table tag + the fresh row tags here or
-		// a cached table-level read goes stale after the batch insert (the batch
-		// sibling of BB-15).
-		q.invalidateBatchInsert(ctx, pks)
-		return nil
-	}
-
-	_, err := q.executeExec(ctx, sqlBuf.String(), args)
-	return err
+	sqlBuf.WriteString(suffix)
+	return sqlBuf.String(), args
 }
 
 // DeleteBatch deletes multiple records by their primary key values using

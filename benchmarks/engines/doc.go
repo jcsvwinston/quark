@@ -3,8 +3,9 @@
 
 // Package engines is the engine bench: Quark measured against the two
 // baselines a Go program on PostgreSQL actually has — database/sql over pgx,
-// and pgx's native pool — on a real PostgreSQL, plus one MySQL read measured
-// with and without a reused prepared statement.
+// and pgx's native pool — on a real PostgreSQL, plus MySQL's FindByPK with
+// and without a reused prepared statement (and with Quark's statement cache),
+// and a MySQL batch insert that reads its keys back.
 //
 // It is a meter, not a leaderboard. Each operation is one control with a
 // RECORDED verdict and RECORDED ratios, and TestEngineBench checks a fresh

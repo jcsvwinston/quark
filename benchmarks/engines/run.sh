@@ -27,6 +27,13 @@
 # ORM, because nothing hides its cost. The same script runs in CI, where the
 # runner is Linux and the namespace trick costs nothing.
 #
+# MySQL runs with innodb_autoinc_lock_mode=1 instead of MySQL 8's default 2:
+# it is the setting under which MySQL documents that the keys of a multi-row
+# INSERT are consecutive, so CreateBatch sends one INSERT per chunk and MY-03
+# measures that form (under 2 it sends one INSERT per row, which MY-03's
+# informational arm measures). The setting touches inserts into an
+# AUTO_INCREMENT column only; MY-01 and MY-02 read.
+#
 # PostgreSQL runs with synchronous_commit=off and both engines keep their data
 # on tmpfs. With durable commits, InsertOne measured between 150 and 600 µs on
 # the same machine from one sample to the next — the disk's flush, not the
@@ -76,7 +83,7 @@ docker run -d --name "$name-pg" \
 docker run -d --name "$name-my" --network "container:$name-pg" \
   --tmpfs /var/lib/mysql:rw \
   -e MYSQL_ROOT_PASSWORD=bench -e MYSQL_DATABASE=bench \
-  "$my_image" >/dev/null
+  "$my_image" --innodb-autoinc-lock-mode=1 >/dev/null
 
 # Both images run a temporary server while they initialise, listening on the
 # socket only. Waiting on TCP waits for the real one.

@@ -74,7 +74,15 @@ Behavior:
 | Dialect | Shape |
 | --- | --- |
 | PostgreSQL, SQLite, MySQL, MariaDB, SQL Server | Multi-row `INSERT ... VALUES ...`, chunked so each statement stays under the dialect's bind-parameter ceiling (SQL Server ~2100). |
+| SQL Server, generated key | One insert-only `MERGE ... OUTPUT` per chunk, which returns each key with its row's position, on an `IDENTITY` key without an `INSTEAD OF` trigger; one row at a time otherwise. |
+| MySQL, generated key | One multi-row `INSERT` per chunk, keys computed from `LAST_INSERT_ID()` and `auto_increment_increment`, when the server runs `innodb_autoinc_lock_mode` 0 or 1 on an InnoDB table without `INSERT` triggers; one row at a time otherwise, including MySQL 8's default (2). |
 | Oracle | Individual single-row inserts to avoid identity-column conflicts. |
+
+Where a chunk with generated keys goes in one statement on SQL Server or MySQL
+and a row of it fails, the statement is undone and the chunk runs again one row
+at a time, so the result is the one the row-at-a-time form gives: the rows
+before the failing one inserted with their keys set, and the error. See
+[Batch Operations](../../guides/batch-operations#createbatch).
 
 Large slices are chunked automatically, so a call with tens of thousands of rows
 will not overrun a dialect's parameter limit. Chunks run on the bound executor

@@ -54,6 +54,18 @@ func resolveMySQLDSN(t *testing.T) string {
 	return setupMySQLContainer(t)
 }
 
+// resolveMySQLConsecutiveDSN is a MySQL server started with
+// innodb_autoinc_lock_mode=1 — the setting under which MySQL documents that
+// a multi-row INSERT's keys are consecutive, and CreateBatch reads them back
+// in one round trip (QK-36). The variable is read-only while the server
+// runs, so it takes a server of its own.
+func resolveMySQLConsecutiveDSN(t *testing.T) string {
+	if dsn := os.Getenv("QUARK_TEST_MYSQL_AUTOINC1_DSN"); dsn != "" {
+		return dsn
+	}
+	return setupMySQLContainer(t, "--innodb-autoinc-lock-mode=1")
+}
+
 func resolveMariaDBDSN(t *testing.T) string {
 	if dsn := os.Getenv("QUARK_TEST_MARIADB_DSN"); dsn != "" {
 		return dsn
@@ -113,18 +125,21 @@ func setupPostgresContainer(t *testing.T) string {
 }
 
 // setupMySQLContainer boots a MySQL 8 container; returns a DSN the
-// `go-sql-driver/mysql` driver consumes (no scheme).
-func setupMySQLContainer(t *testing.T) string {
+// `go-sql-driver/mysql` driver consumes (no scheme). serverArgs go to mysqld.
+func setupMySQLContainer(t *testing.T, serverArgs ...string) string {
 	t.Helper()
 	ctx, cancel := containerCtx()
 	defer cancel()
 
-	c, err := mysql.Run(ctx,
-		"mysql:8.0",
+	opts := []testcontainers.ContainerCustomizer{
 		mysql.WithDatabase("quark_test"),
 		mysql.WithUsername("quark"),
 		mysql.WithPassword("quark"),
-	)
+	}
+	if len(serverArgs) > 0 {
+		opts = append(opts, testcontainers.WithCmdArgs(serverArgs...))
+	}
+	c, err := mysql.Run(ctx, "mysql:8.0", opts...)
 	testcontainers.CleanupContainer(t, c)
 	if err != nil {
 		t.Fatalf("mysql container: %v", err)

@@ -66,6 +66,7 @@ zero-value rules are under [Limits](#limits) below.
 | `WithReplicas(dsns ...string)` | Read-replica DSNs: reads route to replicas, writes stay on the primary; transient replica failures fail over to the primary. |
 | `WithReplicaStrategy(s ReplicaStrategy)` | Replica selection: `ReplicaRoundRobin` (default), `ReplicaRandom`, or `ReplicaLeastConn`. Needs `WithReplicas`. |
 | `WithReplicaDownCooldown(d time.Duration)` | How long a failed replica stays out of rotation before re-probing (default 5s). Needs `WithReplicas`. |
+| `WithStatementCache(size int)` | Keeps up to `size` prepared statements per pool and reuses them instead of letting the driver prepare, execute and close each query. Off by default; ignored on PostgreSQL (pgx caches) and Oracle. See [Dialects › MySQL](dialects#mysql-statements-per-query). |
 | `WithMaxOpenConns(n int)` | Sets `*sql.DB.SetMaxOpenConns`. |
 | `WithMaxIdleConns(n int)` | Sets `*sql.DB.SetMaxIdleConns`. |
 | `WithConnMaxLifetime(d time.Duration)` | Sets `*sql.DB.SetConnMaxLifetime`. |
