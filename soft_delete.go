@@ -125,7 +125,9 @@ func (q *Query[T]) Restore(entity *T) (int64, error) {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	res, err := q.executeExec(ctx, sqlBuf.String(), args)
+	// The row tag with the table tag, as the soft delete it undoes drops
+	// both (QK-66): a read cached by the row's tag kept the row trashed.
+	res, err := q.executeExec(ctx, sqlBuf.String(), args, q.rowTag(pkVal))
 	if err != nil {
 		return 0, fmt.Errorf("Restore failed: %w", err)
 	}

@@ -11,11 +11,26 @@ package quark
 // exactly those entries instead of every cached SELECT on the table.
 //
 // The table tag stays as the fallback for mutations that don't (or
-// can't) know the affected rows up front — DeleteBatch with a complex
-// WHERE, raw Exec, batch upsert in some engines. That preserves
-// correctness for cached listings: even when row-level invalidation is
-// available, the table tag is ALSO invalidated by every mutation, so
-// listings are never left stale.
+// can't) know the affected rows up front — DeleteBy and UpdateMap with
+// their WHERE, the multi-row UpsertBatch of PostgreSQL, SQLite, MySQL and
+// MariaDB. That preserves correctness for cached listings: even when
+// row-level invalidation is available, the table tag is ALSO invalidated
+// by every mutation, so listings are never left stale. Raw SQL
+// (Client.Exec) is not parsed for the tables it writes and drops nothing.
+//
+// Every write path drops its tags once its statement has written, whatever
+// primitive sent it (QK-66). The exec primitive does it inside the seam
+// (stmt.write); a write that reads its keys back through a query —
+// INSERT … RETURNING, OUTPUT, SCOPE_IDENTITY() — calls invalidateInsert or
+// invalidateBatchInsert once it has them, and so does a write that fails
+// after earlier rows of the same call stayed written. Upsert through
+// RETURNING called neither, and a cached List kept the row count it had
+// before the upsert.
+//
+// Inside a transaction the tags are dropped when the statement runs and
+// again when the transaction commits (Client.invalidate, Tx.Commit): a read
+// from outside the transaction between the two caches what is committed
+// then, and the commit makes it stale.
 //
 // rowTag formatting uses fmt.Sprintf("%v", pk) — deliberately simple.
 // Composite PKs aren't supported by this helper yet (they would
@@ -26,7 +41,10 @@ package quark
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"slices"
+	"sync"
 )
 
 // rowTag returns `<table>:<pk>` for a known scalar primary key, or ""
@@ -65,10 +83,28 @@ func (q *BaseQuery) invalidateInsert(ctx context.Context, pkValue any) {
 		return
 	}
 	if tag := q.rowTag(pkValue); tag != "" {
-		_ = q.client.cacheStore.InvalidateTags(ctx, q.table, tag)
+		q.client.invalidate(ctx, q.exec, []string{q.table, tag})
 		return
 	}
-	_ = q.client.cacheStore.InvalidateTags(ctx, q.table)
+	q.client.invalidate(ctx, q.exec, []string{q.table})
+}
+
+// invalidateRowTags drops the row tags of the keys, without the table tag,
+// for a write whose statement went through executeExec — which dropped the
+// table tag when it ran — and whose keys were only known after it: the
+// upsert of MySQL and MariaDB reads the key of the row it wrote from the
+// statement's result. Keys without a scalar row tag contribute nothing.
+func (q *BaseQuery) invalidateRowTags(ctx context.Context, pkValues ...any) {
+	if q.client == nil || q.client.cacheStore == nil || q.table == "" {
+		return
+	}
+	var tags []string
+	for _, pk := range pkValues {
+		if t := q.rowTag(pk); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	q.client.invalidate(ctx, q.exec, tags)
 }
 
 // invalidateBatchInsert is the batch sibling of invalidateInsert: it drops the
@@ -91,5 +127,69 @@ func (q *BaseQuery) invalidateBatchInsert(ctx context.Context, pkValues []any) {
 			tags = append(tags, t)
 		}
 	}
-	_ = q.client.cacheStore.InvalidateTags(ctx, tags...)
+	q.client.invalidate(ctx, q.exec, tags)
+}
+
+// invalidate drops tags from the client's cache. When exec is a
+// transaction the client began, the tags are also kept with it, and
+// Tx.Commit drops them again once the commit succeeds (QK-66): a read
+// from outside the transaction between the write and the commit sees what
+// was committed before, and caches it under the tags the write had
+// already dropped. Dropping them only when the statement ran left that
+// entry in place after the commit. The drop when the statement runs stays,
+// so a cached read inside the transaction does not answer from an entry
+// its own write made stale.
+func (c *Client) invalidate(ctx context.Context, exec Executor, tags []string) {
+	if c == nil || c.cacheStore == nil || len(tags) == 0 {
+		return
+	}
+	_ = c.cacheStore.InvalidateTags(ctx, tags...)
+	if tx, ok := exec.(*sql.Tx); ok {
+		if v, ok := c.txCacheTags.Load(tx); ok {
+			v.(*txTags).add(tags)
+		}
+	}
+}
+
+// txTags is the set of cache tags the writes of one transaction dropped.
+type txTags struct {
+	mu   sync.Mutex
+	tags map[string]struct{}
+}
+
+func (t *txTags) add(tags []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.tags == nil {
+		t.tags = make(map[string]struct{}, len(tags))
+	}
+	for _, tag := range tags {
+		t.tags[tag] = struct{}{}
+	}
+}
+
+// beginTxCacheTags starts keeping the cache tags of a transaction the client
+// began. Without a cache store there is nothing to keep.
+func (c *Client) beginTxCacheTags(tx *sql.Tx) {
+	if c.cacheStore != nil {
+		c.txCacheTags.Store(tx, &txTags{})
+	}
+}
+
+// endTxCacheTags stops keeping the cache tags of a transaction that ended
+// and returns them, sorted, so the commit drops them in one call.
+func (c *Client) endTxCacheTags(tx *sql.Tx) []string {
+	v, ok := c.txCacheTags.LoadAndDelete(tx)
+	if !ok {
+		return nil
+	}
+	t := v.(*txTags)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]string, 0, len(t.tags))
+	for tag := range t.tags {
+		out = append(out, tag)
+	}
+	slices.Sort(out)
+	return out
 }

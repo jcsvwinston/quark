@@ -68,14 +68,22 @@ users, err := quark.For[User](ctx, client).
     List()
 ```
 
-Successful write executions invalidate the model table tag.
+Every write through the query builder invalidates the model table tag once its
+statement has written: `Create`, `CreateBatch`, `Update`, `UpdateFields`,
+`UpdateMap`, `UpdateBatch`, `Upsert`, `UpsertBatch`, `Delete`, `HardDelete`,
+`DeleteBy`, `DeleteBatch`, `Restore` and `Tracked.Save`, on all six engines and
+whichever statement the engine is sent — an `INSERT … RETURNING`, an `OUTPUT`
+or a `MERGE` included. A batch that fails part way, leaving the rows before
+the failing one written (`CreateBatch` on MySQL, SQL Server and Oracle),
+invalidates for those rows on its way out. Raw SQL does not invalidate
+anything: see [Manual Invalidation](#manual-invalidation).
 
 ### Per-row invalidation (`<table>:<pk>`)
 
 When a mutation knows the affected primary key — `Update`, `UpdateFields`,
-`Tracked.Save`, the by-PK delete paths, and `Create` once the new ID is
-populated — Quark **also** invalidates the `<table>:<pk>` tag in the
-same `InvalidateTags` call. Cache by-PK queries with that tag to avoid
+`Tracked.Save`, the by-PK delete paths, `Restore`, and `Create` or `Upsert`
+once the key is read back — Quark **also** invalidates the `<table>:<pk>` tag
+in the same `InvalidateTags` call. Cache by-PK queries with that tag to avoid
 flushing the whole table on every row write:
 
 ```go
@@ -101,11 +109,27 @@ affected rows:
 
 | Mutation | Tags invalidated |
 | --- | --- |
-| `Update`, `UpdateFields`, `Tracked.Save`, `Create`, by-PK `Delete` | table tag + `<table>:<pk>` |
-| `UpdateBatch` | table tag + `<table>:<pk>` per affected row |
-| `CreateBatch` | table tag + `<table>:<pk>` per back-filled PK (RETURNING dialects) |
-| `DeleteBatch` (complex WHERE), raw `Exec`, `Upsert`, `UpsertBatch` | table tag only |
+| `Create`, `Update`, `UpdateFields`, `Tracked.Save`, `Delete`, `HardDelete`, `Restore` | table tag + `<table>:<pk>` |
+| `UpdateBatch`, `DeleteBatch` | table tag + `<table>:<pk>` per entity or id |
+| `CreateBatch` | table tag + `<table>:<pk>` per key written back into the entities |
+| `Upsert` | table tag + `<table>:<pk>` of the row it inserted or updated when the statement reads that key back ([the key written into the entity](crud#the-key-written-into-the-entity)); table tag only otherwise |
+| `UpsertBatch` | table tag; + `<table>:<pk>` per key read back on SQL Server and Oracle, and on MySQL and MariaDB under `RowLevelSecurityClient` |
+| `UpdateMap`, `DeleteBy` | table tag only |
 | Composite-primary-key models | table tag only |
+| Raw SQL: `Client.Exec`, `Client.RawQuery`, `quark.Call`, `Client.Raw()` | nothing |
+
+### Writes inside a transaction
+
+A write inside a transaction — [`Client.Tx`](transactions), or `BeginTx` with
+`ForTx` — invalidates its tags when its statement runs, and the transaction
+invalidates all of them again when it commits, in one `InvalidateTags` call,
+before the `After*` hooks and the `OnCommit` callbacks run. The second call is
+what keeps a read from outside the transaction correct: until the commit that
+read still sees the rows as they were, and caches them under the tags the
+write already dropped; the commit drops that entry. A rollback invalidates
+nothing more. `UpdateBatch`, and `UpsertBatch` under `RowLevelSecurityClient`,
+run in a transaction of their own when the query is not bound to one, and
+their commit does the same.
 
 :::note Tag format is opaque
 The `<table>:<pk>` shape is implementation. Treat it as an opaque
@@ -245,4 +269,14 @@ err := store.InvalidateTags(ctx, "users:active")
 ```
 
 Use manual invalidation when a cache entry is tagged by a business concept or
-when writes happen outside Quark.
+when writes happen outside the query builder. Raw SQL is one of them: Quark
+does not parse a statement sent through `Client.Exec`, `Client.RawQuery` or
+`quark.Call`, or run on `Client.Raw()`, for the tables it writes, so it
+invalidates nothing. Drop the table tag yourself after such a write:
+
+```go
+if err := client.Exec(ctx, "UPDATE users SET active = FALSE WHERE last_seen < ?", cutoff); err != nil {
+    return err
+}
+_ = store.InvalidateTags(ctx, "users")
+```

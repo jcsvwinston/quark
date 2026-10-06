@@ -4,6 +4,7 @@
 package enginesuite
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"testing"
@@ -34,6 +35,11 @@ func runSuiteWithStatementCache(t *testing.T, driver, dsn, conformance string) {
 
 	runConformance(t, client, conformance)
 	SharedSuite(t, client)
+	// SharedSuite's cache cases run on a client WithOptions derives, which
+	// does not keep the statement cache: run them again with it (QK-66).
+	t.Run("CacheWritePathsWithStatementCache", func(t *testing.T) {
+		testCacheWritePaths(context.Background(), t, client, quark.WithStatementCache(16))
+	})
 }
 
 func TestSuiteMySQLStatementCache(t *testing.T) {

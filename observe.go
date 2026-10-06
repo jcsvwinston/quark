@@ -181,6 +181,8 @@ func (c *Client) execEngine(ctx context.Context, exec Executor, st *stmt, sqlStr
 		err = wrapDBError(err)
 		// One InvalidateTags call carries the table tag plus any row tag the
 		// caller knows, so a store sees one invalidation batch per write.
+		// Inside a transaction the tags are dropped again at the commit
+		// (Client.invalidate).
 		if err == nil && c.cacheStore != nil && st.table != "" {
 			tags := make([]string, 0, 1+len(st.rowTags))
 			tags = append(tags, st.table)
@@ -189,7 +191,7 @@ func (c *Client) execEngine(ctx context.Context, exec Executor, st *stmt, sqlStr
 					tags = append(tags, t)
 				}
 			}
-			_ = c.cacheStore.InvalidateTags(ctx, tags...)
+			c.invalidate(ctx, exec, tags)
 		}
 	}
 	var rows int64

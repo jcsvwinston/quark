@@ -49,7 +49,7 @@ Behavior:
 | Hooks | Runs `BeforeCreate` and `AfterCreate` when implemented. |
 | Associations | Recursively saves `belongs_to`, main entity, `has_one`, `has_many`, then many-to-many links. |
 | Primary key | Writes back integer PKs when the dialect supports `RETURNING` or last-insert ID. |
-| Cache | Invalidates the model table tag after successful write execution. |
+| Cache | Invalidates the model table tag and the new row's `<table>:<pk>` tag once the row is inserted; inside a transaction, again when it commits. See [Caching](caching#tags). |
 | Tenant | Under `RowLevelSecurityClient` the tenant column is set to the resolved tenant, whatever the entity carried. A different value is replaced, not written, and logged (`quark.tenant.foreign_value_replaced`). The same holds for `Update`, `UpdateFields`, `UpdateBatch`, `UpdateMap`, `CreateBatch` and the upserts. |
 
 The entity must be a non-nil pointer to a struct.
@@ -474,6 +474,17 @@ another row's, or use `Create` and `Update`.
 
 Validation runs before the SQL is built.
 
+**Cache.** `Upsert` invalidates the table tag, and the `<table>:<pk>` tag of
+the row it inserted or updated when the statement reads that key back (the
+table below), on every engine. See [Caching](caching#tags).
+
+**Oracle 23ai or later.** On Oracle, `Upsert` and `UpsertBatch` need Oracle
+Database 23ai. The `MERGE` Quark writes reads its source row from a `SELECT`
+without `FROM`, and for a model whose key is one integer column it reads the
+key back with `MERGE … RETURNING`. Oracle accepts both from 23ai on; 19c and
+21c do not. Quark's Oracle lane runs Oracle Database 23ai Free, and no earlier
+release is tested.
+
 #### The key written into the entity
 
 When `Upsert` returns `nil` and the model's key is one integer column, the
@@ -568,7 +579,7 @@ Behavior:
 | --- | --- |
 | PostgreSQL, SQLite, MySQL, MariaDB | Multi-row insert with dialect upsert fragment. |
 | SQL Server | Single bulk `MERGE ... USING (VALUES ...)`. |
-| Oracle | One `MERGE` per entity. |
+| Oracle | One `MERGE` per entity; Oracle 23ai or later, as for [`Upsert`](#upsert). |
 
 Empty input returns `nil`. All entities are validated before any SQL is built.
 An empty `updateCols` leaves a conflicting row as it was on PostgreSQL,

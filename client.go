@@ -198,6 +198,11 @@ type Client struct {
 	// without RETURNING (QK-36): the answer of one catalog probe per client
 	// and table. See createBatchBackfill.
 	batchIDsProvable sync.Map // dialect + table + key column → bool
+
+	// txCacheTags holds, for each open transaction the client began while
+	// it has a cache store, the cache tags its writes dropped, to drop
+	// again when it commits (QK-66). See Client.invalidate.
+	txCacheTags sync.Map // *sql.Tx → *txTags
 }
 
 // warnRawUnderNativeRLS emits a developer-experience warning when a raw

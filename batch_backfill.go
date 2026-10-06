@@ -248,6 +248,15 @@ func (q *Query[T]) createBatchMSSQLChunk(ctx context.Context, chunk []*T, column
 		return false, wrapDBError(err)
 	}
 	defer rows.Close()
+	// From here the MERGE may have inserted the chunk. The server undoing it
+	// comes back as done=false with no error; an error below is a read-back
+	// that failed after the rows went in, so the table tag goes on the way
+	// out (QK-66).
+	defer func() {
+		if err != nil {
+			q.invalidateBatchInsert(ctx, nil)
+		}
+	}()
 	ids := make([]int64, len(chunk))
 	got := 0
 	for rows.Next() {

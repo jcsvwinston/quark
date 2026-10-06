@@ -300,6 +300,9 @@ func (q *BaseQuery) upsertGuardedInsertStyle(ctx context.Context, v reflect.Valu
 		if write {
 			setPKValue(v, q.pk, key)
 		}
+		// executeExec dropped the table tag; the row's tag can only be
+		// dropped now that its key is known (QK-66).
+		q.invalidateRowTags(ctx, getPKValue(v, q.pk))
 		return nil
 	}
 	if returning != "" {
@@ -312,7 +315,13 @@ func (q *BaseQuery) upsertGuardedInsertStyle(ctx context.Context, v reflect.Valu
 			// nothing written, nothing to report (QK-48).
 			return nil
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// A single-row query drops nothing from the cache; the upsert does,
+		// as Upsert's own RETURNING path (QK-66).
+		q.invalidateInsert(ctx, getPKValue(v, q.pk))
+		return nil
 	}
 	res, err := q.executeExec(ctx, insertSQL+clause, args)
 	if err != nil {
