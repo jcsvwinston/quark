@@ -202,20 +202,34 @@ its map through `confineTenantColumn`. Regression: `upsert_tenant_test.go` and
 
 `Upsert`/`UpsertBatch` with no `updateCols`: PostgreSQL and SQLite write
 `ON CONFLICT … DO NOTHING`, MySQL and MariaDB `ON DUPLICATE KEY UPDATE
-<first conflict col> = VALUES(<it>)` — the conflicting row stays as it was —
+<first conflict col> = <it>` — the conflicting row stays as it was —
 while the MERGE of SQL Server and Oracle (`buildMerge`,
 `upsertBatchMSSQLBulk`) overwrites every column the insert writes except the
-conflict columns. The godoc promised the MERGE behaviour everywhere; making
-the engines agree changes what callers see on one side, so it is a decision
-for the major (QADR-0010). Until then
+conflict columns, the key and `created_at` (`mergeInferredUpdateCols`). The
+godoc promised the MERGE behaviour everywhere; making the engines agree
+changes what callers see on one side, so it is a decision for the major
+(QADR-0010). Until then
 `internal/enginesuite/upsert_empty_update_cols_test.go`
 (`UpsertEmptyUpdateCols`) pins each engine. What QK-48 did fix: on
 PostgreSQL and SQLite the RETURNING after DO NOTHING had no row and `Upsert`
 returned `sql.ErrNoRows` — the other four answered nil — in both the plain
-path and `upsertGuardedInsertStyle`. Known edges, documented in the CRUD
-reference: MySQL/MariaDB's assignment writes the incoming first conflict
-column when the duplicate is on another unique key, and the MERGE engines
-include a non-zero integer key in the update set, which the engine refuses.
+path and `upsertGuardedInsertStyle`.
+
+QK-61: the MySQL/MariaDB no-op was `= VALUES(<it>)`, the same thing only when
+the duplicate is on that column; ON DUPLICATE KEY UPDATE fires on a duplicate
+of any unique key, so a duplicate on the PK wrote the incoming value into the
+existing row — in `MySQLDialect.UpsertSQL` and in `guardedConflictClause`
+(`IF(<tenant> = ?, VALUES(c), c)`). Both are `c = c` now. With `updateCols`
+the row holding the duplicate is still updated whichever key it is: that is
+ON DUPLICATE KEY UPDATE, which has no conflict target, and the CRUD reference
+says so; PostgreSQL and SQLite answer `ErrConstraintViolation`, the MERGE
+matches on the conflict columns only. QK-62: the MERGE's inferred set held a
+non-zero integer key — an identity, refused at compile time even for a row
+it would insert (Msg 8102, ORA-32796) — and the `created_at` the convention
+stamped. Neither is in it now; `updated_at` is, as in `Update`. An explicit
+`updateCols` is written as given. Regression:
+`internal/enginesuite/upsert_engine_edges_test.go` (`UpsertEngineEdges`, six
+engines).
 
 ### Scopes AND with the caller's whole expression
 

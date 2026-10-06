@@ -321,6 +321,13 @@ func (m *MySQLDialect) SupportsTransactionalDDL() bool {
 }
 
 // UpsertSQL for MySQL: INSERT … ON DUPLICATE KEY UPDATE col = VALUES(col)
+//
+// Without updateCols the clause is a no-op, `<first conflict col> =
+// <itself>`: ON DUPLICATE KEY UPDATE needs one assignment, and the row must
+// be left as it was. It was `= VALUES(<col>)`, which is the same thing only
+// when the duplicate is on that column. ON DUPLICATE KEY UPDATE fires on a
+// duplicate of any unique key, so a duplicate on the primary key wrote the
+// incoming value into the existing row's column (QK-61).
 func (m *MySQLDialect) UpsertSQL(conflictCols, updateCols []string, _ int) string {
 	if len(updateCols) == 0 {
 		if len(conflictCols) == 0 {
@@ -329,7 +336,7 @@ func (m *MySQLDialect) UpsertSQL(conflictCols, updateCols []string, _ int) strin
 			// never be a panic path for a future caller that doesn't.
 			return ""
 		}
-		return " ON DUPLICATE KEY UPDATE " + m.Quote(conflictCols[0]) + " = VALUES(" + m.Quote(conflictCols[0]) + ")"
+		return " ON DUPLICATE KEY UPDATE " + m.Quote(conflictCols[0]) + " = " + m.Quote(conflictCols[0])
 	}
 	sets := make([]string, len(updateCols))
 	for i, c := range updateCols {

@@ -1703,11 +1703,17 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 // PostgreSQL, SQLite, MySQL and MariaDB the conflicting row is left as it
 // was — insert-or-ignore — and Upsert returns nil; on PostgreSQL and SQLite
 // the entity's key is then not written back. On SQL Server and Oracle the
-// MERGE updates every column the insert writes except the conflict columns:
-// every non-conflict column, a created_at the timestamp convention stamped
-// included — and a non-zero integer key too, so the engine refuses the
-// statement. Pass updateCols for behaviour that does not depend on the
-// engine.
+// MERGE updates every column the insert writes except the conflict columns,
+// the primary key and created_at, which keeps the row's creation time
+// (QK-62). Pass updateCols for behaviour that does not depend on the engine.
+//
+// The conflict columns name the key the update branch is for on PostgreSQL,
+// SQLite, SQL Server and Oracle. MySQL and MariaDB have no conflict target:
+// ON DUPLICATE KEY UPDATE fires on a duplicate of any unique key, the
+// primary key included, so with updateCols the row that holds the duplicate
+// is updated whichever key it is; without updateCols it is left as it was
+// (QK-61). On PostgreSQL and SQLite a duplicate of a key other than the
+// conflict columns fails with ErrConstraintViolation.
 //
 // Under RowLevelSecurityClient the update branch only touches a row of the
 // resolved tenant (QK-43). When the conflicting row belongs to another
@@ -1934,11 +1940,11 @@ func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCol
 	// WHEN MATCHED THEN UPDATE SET
 	effectiveUpdateCols := updateCols
 	if len(effectiveUpdateCols) == 0 {
-		for _, cv := range allCols {
-			if !conflictSet[cv.col] {
-				effectiveUpdateCols = append(effectiveUpdateCols, cv.col)
-			}
+		written := make([]string, len(allCols))
+		for i, cv := range allCols {
+			written[i] = cv.col
 		}
+		effectiveUpdateCols = q.mergeInferredUpdateCols(written, conflictSet)
 	}
 	var updateParts []string
 	for _, uc := range effectiveUpdateCols {
@@ -1996,6 +2002,35 @@ func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCol
 	}
 
 	return sqlBuf.String(), args, len(updateParts) > 0, nil
+}
+
+// mergeInferredUpdateCols is the update set of a MERGE that was given no
+// updateCols (SQL Server, Oracle): the columns the insert writes, except the
+// conflict columns, the primary key and created_at. It used to be every
+// written column but the conflict ones (QK-62). The key is the row's
+// identity, which Update never writes either, and an integer key is an
+// IDENTITY column the engine refuses to update (Msg 8102, ORA-32796) — the
+// whole statement was refused, even for a row it would have inserted.
+// created_at is stamped on create only: Update leaves it, and the stamp the
+// convention put on the entity overwrote the row's. updated_at stays in the
+// set, refreshed as by Update.
+func (q *BaseQuery) mergeInferredUpdateCols(written []string, conflictSet map[string]bool) []string {
+	keyCols := make(map[string]bool, 1)
+	if q.meta != nil && q.meta.HasCompositePK {
+		for _, cpk := range q.meta.CompositePK {
+			keyCols[cpk.Column] = true
+		}
+	} else if q.pk.Column != "" {
+		keyCols[q.pk.Column] = true
+	}
+	var out []string
+	for _, col := range written {
+		if conflictSet[col] || keyCols[col] || strings.EqualFold(col, "created_at") {
+			continue
+		}
+		out = append(out, col)
+	}
+	return out
 }
 
 // mergeMatchedClause renders a MERGE's WHEN MATCHED branch for the SET list
@@ -2462,8 +2497,8 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 // conflictCols defines uniqueness (e.g. primary key or unique index columns).
 // updateCols defines which columns to update on conflict. An empty updateCols
 // leaves a conflicting row as it was on PostgreSQL, SQLite, MySQL and
-// MariaDB, and updates every non-conflict column on SQL Server and Oracle,
-// as for [Query.Upsert].
+// MariaDB, and updates every non-conflict column but the primary key and
+// created_at on SQL Server and Oracle, as for [Query.Upsert].
 //
 // Dialect strategies:
 //   - Postgres / SQLite / MySQL / MariaDB: multi-row INSERT … ON CONFLICT / ON DUPLICATE KEY
@@ -2754,11 +2789,11 @@ func (q *Query[T]) upsertBatchMSSQLBulk(
 	// WHEN MATCHED THEN UPDATE SET
 	effUpdateCols := updateCols
 	if len(effUpdateCols) == 0 {
-		for _, c := range cols {
-			if !conflictSet[c.dbTag] {
-				effUpdateCols = append(effUpdateCols, c.dbTag)
-			}
+		written := make([]string, len(cols))
+		for i, c := range cols {
+			written[i] = c.dbTag
 		}
+		effUpdateCols = q.mergeInferredUpdateCols(written, conflictSet)
 	}
 	var updateParts []string
 	for _, uc := range effUpdateCols {

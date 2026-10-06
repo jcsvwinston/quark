@@ -818,7 +818,6 @@ func (k *kit) refusedBeforeSending(t *testing.T, child string, fk quark.ForeignK
 
 	probe := quark.Column{Name: "qk_kit_ra", Type: k.columnType(quarkdriver.ColumnSpec{Kind: quarkdriver.KindInt64}), Nullable: true}
 	plan := quark.Plan{Ops: []quark.Operation{quark.OpAddColumn{Table: child, Column: probe}, quark.OpAddForeignKey{Table: child, ForeignKey: fk}}}
-	k.clearCheckpoint(plan)
 	err = counted.ApplyPlan(k.ctx, plan)
 	if !errors.Is(err, quarkdriver.ErrUnsupportedFeature) || !strings.Contains(err.Error(), clause) {
 		t.Errorf("ReferentialActioner.ReferentialAction answered ActionUnsupported for %s: ApplyPlan should fail with ErrUnsupportedFeature naming it, got %v", clause, err)

@@ -425,26 +425,44 @@ portable behavior.
 
 **An empty `updateCols` does not mean the same on every engine.** On four
 engines the conflicting row is left as it was — insert-or-ignore; on the two
-whose upsert is a `MERGE`, every non-conflict column is overwritten:
+whose upsert is a `MERGE`, the non-conflict columns are overwritten:
 
 | Dialect | Empty `updateCols`, the key conflicts | Error | Key written back |
 | --- | --- | --- | --- |
 | PostgreSQL, SQLite | the row is left as it was (`ON CONFLICT … DO NOTHING`) | `nil` | no |
-| MySQL, MariaDB | the row is left as it was (`ON DUPLICATE KEY UPDATE` rewrites the first conflict column with the value it holds) | `nil` | MariaDB: yes; MySQL: insert branch only |
-| SQL Server, Oracle | every column the insert writes, except the conflict columns, is overwritten (`MERGE … WHEN MATCHED THEN UPDATE SET …`) | `nil` | SQL Server: yes; Oracle: no |
+| MySQL, MariaDB | the row is left as it was (`ON DUPLICATE KEY UPDATE` assigns the first conflict column to itself) | `nil` | MariaDB: yes; MySQL: insert branch only |
+| SQL Server, Oracle | every column the insert writes is overwritten, except the conflict columns, the primary key and `created_at` (`MERGE … WHEN MATCHED THEN UPDATE SET …`) | `nil` | SQL Server: yes; Oracle: no |
 
-What “every column the insert writes” includes on SQL Server and Oracle: a
-`created_at` the timestamp convention stamped on the entity, which overwrites
-the row's, and a non-zero integer primary key, which the engine refuses to
-update — the statement fails (Msg 8102, ORA-32796) even when the key would
-have been inserted. On MySQL and MariaDB the assignment is the incoming value
-of the first conflict column, so when the duplicate is on another unique key —
-the primary key, say — that column of the existing row takes the incoming
-value. A new key is inserted on every engine.
+On SQL Server and Oracle the update branch leaves the row's key and its
+`created_at` as they were, as `Update` does, and writes `updated_at` with the
+rest. An entity that carries a non-zero integer key is upserted like one that
+does not: the key is an identity column there, which the update branch does
+not set and the insert branch does not write. A new row gets the key the
+engine assigns, and the entity keeps the one it carried — re-query by the
+conflict columns if you need the row's. The other four engines insert the
+entity's key. A new key is inserted on every engine.
 
 `UpsertBatch` does the same per row. Bringing the engines together changes
 what callers see on one side or the other, so it waits for the next major
 release; until then, pass `updateCols`.
+
+**Which duplicate takes the update branch.** On PostgreSQL and SQLite
+`conflictCols` is the conflict target: a duplicate of another unique key — the
+primary key, say — fails with `ErrConstraintViolation`. On SQL Server and
+Oracle the `MERGE` matches on `conflictCols` only. MySQL and MariaDB have no
+conflict target: `ON DUPLICATE KEY UPDATE` fires on a duplicate of any unique
+key, so the row that holds the duplicate takes the update branch whichever key
+it is:
+
+| Dialect | The entity carries the key of an existing row and a `conflictCols` value no row has |
+| --- | --- |
+| PostgreSQL, SQLite | `ErrConstraintViolation`; nothing is written |
+| MySQL, MariaDB | `nil`; with `updateCols`, that row's `updateCols` are written; without, the row is left as it was |
+| SQL Server, Oracle | `nil`; a new row is inserted, with a key the engine assigns |
+
+`conflictCols` does not choose the row on MySQL and MariaDB. When a table has
+more than one unique key, upsert entities whose other keys do not collide with
+another row's, or use `Create` and `Update`.
 
 **Generated-key back-fill:** when the entity's single integer PK is zero,
 `Upsert` writes the generated key back on PostgreSQL/SQLite/MariaDB

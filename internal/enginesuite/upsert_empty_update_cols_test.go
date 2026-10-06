@@ -14,7 +14,8 @@ import (
 //
 // The engines do not agree, and the reference says so. On PostgreSQL, SQLite,
 // MySQL and MariaDB a conflicting row is left as it was — insert-or-ignore.
-// On SQL Server and Oracle the MERGE updates every non-conflict column. The
+// On SQL Server and Oracle the MERGE updates every non-conflict column but
+// the key and created_at (QK-62; UpsertEngineEdges pins those two). The
 // godoc used to promise the second everywhere. Making the engines agree
 // changes what callers observe on one side or the other, which is a decision
 // for the major (QADR-0010); until then this test holds each engine to what it
