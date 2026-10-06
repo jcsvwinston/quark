@@ -2193,10 +2193,26 @@ func (q *Query[T]) backfillPerRow(ctx context.Context, entities []*T, columns []
 		var id int64
 		if isMSSQL {
 			// SCOPE_IDENTITY() in the same batch returns this row's identity.
+			//
+			// Scanned into a NullInt64 for the reason single Create does: when
+			// the INSERT is rejected the server still answers the SELECT, with
+			// NULL, and the driver delivers the INSERT's error only after the
+			// scan succeeds. Scanning that NULL into an int64 failed first, and
+			// database/sql returned "converting NULL to int64 is unsupported"
+			// in place of the engine's error — a duplicate key that
+			// IsUniqueViolation could not see (QK-53).
+			var lastID sql.NullInt64
 			row := q.executeQueryRow(ctx, insertSQL+"; "+q.dialect.LastInsertIDQuery(q.meta.Table, q.pk.Column), rowArgs)
-			if err := row.Scan(&id); err != nil {
+			if err := row.Scan(&lastID); err != nil {
 				return wrapDBError(err)
 			}
+			if !lastID.Valid {
+				// No error and no identity: an INSTEAD OF trigger took the
+				// row, or the key is not an IDENTITY. Handing back a zero key
+				// the caller would use as real is worse than failing.
+				return fmt.Errorf("insert into %s reported success but SCOPE_IDENTITY() returned NULL", q.meta.Table)
+			}
+			id = lastID.Int64
 		} else { // mysql
 			res, err := q.executeExec(ctx, insertSQL, rowArgs)
 			if err != nil {

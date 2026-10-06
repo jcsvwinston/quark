@@ -11,8 +11,9 @@ import (
 	"github.com/jcsvwinston/quark"
 )
 
-// testUniqueViolationClassifiable pins that a rejected insert reaches the
-// caller as the ENGINE's error, classifiable on every dialect.
+// testUniqueViolationClassifiable pins that a rejected insert — by Create or
+// by CreateBatch — reaches the caller as the ENGINE's error, classifiable on
+// every dialect.
 //
 // The regression it guards is SQL Server specific but the assertion is not:
 // there, Create sends the INSERT and SCOPE_IDENTITY() as one batch, and the
@@ -60,5 +61,18 @@ func testUniqueViolationClassifiable(ctx context.Context, t *testing.T, client *
 	// A deadlock and a unique violation must not be confused for one another.
 	if quark.IsDeadlock(err) {
 		t.Errorf("IsDeadlock classified a unique violation: %v", err)
+	}
+
+	// CreateBatch makes the same promise, and on SQL Server it broke it the
+	// same way: its per-row form — the one a failed MERGE chunk falls back
+	// to — sent the same INSERT and SCOPE_IDENTITY() batch and scanned the
+	// NULL into an int64, so the duplicate arrived as the scan error (QK-53).
+	batch := []*UVProbe{{Email: "batch@uv.test"}, {Email: "dup@uv.test"}}
+	err = quark.For[UVProbe](ctx, client).CreateBatch(batch)
+	if err == nil {
+		t.Fatal("a CreateBatch with an email already taken must violate the unique constraint")
+	}
+	if !quark.IsUniqueViolation(err) {
+		t.Errorf("IsUniqueViolation did not recognise a real engine violation in CreateBatch: %v", err)
 	}
 }

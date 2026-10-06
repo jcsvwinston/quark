@@ -5,11 +5,14 @@ package enginesuite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	mssql "github.com/microsoft/go-mssqldb"
 
 	"github.com/jcsvwinston/quark"
 )
@@ -26,6 +29,12 @@ import (
 // consecutive and CreateBatch keeps one INSERT per row; and on a server
 // started with innodb_autoinc_lock_mode=1, where they are, and a chunk goes
 // in one INSERT. The statement count tells which form ran.
+//
+// On every engine the rejected row reaches the caller as the engine's error,
+// a unique violation the predicate recognises (QK-53). On SQL Server that is
+// checked on each form the batch can take: the MERGE that falls back to rows
+// one by one, the per-row form on its own, and the MERGE that raises the
+// error itself because it took the caller's transaction with it.
 
 type batchKeyUser struct {
 	ID   int64  `db:"id" pk:"true"`
@@ -37,11 +46,15 @@ func (batchKeyUser) TableName() string { return "qk36_batch_users" }
 
 // insertCounter counts the INSERT statements into the batch table the engine
 // received, leaving out the ones the concurrent writers send — the round
-// trips CreateBatch made.
-type insertCounter struct{ n atomic.Int64 }
+// trips CreateBatch made. merges counts the MERGE statements sent, whatever
+// their outcome: on SQL Server it tells whether a batch took the MERGE form.
+type insertCounter struct{ n, merges atomic.Int64 }
 
 func (c *insertCounter) ObserveQuery(e quark.QueryEvent) {
 	up := strings.ToUpper(e.SQL)
+	if strings.Contains(up, "QK36_BATCH_USERS") && strings.Contains(up, "MERGE INTO") {
+		c.merges.Add(1)
+	}
 	if e.Error != nil || !strings.Contains(up, "QK36_BATCH_USERS") || !(strings.Contains(up, "INSERT INTO") || strings.Contains(up, "MERGE INTO")) {
 		return
 	}
@@ -247,26 +260,29 @@ func testCreateBatchKeys(t *testing.T, drv, dsn string, perRowOnFailure bool, st
 		users[5].Name = "b1-0000"
 		return users
 	}
-	// wantFailure checks the error of a batch whose sixth row is rejected.
-	// On SQL Server the per-row form reports it as a failed scan of a NULL
-	// SCOPE_IDENTITY() rather than as the engine's error — single Create was
-	// fixed for this (it scans a NullInt64), CreateBatch's per-row form was
-	// not. That predates A12 Q3 and is reported, not changed, here: the
-	// rows and keys it leaves are what this test pins.
+	// wantFailure checks the error of a batch whose sixth row is rejected:
+	// the engine's own, classified. On SQL Server the per-row form used to
+	// report it as a failed scan of the NULL that SCOPE_IDENTITY() answers
+	// after a rejected INSERT — "converting NULL to int64 is unsupported",
+	// naming no constraint — so the predicate said false (QK-53).
 	wantFailure := func(err error) error {
 		switch {
 		case err == nil:
 			return fmt.Errorf("a batch with a duplicate name succeeded")
-		case drv == "sqlserver":
-			return nil
 		case !quark.IsUniqueViolation(err):
 			return fmt.Errorf("a batch with a duplicate name: %v, want a unique violation", err)
 		}
 		return nil
 	}
 	users := failing("fail")
+	merges := counter.merges.Load()
 	if err := wantFailure(quark.For[batchKeyUser](ctx, c).CreateBatch(users)); err != nil {
 		t.Fatal(err)
+	}
+	// On SQL Server the batch tried the MERGE first, which the server undid,
+	// and the error above came from the per-row form it fell back to.
+	if drv == "sqlserver" && counter.merges.Load() == merges {
+		t.Fatal("the failed batch never sent its MERGE: the fallback was not what this checked")
 	}
 	left, err := quark.For[batchKeyUser](ctx, c).Where("name", "LIKE", "fail-%").Count()
 	if err != nil {
@@ -307,6 +323,120 @@ func testCreateBatchKeys(t *testing.T, drv, dsn string, perRowOnFailure bool, st
 	if err != errRollbackOnPurpose {
 		t.Fatal(err)
 	}
+
+	if drv == "sqlserver" {
+		testCreateBatchFailureMSSQL(t, dsn, c, counter, failing)
+	}
 }
 
 var errRollbackOnPurpose = fmt.Errorf("rolled back on purpose")
+
+// batchKeyUserView is batchKeyUser seen through a view of its table. The
+// probe that admits the MERGE asks for a user table, so a batch into the
+// view takes the per-row form from the start.
+type batchKeyUserView struct {
+	ID   int64  `db:"id" pk:"true"`
+	Name string `db:"name,size=120"`
+	Age  int    `db:"age"`
+}
+
+func (batchKeyUserView) TableName() string { return "qk36_batch_users_v" }
+
+// testCreateBatchFailureMSSQL checks the rejected row on the SQL Server forms
+// the fallback test above does not reach (QK-53).
+func testCreateBatchFailureMSSQL(t *testing.T, dsn string, c *quark.Client, counter *insertCounter, failing func(string) []*batchKeyUser) {
+	ctx := context.Background()
+
+	// The per-row form on its own: no MERGE is sent, the rows before the
+	// rejected one are inserted with their keys, and the error is the
+	// engine's.
+	t.Run("per-row form", func(t *testing.T) {
+		_ = c.Exec(ctx, "DROP VIEW IF EXISTS qk36_batch_users_v")
+		if err := c.Exec(ctx, "CREATE VIEW qk36_batch_users_v AS SELECT id, name, age FROM qk36_batch_users"); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Exec(context.Background(), "DROP VIEW qk36_batch_users_v") })
+
+		users := make([]*batchKeyUserView, 0, 10)
+		for _, u := range failing("view") {
+			users = append(users, &batchKeyUserView{Name: u.Name, Age: u.Age})
+		}
+		merges := counter.merges.Load()
+		err := quark.For[batchKeyUserView](ctx, c).CreateBatch(users)
+		if err == nil || !quark.IsUniqueViolation(err) {
+			t.Fatalf("a batch with a duplicate name through the view: %v, want a unique violation", err)
+		}
+		if counter.merges.Load() != merges {
+			t.Fatal("a batch into a view sent a MERGE; the probe should have kept it row by row")
+		}
+		for i, u := range users {
+			if (i < 5) != (u.ID != 0) {
+				t.Fatalf("row %d has key %d; the rows before the failing one carry theirs, the rest none", i, u.ID)
+			}
+			if u.ID == 0 {
+				continue
+			}
+			got, err := quark.For[batchKeyUser](ctx, c).Find(u.ID)
+			if err != nil || got.Name != u.Name {
+				t.Fatalf("key %d was handed to %s, but reads %+v (%v)", u.ID, u.Name, got, err)
+			}
+		}
+		left, err := quark.For[batchKeyUser](ctx, c).Where("name", "LIKE", "view-%").Count()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if left != 5 {
+			t.Fatalf("%d rows of the failed batch are in the table, want the 5 before the failing one", left)
+		}
+	})
+
+	// Under SET XACT_ABORT ON the rejected row dooms the caller's
+	// transaction, so the MERGE does not fall back: running the rows again
+	// would run them outside the transaction. It raises the error, and that
+	// error is the engine's.
+	t.Run("MERGE raises", func(t *testing.T) {
+		connector, err := mssql.NewConnector(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connector.SessionInitSQL = "SET XACT_ABORT ON"
+		db := sql.OpenDB(connector)
+		defer db.Close()
+		limits := quark.DefaultLimits()
+		limits.AllowRawQueries = true
+		ca, err := quark.NewWithDB("sqlserver", db, quark.WithLimits(limits), quark.WithQueryObserver(counter))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ca.Close()
+
+		users := failing("abort")
+		merges := counter.merges.Load()
+		var batchErr error
+		txErr := ca.Tx(ctx, func(tx *quark.Tx) error {
+			batchErr = quark.ForTx[batchKeyUser](ctx, tx).CreateBatch(users)
+			return batchErr
+		})
+		if batchErr == nil || !quark.IsUniqueViolation(batchErr) {
+			t.Fatalf("a batch with a duplicate name under XACT_ABORT: %v, want a unique violation", batchErr)
+		}
+		if !quark.IsUniqueViolation(txErr) {
+			t.Fatalf("the transaction around it: %v, want the unique violation", txErr)
+		}
+		if counter.merges.Load() == merges {
+			t.Fatal("the batch never sent its MERGE")
+		}
+		for i, u := range users {
+			if u.ID != 0 {
+				t.Fatalf("row %d has key %d, but the transaction is gone and the MERGE set none", i, u.ID)
+			}
+		}
+		left, err := quark.For[batchKeyUser](ctx, c).Where("name", "LIKE", "abort-%").Count()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if left != 0 {
+			t.Fatalf("%d rows of the failed batch outlived its transaction", left)
+		}
+	})
+}
