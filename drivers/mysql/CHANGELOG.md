@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/jcsvwinston/quark/compare/drivers/mysql/v0.2.5...drivers/mysql/v0.3.0) (2026-10-12)
+
+
+### Added
+
+* **drivertest:** a dialect conformance kit a driver runs against its own engine, and the engine suite importable from outside (A11 Q4) ([#441](https://github.com/jcsvwinston/quark/issues/441)) ([340ac49](https://github.com/jcsvwinston/quark/commit/340ac49eb549a286b0f35699b634c0089fb384d4))
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.16.0 ([#465](https://github.com/jcsvwinston/quark/issues/465)) ([854c375](https://github.com/jcsvwinston/quark/commit/854c375e61d9bff916771c435731f4c49a33f06a))
+
 ## [0.2.5](https://github.com/jcsvwinston/quark/compare/drivers/mysql/v0.2.4...drivers/mysql/v0.2.5) (2026-10-05)
 
 
