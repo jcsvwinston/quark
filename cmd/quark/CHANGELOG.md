@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/jcsvwinston/quark/compare/cmd/quark/v1.2.0...cmd/quark/v1.2.1) (2026-10-12)
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.16.0 ([#465](https://github.com/jcsvwinston/quark/issues/465)) ([854c375](https://github.com/jcsvwinston/quark/commit/854c375e61d9bff916771c435731f4c49a33f06a))
+
 ## [1.2.0](https://github.com/jcsvwinston/quark/compare/cmd/quark/v1.1.2...cmd/quark/v1.2.0) (2026-10-05)
 
 
