@@ -2,7 +2,7 @@ module github.com/jcsvwinston/quark
 
 go 1.25.7
 
-toolchain go1.26.6
+toolchain go1.26.9
 
 require (
 	github.com/go-playground/validator/v10 v10.30.4
