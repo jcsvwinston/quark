@@ -43,9 +43,9 @@ method stays — so the guard above has nothing to read; the notice and the
 godoc of the affected method are the announcement, and the tests that pin the
 v1 behaviour are named in the notice so the change at the major is a diff to
 them. See [`DEP-2026-003`](DEP-2026-003-updatebatch-version-check-default.md),
-and `DEP-2026-004` to `DEP-2026-009`, the behaviour changes of the 2.0 list
-the owner decided on 2026-10-06; each names the test that pins v1, the exit
-that exists in 1.x and the date its window opens.
+and `DEP-2026-004` to `DEP-2026-010`, the behaviour changes of the 2.0 list
+the owner decided on 2026-10-06 and 2026-10-16; each names the test that
+pins v1, the exit that exists in 1.x and the date its window opens.
 
 ## Removal rules
 
@@ -86,3 +86,4 @@ specification and a changelog entry. Quark has neither home:
 | [`DEP-2026-007`](DEP-2026-007-on-delete-set-default-mysql-mariadb.md) | `SET DEFAULT` in a foreign key is refused on MySQL and MariaDB before anything is sent, as on Oracle (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
 | [`DEP-2026-008`](DEP-2026-008-group-by-without-select-error.md) | `GroupBy` without `Select`/`SelectExpr` is `ErrInvalidQuery` instead of a `WARN` (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
 | [`DEP-2026-009`](DEP-2026-009-plain-like-declares-escape.md) | the plain `LIKE` forms (`Where(col, "LIKE", p)`, typed `Like`, `Cmp`) declare `ESCAPE '\'` on every engine (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
+| [`DEP-2026-010`](DEP-2026-010-oracle-varchar2-char-semantics.md) | on Oracle a sized string column is rendered `VARCHAR2(n CHAR)`: the length counts characters, as on the other five engines (behaviour; the DDL the plan renders, not the data) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
