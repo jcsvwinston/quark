@@ -49,6 +49,11 @@ func PortableColumnType(spec quarkdriver.ColumnSpec) string {
 }
 
 // engineBase is the engine's type for a kind, before the size hint.
+//
+// Changes in v2.0.0: on Oracle the sized string family is rendered with
+// explicit character semantics, VARCHAR2(n CHAR), so that a length means
+// characters on the six engines; today it is VARCHAR2(n), which Oracle counts
+// in bytes under its default NLS_LENGTH_SEMANTICS. See DEP-2026-010.
 func engineBase(engine string, spec quarkdriver.ColumnSpec) string {
 	switch spec.Kind {
 	case quarkdriver.KindString:
@@ -231,7 +236,8 @@ func jsonColumnType(engine string) string {
 // applySize rewrites a VARCHAR/CHAR/NVARCHAR family default with an explicit
 // size. Engines that emit TEXT for the default (postgres/sqlite) get a
 // VARCHAR(N) instead, matching what callers usually mean when they ask for
-// a sized string.
+// a sized string. On Oracle the result changes in v2.0.0 to VARCHAR2(n CHAR);
+// see DEP-2026-010.
 func applySize(base, engine string, size int) string {
 	switch engine {
 	case EnginePostgres, EngineSQLite:
