@@ -146,12 +146,20 @@ func NewTypedStringColumn(name string) TypedStringColumn {
 	return TypedStringColumn{TypedColumn[string]{name: name}}
 }
 
-// Like builds `column LIKE pattern`.
+// Like builds `column LIKE pattern` under the engine's default escape;
+// [TypedStringColumn.LikeEscaped] declares it.
+//
+// Changes in v2.0.0: Like declares ESCAPE '\' on every engine, as
+// LikeEscaped does. See DEP-2026-009.
 func (c TypedStringColumn) Like(pattern string) Predicate {
 	return Predicate{column: c.name, operator: "LIKE", value: pattern}
 }
 
-// NotLike builds `column NOT LIKE pattern`.
+// NotLike builds `column NOT LIKE pattern` under the engine's default
+// escape; [TypedStringColumn.NotLikeEscaped] declares it.
+//
+// Changes in v2.0.0: NotLike declares ESCAPE '\' on every engine, as
+// NotLikeEscaped does. See DEP-2026-009.
 func (c TypedStringColumn) NotLike(pattern string) Predicate {
 	return Predicate{column: c.name, operator: "NOT LIKE", value: pattern}
 }

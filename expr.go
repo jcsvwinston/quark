@@ -123,6 +123,9 @@ func (n notExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 // Cmp is the general comparison constructor. Operator goes through
 // SQLGuard.ValidateOperator so the AST cannot smuggle arbitrary tokens
 // into the SQL surface.
+//
+// Changes in v2.0.0: Cmp(lhs, "LIKE", Lit(pattern)) declares ESCAPE '\' on
+// every engine, as [Like] does. See DEP-2026-009.
 func Cmp(lhs Expr, op string, rhs Expr) Expr { return cmpExpr{lhs: lhs, op: op, rhs: rhs} }
 
 // Eq, Ne, Lt, Gt, Lte, Gte are the syntactic shortcuts for Cmp with the

@@ -62,6 +62,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("LikeEscape", func(t *testing.T) {
 		testLikeEscape(ctx, t, client)
 	})
+	t.Run("OnDeleteSetDefault", func(t *testing.T) {
+		testOnDeleteSetDefault(ctx, t, client)
+	})
 
 	t.Run("Relationships", func(t *testing.T) {
 		testRelationships(ctx, t, client)
@@ -358,6 +361,33 @@ func testLikeEscape(ctx context.Context, t *testing.T, client *quark.Client) {
 	if strings.Contains(plain, " ESCAPE '") {
 		t.Errorf("the plain LIKE grew an ESCAPE tail on %s: %s", engine, plain)
 	}
+
+	// And what that opaque pattern means is the engine's default, which is
+	// not the same on the six (QK-32): on PostgreSQL, MySQL and MariaDB a
+	// backslash escapes the character after it, so `%\%%` finds the name
+	// with a literal percent sign; on SQLite, SQL Server and Oracle the
+	// backslash is a character, so the same pattern finds the name with a
+	// backslash in it. Quark 2.0 declares ESCAPE '\' on the plain form too
+	// (DEP-2026-009); this subtest is what that PR changes — every engine
+	// then answers "100% off".
+	t.Run("PlainFormKeepsTheEngineDefault", func(t *testing.T) {
+		want := `back\slash`
+		switch engine {
+		case "postgres", "mysql", "mariadb":
+			want = "100% off"
+		}
+		rows, err := quark.For[LikeEscapeRow](ctx, client).Where("name", "LIKE", `%\%%`).List()
+		if err != nil {
+			t.Fatalf("plain LIKE %%\\%%%% on %s: %v", engine, err)
+		}
+		names := make([]string, len(rows))
+		for i, r := range rows {
+			names[i] = r.Name
+		}
+		if len(rows) != 1 || rows[0].Name != want {
+			t.Fatalf("plain LIKE %%\\%%%% on %s answered %v, want exactly %q (the engine's default escape, v1 behaviour)", engine, names, want)
+		}
+	})
 }
 
 // testPlanConstraints proves on the engine this lane runs that an

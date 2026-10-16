@@ -22,7 +22,8 @@ const likeEscapeChar = `\`
 // [Query.WhereLike], [TypedStringColumn.LikeEscaped], [Like] — which declare
 // the escape character on the statement; in a plain
 // `Where(col, "LIKE", …)` the backslash keeps whatever meaning the engine
-// gives it by default.
+// gives it by default, until v2.0.0 declares the escape there too
+// (DEP-2026-009).
 //
 // The set is the portable one. SQL Server also reads `[` as the start of a
 // character class, but Oracle refuses an escape character in front of
@@ -124,8 +125,10 @@ func likePattern(g *SQLGuard, pattern string) error {
 // It differs from Where(column, "LIKE", pattern) in exactly that: the plain
 // form hands the engine an opaque pattern and lets the engine's own default
 // decide what a backslash means, which is not the same on SQLite, SQL Server
-// and Oracle as it is on PostgreSQL and MySQL (QK-25). The plain form is
-// unchanged — its meaning is published — and this one is the portable form.
+// and Oracle as it is on PostgreSQL and MySQL (QK-25). The plain form keeps
+// that meaning until v2.0.0, when it declares the escape as this one does
+// (DEP-2026-009); this one is the portable form, and a call that uses it
+// does not change.
 //
 // A pattern that ends in a dangling escape character is refused with
 // ErrInvalidQuery before it reaches the engine: PostgreSQL rejects it, other
@@ -179,7 +182,7 @@ func (q *Query[T]) whereLike(column, operator, pattern string) *Query[T] {
 
 // LikeEscaped builds `column LIKE pattern` with the escape character declared
 // on the statement — the typed counterpart of [Query.WhereLike]. [TypedStringColumn.Like]
-// keeps the plain, engine-default form.
+// keeps the plain, engine-default form until v2.0.0 (DEP-2026-009).
 func (c TypedStringColumn) LikeEscaped(pattern string) Predicate {
 	return Predicate{column: c.name, operator: "LIKE", value: pattern, escape: true}
 }
@@ -211,7 +214,8 @@ func (c TypedStringColumn) EndsWith(text string) Predicate {
 
 // Like is the AST form of [Query.WhereLike]: `lhs LIKE pattern` with the
 // escape character declared, so the pattern means the same on every engine.
-// The plain, engine-default form remains Cmp(lhs, "LIKE", Lit(pattern)).
+// The plain, engine-default form is Cmp(lhs, "LIKE", Lit(pattern)) until
+// v2.0.0, when it declares the escape too (DEP-2026-009).
 func Like(lhs Expr, pattern string) Expr { return likeExpr{lhs: lhs, pattern: pattern} }
 
 // NotLike is the negation of [Like].

@@ -76,6 +76,10 @@ func (q *BaseQuery) softDeletePredicate() *condition {
 // flows. The query's conditions — its Where calls, and the tenant predicate
 // under RowLevelSecurityClient — are ANDed with the key (QK-40).
 //
+// Changes in v2.0.0: on a model with a quark:"version" column Restore sends
+// no version predicate in v1 and leaves the version where it was; in 2.0 it
+// joins optimistic locking. See DEP-2026-004.
+//
 // Phase-1 F1-5. Returns ErrInvalidModel when the model has no deleted_at.
 func (q *Query[T]) Restore(entity *T) (int64, error) {
 	if q.client == nil {

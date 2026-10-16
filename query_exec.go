@@ -1122,7 +1122,7 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 		//
 		// Making it an error is the right end state and is a breaking change
 		// for anyone relying on the permissive engines, so it waits for the
-		// major QADR-0010 collects breaking changes into.
+		// major QADR-0010 collects breaking changes into (DEP-2026-008).
 		if len(q.selectCols) == 0 && len(q.selectExprs) == 0 && q.client != nil && q.client.logger != nil {
 			q.client.logger.Warn("GROUP BY without Select() or SelectExpr() emits SELECT *, which PostgreSQL, SQL Server, Oracle and MySQL in strict mode reject: only the grouped columns and aggregates may appear. Add Select(...) naming the grouped columns, or SelectExpr for the aggregates.",
 				"table", q.table, "group_by", strings.Join(q.groupBy, ", "))

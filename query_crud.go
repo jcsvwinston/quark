@@ -760,6 +760,11 @@ func (q *BaseQuery) scanReturning(row *sql.Row, v reflect.Value) error {
 // whose key is zero is inserted, as before; the conditions do not apply to
 // an insert. Returns the number of rows affected.
 //
+// Changes in v2.0.0: without conditions, an Update on a key no row has
+// still runs the AfterUpdate hook, writes the audit entry and publishes the
+// event in v1; in 2.0 it reports nothing, as it does under conditions. See
+// DEP-2026-005.
+//
 // CAUTION — recursive association save (AQ-03): Update recursively saves
 // every loaded association, exactly like Create. An entity read with
 // Find + Preload carries its children in memory, so updating one scalar
@@ -868,6 +873,10 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 // The query's conditions are ANDed with the key, as in Update: when no row
 // with the key satisfies them, UpdateFields writes nothing, returns (0, nil)
 // and runs no AfterUpdate hook, audit entry or event (QK-40).
+//
+// Changes in v2.0.0: without conditions, an UpdateFields on a key no row
+// has still runs the AfterUpdate hook, writes the audit entry and publishes
+// the event in v1; in 2.0 it reports nothing. See DEP-2026-005.
 //
 // Returns the number of rows affected.
 func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
@@ -1071,6 +1080,12 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 // resolved tenant into it, whatever value the map holds (QK-44); a different
 // value is logged (event quark.tenant.foreign_value_replaced), as Create and
 // the updates by entity do. The caller's map is not modified.
+//
+// Changes in v2.0.0: on a model with a quark:"version" column UpdateMap
+// sends no version predicate and leaves the version where it was in v1; in
+// 2.0 it joins optimistic locking with the other writes of a versioned
+// model. See DEP-2026-004.
+//
 // Returns the number of rows affected.
 func (q *Query[T]) UpdateMap(data map[string]any) (int64, error) {
 	if q.err != nil {
@@ -1372,6 +1387,15 @@ func isWarnableZero(v reflect.Value) bool {
 // RowLevelSecurityClient — are ANDed with the key (QK-40): when no row with
 // the key satisfies them, Delete removes nothing, returns (0, nil), and runs
 // no AfterDelete hook, audit entry or event.
+//
+// Changes in v2.0.0: without conditions, a Delete on a key no row has
+// still runs the AfterDelete hook, writes the audit entry and publishes the
+// event in v1; in 2.0 it reports nothing (DEP-2026-005). On a model with a
+// quark:"version" column the DELETE matches the key alone in v1, so a
+// stale entity removes the row another writer moved; in 2.0 it carries the
+// version predicate and returns ErrStaleEntity instead, for the soft delete
+// too (DEP-2026-004).
+//
 // Returns the number of rows affected.
 func (q *Query[T]) Delete(entity *T) (int64, error) {
 	if q.err != nil {
@@ -1458,6 +1482,11 @@ func (q *Query[T]) DeleteBy() (int64, error) {
 // The query's conditions are ANDed with the key, as in Delete: when no row
 // with the key satisfies them, HardDelete removes nothing, returns (0, nil),
 // and runs no AfterDelete hook, audit entry or event (QK-40).
+//
+// Changes in v2.0.0: as for [Query.Delete] — without conditions, a
+// HardDelete on a key no row has reports nothing (DEP-2026-005), and on a
+// versioned model a stale entity returns ErrStaleEntity instead of removing
+// the row (DEP-2026-004).
 func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	if q.err != nil {
 		return 0, q.err
@@ -1733,6 +1762,14 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 // PostgreSQL and SQLite, a MERGE with no update branch — the entity keeps
 // its key; MySQL and MariaDB report the conflicting row's. A row of another
 // tenant gives no key. The entity is never given the key of another row.
+//
+// Changes in v2.0.0: Upsert does the same on the six engines (DEP-2026-006):
+// an empty updateCols leaves a conflicting row as it was everywhere, SQL
+// Server and Oracle included, and a duplicate of a unique key other than
+// the conflict columns is ErrConstraintViolation everywhere, with nothing
+// written; the notice proposes those semantics and the 2.0 plan settles
+// them. On a model with a quark:"version" column the update branch also
+// joins optimistic locking (DEP-2026-004).
 //
 // Example:
 //
@@ -2539,6 +2576,10 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 //   - Postgres / SQLite / MySQL / MariaDB: multi-row INSERT … ON CONFLICT / ON DUPLICATE KEY
 //   - MSSQL: single MERGE … USING (VALUES …) AS src(…)
 //   - Oracle: N individual MERGE statements (Oracle IDENTITY restriction prevents bulk MERGE)
+//
+// Changes in v2.0.0: as for [Query.Upsert] — one behaviour on the six
+// engines (DEP-2026-006), and the update branch of a versioned model inside
+// optimistic locking (DEP-2026-004).
 //
 // Example:
 //

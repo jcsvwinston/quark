@@ -237,7 +237,7 @@ while the MERGE of SQL Server and Oracle (`buildMerge`,
 conflict columns, the key and `created_at` (`mergeInferredUpdateCols`). The
 godoc promised the MERGE behaviour everywhere; making the engines agree
 changes what callers see on one side, so it is a decision for the major
-(QADR-0010). Until then
+(QADR-0010): `DEP-2026-006` announces one behaviour for 2.0. Until then
 `internal/enginesuite/upsert_empty_update_cols_test.go`
 (`UpsertEmptyUpdateCols`) pins each engine. What QK-48 did fix: on
 PostgreSQL and SQLite the RETURNING after DO NOTHING had no row and `Upsert`
