@@ -363,6 +363,18 @@ func (q *Query[T]) Select(columns ...string) *Query[T] {
 }
 
 // Where adds a WHERE condition with AND logic.
+//
+// With the LIKE and NOT LIKE operators the pattern reaches the engine as
+// given, under the engine's own default escape: PostgreSQL, MySQL and
+// MariaDB read a backslash as an escape, SQLite, SQL Server and Oracle as a
+// character. [Query.WhereLike], [Query.WhereContains],
+// [Query.WhereStartsWith] and [Query.WhereEndsWith] declare the escape and
+// mean the same on every engine.
+//
+// Changes in v2.0.0: Where(col, "LIKE", pattern) declares ESCAPE '\' on
+// every engine, as WhereLike does; a backslash in the pattern then escapes
+// the character after it on SQLite, SQL Server and Oracle too. A call that
+// already uses the escaped forms does not change. See DEP-2026-009.
 func (q *Query[T]) Where(column string, operator string, value any) *Query[T] {
 	c := q.clone()
 	c.where = ownedAppend(c.where, condition{
@@ -754,7 +766,13 @@ func (q *Query[T]) Distinct() *Query[T] {
 	return c
 }
 
-// GroupBy adds a GROUP BY clause.
+// GroupBy adds a GROUP BY clause. Name the projection with [Query.Select] or
+// [Query.SelectExpr]: without one the statement is SELECT * … GROUP BY,
+// which only SQLite and MySQL in its permissive mode run, and the builder
+// logs a WARN naming the fix.
+//
+// Changes in v2.0.0: GroupBy without a projection is ErrInvalidQuery instead
+// of a warning. See DEP-2026-008.
 func (q *Query[T]) GroupBy(columns ...string) *Query[T] {
 	c := q.clone()
 	c.groupBy = ownedAppend(c.groupBy, columns...)

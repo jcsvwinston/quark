@@ -222,6 +222,10 @@ func (c *Client) createIndexOn(ctx context.Context, exec Executor, table, indexN
 // and ON DELETE SET NULL — returns an error wrapping ErrUnsupportedFeature
 // that names it, and nothing is sent.
 //
+// Changes in v2.0.0: MySQL and MariaDB accept SET DEFAULT and do not run it
+// — InnoDB refuses the delete or the update, as NO ACTION would — and in
+// 2.0 the action is refused there as it is on Oracle. See DEP-2026-007.
+//
 // Example:
 //
 //	client.AddForeignKey(ctx, "orders", "fk_orders_user", []string{"user_id"}, "users", []string{"id"}, "CASCADE", "SET NULL")

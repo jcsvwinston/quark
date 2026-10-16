@@ -375,6 +375,10 @@ const (
 // delete or the update, as NO ACTION would, and MariaDB records RESTRICT in
 // its catalog. They keep the default all the same, because refusing the
 // action would fail a statement that succeeds today.
+//
+// Changes in v2.0.0: SET DEFAULT is refused on MySQL and MariaDB before
+// anything is sent, as Oracle refuses it, with ErrUnsupportedFeature naming
+// the clause. See DEP-2026-007 in Quark's docs/deprecations.
 type ReferentialActioner interface {
 	ReferentialAction(event ReferentialEvent, action string) ActionSupport
 }
