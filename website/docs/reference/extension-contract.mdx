@@ -103,7 +103,6 @@ beside it.
 | `quarkdriver.ListenerFactory` | yes | stable | `quarkdriver.RegisterListenerFactory(engine, f)`. Called when an application opens a listener with `NewListenerFactory(client).CreateListener()`. |
 | `quarkdriver.Listener` (`quark.EventListener`) | yes | stable | What a `ListenerFactory` returns; the application receives it as a `quark.EventListener`. See [Events](../advanced/events). |
 | `quarkdriver.IdentifierValidator` | no | stable | What Quark hands a `ListenerFactory` to validate channel names with: its `SQLGuard`. |
-| `quarkdriver.NewListenerFunc` | no | internal-use | The listener contract before `ListenerFactory`, kept so a driver built against it still registers. Deprecated; removed in `v2`. |
 | `quarkdriver.Dialect` (`quark.Dialect`) | yes | stable | `quarkdriver.RegisterDialect(name, d)`, or `WithDialect(d)`. Every statement Quark writes goes through it. See [Dialects API](api/dialects). |
 | `quarkdriver.SavepointDialect` (`quark.SavepointDialect`) | yes | stable | Optional on a `Dialect`. `Tx.Savepoint`, `Tx.RollbackTo` and `Tx.ReleaseSavepoint`; without it, the ANSI statements. |
 | `quarkdriver.ColumnTypeMapper` (`quark.ColumnTypeMapper`) | yes | stable | Optional on a `Dialect`. Translates the column type of a hand-built plan before `ApplyPlan` writes it. |

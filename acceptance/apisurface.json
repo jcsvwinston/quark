@@ -5128,12 +5128,6 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
-      "name": "LookupListener",
-      "kind": "func",
-      "sig": "func(string) (NewListenerFunc, bool)"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "LookupListenerFactory",
       "kind": "func",
       "sig": "func(string) (ListenerFactory, bool)"
@@ -5164,21 +5158,9 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
-      "name": "MustRegisterListener",
-      "kind": "func",
-      "sig": "func(string, NewListenerFunc)"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
       "name": "MustRegisterListenerFactory",
       "kind": "func",
       "sig": "func(string, ListenerFactory)"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
-      "name": "NewListenerFunc",
-      "kind": "type",
-      "sig": "func(*sql.DB, *internal/guard.SQLGuard) (Listener, error)"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",
@@ -5239,12 +5221,6 @@
       "name": "RegisterDialect",
       "kind": "func",
       "sig": "func(string, Dialect)"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark/quarkdriver",
-      "name": "RegisterListener",
-      "kind": "func",
-      "sig": "func(string, NewListenerFunc) error"
     },
     {
       "pkg": "github.com/jcsvwinston/quark/quarkdriver",

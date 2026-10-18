@@ -33,7 +33,7 @@ func TestClassificationNeedsNoRegistration(t *testing.T) {
 // The listener, on the other hand, IS registered here: it needs the pgx
 // connection underneath database/sql, so it cannot live in the ORM.
 func TestRegistersTheListener(t *testing.T) {
-	if _, ok := quarkdriver.LookupListener("postgres"); !ok {
+	if _, ok := quarkdriver.LookupListenerFactory("postgres"); !ok {
 		t.Error("importing this module must register the LISTEN/NOTIFY listener")
 	}
 }
