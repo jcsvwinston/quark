@@ -40,6 +40,7 @@ func testWhereGuards(ctx context.Context, t *testing.T, client *quark.Client) {
 	t.Run("TenantScope", func(t *testing.T) { testWhereGuardTenantScope(ctx, t, client) })
 	t.Run("Versioned", func(t *testing.T) { testWhereGuardVersioned(ctx, t, client) })
 	t.Run("UnchangedRowUnderAGuard", func(t *testing.T) { testWhereGuardUnchangedRow(ctx, t, client) })
+	t.Run("MissingKeyWithoutConditions", func(t *testing.T) { testWhereGuardMissingKey(ctx, t, client) })
 	t.Run("SoftDeleteOr", func(t *testing.T) { testWhereGuardSoftDeleteOr(ctx, t, client) })
 }
 
@@ -390,7 +391,7 @@ func testWhereGuardVersioned(ctx context.Context, t *testing.T, client *quark.Cl
 // MySQL and MariaDB count changed rows
 // ---------------------------------------------------------------------------
 
-var wgeAfterUpdates atomic.Int64
+var wgeAfterUpdates, wgeAfterDeletes atomic.Int64
 
 type wgeHooked struct {
 	ID    int64  `db:"id" pk:"true"`
@@ -401,6 +402,7 @@ type wgeHooked struct {
 func (wgeHooked) TableName() string { return "wg_hooked" }
 
 func (*wgeHooked) AfterUpdate(context.Context) error { wgeAfterUpdates.Add(1); return nil }
+func (*wgeHooked) AfterDelete(context.Context) error { wgeAfterDeletes.Add(1); return nil }
 
 // An Update under a guard the row passes, writing the values the row already
 // has, matched the row: it is not an exclusion, on any engine. MySQL and
@@ -435,6 +437,69 @@ func testWhereGuardUnchangedRow(ctx context.Context, t *testing.T, client *quark
 	if got := wgeAfterUpdates.Load() - before; got != 0 {
 		t.Errorf("Update under an excluding guard on %s ran AfterUpdate %d times, want 0", engine, got)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// QK-46: a write without conditions on a key no row has
+// ---------------------------------------------------------------------------
+
+// A write by entity without conditions on a key no row has touches nothing,
+// returns (0, nil) and runs no After hook (QK-46, DEP-2026-005): Update,
+// UpdateFields, Delete and HardDelete. An unconditioned Update that matched
+// its row and changed nothing — zero changed rows on MySQL and MariaDB —
+// still runs it: the probe that tells the two apart runs on every engine.
+func testWhereGuardMissingKey(ctx context.Context, t *testing.T, client *quark.Client) {
+	engine := client.Dialect().Name()
+	dropTable(client, "wg_hooked")
+	if err := client.Migrate(ctx, &wgeHooked{}); err != nil {
+		t.Fatalf("migrate on %s: %v", engine, err)
+	}
+	t.Cleanup(func() { dropTable(client, "wg_hooked") })
+	seed := wgeHooked{Owner: "alice", Name: "a"}
+	if err := quark.For[wgeHooked](ctx, client).Create(&seed); err != nil {
+		t.Fatalf("seed on %s: %v", engine, err)
+	}
+	missing := seed.ID + 1000
+
+	writes := []struct {
+		name  string
+		hooks *atomic.Int64
+		write func(q *quark.Query[wgeHooked], e *wgeHooked) (int64, error)
+	}{
+		{"Update", &wgeAfterUpdates, func(q *quark.Query[wgeHooked], e *wgeHooked) (int64, error) { return q.Update(e) }},
+		{"UpdateFields", &wgeAfterUpdates, func(q *quark.Query[wgeHooked], e *wgeHooked) (int64, error) { return q.UpdateFields(e, "name") }},
+		{"Delete", &wgeAfterDeletes, func(q *quark.Query[wgeHooked], e *wgeHooked) (int64, error) { return q.Delete(e) }},
+		{"HardDelete", &wgeAfterDeletes, func(q *quark.Query[wgeHooked], e *wgeHooked) (int64, error) { return q.HardDelete(e) }},
+	}
+	for _, w := range writes {
+		t.Run(w.name, func(t *testing.T) {
+			before := w.hooks.Load()
+			n, err := w.write(quark.For[wgeHooked](ctx, client), &wgeHooked{ID: missing, Owner: "nobody", Name: "x"})
+			if err != nil || n != 0 {
+				t.Fatalf("%s on a missing key without conditions on %s = (%d, %v), want (0, nil)", w.name, engine, n, err)
+			}
+			if got := w.hooks.Load() - before; got != 0 {
+				t.Errorf("%s on a missing key without conditions on %s ran the After hook %d times, want 0", w.name, engine, got)
+			}
+			if n, err := quark.For[wgeHooked](ctx, client).Count(); err != nil || n != 1 {
+				t.Errorf("the table changed on %s: %d rows, %v", engine, n, err)
+			}
+		})
+	}
+
+	t.Run("UnchangedRowWithoutConditions", func(t *testing.T) {
+		same := wgeHooked{ID: seed.ID, Owner: "alice", Name: "a"}
+		for _, w := range writes[:2] {
+			before := wgeAfterUpdates.Load()
+			n, err := w.write(quark.For[wgeHooked](ctx, client), &same)
+			if err != nil || n > 1 {
+				t.Fatalf("unchanged %s without conditions on %s = (%d, %v)", w.name, engine, n, err)
+			}
+			if got := wgeAfterUpdates.Load() - before; got != 1 {
+				t.Errorf("unchanged %s without conditions on %s ran AfterUpdate %d times, want 1 (rows affected %d)", w.name, engine, got, n)
+			}
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

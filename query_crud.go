@@ -413,12 +413,16 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		}
 		rowsAffected, _ = res.RowsAffected()
 
-		// A guarded UPDATE that touched nothing: either no row with the key
-		// satisfies the conditions — then nothing was written and nothing
-		// more is (QK-40) — or the row passes them and something else held
-		// the write back: the version predicate below, or, on MySQL and
-		// MariaDB, values that were already there.
-		if rowsAffected == 0 && guarded {
+		// An UPDATE that touched nothing: either no row with the key
+		// satisfies the conditions — or, without conditions, no row has the
+		// key — then nothing was written and nothing more is (QK-40,
+		// QK-46); or the row is there and something else held the write
+		// back: the version predicate below, or, on MySQL and MariaDB,
+		// values that were already there. The probe tells the two apart.
+		// On a versioned model without conditions a missing key is the
+		// version conflict it has always been, and the probe is not run.
+		vfm := versionFieldOf(meta)
+		if rowsAffected == 0 && (guarded || vfm == nil) {
 			passes, err := dq.keyPassesWhere(ctx, dq.pkValueOf(elem))
 			if err != nil {
 				return 0, err
@@ -433,7 +437,7 @@ func (q *BaseQuery) saveAny(ctx context.Context, exec Executor, entity any, isUp
 		// writer bumped it after we loaded. Surface as ErrStaleEntity.
 		// Otherwise bump the in-memory version so a subsequent Update on
 		// the same struct sees the new value.
-		if vfm := versionFieldOf(meta); vfm != nil {
+		if vfm != nil {
 			if rowsAffected == 0 {
 				return 0, fmt.Errorf("%w: table %s pk=%v", ErrStaleEntity, meta.Table, getPKValue(elem, meta.PK))
 			}
@@ -753,17 +757,14 @@ func (q *BaseQuery) scanReturning(row *sql.Row, v reflect.Value) error {
 // The query's conditions — its Where calls, and the tenant predicate under
 // RowLevelSecurityClient — are ANDed with the key, so they can only narrow
 // which row is written (QK-40): Where("tenant_id", "=", t).Update(&e) writes
-// e's row only when it belongs to t. When no row with the key satisfies them,
-// Update writes nothing, returns (0, nil), and runs no AfterUpdate hook,
-// audit entry or event. On a model with a version column, ErrStaleEntity
-// means the row satisfies the conditions and its version moved. An entity
-// whose key is zero is inserted, as before; the conditions do not apply to
-// an insert. Returns the number of rows affected.
-//
-// Changes in v2.0.0: without conditions, an Update on a key no row has
-// still runs the AfterUpdate hook, writes the audit entry and publishes the
-// event in v1; in 2.0 it reports nothing, as it does under conditions. See
-// DEP-2026-005.
+// e's row only when it belongs to t. When no row with the key satisfies
+// them — or, without conditions, when no row has the key — Update writes
+// nothing, returns (0, nil), and runs no AfterUpdate hook, audit entry or
+// event (QK-46): nothing happened, so nothing is reported. On a model with
+// a version column, ErrStaleEntity means the row satisfies the conditions
+// and its version moved, or, without conditions, that no row has the key.
+// An entity whose key is zero is inserted, as before; the conditions do not
+// apply to an insert. Returns the number of rows affected.
 //
 // CAUTION — recursive association save (AQ-03): Update recursively saves
 // every loaded association, exactly like Create. An entity read with
@@ -871,12 +872,11 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 //	// emitted: UPDATE "users" SET "active" = $1 WHERE "id" = $2  args=[false, 42]
 //
 // The query's conditions are ANDed with the key, as in Update: when no row
-// with the key satisfies them, UpdateFields writes nothing, returns (0, nil)
-// and runs no AfterUpdate hook, audit entry or event (QK-40).
-//
-// Changes in v2.0.0: without conditions, an UpdateFields on a key no row
-// has still runs the AfterUpdate hook, writes the audit entry and publishes
-// the event in v1; in 2.0 it reports nothing. See DEP-2026-005.
+// with the key satisfies them — or, without conditions, when no row has the
+// key — UpdateFields writes nothing, returns (0, nil) and runs no
+// AfterUpdate hook, audit entry or event (QK-40, QK-46). On a model with a
+// version column a missing key without conditions is ErrStaleEntity, as for
+// Update.
 //
 // Returns the number of rows affected.
 func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
@@ -1037,11 +1037,14 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		rowsAffected, _ = result.RowsAffected()
 	}
 
-	// Nothing written under conditions: when no row with the key satisfies
-	// them, report zero rows and run no After hook, audit entry or event
-	// (QK-40). Before, a versioned model reported ErrStaleEntity here — a
-	// version conflict — for a row the caller's own Where had left out.
-	if rowsAffected == 0 && len(q.where) > 0 {
+	// Nothing written: when no row with the key satisfies the conditions —
+	// or, without conditions, no row has the key — report zero rows and run
+	// no After hook, audit entry or event (QK-40, QK-46). On MySQL and
+	// MariaDB the count is of changed rows, so the probe also tells a row
+	// that already held the values, which is reported. A versioned model
+	// without conditions skips the probe: a missing key is ErrStaleEntity
+	// there, as for Update.
+	if rowsAffected == 0 && (len(q.where) > 0 || versionFieldOf(q.meta) == nil) {
 		passes, err := q.keyPassesWhere(ctx, q.pkValueOf(v))
 		if err != nil {
 			return 0, fmt.Errorf("UpdateFields failed: %w", err)
@@ -1385,16 +1388,14 @@ func isWarnableZero(v reflect.Value) bool {
 //
 // The query's conditions — its Where calls, and the tenant predicate under
 // RowLevelSecurityClient — are ANDed with the key (QK-40): when no row with
-// the key satisfies them, Delete removes nothing, returns (0, nil), and runs
-// no AfterDelete hook, audit entry or event.
+// the key satisfies them — or, without conditions, when no row has the
+// key, or the row is already trashed — Delete removes nothing, returns
+// (0, nil), and runs no AfterDelete hook, audit entry or event (QK-46).
 //
-// Changes in v2.0.0: without conditions, a Delete on a key no row has
-// still runs the AfterDelete hook, writes the audit entry and publishes the
-// event in v1; in 2.0 it reports nothing (DEP-2026-005). On a model with a
-// quark:"version" column the DELETE matches the key alone in v1, so a
-// stale entity removes the row another writer moved; in 2.0 it carries the
-// version predicate and returns ErrStaleEntity instead, for the soft delete
-// too (DEP-2026-004).
+// Changes in v2.0.0: on a model with a quark:"version" column the DELETE
+// matches the key alone in v1, so a stale entity removes the row another
+// writer moved; in 2.0 it carries the version predicate and returns
+// ErrStaleEntity instead, for the soft delete too (DEP-2026-004).
 //
 // Returns the number of rows affected.
 func (q *Query[T]) Delete(entity *T) (int64, error) {
@@ -1436,10 +1437,11 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 		rows, err = q.hardDeleteByPK(pkValue)
 	}
 
-	// Under conditions, a delete that removed nothing found no row with the
-	// key that satisfies them: nothing happened, so nothing is reported to
-	// the hooks, the audit log or the event bus (QK-40).
-	if err == nil && rows == 0 && len(q.where) > 0 {
+	// A delete that removed nothing found no row with the key that satisfies
+	// the conditions, or no row with the key at all: nothing happened, so
+	// nothing is reported to the hooks, the audit log or the event bus
+	// (QK-40, QK-46).
+	if err == nil && rows == 0 {
 		return 0, nil
 	}
 
@@ -1480,13 +1482,12 @@ func (q *Query[T]) DeleteBy() (int64, error) {
 // HardDelete permanently deletes the entity by its primary key.
 //
 // The query's conditions are ANDed with the key, as in Delete: when no row
-// with the key satisfies them, HardDelete removes nothing, returns (0, nil),
-// and runs no AfterDelete hook, audit entry or event (QK-40).
+// with the key satisfies them — or, without conditions, when no row has the
+// key — HardDelete removes nothing, returns (0, nil), and runs no
+// AfterDelete hook, audit entry or event (QK-40, QK-46).
 //
-// Changes in v2.0.0: as for [Query.Delete] — without conditions, a
-// HardDelete on a key no row has reports nothing (DEP-2026-005), and on a
-// versioned model a stale entity returns ErrStaleEntity instead of removing
-// the row (DEP-2026-004).
+// Changes in v2.0.0: as for [Query.Delete] — on a versioned model a stale
+// entity returns ErrStaleEntity instead of removing the row (DEP-2026-004).
 func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	if q.err != nil {
 		return 0, q.err
@@ -1509,8 +1510,8 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	pkValue := q.pkValueOf(v)
 
 	rows, err := q.hardDeleteByPK(pkValue)
-	if err == nil && rows == 0 && len(q.where) > 0 {
-		// Nothing removed under conditions: nothing to report (QK-40).
+	if err == nil && rows == 0 {
+		// Nothing removed: nothing to report (QK-40, QK-46).
 		return 0, nil
 	}
 	if err == nil {

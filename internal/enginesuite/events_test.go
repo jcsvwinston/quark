@@ -225,21 +225,19 @@ func TestF5_6_EmitFailure_Tx_DoesNotPropagate(t *testing.T) {
 	}
 }
 
-// TestF5_6_Update_NoMatch_StillEmits documents the deliberate
-// decision that Update emits "updated" even when the WHERE matched
-// zero rows. Emission means "operation attempted and committed", not
-// "a row was mutated" — gating on rows-affected would be
-// engine-dependent (see events.mdx). A subscriber must not assume a
-// row changed.
-func TestF5_6_Update_NoMatch_StillEmits(t *testing.T) {
+// TestF5_6_Update_NoMatch_EmitsNothing: an Update on a key no row has
+// writes nothing, returns (0, nil) and publishes no event (QK-46,
+// DEP-2026-005). An event means "the write found its row and committed",
+// not "a value changed": a matched row that changed nothing still emits,
+// on the engines that count changed rows too (WhereGuards covers that per
+// engine). In v1 the ghost update emitted "updated".
+func TestF5_6_Update_NoMatch_EmitsNothing(t *testing.T) {
 	t.Parallel()
 	c := newBusClient(t)
 	bus := &captureBus{}
 	c.UseEventBus(bus)
 	ctx := context.Background()
 
-	// Update an entity whose PK does not exist → 0 rows affected,
-	// no error. The event still fires.
 	ghost := &busRow{ID: 9999, Name: "ghost"}
 	n, err := quark.For[busRow](ctx, c).Update(ghost)
 	if err != nil {
@@ -248,8 +246,8 @@ func TestF5_6_Update_NoMatch_StillEmits(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("expected 0 rows affected, got %d", n)
 	}
-	if got := joinStr(bus.snapshotKinds()); got != "updated" {
-		t.Errorf("kinds = %q, want %q (emit fires regardless of rows affected)", got, "updated")
+	if got := joinStr(bus.snapshotKinds()); got != "" {
+		t.Errorf("kinds = %q, want none: a write that found no row publishes nothing", got)
 	}
 }
 

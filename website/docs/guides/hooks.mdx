@@ -55,6 +55,14 @@ timestamp / default / derived-field hooks apply to batched rows too. Their
 `After*` hooks don't fire, and the WHERE-based deletes (`DeleteBatch`,
 `DeleteBy`) skip hooks entirely — see [Limitations](#limitations).
 
+An `After*` hook fires only when the write found its row. `Update`,
+`UpdateFields`, `Delete` and `HardDelete` on a key no row has, or on a row
+the query's `Where` conditions exclude, write nothing, return `(0, nil)` and
+run no `AfterUpdate` / `AfterDelete` — nor do they write an audit row or
+publish an event (QK-40, QK-46). The `Before*` hook has already run by then:
+it runs before the statement. See
+[Guarding a write by key](/docs/reference/api/crud#guarding-a-write-by-key-with-where).
+
 ## Hooks and transactions
 
 Outside a transaction, hooks run inline: `Before*` before the statement,

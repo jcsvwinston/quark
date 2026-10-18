@@ -23,12 +23,20 @@ import (
 // DeleteBy and UpdateFields already report when their conditions match
 // nothing — and runs no After hook, records no audit entry and emits no
 // event, because nothing happened.
+//
+// QK-46 (DEP-2026-005). The same holds without conditions: a write by entity
+// on a key no row has — Update, UpdateFields, Delete, HardDelete on a model
+// without a version column — touches nothing, returns (0, nil) and reports
+// nothing. In v1 it ran the After hook, wrote the audit row and published
+// the event as if it had written. On a versioned model a missing key without
+// conditions stays the version conflict it was: ErrStaleEntity.
 
-// errExcludedByWhere is how saveAny tells its caller that the row it was
-// asked to update does not satisfy the query's conditions, so nothing was
-// written. It never leaves the package: Update turns it into (0, nil) and
-// skips its After hook, audit entry and event; an association save treats it
-// as an association that was not written.
+// errExcludedByWhere is how saveAny tells its caller that no row with the
+// key satisfies the query's conditions — or, without conditions, that no
+// row has the key — so nothing was written. It never leaves the package:
+// Update turns it into (0, nil) and skips its After hook, audit entry and
+// event; an association save treats it as an association that was not
+// written.
 var errExcludedByWhere = errors.New("quark: no row with the key satisfies the query's conditions")
 
 // pkValueOf returns the entity's key in the shape keyWhere takes: the value
@@ -75,16 +83,17 @@ func (q *BaseQuery) keyWhere(pkValue any, argIndex int) (string, []any) {
 }
 
 // keyPassesWhere reports whether a row with the key satisfies the query's
-// conditions, scopes included. It runs on the primary, inside the caller's
-// transaction when there is one, and only where a guarded UPDATE cannot tell
-// by itself:
+// conditions, scopes included — without conditions, whether a row with the
+// key exists. It runs on the primary, inside the caller's transaction when
+// there is one, and only where an UPDATE cannot tell by itself:
 //
 //   - after it affected no row. On a versioned model that is the version
 //     predicate failing (ErrStaleEntity) when the row passes the conditions,
 //     and the conditions excluding it otherwise; ErrStaleEntity is not the
 //     answer for a row the caller's own conditions left out. On MySQL and
 //     MariaDB it also tells "matched, nothing changed" — their rows-affected
-//     counts changed rows, not matched ones — from "excluded".
+//     counts changed rows, not matched ones — from "excluded" and, without
+//     conditions, from "no such row" (QK-46).
 //   - before Update writes a loaded belongs_to association, which it writes
 //     ahead of the entity's own row: a row the conditions exclude must not
 //     have its associations rewritten either.

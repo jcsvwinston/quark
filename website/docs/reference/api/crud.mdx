@@ -182,19 +182,22 @@ The same holds for every write that addresses a row by key: `Update`,
 `RowLevelSecurityClient` tenant strategy the tenant predicate is one of the
 conditions, so these writes never touch another tenant's row.
 
-When no row with the key satisfies the conditions:
+When no row with the key satisfies the conditions — or, on a query without
+conditions, when no row has the key at all:
 
 | Outcome | Why |
 | --- | --- |
 | Nothing is written, and `(0, nil)` is returned. | The same answer `UpdateMap` and `DeleteBy` give when their conditions match nothing; check the count. |
 | `AfterUpdate` / `AfterDelete` do not run, no audit row is written, no event is emitted. | Nothing happened. `BeforeUpdate` / `BeforeDelete` have already run: they run before the statement. |
-| Loaded associations are not written either. | `Update` checks the row before writing a `belongs_to` association, which it writes ahead of the entity's row. |
-| A versioned model returns `(0, nil)`, not `ErrStaleEntity`. | `ErrStaleEntity` means the row satisfies the conditions and its version moved. `UpdateBatch` skips such a row the same way. |
+| Loaded associations are not written either, under conditions. | `Update` checks the row before writing a `belongs_to` association, which it writes ahead of the entity's row. |
+| A versioned model returns `(0, nil)`, not `ErrStaleEntity`, under conditions. | `ErrStaleEntity` means the row satisfies the conditions and its version moved. `UpdateBatch` skips such a row the same way. Without conditions a missing key on a versioned model is `ErrStaleEntity`, as it always was. |
 
-The answer does not say whether the row exists outside the conditions: a row
-of another tenant and a row that does not exist look the same. An entity
-whose key is zero is inserted, as before; the conditions do not apply to an
-insert.
+A write that matched its row and changed no value is reported as a write of
+one row on every engine: MySQL and MariaDB count changed rows, so Quark
+checks the row is there before reporting. The answer does not say whether
+the row exists outside the conditions: a row of another tenant and a row
+that does not exist look the same. An entity whose key is zero is inserted,
+as before; the conditions do not apply to an insert.
 
 Hooks: `BeforeUpdate` and `AfterUpdate`.
 
@@ -340,8 +343,9 @@ If the model does not have `deleted_at`, `Delete` performs a hard delete by
 primary key.
 
 The query's `Where` conditions are ANDed with the key, as for `Update`: when no
-row with the key satisfies them, nothing is deleted, `(0, nil)` is returned and
-`AfterDelete`, the audit row and the event are skipped. See
+row with the key satisfies them — or, without conditions, when no row has the
+key or the row is already trashed — nothing is deleted, `(0, nil)` is returned
+and `AfterDelete`, the audit row and the event are skipped. See
 [Guarding a write by key](#guarding-a-write-by-key-with-where).
 
 ```go

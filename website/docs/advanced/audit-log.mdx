@@ -123,6 +123,11 @@ excluded (auditing the audit log would recurse).
 - **Bulk and WHERE-based methods aren't audited** (`CreateBatch`, `UpdateBatch`,
   `DeleteBatch`, `DeleteBy`, `UpdateMap`) — no per-row entity to diff. Loop the
   single-row methods if you need a trail.
+- **A write that touches no row writes no audit row.** `Update`, `UpdateFields`,
+  `Delete` and `HardDelete` on a key no row has, or on a row the query's
+  `Where` conditions exclude, return `(0, nil)` and record nothing (QK-40,
+  QK-46): an audit row saying "deleted" for a row that was not deleted would
+  be a false record.
 - **Plain `Update` records new values only**; the `{old, new}` delta needs
   `Tracked.Save`.
 - **No automatic retention** — `quark_audit` grows unbounded; schedule your own
