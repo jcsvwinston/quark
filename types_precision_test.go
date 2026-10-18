@@ -35,7 +35,7 @@ func TestPrecisionScaleRefinesFloatsOnly(t *testing.T) {
 		{"postgres", "DECIMAL(10,2)", "DECIMAL(5,4)", "DECIMAL(8)", "TEXT"},
 		{"mysql", "DECIMAL(10,2)", "DECIMAL(5,4)", "DECIMAL(8)", "VARCHAR(255)"},
 		{"mssql", "DECIMAL(10,2)", "DECIMAL(5,4)", "DECIMAL(8)", "NVARCHAR(255)"},
-		{"oracle", "NUMBER(10,2)", "NUMBER(5,4)", "NUMBER(8)", "VARCHAR2(255)"},
+		{"oracle", "NUMBER(10,2)", "NUMBER(5,4)", "NUMBER(8)", "VARCHAR2(255 CHAR)"},
 	} {
 		typ := reflect.TypeOf(s7Row{})
 		get := func(field string, opts migrate.TypeOptions) string {

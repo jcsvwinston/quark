@@ -218,13 +218,10 @@ func (c *Client) createIndexOn(ctx context.Context, exec Executor, table, indexN
 // the engine applies its default, NO ACTION. They are written as the
 // dialect's engine takes them (quarkdriver.ReferentialActioner): Oracle has
 // no clause for NO ACTION, so it is left out, and an action the engine does
-// not have — RESTRICT on SQL Server; on Oracle anything but ON DELETE CASCADE
-// and ON DELETE SET NULL — returns an error wrapping ErrUnsupportedFeature
-// that names it, and nothing is sent.
-//
-// Changes in v2.0.0: MySQL and MariaDB accept SET DEFAULT and do not run it
-// — InnoDB refuses the delete or the update, as NO ACTION would — and in
-// 2.0 the action is refused there as it is on Oracle. See DEP-2026-007.
+// not have — RESTRICT on SQL Server; SET DEFAULT on MySQL and MariaDB, whose
+// InnoDB accepts the clause and runs NO ACTION instead; on Oracle anything
+// but ON DELETE CASCADE and ON DELETE SET NULL — returns an error wrapping
+// ErrUnsupportedFeature that names it, and nothing is sent.
 //
 // Example:
 //

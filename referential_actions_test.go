@@ -17,7 +17,8 @@ import (
 // UPDATE and ON DELETE NO ACTION, and Quark passed both through, so the DDL
 // failed on the engine; now NO ACTION is left out where the engine has no
 // clause for it, and an action the engine lacks is refused, named, before
-// any statement is sent.
+// any statement is sent. MySQL and MariaDB accept SET DEFAULT and run NO
+// ACTION instead, so it is refused there too (DEP-2026-007, QK-60).
 
 func TestReferentialClauses(t *testing.T) {
 	for _, tc := range []struct {
@@ -30,9 +31,17 @@ func TestReferentialClauses(t *testing.T) {
 		// Without a ReferentialActioner every action is written as given.
 		{"postgres writes all", PostgreSQL(), "SET DEFAULT", "RESTRICT", " ON DELETE SET DEFAULT ON UPDATE RESTRICT", nil},
 		{"postgres writes as given", PostgreSQL(), "cascade", "", " ON DELETE cascade", nil},
-		{"mysql writes all", MySQL(), "SET NULL", "CASCADE", " ON DELETE SET NULL ON UPDATE CASCADE", nil},
 		{"sqlite writes all", SQLite(), "NO ACTION", "SET DEFAULT", " ON DELETE NO ACTION ON UPDATE SET DEFAULT", nil},
 		{"empty writes nothing", Oracle(), "", "", "", nil},
+
+		// MySQL and MariaDB write four and have no SET DEFAULT: InnoDB
+		// accepts the clause and runs NO ACTION instead.
+		{"mysql writes its four", MySQL(), "SET NULL", "CASCADE", " ON DELETE SET NULL ON UPDATE CASCADE", nil},
+		{"mysql writes restrict and no action", MySQL(), "RESTRICT", "NO ACTION", " ON DELETE RESTRICT ON UPDATE NO ACTION", nil},
+		{"mysql refuses set default", MySQL(), "SET DEFAULT", "", "", []string{"ON DELETE SET DEFAULT"}},
+		{"mysql refuses set default on update", MySQL(), "CASCADE", "set  default", "", []string{"ON UPDATE SET DEFAULT"}},
+		{"mariadb writes its four", MariaDB(), "CASCADE", "SET NULL", " ON DELETE CASCADE ON UPDATE SET NULL", nil},
+		{"mariadb refuses set default", MariaDB(), "SET DEFAULT", "SET DEFAULT", "", []string{"ON DELETE SET DEFAULT", "ON UPDATE SET DEFAULT"}},
 
 		// SQL Server has no RESTRICT.
 		{"mssql writes its four", MSSQL(), "SET DEFAULT", "NO ACTION", " ON DELETE SET DEFAULT ON UPDATE NO ACTION", nil},
@@ -174,8 +183,8 @@ func TestBuiltinsAnswerReferentialActions(t *testing.T) {
 		d    Dialect
 		asks bool
 	}{
-		{PostgreSQL(), false}, {MySQL(), false}, {MariaDB(), false},
-		{SQLite(), false}, {MSSQL(), true}, {Oracle(), true},
+		{PostgreSQL(), false}, {SQLite(), false},
+		{MySQL(), true}, {MariaDB(), true}, {MSSQL(), true}, {Oracle(), true},
 	} {
 		if _, ok := tc.d.(quarkdriver.ReferentialActioner); ok != tc.asks {
 			t.Errorf("%s: ReferentialActioner %v, want %v", tc.d.Name(), ok, tc.asks)

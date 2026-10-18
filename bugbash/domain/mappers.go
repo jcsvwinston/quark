@@ -23,7 +23,7 @@ func init() {
 		case "postgres":
 			return "UUID"
 		case "oracle":
-			return "VARCHAR2(36)"
+			return "VARCHAR2(36 CHAR)"
 		default: // mysql, mariadb, sqlite, mssql
 			// NOT mssql UNIQUEIDENTIFIER: SQL Server stores a GUID's first
 			// three groups little-endian while google/uuid is big-endian, so

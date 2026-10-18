@@ -459,15 +459,11 @@ other one cannot get it from its dialect today.
   SQL Server's `[` is escaped in the text only under the name `mssql`. An engine
   whose literals treat a backslash as MySQL's do, or with metacharacters of its
   own, gets a clause or a pattern it does not read as Quark means.
-- **Referential actions.** The `ON DELETE` and `ON UPDATE` a model declares reach
-  the DDL as written. No interface lets a dialect refuse or translate one, so an
-  engine that does not accept an action fails the statement. Oracle is the
-  built-in example: it refuses `ON UPDATE` and `ON DELETE NO ACTION`.
-- **The unit of a length.** `ColumnSpec.Size` is the `size=N` of a field's tag,
-  and the contract does not say whether `N` counts characters or bytes. The
-  dialect's type decides — Oracle's built-in `VARCHAR2(n)` counts bytes, so a
-  string of `n` characters that are not all ASCII can be refused there — and the
-  kit does not check which.
+- **The unit of a length.** `ColumnSpec.Size` is the `size=N` of a field's tag
+  and counts characters: the six built-in dialects render it so, Oracle's as
+  `VARCHAR2(n CHAR)` because its bare `VARCHAR2(n)` counts bytes. The kit does
+  not check which unit a driver's type uses, so a driver whose engine counts
+  bytes by default declares the unit in the type itself.
 - **Features tied to one engine.** The `LISTEN`/`NOTIFY` listener is
   PostgreSQL's only: `CreateListener` refuses any other dialect before it looks
   for a `quarkdriver.ListenerFactory`, so a factory a driver registers for its

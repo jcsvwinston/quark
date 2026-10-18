@@ -180,8 +180,9 @@ auto-increment key (`AutoIncrementer`) and how it creates only what is missing
 (`IdempotentDDL`); ApplyPlan asks `SupportsTransactionalDDL()`, and for its
 statements `ColumnAlterer`, `ObjectDropper` and `TableRebuilder` (SQLite's
 rebuild), implemented in `dialect_alter.go`; and every foreign key's actions
-go through `ReferentialActioner` (QK-49: SQL Server has no RESTRICT, Oracle
-only ON DELETE CASCADE / SET NULL with NO ACTION left out), answered in
+go through `ReferentialActioner` (QK-49: SQL Server has no RESTRICT, MySQL
+and MariaDB no SET DEFAULT — DEP-2026-007 —, Oracle only ON DELETE CASCADE /
+SET NULL with NO ACTION left out), answered in
 `dialect_schema.go` and checked for a whole plan before its first op. Oracle's
 `SupportsTransactionalDDL()` answered true until Q2 made it matter; it is
 false. The six built-ins implement them in `dialect_schema.go` by
@@ -335,10 +336,11 @@ Mezcla SQL builder + DDL + procedures + JSON. Cuando MariaDB añade `CreateSeque
   `query_exec.go`: generated keys, MERGE upserts, the implicit ORDER BY of
   OFFSET/FETCH, the RECURSIVE keyword, Oracle's lock with a row limit), the
   LIKE escape tail and `[` escaping by name (`like.go`), the batch
-  bind-parameter ceiling by name, referential actions written unasked (Oracle
-  refuses `ON UPDATE` and `ON DELETE NO ACTION`), and the unit of a length
-  (`VARCHAR2(n)` counts bytes). Closing one removes its bullet from the guide
-  in the same change.
+  bind-parameter ceiling by name, and the unit of a length, which the kit does
+  not check (the built-ins count characters: Oracle renders `VARCHAR2(n CHAR)`
+  and its introspection reads `CHAR_USED`, DEP-2026-010). Closing one removes
+  its bullet from the guide in the same change (referential actions closed
+  with `ReferentialActioner`, QK-49, the same on the six since DEP-2026-007).
 
 ## Tests críticos a no romper
 

@@ -247,7 +247,7 @@ asks — it unwraps pointers, `sql.Null[T]`, `quark.JSON[T]` and
 
 | Kind | Go types | Portable type | PostgreSQL | MySQL / MariaDB | SQLite | SQL Server | Oracle |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `KindString` | `string` | `VARCHAR(255)`, `VARCHAR(N)` with `size=N` | `TEXT` | `VARCHAR(255)` | `TEXT` | `NVARCHAR(255)` | `VARCHAR2(255)` |
+| `KindString` | `string` | `VARCHAR(255)`, `VARCHAR(N)` with `size=N` | `TEXT` | `VARCHAR(255)` | `TEXT` | `NVARCHAR(255)` | `VARCHAR2(255 CHAR)` |
 | `KindText` | Quark's own long text | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
 | `KindInt16` / `KindInt32` / `KindInt64` | integers by width, `time.Duration` | `SMALLINT` / `INTEGER` / `BIGINT` | same | same | same | same | `NUMBER(5)` / `NUMBER(10)` / `NUMBER(19)` |
 | `KindFloat32` / `KindFloat64` | `float32` / `float64` | `REAL` / `DOUBLE PRECISION` | same | `REAL` / `DOUBLE` | `REAL` / `REAL` | `REAL` / `FLOAT(53)` | `BINARY_FLOAT` / `BINARY_DOUBLE` |
@@ -256,8 +256,8 @@ asks — it unwraps pointers, `sql.Null[T]`, `quark.JSON[T]` and
 | `KindTime` | `time.Time` | `TIMESTAMP` | `TIMESTAMP` | `DATETIME` | `DATETIME` | `DATETIME2` | `TIMESTAMP` |
 | `KindBytes` | `[]byte` | `BLOB` | `BYTEA` | `BLOB` | `BLOB` | `VARBINARY(MAX)` | `BLOB` |
 | `KindJSON` | `quark.JSON[T]`, `quark.Array[T]`, maps, slices of non-scalars | `TEXT` | `JSONB` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
-| `KindUUID` | 16-byte arrays (`uuid.UUID`) | `CHAR(36)` | `UUID` | `CHAR(36)` | `UUID` | `NCHAR(36)` | `VARCHAR2(36)` |
-| `KindIP` | `net.IP` | `VARCHAR(45)` | `INET` | `VARCHAR(45)` | `TEXT` | `NVARCHAR(45)` | `VARCHAR2(45)` |
+| `KindUUID` | 16-byte arrays (`uuid.UUID`) | `CHAR(36)` | `UUID` | `CHAR(36)` | `UUID` | `NCHAR(36)` | `VARCHAR2(36 CHAR)` |
+| `KindIP` | `net.IP` | `VARCHAR(45)` | `INET` | `VARCHAR(45)` | `TEXT` | `NVARCHAR(45)` | `VARCHAR2(45 CHAR)` |
 | `KindArray` | slices of a scalar | `TEXT` | the element type `[]` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
 | `KindRange` | `quark.Range[T]` | `TEXT` | `TSTZRANGE`, `INT8RANGE`, `INT4RANGE`, `NUMRANGE` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
 | `KindOther` | anything else | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` |
@@ -298,8 +298,8 @@ and no `ADD`/`DROP CONSTRAINT`, so a column change, a foreign key and a `CHECK`
 rebuild the table inside the plan's transaction. The rebuild reads SQLite's own
 catalog, so only an engine that keeps that catalog can answer true.
 
-SQL Server and Oracle implement `ReferentialActioner`, because each lacks
-actions of the SQL standard's five. Quark asks about every action a foreign key
+MySQL, MariaDB, SQL Server and Oracle implement `ReferentialActioner`, because
+each lacks actions of the SQL standard's five. Quark asks about every action a foreign key
 names, upper case and single-spaced, and acts on the answer: `ActionWritten`
 writes the clause as the caller gave it, `ActionImplied` leaves it out because
 the engine does that action for a foreign key that names none, and
@@ -314,7 +314,7 @@ changes nothing, on an engine without transactional DDL too.
 | `RESTRICT` | written | written | refused | refused | refused |
 | `CASCADE` | written | written | written | written | refused |
 | `SET NULL` | written | written | written | written | refused |
-| `SET DEFAULT` | written | written, not done (below) | written | refused | refused |
+| `SET DEFAULT` | written | refused | written | refused | refused |
 
 Oracle has no `ON UPDATE` clause, and no clause for `NO ACTION` in either
 (ORA-02000 for both); `ON DELETE SET DEFAULT` is ORA-03001. SQL Server has no
@@ -325,11 +325,12 @@ keys of the schema, not on one action, and the engine's error says so.
 
 MySQL and MariaDB accept `SET DEFAULT` and do not do it: InnoDB refuses the
 delete or the update, as `NO ACTION` would, and MariaDB records `RESTRICT` in
-its catalog, so a `Schema` that declares `SET DEFAULT` keeps planning the
-foreign key again there. Their
-dialects write it all the same, because refusing it would fail a statement that
-succeeds today. Declare `NO ACTION`, or `RESTRICT`, which is what the engine
-does.
+its catalog, so a `Schema` that declared `SET DEFAULT` planned the foreign key
+again on every run there. Their dialects refuse it the way Oracle does, before
+any statement is sent, so the action means the same on the six engines
+(DEP-2026-007). Declare `NO ACTION`, or `RESTRICT`, which is what the engine
+does, or `SET NULL` if the column may be cleared. A foreign key already in the
+database keeps whatever its catalog holds.
 
 ### Wrapping a built-in dialect
 
@@ -366,9 +367,10 @@ wrapper of `quark.PostgreSQL()`, like the one above, forwards `ColumnTyper`,
 `AutoIncrementer`, `ColumnAlterer` and `SchemaIntrospector` — and
 `MigrationLocker` too, for the migrator's lock, which the example leaves out. A
 wrapper of `quark.SQLite()` forwards `ColumnTyper`, `AutoIncrementer`,
-`TableRebuilder` and `SchemaIntrospector`. A wrapper of `quark.MSSQL()` or
-`quark.Oracle()` also forwards `ReferentialActioner`, or its foreign keys are
-written with the actions its engine refuses.
+`TableRebuilder` and `SchemaIntrospector`. A wrapper of `quark.MySQL()`,
+`quark.MariaDB()`, `quark.MSSQL()` or `quark.Oracle()` also forwards
+`ReferentialActioner`, or its foreign keys are written with the actions its
+engine refuses.
 
 
 ## Checking a dialect

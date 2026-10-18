@@ -17,7 +17,7 @@ func controlsTipos() []control {
 			want:   present,
 			note: "Closed at A8 S5: a 16-byte array — the shape of google/uuid.UUID — gets UUID on " +
 				"PostgreSQL and on SQLite (a declared type name there), CHAR(36) on MySQL/MariaDB, " +
-				"VARCHAR2(36) on Oracle and NCHAR(36) on SQL Server, whose UNIQUEIDENTIFIER the driver " +
+				"VARCHAR2(36 CHAR) on Oracle and NCHAR(36) on SQL Server, whose UNIQUEIDENTIFIER the driver " +
 				"scans in the engine's mixed-endian byte order. The value travels through the type's " +
 				"own Valuer/Scanner and round-trips.",
 			probe: probeTiposUUIDNative,

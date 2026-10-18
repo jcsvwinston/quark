@@ -65,6 +65,9 @@ func SharedSuite(t *testing.T, client *quark.Client) {
 	t.Run("OnDeleteSetDefault", func(t *testing.T) {
 		testOnDeleteSetDefault(ctx, t, client)
 	})
+	t.Run("OracleLengthSemantics", func(t *testing.T) {
+		testOracleLengthSemantics(ctx, t, client)
+	})
 
 	t.Run("Relationships", func(t *testing.T) {
 		testRelationships(ctx, t, client)
@@ -410,7 +413,7 @@ func testPlanConstraints(ctx context.Context, t *testing.T, client *quark.Client
 	case "mssql":
 		intType, textType = "BIGINT", "NVARCHAR(255)"
 	case "oracle":
-		intType, textType = "NUMBER(19)", "VARCHAR2(255)"
+		intType, textType = "NUMBER(19)", "VARCHAR2(255 CHAR)"
 	}
 	desired := quark.Schema{Tables: []quark.Table{
 		{
@@ -516,7 +519,7 @@ func testAlterColumn(ctx context.Context, t *testing.T, client *quark.Client) {
 	case "mssql":
 		intType, textType = "BIGINT", "NVARCHAR(255)"
 	case "oracle":
-		intType, textType = "NUMBER(19)", "VARCHAR2(255)"
+		intType, textType = "NUMBER(19)", "VARCHAR2(255 CHAR)"
 	}
 	// No primary key yet: the key delta ADDS it, on a column that is NOT
 	// NULL from the start (SQL Server and Oracle require that).
@@ -893,7 +896,7 @@ func testRaw(ctx context.Context, t *testing.T, client *quark.Client) {
 	case "mysql", "mariadb":
 		sqlType = "VARCHAR(255)"
 	case "oracle":
-		sqlType = "VARCHAR2(255)"
+		sqlType = "VARCHAR2(255 CHAR)"
 	case "mssql":
 		sqlType = "NVARCHAR(MAX)"
 	}

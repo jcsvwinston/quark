@@ -1645,7 +1645,11 @@ func pgListChecks(ctx context.Context, exec Executor, table string) ([]Check, er
 //   - NUMBER reassembly: precision/scale are glued back on
 //     (`NUMBER(19)`, `NUMBER(10,2)`); a NULL precision stays bare
 //     `NUMBER`. CHAR/VARCHAR2 use CHAR_LENGTH so the displayed length
-//     matches the DDL the migrator wrote.
+//     matches the DDL the migrator wrote, and carry the length semantics
+//     CHAR_USED records — `VARCHAR2(40 CHAR)` or `VARCHAR2(40 BYTE)` — so
+//     a byte column under a model that declares a length is a type change
+//     Diff can see (DEP-2026-010). NVARCHAR2/NCHAR always count characters
+//     and take no qualifier.
 //   - NOT NULL is stored as a system CHECK constraint (`"COL" IS NOT
 //     NULL`); those are filtered out of Checks — they are surfaced via
 //     Column.Nullable, not as user CHECK constraints.
@@ -1748,6 +1752,7 @@ func oracleListColumns(ctx context.Context, exec Executor, table string) ([]Colu
 		SELECT column_name,
 		       data_type,
 		       char_length,
+		       char_used,
 		       data_precision,
 		       data_scale,
 		       nullable,
@@ -1766,17 +1771,18 @@ func oracleListColumns(ctx context.Context, exec Executor, table string) ([]Colu
 			name      string
 			dataType  string
 			charLen   sql.NullInt64
+			charUsed  sql.NullString
 			precision sql.NullInt64
 			scale     sql.NullInt64
 			nullable  string
 			dflt      sql.NullString
 		)
-		if err := rows.Scan(&name, &dataType, &charLen, &precision, &scale, &nullable, &dflt); err != nil {
+		if err := rows.Scan(&name, &dataType, &charLen, &charUsed, &precision, &scale, &nullable, &dflt); err != nil {
 			return nil, err
 		}
 		col := Column{
 			Name:       strings.ToLower(name),
-			Type:       oracleReassembleType(dataType, charLen, precision, scale),
+			Type:       oracleReassembleType(dataType, charLen, charUsed, precision, scale),
 			Nullable:   nullable == "Y",
 			PrimaryKey: pk[strings.ToLower(name)],
 		}
@@ -1971,10 +1977,14 @@ func oracleListChecks(ctx context.Context, exec Executor, table string) ([]Check
 // oracleReassembleType glues precision/scale or length back onto the
 // bare DATA_TYPE from USER_TAB_COLUMNS. NUMBER(p,s) keeps both when the
 // scale is non-zero; NUMBER(p) when scale is zero/absent; bare NUMBER
-// when precision is NULL. VARCHAR2/CHAR/NVARCHAR2 use CHAR_LENGTH.
-// Everything else (CLOB, BLOB, DATE, TIMESTAMP variants, FLOAT) keeps
-// the catalog's DATA_TYPE verbatim.
-func oracleReassembleType(dataType string, charLen, precision, scale sql.NullInt64) string {
+// when precision is NULL. VARCHAR2/CHAR/NVARCHAR2/NCHAR use CHAR_LENGTH, and
+// VARCHAR2/CHAR carry the length semantics CHAR_USED records: `C` is
+// `VARCHAR2(n CHAR)`, what the migrator writes, and `B` is
+// `VARCHAR2(n BYTE)`, a column created under Oracle's default semantics
+// before 2.0 or by hand; NVARCHAR2/NCHAR always count characters and admit
+// no qualifier. Everything else (CLOB, BLOB, DATE, TIMESTAMP variants,
+// FLOAT) keeps the catalog's DATA_TYPE verbatim.
+func oracleReassembleType(dataType string, charLen sql.NullInt64, charUsed sql.NullString, precision, scale sql.NullInt64) string {
 	switch dataType {
 	case "NUMBER":
 		if !precision.Valid {
@@ -1984,7 +1994,17 @@ func oracleReassembleType(dataType string, charLen, precision, scale sql.NullInt
 			return fmt.Sprintf("NUMBER(%d)", precision.Int64)
 		}
 		return fmt.Sprintf("NUMBER(%d,%d)", precision.Int64, scale.Int64)
-	case "VARCHAR2", "CHAR", "NVARCHAR2", "NCHAR":
+	case "VARCHAR2", "CHAR":
+		if charLen.Valid && charLen.Int64 > 0 {
+			switch charUsed.String {
+			case "C":
+				return fmt.Sprintf("%s(%d CHAR)", dataType, charLen.Int64)
+			case "B":
+				return fmt.Sprintf("%s(%d BYTE)", dataType, charLen.Int64)
+			}
+			return fmt.Sprintf("%s(%d)", dataType, charLen.Int64)
+		}
+	case "NVARCHAR2", "NCHAR":
 		if charLen.Valid && charLen.Int64 > 0 {
 			return fmt.Sprintf("%s(%d)", dataType, charLen.Int64)
 		}

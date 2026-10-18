@@ -46,7 +46,7 @@ func TestSQLType_StringPK_UUID(t *testing.T) {
 		{"mysql", "VARCHAR(36) PRIMARY KEY"},
 		{"mariadb", "VARCHAR(36) PRIMARY KEY"},
 		{"mssql", "NVARCHAR(36) PRIMARY KEY"},
-		{"oracle", "VARCHAR2(36) PRIMARY KEY"},
+		{"oracle", "VARCHAR2(36 CHAR) PRIMARY KEY"},
 	}
 
 	for _, tc := range cases {
@@ -69,7 +69,7 @@ func TestSQLType_NonPK_String(t *testing.T) {
 		{"mysql", "VARCHAR(255)"},
 		{"mariadb", "VARCHAR(255)"},
 		{"mssql", "NVARCHAR(255)"},
-		{"oracle", "VARCHAR2(255)"},
+		{"oracle", "VARCHAR2(255 CHAR)"},
 	}
 
 	for _, tc := range cases {
