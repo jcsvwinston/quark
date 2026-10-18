@@ -49,7 +49,7 @@ func testOnDeleteSetDefault(ctx context.Context, t *testing.T, client *quark.Cli
 	case "mssql":
 		intType, textType = "BIGINT", "NVARCHAR(16)"
 	case "oracle":
-		intType, textType = "NUMBER(19)", "VARCHAR2(16)"
+		intType, textType = "NUMBER(19)", "VARCHAR2(16 CHAR)"
 	}
 	keep := "'keep'"
 	desired := quark.Schema{Tables: []quark.Table{

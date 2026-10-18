@@ -327,8 +327,8 @@ func ensureTenantRegistry(ctx context.Context, client *quark.Client) error {
 			)`
 	case "oracle":
 		ddl = `CREATE TABLE quark_tenants (
-			id          VARCHAR2(255) NOT NULL,
-			strategy    VARCHAR2(50)  DEFAULT 'db_per_tenant' NOT NULL,
+			id          VARCHAR2(255 CHAR) NOT NULL,
+			strategy    VARCHAR2(50 CHAR)  DEFAULT 'db_per_tenant' NOT NULL,
 			created_at  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP NOT NULL,
 			CONSTRAINT pk_quark_tenants PRIMARY KEY (id)
 		)`

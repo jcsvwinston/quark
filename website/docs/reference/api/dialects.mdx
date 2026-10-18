@@ -247,7 +247,7 @@ asks — it unwraps pointers, `sql.Null[T]`, `quark.JSON[T]` and
 
 | Kind | Go types | Portable type | PostgreSQL | MySQL / MariaDB | SQLite | SQL Server | Oracle |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `KindString` | `string` | `VARCHAR(255)`, `VARCHAR(N)` with `size=N` | `TEXT` | `VARCHAR(255)` | `TEXT` | `NVARCHAR(255)` | `VARCHAR2(255)` |
+| `KindString` | `string` | `VARCHAR(255)`, `VARCHAR(N)` with `size=N` | `TEXT` | `VARCHAR(255)` | `TEXT` | `NVARCHAR(255)` | `VARCHAR2(255 CHAR)` |
 | `KindText` | Quark's own long text | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
 | `KindInt16` / `KindInt32` / `KindInt64` | integers by width, `time.Duration` | `SMALLINT` / `INTEGER` / `BIGINT` | same | same | same | same | `NUMBER(5)` / `NUMBER(10)` / `NUMBER(19)` |
 | `KindFloat32` / `KindFloat64` | `float32` / `float64` | `REAL` / `DOUBLE PRECISION` | same | `REAL` / `DOUBLE` | `REAL` / `REAL` | `REAL` / `FLOAT(53)` | `BINARY_FLOAT` / `BINARY_DOUBLE` |
@@ -256,8 +256,8 @@ asks — it unwraps pointers, `sql.Null[T]`, `quark.JSON[T]` and
 | `KindTime` | `time.Time` | `TIMESTAMP` | `TIMESTAMP` | `DATETIME` | `DATETIME` | `DATETIME2` | `TIMESTAMP` |
 | `KindBytes` | `[]byte` | `BLOB` | `BYTEA` | `BLOB` | `BLOB` | `VARBINARY(MAX)` | `BLOB` |
 | `KindJSON` | `quark.JSON[T]`, `quark.Array[T]`, maps, slices of non-scalars | `TEXT` | `JSONB` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
-| `KindUUID` | 16-byte arrays (`uuid.UUID`) | `CHAR(36)` | `UUID` | `CHAR(36)` | `UUID` | `NCHAR(36)` | `VARCHAR2(36)` |
-| `KindIP` | `net.IP` | `VARCHAR(45)` | `INET` | `VARCHAR(45)` | `TEXT` | `NVARCHAR(45)` | `VARCHAR2(45)` |
+| `KindUUID` | 16-byte arrays (`uuid.UUID`) | `CHAR(36)` | `UUID` | `CHAR(36)` | `UUID` | `NCHAR(36)` | `VARCHAR2(36 CHAR)` |
+| `KindIP` | `net.IP` | `VARCHAR(45)` | `INET` | `VARCHAR(45)` | `TEXT` | `NVARCHAR(45)` | `VARCHAR2(45 CHAR)` |
 | `KindArray` | slices of a scalar | `TEXT` | the element type `[]` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
 | `KindRange` | `quark.Range[T]` | `TEXT` | `TSTZRANGE`, `INT8RANGE`, `INT4RANGE`, `NUMRANGE` | `JSON` | `TEXT` | `NVARCHAR(MAX)` | `CLOB` |
 | `KindOther` | anything else | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` | `TEXT` |

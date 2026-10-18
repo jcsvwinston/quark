@@ -56,7 +56,7 @@ func TestUUIDShapedTypePerDialect(t *testing.T) {
 	if migrate.IsUUIDShaped(reflect.TypeOf([17]byte{})) || migrate.IsUUIDShaped(reflect.TypeOf([]byte{})) {
 		t.Fatal("17 bytes or a slice is not")
 	}
-	want := map[string]string{"postgres": "UUID", "sqlite": "UUID", "mysql": "CHAR(36)", "mariadb": "CHAR(36)", "mssql": "NCHAR(36)", "oracle": "VARCHAR2(36)"}
+	want := map[string]string{"postgres": "UUID", "sqlite": "UUID", "mysql": "CHAR(36)", "mariadb": "CHAR(36)", "mssql": "NCHAR(36)", "oracle": "VARCHAR2(36 CHAR)"}
 	for d, w := range want {
 		if got := migrate.SQLTypeWithOpts(d, typ, migrate.TypeOptions{}); got != w {
 			t.Errorf("%s: %q, want %q", d, got, w)

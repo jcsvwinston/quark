@@ -50,6 +50,14 @@ func TestNormalizeType(t *testing.T) {
 		{"bare tinyint is not boolean", "tinyint", "boolean", false},
 		{"Oracle default-precision TIMESTAMP(6) ≡ TIMESTAMP", "TIMESTAMP(6)", "TIMESTAMP", true},
 		{"explicit non-default timestamp precision stays distinct", "timestamp(3)", "timestamp", false},
+		// Oracle length semantics (DEP-2026-010): BYTE is the engine's default,
+		// so a bare length is a byte column; CHAR is what the migrator writes.
+		{"Oracle byte column ≡ bare VARCHAR2(n)", "VARCHAR2(40 BYTE)", "varchar2(40)", true},
+		{"Oracle byte CHAR column ≡ bare CHAR(n)", "CHAR(8 BYTE)", "char(8)", true},
+		{"Oracle char column stays distinct from a bare length", "VARCHAR2(40 CHAR)", "varchar2(40)", false},
+		{"Oracle char column stays distinct from a byte column", "varchar2(40 char)", "varchar2(40 byte)", false},
+		{"Oracle char column, case fold", "VARCHAR2(40 CHAR)", "varchar2(40 char)", true},
+		{"Oracle char length matters", "varchar2(40 char)", "varchar2(41 char)", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

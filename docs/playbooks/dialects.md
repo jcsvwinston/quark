@@ -335,10 +335,11 @@ Mezcla SQL builder + DDL + procedures + JSON. Cuando MariaDB añade `CreateSeque
   `query_exec.go`: generated keys, MERGE upserts, the implicit ORDER BY of
   OFFSET/FETCH, the RECURSIVE keyword, Oracle's lock with a row limit), the
   LIKE escape tail and `[` escaping by name (`like.go`), the batch
-  bind-parameter ceiling by name, and the unit of a length (`VARCHAR2(n)`
-  counts bytes). Closing one removes its bullet from the guide in the same
-  change (referential actions closed with `ReferentialActioner`, QK-49, the
-  same on the six since DEP-2026-007).
+  bind-parameter ceiling by name, and the unit of a length, which the kit does
+  not check (the built-ins count characters: Oracle renders `VARCHAR2(n CHAR)`
+  and its introspection reads `CHAR_USED`, DEP-2026-010). Closing one removes
+  its bullet from the guide in the same change (referential actions closed
+  with `ReferentialActioner`, QK-49, the same on the six since DEP-2026-007).
 
 ## Tests críticos a no romper
 

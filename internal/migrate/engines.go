@@ -50,10 +50,11 @@ func PortableColumnType(spec quarkdriver.ColumnSpec) string {
 
 // engineBase is the engine's type for a kind, before the size hint.
 //
-// Changes in v2.0.0: on Oracle the sized string family is rendered with
-// explicit character semantics, VARCHAR2(n CHAR), so that a length means
-// characters on the six engines; today it is VARCHAR2(n), which Oracle counts
-// in bytes under its default NLS_LENGTH_SEMANTICS. See DEP-2026-010.
+// On Oracle the sized string family carries explicit character semantics,
+// VARCHAR2(n CHAR), so that a length means characters on the six engines: a
+// bare VARCHAR2(n) counts bytes under Oracle's default NLS_LENGTH_SEMANTICS,
+// and a value of n non-ASCII characters that fits everywhere else is
+// ORA-12899 there (DEP-2026-010, QK-50).
 func engineBase(engine string, spec quarkdriver.ColumnSpec) string {
 	switch spec.Kind {
 	case quarkdriver.KindString:
@@ -61,7 +62,7 @@ func engineBase(engine string, spec quarkdriver.ColumnSpec) string {
 		case EnginePostgres, EngineSQLite:
 			return "TEXT"
 		case EngineOracle:
-			return "VARCHAR2(255)"
+			return "VARCHAR2(255 CHAR)"
 		case EngineMSSQL:
 			return "NVARCHAR(255)"
 		default:
@@ -164,7 +165,7 @@ func engineBase(engine string, spec quarkdriver.ColumnSpec) string {
 		case EnginePostgres:
 			return "UUID"
 		case EngineOracle:
-			return "VARCHAR2(36)"
+			return "VARCHAR2(36 CHAR)"
 		case EngineMSSQL:
 			return "NCHAR(36)"
 		case EngineSQLite:
@@ -181,7 +182,7 @@ func engineBase(engine string, spec quarkdriver.ColumnSpec) string {
 		case EnginePostgres:
 			return "INET"
 		case EngineOracle:
-			return "VARCHAR2(45)"
+			return "VARCHAR2(45 CHAR)"
 		case EngineMSSQL:
 			return "NVARCHAR(45)"
 		case EngineSQLite:
@@ -236,8 +237,8 @@ func jsonColumnType(engine string) string {
 // applySize rewrites a VARCHAR/CHAR/NVARCHAR family default with an explicit
 // size. Engines that emit TEXT for the default (postgres/sqlite) get a
 // VARCHAR(N) instead, matching what callers usually mean when they ask for
-// a sized string. On Oracle the result changes in v2.0.0 to VARCHAR2(n CHAR);
-// see DEP-2026-010.
+// a sized string. Oracle keeps the character semantics of the default,
+// VARCHAR2(n CHAR) (DEP-2026-010).
 func applySize(base, engine string, size int) string {
 	switch engine {
 	case EnginePostgres, EngineSQLite:
@@ -245,8 +246,8 @@ func applySize(base, engine string, size int) string {
 			return fmt.Sprintf("VARCHAR(%d)", size)
 		}
 	case EngineOracle:
-		if base == "VARCHAR2(255)" {
-			return fmt.Sprintf("VARCHAR2(%d)", size)
+		if base == "VARCHAR2(255 CHAR)" {
+			return fmt.Sprintf("VARCHAR2(%d CHAR)", size)
 		}
 	case EngineMSSQL:
 		if base == "NVARCHAR(255)" {

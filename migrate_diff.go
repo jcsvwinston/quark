@@ -798,6 +798,14 @@ func isAutoincrementDefault(s string) bool {
 //     dropped them but a mixed-version cluster could still surface
 //     them. Stripping is safe — the width was always cosmetic for
 //     integer types.
+//  9. Oracle length semantics: `varchar2(40 byte)` → `varchar2(40)` and
+//     `char(40 byte)` → `char(40)`. A bare length is what Oracle's
+//     default NLS_LENGTH_SEMANTICS makes of it, BYTE, so a hand-written
+//     `VARCHAR2(40)` in a desired Schema matches the byte column it
+//     created and does not re-plan on every run. `(40 char)` stays
+//     distinct: the migrator renders it for every sized string
+//     (DEP-2026-010), and a byte column under it is a type change that
+//     plans one `MODIFY` and then converges.
 //
 // Deliberately NOT normalised in this pass:
 //
@@ -854,6 +862,14 @@ func normalizeType(t string) string {
 	// typesEqual already matches it against a bare NUMBER.
 	if strings.HasPrefix(s, "numeric(") || (strings.HasPrefix(s, "number(") && strings.Contains(s, ",")) {
 		s = "decimal(" + s[strings.Index(s, "(")+1:]
+	}
+	// Oracle's byte semantics are its default: `varchar2(40 byte)`, what
+	// the catalog reports for a column created by a bare `VARCHAR2(40)`
+	// under NLS_LENGTH_SEMANTICS = BYTE, is that bare declaration. The
+	// `char` qualifier is kept, so a byte column differs from the
+	// `VARCHAR2(40 CHAR)` the migrator writes (DEP-2026-010).
+	if strings.HasSuffix(s, " byte)") {
+		s = strings.TrimSuffix(s, " byte)") + ")"
 	}
 	return s
 }
