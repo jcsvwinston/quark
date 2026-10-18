@@ -219,46 +219,62 @@ no RETURNING row or zero rows affected, SQL Server/Oracle zero rows from the
 MERGE, and MySQL/MariaDB — whose zero also means "own row already held the
 values" — end the clause with `<pk> = IF(<tenant> = ?, LAST_INSERT_ID(<pk>),
 <pk>)`, so the statement reports the tenant's row it met and no key (0) for
-another tenant's (QK-63, `duplicateKeyKeyAssignment`); a model without a
-single integer key still reads the row back by conflict key within the
-tenant (`finishGuardedDuplicateKey`). RETURNING is not used there under the
-guard because MariaDB would hand back the other tenant's id. `UpsertBatch` under the guard runs in a
-transaction and goes row by row on MySQL/MariaDB. QK-44: `UpdateMap` passes
-its map through `confineTenantColumn`. Regression: `upsert_tenant_test.go` and
-`internal/enginesuite/upsert_tenant_test.go` (`UpsertTenant`, six engines).
+another tenant's (QK-63, `duplicateKeyKeyAssignment`); a statement that
+changed nothing reads the row back by conflict key (`upsertNotWritten`,
+`upsert_conflict.go`), which tells the tenant's own unchanged row from
+another tenant's. RETURNING is not used there under the guard because
+MariaDB would hand back the other tenant's id. `UpsertBatch` runs in a
+transaction under the guard, and on every engine that upserts row by row.
+QK-44: `UpdateMap` passes its map through `confineTenantColumn`. Regression:
+`upsert_tenant_test.go` and `internal/enginesuite/upsert_tenant_test.go`
+(`UpsertTenant`, six engines).
 
-### An empty `updateCols` is not one behaviour (QK-48)
+### An empty `updateCols` is one behaviour (QK-48, QK-59, DEP-2026-006)
 
-`Upsert`/`UpsertBatch` with no `updateCols`: PostgreSQL and SQLite write
-`ON CONFLICT … DO NOTHING`, MySQL and MariaDB `ON DUPLICATE KEY UPDATE
-<first conflict col> = <it>` — the conflicting row stays as it was —
-while the MERGE of SQL Server and Oracle (`buildMerge`,
-`upsertBatchMSSQLBulk`) overwrites every column the insert writes except the
-conflict columns, the key and `created_at` (`mergeInferredUpdateCols`). The
-godoc promised the MERGE behaviour everywhere; making the engines agree
-changes what callers see on one side, so it is a decision for the major
-(QADR-0010): `DEP-2026-006` announces one behaviour for 2.0. Until then
+`Upsert`/`UpsertBatch` with no `updateCols` is insert-or-ignore on the six
+engines: PostgreSQL and SQLite write `ON CONFLICT … DO NOTHING`, MySQL and
+MariaDB `ON DUPLICATE KEY UPDATE <first conflict col> = <it>`, and the
+MERGE of SQL Server and Oracle (`buildMerge`, `upsertBatchMSSQLBulk`) has no
+`WHEN MATCHED` branch (`hasUpdate` is false). The conflicting row stays as
+it was, the call returns nil, and no key is written back. In v1 the MERGE
+inferred an update set — every column the insert writes except the conflict
+columns, the key and `created_at` (`mergeInferredUpdateCols`, gone) — and
 `internal/enginesuite/upsert_empty_update_cols_test.go`
-(`UpsertEmptyUpdateCols`) pins each engine. What QK-48 did fix: on
-PostgreSQL and SQLite the RETURNING after DO NOTHING had no row and `Upsert`
-returned `sql.ErrNoRows` — the other four answered nil — in both the plain
-path and `upsertGuardedInsertStyle`.
+(`UpsertEmptyUpdateCols`) pinned each engine; it holds the six to the same
+now. What QK-48 fixed within v1: on PostgreSQL and SQLite the RETURNING after
+DO NOTHING had no row and `Upsert` returned `sql.ErrNoRows` — the other four
+answered nil.
 
-QK-61: the MySQL/MariaDB no-op was `= VALUES(<it>)`, the same thing only when
-the duplicate is on that column; ON DUPLICATE KEY UPDATE fires on a duplicate
-of any unique key, so a duplicate on the PK wrote the incoming value into the
-existing row — in `MySQLDialect.UpsertSQL` and in `guardedConflictClause`
-(`IF(<tenant> = ?, VALUES(c), c)`). Both are `c = c` now. With `updateCols`
-the row holding the duplicate is still updated whichever key it is: that is
-ON DUPLICATE KEY UPDATE, which has no conflict target, and the CRUD reference
-says so; PostgreSQL and SQLite answer `ErrConstraintViolation`, the MERGE
-matches on the conflict columns only. QK-62: the MERGE's inferred set held a
-non-zero integer key — an identity, refused at compile time even for a row
-it would insert (Msg 8102, ORA-32796) — and the `created_at` the convention
-stamped. Neither is in it now; `updated_at` is, as in `Update`. An explicit
-`updateCols` is written as given. Regression:
+### A duplicate of another unique key is `ErrConstraintViolation` (QK-61, QK-65, DEP-2026-006)
+
+The conflict columns name the key `Upsert` arbitrates. ON CONFLICT names its
+arbiter on PostgreSQL and SQLite, so a duplicate of another key — the
+entity carries an existing row's primary key and a conflict value no row has
+— is the engine's own error. ON DUPLICATE KEY UPDATE has no conflict target
+and fires on a duplicate of any unique key: in v1 MySQL and MariaDB updated
+the row holding the duplicate whichever key it was (QK-61 made the no-op
+clause `c = c` so it no longer rewrote the conflict column). Now every
+assignment is guarded by the conflict columns — `c = IF(<k> <=> VALUES(<k>)
+[AND <tenant> = ?], VALUES(c), c)` (`mysqlConflictMatch`, in
+`MySQLDialect.UpsertSQL` and `conflictClause`) — and a statement that
+changed nothing reads the row back (`upsertNotWritten`): no row with the
+conflict key means the duplicate was elsewhere, `ErrConstraintViolation`; a
+row with the conflict key whose key is not the one the entity carries, while
+a row holds the carried key, is the same error (MySQL met the carried key
+first). The MERGE matches on the conflict columns only and its insert branch
+does not write the identity key, so the same entity inserted a second row
+with a key of its own: an entity carrying a non-zero integer key is checked
+before the MERGE (`carriedKeyIsAnotherRow`) — no row with the conflict key
+and a row with the carried key is the error; a row with the conflict key is
+met by the MERGE whatever key the entity carried, as ON CONFLICT does. A key
+of another type is written by the insert branch, where the engine refuses
+the duplicate itself. `UpsertBatch` on MySQL and MariaDB goes row by row,
+always: a multi-row statement reports one count for the whole batch and
+cannot tell a row left alone from one written; the rows run inside a
+transaction so the error leaves nothing written, on Oracle's per-row MERGE
+too. QK-62 is moot without the inferred set. Regression:
 `internal/enginesuite/upsert_engine_edges_test.go` (`UpsertEngineEdges`, six
-engines).
+engines) and `upsert_engine_edges_test.go`.
 
 ### The key an upsert writes into the entity (QK-63, QK-64)
 

@@ -176,8 +176,8 @@ func TestTenantGuardedUpsertShapes(t *testing.T) {
 	for _, tc := range []tc{
 		{PostgreSQL(), ` ON CONFLICT ("code") DO UPDATE SET "name" = excluded."name" WHERE "ut_rows"."tenant_id" = $4`, false},
 		{SQLite(), ` ON CONFLICT ("code") DO UPDATE SET "name" = excluded."name" WHERE "ut_rows"."tenant_id" = ?`, false},
-		{MySQL(), " ON DUPLICATE KEY UPDATE `name` = IF(`tenant_id` = ?, VALUES(`name`), `name`)", false},
-		{MariaDB(), " ON DUPLICATE KEY UPDATE `name` = IF(`tenant_id` = ?, VALUES(`name`), `name`)", false},
+		{MySQL(), " ON DUPLICATE KEY UPDATE `name` = IF(`code` <=> VALUES(`code`) AND `tenant_id` = ?, VALUES(`name`), `name`)", false},
+		{MariaDB(), " ON DUPLICATE KEY UPDATE `name` = IF(`code` <=> VALUES(`code`) AND `tenant_id` = ?, VALUES(`name`), `name`)", false},
 		{MSSQL(), "WHEN MATCHED AND target.[tenant_id] = @p5 THEN UPDATE SET target.[name] = src.[name]", true},
 		{Oracle(), `WHEN MATCHED THEN UPDATE SET target."NAME" = src."NAME" WHERE target."TENANT_ID" = :5`, true},
 	} {
@@ -205,9 +205,9 @@ func TestTenantGuardedUpsertShapes(t *testing.T) {
 				}
 				got = sqlStr
 			} else {
-				clause, args, hasUpdate, err := q.guardedConflictClause([]string{"code"}, []string{"name"}, 4)
+				clause, args, hasUpdate, err := q.conflictClause([]string{"code"}, []string{"name"}, 4)
 				if err != nil || !hasUpdate || !reflect.DeepEqual(args, []any{"ta"}) {
-					t.Fatalf("guardedConflictClause: %v, update branch %v, args %v", err, hasUpdate, args)
+					t.Fatalf("conflictClause: %v, update branch %v, args %v", err, hasUpdate, args)
 				}
 				got = clause
 			}

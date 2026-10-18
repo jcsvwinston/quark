@@ -4,11 +4,7 @@
 package quark
 
 import (
-	"context"
-	"database/sql"
-	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 )
 
@@ -20,10 +16,11 @@ import (
 // updateCols means "every column but the conflict ones", moved it into A by
 // writing A's id into the tenant column.
 //
-// The update branch now carries the tenant predicate on every engine:
+// The update branch now carries the tenant predicate on every engine
+// (rendered by conflictClause and mergeMatchedClause, upsert_conflict.go):
 //
 //	PostgreSQL, SQLite  ON CONFLICT (…) DO UPDATE SET … WHERE <table>.<tenant> = ?
-//	MySQL, MariaDB      ON DUPLICATE KEY UPDATE c = IF(<tenant> = ?, VALUES(c), c), …
+//	MySQL, MariaDB      ON DUPLICATE KEY UPDATE c = IF(<conflict match> AND <tenant> = ?, VALUES(c), c), …
 //	SQL Server          MERGE … WHEN MATCHED AND target.<tenant> = @p THEN UPDATE …
 //	Oracle              MERGE … WHEN MATCHED THEN UPDATE SET … WHERE target.<tenant> = :n
 //
@@ -33,6 +30,9 @@ import (
 // writes nothing: UpsertBatch runs in a transaction under this strategy and
 // rolls the batch back. A dialect quark does not know how to guard refuses
 // the upsert with ErrUnsupportedFeature rather than run it unguarded.
+// Without updateCols there is no update branch on any engine, and a
+// conflict with another tenant's row is left alone and not reported, as a
+// conflict with the tenant's own row is (QK-59).
 
 // tenantGuarded reports whether the query's writes are confined by
 // RowLevelSecurityClient: a resolved tenant and the column that holds it.
@@ -99,132 +99,6 @@ func (q *BaseQuery) checkTenantUpsert() error {
 	return q.guard.ValidateIdentifier(q.tenantCol)
 }
 
-// guardedConflictClause renders the conflict clause of an INSERT-based upsert
-// (PostgreSQL, SQLite, MySQL, MariaDB) with its update branch confined to the
-// tenant. argIndex is the next placeholder index after the INSERT's own
-// arguments; the tenant binds come back in args. hasUpdate reports whether
-// there is an update branch at all: without updateCols, PostgreSQL and SQLite
-// do nothing on a conflict and MySQL assigns the first conflict column to
-// itself — insert-or-ignore, which writes no row of another tenant and is
-// not reported as a conflict.
-func (q *BaseQuery) guardedConflictClause(conflictCols, updateCols []string, argIndex int) (clause string, args []any, hasUpdate bool, err error) {
-	for _, c := range append(append([]string{}, conflictCols...), updateCols...) {
-		if err := q.guard.ValidateIdentifier(c); err != nil {
-			return "", nil, false, err
-		}
-	}
-	tenant := q.dialect.Quote(q.tenantCol)
-	switch q.upsertFamily() {
-	case "on_conflict":
-		quoted := make([]string, len(conflictCols))
-		for i, c := range conflictCols {
-			quoted[i] = q.dialect.Quote(c)
-		}
-		if len(updateCols) == 0 {
-			return fmt.Sprintf(" ON CONFLICT (%s) DO NOTHING", strings.Join(quoted, ", ")), nil, false, nil
-		}
-		sets := make([]string, len(updateCols))
-		for i, c := range updateCols {
-			sets[i] = fmt.Sprintf("%s = excluded.%s", q.dialect.Quote(c), q.dialect.Quote(c))
-		}
-		// The existing row is referenced by the table's name, without the
-		// schema: that is the form both engines accept in this clause.
-		return fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s WHERE %s.%s = %s",
-				strings.Join(quoted, ", "), strings.Join(sets, ", "),
-				q.dialect.Quote(q.table), tenant, q.dialect.Placeholder(argIndex)),
-			[]any{q.tenantID}, true, nil
-	case "duplicate_key":
-		if len(updateCols) == 0 {
-			// The no-op of the unguarded clause, which writes no row of any
-			// tenant. It was IF(<tenant> = ?, VALUES(<col>), <col>), which on
-			// a duplicate of another unique key wrote the incoming value into
-			// the tenant's own row (QK-61).
-			qc := q.dialect.Quote(conflictCols[0])
-			return " ON DUPLICATE KEY UPDATE " + qc + " = " + qc, nil, false, nil
-		}
-		// Every assignment keeps the existing value unless the existing row
-		// is the tenant's. MySQL evaluates the assignments left to right and
-		// a later one sees an earlier one's result, which is safe here: the
-		// only column the condition reads is the tenant column, and an
-		// assignment to it writes the resolved tenant onto a row that already
-		// holds it.
-		sets := make([]string, len(updateCols))
-		for i, c := range updateCols {
-			qc := q.dialect.Quote(c)
-			sets[i] = fmt.Sprintf("%s = IF(%s = %s, VALUES(%s), %s)", qc, tenant, q.dialect.Placeholder(argIndex+i), qc, qc)
-			args = append(args, q.tenantID)
-		}
-		return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", "), args, true, nil
-	default:
-		return "", nil, false, fmt.Errorf("%w: no tenant-guarded conflict clause for dialect %q", ErrUnsupportedFeature, q.dialect.Name())
-	}
-}
-
-// finishGuardedDuplicateKey completes a tenant-guarded MySQL or MariaDB
-// upsert of one row whose model has no single integer key; one with such a
-// key reads it from the statement instead (duplicateKeyKeyAssignment). n is
-// the statement's rows affected: 1 for an insert, 2 for an update, and 0
-// both when the tenant's own row already held the values and when the
-// conflicting row belongs to another tenant — the guard kept its values.
-// Those two are told apart by reading the row back by its conflict key
-// within the tenant, which also returns the key of an updated row:
-// RETURNING (MariaDB) would hand back the other tenant's id, so it is not
-// used under the guard.
-func (q *BaseQuery) finishGuardedDuplicateKey(ctx context.Context, v reflect.Value, conflictCols []string, n int64, hasUpdate bool) error {
-	needPK := q.pk.Column != "" && (q.meta == nil || !q.meta.HasCompositePK) && isZeroPKValue(v.Field(q.pk.Index))
-	if n != 0 && !needPK {
-		return nil
-	}
-	var where []string
-	var args []any
-	argIndex := 1
-	for _, c := range conflictCols {
-		fm, ok := q.meta.FieldByCol[strings.ToLower(c)]
-		if !ok {
-			return fmt.Errorf("%w: conflict column %q is not a field of %s", ErrInvalidQuery, c, q.table)
-		}
-		f := v.Field(fm.Index)
-		if (f.Kind() == reflect.Ptr || f.Kind() == reflect.Interface) && f.IsNil() {
-			where = append(where, q.dialect.Quote(c)+" IS NULL")
-			continue
-		}
-		where = append(where, q.dialect.Quote(c)+" = "+q.dialect.Placeholder(argIndex))
-		args = append(args, q.bindColumnArg(c, f.Interface()))
-		argIndex++
-	}
-	where = append(where, q.dialect.Quote(q.tenantCol)+" = "+q.dialect.Placeholder(argIndex))
-	args = append(args, q.tenantID)
-
-	selectCol := q.pk.Column
-	if selectCol == "" || (q.meta != nil && q.meta.HasCompositePK) {
-		selectCol = q.tenantCol
-	}
-	sqlStr := "SELECT " + q.dialect.Quote(selectCol) + " FROM " + q.fullTableName() +
-		" WHERE " + strings.Join(where, " AND ")
-
-	var dest reflect.Value
-	if needPK {
-		dest = reflect.New(v.Field(q.pk.Index).Type())
-	} else {
-		var sink any
-		dest = reflect.ValueOf(&sink)
-	}
-	err := q.executeQueryRow(ctx, sqlStr, args).Scan(dest.Interface())
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		if n == 0 && hasUpdate {
-			return q.errUpsertOutsideTenant()
-		}
-		return nil
-	case err != nil:
-		return wrapDBError(err)
-	}
-	if needPK {
-		v.Field(q.pk.Index).Set(dest.Elem())
-	}
-	return nil
-}
-
 // confineTenantColumn returns data with every key that names the tenant
 // column set to the resolved tenant, under RowLevelSecurityClient (QK-44).
 // UpdateMap wrote its map verbatim, so {"tenant_id": "tb"} moved a row of
@@ -256,81 +130,6 @@ func (q *BaseQuery) confineTenantColumn(data map[string]any) map[string]any {
 	}
 	q.warnForeignTenantValue()
 	return out
-}
-
-// upsertGuardedInsertStyle runs one tenant-guarded INSERT-based upsert on
-// PostgreSQL, SQLite, MySQL or MariaDB. insertSQL is the INSERT without its
-// RETURNING clause, returning that clause ("" when there is none) and args
-// the INSERT's arguments.
-//
-// On PostgreSQL and SQLite a conflict with another tenant's row leaves the
-// statement with nothing to return and nothing affected — the WHERE on DO
-// UPDATE skipped it — and that is the error. On MySQL and MariaDB see
-// finishGuardedDuplicateKey.
-func (q *BaseQuery) upsertGuardedInsertStyle(ctx context.Context, v reflect.Value, insertSQL, returning string, args []any, conflictCols, updateCols []string) error {
-	clause, guardArgs, hasUpdate, err := q.guardedConflictClause(conflictCols, updateCols, len(args)+1)
-	if err != nil {
-		return err
-	}
-	args = append(args, guardArgs...)
-	if q.upsertFamily() == "duplicate_key" {
-		// A single integer key: the statement reports the key of the row it
-		// inserted or met, and none for a row of another tenant (QK-63,
-		// see duplicateKeyKeyAssignment).
-		carried := q.pk.Column != "" && !isZeroPKValue(v.Field(q.pk.Index))
-		keyAssign, keyArgs := q.duplicateKeyKeyAssignment(clause, len(args)+1)
-		args = append(args, keyArgs...)
-		res, err := q.executeExec(ctx, insertSQL+clause+keyAssign, args)
-		if err != nil {
-			return err
-		}
-		n, _ := res.RowsAffected()
-		if keyAssign == "" {
-			return q.finishGuardedDuplicateKey(ctx, v, conflictCols, n, hasUpdate)
-		}
-		key, found, write := duplicateKeyRowKey(res, carried)
-		if !found {
-			// No row of the tenant was inserted or met: the conflicting
-			// row is another tenant's, and the guard kept its values.
-			if n == 0 && hasUpdate {
-				return q.errUpsertOutsideTenant()
-			}
-			return nil
-		}
-		if write {
-			setPKValue(v, q.pk, key)
-		}
-		// executeExec dropped the table tag; the row's tag can only be
-		// dropped now that its key is known (QK-66).
-		q.invalidateRowTags(ctx, getPKValue(v, q.pk))
-		return nil
-	}
-	if returning != "" {
-		err := q.scanReturning(q.executeQueryRow(ctx, insertSQL+clause+returning, args), v)
-		if errors.Is(err, sql.ErrNoRows) {
-			if hasUpdate {
-				return q.errUpsertOutsideTenant()
-			}
-			// DO NOTHING on a conflict, with the tenant's row or another's:
-			// nothing written, nothing to report (QK-48).
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		// A single-row query drops nothing from the cache; the upsert does,
-		// as Upsert's own RETURNING path (QK-66).
-		q.invalidateInsert(ctx, getPKValue(v, q.pk))
-		return nil
-	}
-	res, err := q.executeExec(ctx, insertSQL+clause, args)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); hasUpdate && n == 0 {
-		return q.errUpsertOutsideTenant()
-	}
-	return nil
 }
 
 // splitReturning separates an INSERT built by buildInsert from its RETURNING

@@ -539,10 +539,13 @@ func TestUpsertSQL_SQLite(t *testing.T) {
 	}
 }
 
+// Every assignment is guarded by the conflict columns: ON DUPLICATE KEY
+// UPDATE fires on a duplicate of any unique key, and only the row the
+// conflict columns name takes the update branch (QK-65, DEP-2026-006).
 func TestUpsertSQL_MySQL(t *testing.T) {
 	d := quark.MySQL()
 	sql := d.UpsertSQL([]string{"email"}, []string{"name", "age"}, 1)
-	expected := " ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `age` = VALUES(`age`)"
+	expected := " ON DUPLICATE KEY UPDATE `name` = IF(`email` <=> VALUES(`email`), VALUES(`name`), `name`), `age` = IF(`email` <=> VALUES(`email`), VALUES(`age`), `age`)"
 	if sql != expected {
 		t.Errorf("mysql upsert:\ngot:  %q\nwant: %q", sql, expected)
 	}

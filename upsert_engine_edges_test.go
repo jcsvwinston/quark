@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// QK-61 and QK-62, as the statements render, without an engine.
+// QK-61, QK-65 and QK-59, as the statements render, without an engine.
 // internal/enginesuite (UpsertEngineEdges) runs them on the six engines.
 
 // QK-61: without updateCols the MySQL and MariaDB clause assigns the first
@@ -36,12 +36,12 @@ func TestUpsertDuplicateKeyNoOpAssignsTheColumnToItself(t *testing.T) {
 			t.Fatalf("open: %v", err)
 		}
 		router, ta := wgRouter(c)
-		clause, args, hasUpdate, err := For[utRow](ta, router).guardedConflictClause([]string{"code"}, nil, 4)
+		clause, args, hasUpdate, err := For[utRow](ta, router).conflictClause([]string{"code"}, nil, 4)
 		if err != nil || hasUpdate || len(args) != 0 {
-			t.Errorf("%s guardedConflictClause without updateCols: %v, update branch %v, args %v; want no update branch and no binds", d.Name(), err, hasUpdate, args)
+			t.Errorf("%s conflictClause without updateCols: %v, update branch %v, args %v; want no update branch and no binds", d.Name(), err, hasUpdate, args)
 		}
 		if want := " ON DUPLICATE KEY UPDATE `code` = `code`"; clause != want {
-			t.Errorf("%s guardedConflictClause without updateCols = %q, want %q", d.Name(), clause, want)
+			t.Errorf("%s conflictClause without updateCols = %q, want %q", d.Name(), clause, want)
 		}
 		_ = c.Close()
 	}
@@ -86,14 +86,16 @@ func mergeSets(t *testing.T, d Dialect, stmt string) []string {
 	return cols
 }
 
-// QK-62: without updateCols the MERGE's update set leaves out the conflict
-// columns, the primary key and created_at; updated_at stays. An explicit
-// updateCols is written as given.
-func TestMergeInferredUpdateSetLeavesTheKeyAndCreatedAt(t *testing.T) {
+// QK-59: without updateCols the MERGE has no WHEN MATCHED branch — a
+// conflicting row is left as it was, as ON CONFLICT DO NOTHING leaves it.
+// In v1 the update set was inferred: every column the insert writes but the
+// conflict columns, the key and created_at (QK-62). An explicit updateCols
+// is written as given.
+func TestMergeWithoutUpdateColsHasNoUpdateBranch(t *testing.T) {
 	stamp := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
 	for _, d := range []Dialect{MSSQL(), Oracle()} {
 		t.Run(d.Name(), func(t *testing.T) {
-			c, err := New("sqlite", "file:qk62_merge_"+d.Name()+"?mode=memory&cache=shared",
+			c, err := New("sqlite", "file:qk59_merge_"+d.Name()+"?mode=memory&cache=shared",
 				WithDialect(d), WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
 			if err != nil {
 				t.Fatalf("open: %v", err)
@@ -102,32 +104,34 @@ func TestMergeInferredUpdateSetLeavesTheKeyAndCreatedAt(t *testing.T) {
 			ctx := context.Background()
 
 			for _, id := range []int64{0, 7} {
-				e := mergeEdgeRow{ID: id, Code: "a", Name: "n", CreatedAt: stamp, UpdatedAt: stamp}
-				stmt, _, hasUpdate, err := For[mergeEdgeRow](ctx, c).buildMerge(reflect.ValueOf(&e).Elem(), []string{"code"}, nil)
-				if err != nil || !hasUpdate {
-					t.Fatalf("buildMerge with key %d: %v (update branch %v)", id, err, hasUpdate)
-				}
-				if got, want := mergeSets(t, d, stmt), []string{"name", "updated_at"}; !reflect.DeepEqual(got, want) {
-					t.Errorf("key %d: the inferred update set is %v, want %v\n%s", id, got, want, stmt)
+				for _, update := range [][]string{nil, {}} {
+					e := mergeEdgeRow{ID: id, Code: "a", Name: "n", CreatedAt: stamp, UpdatedAt: stamp}
+					stmt, _, hasUpdate, err := For[mergeEdgeRow](ctx, c).buildMerge(reflect.ValueOf(&e).Elem(), []string{"code"}, update)
+					if err != nil || hasUpdate {
+						t.Fatalf("buildMerge with key %d and updateCols %#v: %v (update branch %v), want none", id, update, err, hasUpdate)
+					}
+					if strings.Contains(stmt, "WHEN MATCHED") || mergeSets(t, d, stmt) != nil {
+						t.Errorf("key %d: the MERGE without updateCols has an update branch:\n%s", id, stmt)
+					}
+					if !strings.Contains(stmt, "WHEN NOT MATCHED THEN INSERT") {
+						t.Errorf("key %d: the MERGE without updateCols has no insert branch:\n%s", id, stmt)
+					}
 				}
 			}
 
 			e := mergeEdgeRow{ID: 7, Code: "a", Name: "n", CreatedAt: stamp, UpdatedAt: stamp}
-			stmt, _, _, err := For[mergeEdgeRow](ctx, c).buildMerge(reflect.ValueOf(&e).Elem(), []string{"code"}, []string{"name", "created_at"})
-			if err != nil {
-				t.Fatal(err)
+			stmt, _, hasUpdate, err := For[mergeEdgeRow](ctx, c).buildMerge(reflect.ValueOf(&e).Elem(), []string{"code"}, []string{"name", "created_at"})
+			if err != nil || !hasUpdate {
+				t.Fatalf("buildMerge with updateCols: %v (update branch %v)", err, hasUpdate)
 			}
 			if got, want := mergeSets(t, d, stmt), []string{"name", "created_at"}; !reflect.DeepEqual(got, want) {
 				t.Errorf("an explicit updateCols is written as given: got %v, want %v", got, want)
 			}
 
 			p := mergeEdgePair{A: 1, B: 2, Code: "a", Name: "n"}
-			stmt, _, _, err = For[mergeEdgePair](ctx, c).buildMerge(reflect.ValueOf(&p).Elem(), []string{"code"}, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got, want := mergeSets(t, d, stmt), []string{"name"}; !reflect.DeepEqual(got, want) {
-				t.Errorf("a composite key: the inferred update set is %v, want %v\n%s", got, want, stmt)
+			stmt, _, hasUpdate, err = For[mergeEdgePair](ctx, c).buildMerge(reflect.ValueOf(&p).Elem(), []string{"code"}, nil)
+			if err != nil || hasUpdate || strings.Contains(stmt, "WHEN MATCHED") {
+				t.Errorf("a composite key without updateCols: %v, update branch %v\n%s", err, hasUpdate, stmt)
 			}
 		})
 	}

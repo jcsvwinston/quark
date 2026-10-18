@@ -77,19 +77,14 @@ func testUpsertTenant(ctx context.Context, t *testing.T, client *quark.Client) {
 		}
 	})
 
-	// Without updateCols PostgreSQL, SQLite, MySQL and MariaDB do nothing on
-	// a conflict, and say nothing (QK-48: PostgreSQL and SQLite used to
-	// return sql.ErrNoRows); SQL Server and Oracle update every non-conflict
-	// column — the tenant column included, which used to move tb's row into
-	// ta — and refuse. Either way tb's row stays as it was.
+	// Without updateCols there is no update branch on any engine (QK-59):
+	// a conflict with tb's row writes nothing and says nothing, as a
+	// conflict with ta's own row does. SQL Server and Oracle used to update
+	// every non-conflict column — the tenant column included, which moved
+	// tb's row into ta before QK-43 — and refuse.
 	t.Run("ForeignKeyWithoutUpdateCols", func(t *testing.T) {
 		before := reseed(t)
-		err := quark.For[uteRow](ta, router).Upsert(&uteRow{Code: "x", Name: "a-x"}, []string{"code"}, nil)
-		if engine == "mssql" || engine == "oracle" {
-			if !errors.Is(err, quark.ErrConstraintViolation) {
-				t.Errorf("Upsert of tb's code with every column to update on %s = %v, want ErrConstraintViolation", engine, err)
-			}
-		} else if err != nil {
+		if err := quark.For[uteRow](ta, router).Upsert(&uteRow{Code: "x", Name: "a-x"}, []string{"code"}, nil); err != nil {
 			t.Errorf("Upsert of tb's code with no update branch on %s = %v, want nil: nothing is written and nothing is reported", engine, err)
 		}
 		if got := uteRows(t, ctx, client); !sameUteRows(got, before) {
