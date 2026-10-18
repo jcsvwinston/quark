@@ -135,7 +135,12 @@ database assigns it, just like `CreateBatch`. Each dialect gets its native form:
 MySQL and MariaDB upsert one row at a time because a multi-row statement
 reports one count for the whole batch, which cannot tell a row left alone
 from one written; where the batch is more than one statement it runs in a
-transaction, so an error leaves nothing written.
+transaction, so an error leaves nothing written. A model with a
+`quark:"version"` column goes row by row on every engine when `updateCols`
+is given: the update branch holds each row to its entity's version, a stale
+row fails the batch with `ErrStaleEntity` naming it, and each entity's
+version follows its row. See
+[Upsert](../reference/api/crud#upsert) for the contract.
 
 SQL Server, Oracle, MySQL and MariaDB write each row's key into its entity —
 on SQL Server and Oracle the key the identity assigned to an inserted row,

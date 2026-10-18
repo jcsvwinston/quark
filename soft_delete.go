@@ -76,9 +76,11 @@ func (q *BaseQuery) softDeletePredicate() *condition {
 // flows. The query's conditions — its Where calls, and the tenant predicate
 // under RowLevelSecurityClient — are ANDed with the key (QK-40).
 //
-// Changes in v2.0.0: on a model with a quark:"version" column Restore sends
-// no version predicate in v1 and leaves the version where it was; in 2.0 it
-// joins optimistic locking. See DEP-2026-004.
+// On a model with a quark:"version" column Restore holds the row to the
+// version the entity was loaded with and bumps it, in the row and in the
+// entity (DEP-2026-004): a stale entity restores nothing and returns
+// ErrStaleEntity; a live row, or a row the conditions exclude, is (0, nil).
+// In v1 the version was neither checked nor moved.
 //
 // Phase-1 F1-5. Returns ErrInvalidModel when the model has no deleted_at.
 func (q *Query[T]) Restore(entity *T) (int64, error) {
@@ -95,12 +97,18 @@ func (q *Query[T]) Restore(entity *T) (int64, error) {
 		return 0, fmt.Errorf("%w: Restore requires a populated primary key", ErrInvalidQuery)
 	}
 
+	bump, err := q.versionBump()
+	if err != nil {
+		return 0, err
+	}
 	var sqlBuf strings.Builder
 	sqlBuf.WriteString("UPDATE ")
 	sqlBuf.WriteString(q.fullTableName())
 	sqlBuf.WriteString(" SET ")
 	sqlBuf.WriteString(q.dialect.Quote("deleted_at"))
-	sqlBuf.WriteString(" = NULL WHERE ")
+	sqlBuf.WriteString(" = NULL")
+	sqlBuf.WriteString(bump)
+	sqlBuf.WriteString(" WHERE ")
 	sqlBuf.WriteString(q.dialect.Quote(q.pk.Column))
 	sqlBuf.WriteString(" = ")
 	sqlBuf.WriteString(q.dialect.Placeholder(1))
@@ -111,12 +119,18 @@ func (q *Query[T]) Restore(entity *T) (int64, error) {
 	sqlBuf.WriteString(q.dialect.Quote("deleted_at"))
 	sqlBuf.WriteString(" IS NOT NULL")
 
+	args := []any{pkVal}
+	versionSQL, args, err := q.versionPredicate(v, 2, args)
+	if err != nil {
+		return 0, err
+	}
+	sqlBuf.WriteString(versionSQL)
+
 	// The query's conditions narrow the key, as they do for every write by
 	// key (QK-40). Under RowLevelSecurityClient the tenant predicate is one
 	// of them; it used to be written here by hand, and the caller's own
 	// Where was dropped.
-	args := []any{pkVal}
-	whereSQL, whereArgs, err := q.whereForWrite(2)
+	whereSQL, whereArgs, err := q.whereForWrite(len(args) + 1)
 	if err != nil {
 		return 0, err
 	}
@@ -140,16 +154,33 @@ func (q *Query[T]) Restore(entity *T) (int64, error) {
 		rowsAffected, _ = res.RowsAffected()
 	}
 
+	// Nothing restored: a live row, a row the conditions exclude, no row —
+	// or, on a versioned model, a trashed row that moved: ErrStaleEntity
+	// (DEP-2026-004). The probe asks for a trashed row the conditions admit.
+	if rowsAffected == 0 {
+		if versionFieldOf(q.meta) == nil {
+			return 0, nil
+		}
+		passes, err := q.keyPassesWhereExtra(ctx, pkVal, q.dialect.Quote("deleted_at")+" IS NOT NULL")
+		if err != nil {
+			return 0, fmt.Errorf("Restore failed: %w", err)
+		}
+		if !passes {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("%w: table %s pk=%v", ErrStaleEntity, q.meta.Table, pkVal)
+	}
+
 	// Clear the entity's deleted_at field in memory so the in-process struct
-	// reflects the restored state without a re-read.
-	if rowsAffected > 0 {
-		if fm, ok := q.meta.FieldByCol["deleted_at"]; ok {
-			f := v.Field(fm.Index)
-			if f.CanSet() {
-				f.Set(reflect.Zero(f.Type()))
-			}
+	// reflects the restored state without a re-read, and move its version
+	// with the row's.
+	if fm, ok := q.meta.FieldByCol["deleted_at"]; ok {
+		f := v.Field(fm.Index)
+		if f.CanSet() {
+			f.Set(reflect.Zero(f.Type()))
 		}
 	}
+	bumpVersion(v, versionFieldOf(q.meta))
 
 	return rowsAffected, nil
 }

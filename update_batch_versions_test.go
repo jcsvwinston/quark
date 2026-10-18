@@ -344,7 +344,8 @@ func TestUpdateBatchCheckVersionsInTheCallersTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tx: %v", err)
 	}
-	want := map[int64]string{1: "11@2", 2: "22@3", 3: "30@1"}
+	// Row 3 is at version 2: the caller's UpdateMap moved it (DEP-2026-004).
+	want := map[int64]string{1: "11@2", 2: "22@3", 3: "30@2"}
 	if got := ubvTable(t, c); !sameTable(got, want) {
 		t.Errorf("after commit: %v, want %v", got, want)
 	}

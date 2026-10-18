@@ -354,11 +354,17 @@ func testWhereGuardVersioned(ctx context.Context, t *testing.T, client *quark.Cl
 	t.Cleanup(func() { dropTable(client, "wg_versioned") })
 
 	writes := []struct {
-		name  string
+		name string
+		// bumps: the write leaves the entity at the next version; a delete
+		// leaves no row.
+		bumps bool
 		write func(q *quark.Query[wgeVersioned], e *wgeVersioned) (int64, error)
 	}{
-		{"Update", func(q *quark.Query[wgeVersioned], e *wgeVersioned) (int64, error) { return q.Update(e) }},
-		{"UpdateFields", func(q *quark.Query[wgeVersioned], e *wgeVersioned) (int64, error) { return q.UpdateFields(e, "name") }},
+		{"Update", true, func(q *quark.Query[wgeVersioned], e *wgeVersioned) (int64, error) { return q.Update(e) }},
+		{"UpdateFields", true, func(q *quark.Query[wgeVersioned], e *wgeVersioned) (int64, error) { return q.UpdateFields(e, "name") }},
+		// DEP-2026-004: the deletes hold the row to the version too.
+		{"Delete", false, func(q *quark.Query[wgeVersioned], e *wgeVersioned) (int64, error) { return q.Delete(e) }},
+		{"HardDelete", false, func(q *quark.Query[wgeVersioned], e *wgeVersioned) (int64, error) { return q.HardDelete(e) }},
 	}
 	for _, w := range writes {
 		t.Run(w.name, func(t *testing.T) {
@@ -379,8 +385,12 @@ func testWhereGuardVersioned(ctx context.Context, t *testing.T, client *quark.Cl
 			if _, err := w.write(quark.For[wgeVersioned](ctx, client).Where("owner", "=", "alice"), &e); !errors.Is(err, quark.ErrStaleEntity) {
 				t.Fatalf("admitted stale %s on %s = %v, want ErrStaleEntity", w.name, engine, err)
 			}
+			e = wgeVersioned{ID: id, Name: "x", Version: 7}
+			if _, err := w.write(quark.For[wgeVersioned](ctx, client), &e); !errors.Is(err, quark.ErrStaleEntity) {
+				t.Fatalf("unconditioned stale %s on %s = %v, want ErrStaleEntity", w.name, engine, err)
+			}
 			e = wgeVersioned{ID: id, Name: "x", Version: 1}
-			if n, err := w.write(quark.For[wgeVersioned](ctx, client).Where("owner", "=", "alice"), &e); err != nil || n != 1 || e.Version != 2 {
+			if n, err := w.write(quark.For[wgeVersioned](ctx, client).Where("owner", "=", "alice"), &e); err != nil || n != 1 || (w.bumps && e.Version != 2) {
 				t.Fatalf("admitted %s on %s = (%d, %v), version %d; want (1, nil), version 2", w.name, engine, n, err, e.Version)
 			}
 		})

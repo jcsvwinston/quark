@@ -101,6 +101,14 @@ func (q *BaseQuery) keyWhere(pkValue any, argIndex int) (string, []any) {
 // The probe asks only about rows the conditions let the caller see, so its
 // answer cannot tell a row of another tenant from a row that does not exist.
 func (q *BaseQuery) keyPassesWhere(ctx context.Context, pkValue any) (bool, error) {
+	return q.keyPassesWhereExtra(ctx, pkValue, "")
+}
+
+// keyPassesWhereExtra is keyPassesWhere with one more predicate, rendered
+// as given: the soft delete asks for a live row (deleted_at IS NULL) and
+// Restore for a trashed one, so that a row in the other state is told from
+// a version conflict (DEP-2026-004).
+func (q *BaseQuery) keyPassesWhereExtra(ctx context.Context, pkValue any, extra string) (bool, error) {
 	keySQL, args := q.keyWhere(pkValue, 1)
 	whereSQL, whereArgs, err := q.whereForWrite(len(args) + 1)
 	if err != nil {
@@ -111,6 +119,10 @@ func (q *BaseQuery) keyPassesWhere(ctx context.Context, pkValue any) (bool, erro
 	sb.WriteString(q.fullTableName())
 	sb.WriteString(" WHERE ")
 	sb.WriteString(keySQL)
+	if extra != "" {
+		sb.WriteString(" AND ")
+		sb.WriteString(extra)
+	}
 	if whereSQL != "" {
 		sb.WriteString(" AND ")
 		sb.WriteString(whereSQL)

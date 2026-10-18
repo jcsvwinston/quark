@@ -33,12 +33,24 @@ import (
 // (carriedKeyIsAnotherRow), and without updateCols the MERGE has no WHEN
 // MATCHED branch.
 //
-// The tenant-guarded update branch (QK-43) is the same clause with one more
-// condition: conflictClause renders it for the INSERT-based engines,
+// The tenant-guarded update branch (QK-43) and, on a versioned model, the
+// version guard (DEP-2026-004) are the same clause with more conditions:
+// conflictClause renders them for the INSERT-based engines,
 // mergeMatchedClause for the MERGE ones, and upsertNotWritten tells the
 // outcomes of a statement that met a row and wrote nothing apart — ignored,
-// unchanged, another tenant's, or a duplicate elsewhere — by reading that
-// row back.
+// unchanged, another tenant's, stale, or a duplicate elsewhere — by reading
+// that row back.
+//
+// DEP-2026-004 (QK-58). The update branch of a versioned model bumps the
+// version it writes and, when the entity carries a version, holds the row
+// to it: a row that moved is ErrStaleEntity, nothing written. An entity with
+// a zero version is treated as new and holds the row to nothing. The
+// predicate needs no bind: the INSERT carries the entity's version, so the
+// clause compares the existing row's with excluded.version, VALUES(version)
+// or src.version — row by row in a multi-row statement. After the write the
+// entity's version follows the row's: read back with RETURNING where the
+// engine has it, bumped from the carried version where the statement
+// reports an update, read by key otherwise (syncVersion).
 
 // errUpsertDuplicateElsewhere is what an upsert returns when the entity
 // duplicates a unique key other than the conflict columns (QK-65).
@@ -56,10 +68,13 @@ func (q *BaseQuery) errUpsertDuplicateElsewhere() error {
 //
 // Without a guard the clause is the dialect's own (Dialect.UpsertSQL). Under
 // RowLevelSecurityClient the update branch only fires for a row of the
-// resolved tenant (QK-43):
+// resolved tenant (QK-43), and on a versioned model for a row at the version
+// the incoming row carries, which it bumps (DEP-2026-004):
 //
-//	PostgreSQL, SQLite  ON CONFLICT (…) DO UPDATE SET … WHERE <table>.<tenant> = ?
-//	MySQL, MariaDB      ON DUPLICATE KEY UPDATE c = IF(<conflict match> AND <tenant> = ?, VALUES(c), c), …
+//	PostgreSQL, SQLite  ON CONFLICT (…) DO UPDATE SET …, <v> = <table>.<v> + 1
+//	                    WHERE (excluded.<v> = 0 OR <table>.<v> = excluded.<v>) AND <table>.<tenant> = ?
+//	MySQL, MariaDB      ON DUPLICATE KEY UPDATE c = IF(<conflict match> AND <tenant> = ? AND (VALUES(<v>) = 0 OR <v> = VALUES(<v>)), VALUES(c), c), …,
+//	                    <v> = IF(<the same>, <v> + 1, <v>)
 func (q *BaseQuery) conflictClause(conflictCols, updateCols []string, argIndex int) (clause string, args []any, hasUpdate bool, err error) {
 	for _, c := range append(append([]string{}, conflictCols...), updateCols...) {
 		if err := q.guard.ValidateIdentifier(c); err != nil {
@@ -67,10 +82,20 @@ func (q *BaseQuery) conflictClause(conflictCols, updateCols []string, argIndex i
 		}
 	}
 	hasUpdate = len(updateCols) > 0
-	if !q.tenantGuarded() {
+	vfm := versionFieldOf(q.meta)
+	if vfm != nil {
+		if err := q.guard.ValidateIdentifier(vfm.Column); err != nil {
+			return "", nil, false, err
+		}
+	}
+	guarded := q.tenantGuarded()
+	if !guarded && (vfm == nil || !hasUpdate) {
 		return q.dialect.UpsertSQL(conflictCols, updateCols, argIndex), nil, hasUpdate, nil
 	}
-	tenant := q.dialect.Quote(q.tenantCol)
+	var tenant string
+	if guarded {
+		tenant = q.dialect.Quote(q.tenantCol)
+	}
 	switch q.upsertFamily() {
 	case "on_conflict":
 		quoted := make([]string, len(conflictCols))
@@ -80,16 +105,25 @@ func (q *BaseQuery) conflictClause(conflictCols, updateCols []string, argIndex i
 		if !hasUpdate {
 			return fmt.Sprintf(" ON CONFLICT (%s) DO NOTHING", strings.Join(quoted, ", ")), nil, false, nil
 		}
+		// The existing row is referenced by the table's name, without the
+		// schema: that is the form both engines accept in this clause.
+		table := q.dialect.Quote(q.table)
 		sets := make([]string, len(updateCols))
 		for i, c := range updateCols {
 			sets[i] = fmt.Sprintf("%s = excluded.%s", q.dialect.Quote(c), q.dialect.Quote(c))
 		}
-		// The existing row is referenced by the table's name, without the
-		// schema: that is the form both engines accept in this clause.
-		return fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s WHERE %s.%s = %s",
-				strings.Join(quoted, ", "), strings.Join(sets, ", "),
-				q.dialect.Quote(q.table), tenant, q.dialect.Placeholder(argIndex)),
-			[]any{q.tenantID}, true, nil
+		var conds []string
+		if vfm != nil {
+			qv := q.dialect.Quote(vfm.Column)
+			sets = append(sets, fmt.Sprintf("%s = %s.%s + 1", qv, table, qv))
+			conds = append(conds, fmt.Sprintf("(excluded.%s = 0 OR %s.%s = excluded.%s)", qv, table, qv, qv))
+		}
+		if guarded {
+			conds = append(conds, fmt.Sprintf("%s.%s = %s", table, tenant, q.dialect.Placeholder(argIndex)))
+			args = append(args, q.tenantID)
+		}
+		return fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s WHERE %s",
+			strings.Join(quoted, ", "), strings.Join(sets, ", "), strings.Join(conds, " AND ")), args, true, nil
 	case "duplicate_key":
 		if !hasUpdate {
 			// The no-op of the unguarded clause, which writes no row of any
@@ -98,23 +132,97 @@ func (q *BaseQuery) conflictClause(conflictCols, updateCols []string, argIndex i
 			return " ON DUPLICATE KEY UPDATE " + qc + " = " + qc, nil, false, nil
 		}
 		// Every assignment keeps the existing value unless the row met is
-		// the one the conflict columns name and it is the tenant's. MySQL
-		// evaluates the assignments left to right and a later one sees an
-		// earlier one's result, which is safe here: the condition reads the
-		// conflict columns, which no assignment changes, and the tenant
-		// column, which an assignment to it writes with the value it
-		// already holds.
+		// the one the conflict columns name, it is the tenant's, and it is
+		// at the incoming version. MySQL evaluates the assignments left to
+		// right and a later one sees an earlier one's result, which is safe
+		// here: the condition reads the conflict columns, which no
+		// assignment changes, the tenant column, which an assignment to it
+		// writes with the value it already holds, and the version column,
+		// whose bump is the last assignment.
 		match := mysqlConflictMatch(q.dialect, conflictCols)
-		sets := make([]string, len(updateCols))
-		for i, c := range updateCols {
-			qc := q.dialect.Quote(c)
-			sets[i] = fmt.Sprintf("%s = IF(%s AND %s = %s, VALUES(%s), %s)", qc, match, tenant, q.dialect.Placeholder(argIndex+i), qc, qc)
+		if vfm != nil {
+			qv := q.dialect.Quote(vfm.Column)
+			match += fmt.Sprintf(" AND (VALUES(%s) = 0 OR %s = VALUES(%s))", qv, qv, qv)
+		}
+		cond := func() string {
+			if !guarded {
+				return match
+			}
 			args = append(args, q.tenantID)
+			return fmt.Sprintf("%s AND %s = %s", match, tenant, q.dialect.Placeholder(argIndex+len(args)-1))
+		}
+		sets := make([]string, 0, len(updateCols)+1)
+		for _, c := range updateCols {
+			qc := q.dialect.Quote(c)
+			sets = append(sets, fmt.Sprintf("%s = IF(%s, VALUES(%s), %s)", qc, cond(), qc, qc))
+		}
+		if vfm != nil {
+			qv := q.dialect.Quote(vfm.Column)
+			sets = append(sets, fmt.Sprintf("%s = IF(%s, %s + 1, %s)", qv, cond(), qv, qv))
 		}
 		return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", "), args, true, nil
 	default:
-		return "", nil, false, fmt.Errorf("%w: no tenant-guarded conflict clause for dialect %q", ErrUnsupportedFeature, q.dialect.Name())
+		if guarded {
+			return "", nil, false, fmt.Errorf("%w: no tenant-guarded conflict clause for dialect %q", ErrUnsupportedFeature, q.dialect.Name())
+		}
+		return "", nil, false, fmt.Errorf("%w: no version-guarded conflict clause for dialect %q", ErrUnsupportedFeature, q.dialect.Name())
 	}
+}
+
+// syncVersion reads the row's version by the entity's key into the entity,
+// after an upsert whose statement did not say what version the row ended at:
+// an update branch that met a zero-version entity, or a MERGE, which reports
+// its key but not whether it inserted or updated.
+func (q *BaseQuery) syncVersion(ctx context.Context, v reflect.Value) error {
+	vfm := versionFieldOf(q.meta)
+	if vfm == nil || q.pk.Column == "" {
+		return nil
+	}
+	keySQL, args := q.keyWhere(q.pkValueOf(v), 1)
+	var version int64
+	err := q.executeQueryRow(ctx, "SELECT "+q.dialect.Quote(vfm.Column)+" FROM "+q.fullTableName()+" WHERE "+keySQL, args).Scan(&version)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return wrapDBError(err)
+	}
+	setVersion(v, vfm, version)
+	return nil
+}
+
+// upsertReturning is the RETURNING clause of an INSERT-based upsert: the key,
+// and on a versioned model the version the row ended at, so the entity
+// follows the row whether it was inserted or updated.
+func (q *BaseQuery) upsertReturning() string {
+	cols := []string{q.pk.Column}
+	if vfm := versionFieldOf(q.meta); vfm != nil {
+		cols = append(cols, vfm.Column)
+	}
+	return " " + q.dialect.Returning(cols...)
+}
+
+// scanUpsertReturning scans what upsertReturning asked for into the entity.
+func (q *BaseQuery) scanUpsertReturning(row *sql.Row, v reflect.Value) error {
+	vfm := versionFieldOf(q.meta)
+	if vfm == nil {
+		return q.scanReturning(row, v)
+	}
+	var version int64
+	pkField := v.Field(q.pk.Index)
+	if pkField.CanAddr() {
+		if err := row.Scan(pkField.Addr().Interface(), &version); err != nil {
+			return wrapDBError(err)
+		}
+	} else {
+		var id int64
+		if err := row.Scan(&id, &version); err != nil {
+			return wrapDBError(err)
+		}
+		setPKValue(v, q.pk, id)
+	}
+	setVersion(v, vfm, version)
+	return nil
 }
 
 // upsertRow is the row an upsert met, read back by its conflict columns.
@@ -215,6 +323,8 @@ func (q *BaseQuery) carriesKey(v reflect.Value) bool {
 //   - the entity carries the key of another row, and a row holds that key:
 //     the statement met that row on its key and left it alone — on
 //     PostgreSQL the INSERT fails on the key — so ErrConstraintViolation;
+//   - the entity carries a version and the row's is not it: the row moved,
+//     ErrStaleEntity (DEP-2026-004);
 //   - otherwise the row already held the values: nil, and the row is the one
 //     the update branch met, so it is handed back for the entity's key.
 func (q *BaseQuery) upsertNotWritten(ctx context.Context, v reflect.Value, conflictCols []string, hasUpdate bool) (upsertRow, error) {
@@ -238,6 +348,11 @@ func (q *BaseQuery) upsertNotWritten(ctx context.Context, v reflect.Value, confl
 		}
 		if taken {
 			return row, q.errUpsertDuplicateElsewhere()
+		}
+	}
+	if vfm := versionFieldOf(q.meta); vfm != nil {
+		if carried := readVersion(v, vfm); carried != 0 && row.version != carried {
+			return row, fmt.Errorf("%w: table %s pk=%v", ErrStaleEntity, q.meta.Table, q.pkValueOf(v))
 		}
 	}
 	return row, nil
@@ -287,6 +402,7 @@ func (q *BaseQuery) upsertInsertStyleRow(ctx context.Context, v reflect.Value, i
 		return err
 	}
 	args = append(args, clauseArgs...)
+	vfm := versionFieldOf(q.meta)
 	if q.upsertFamily() == "duplicate_key" {
 		// A single integer key: the statement reports the key of the row it
 		// inserted or met (QK-63, see duplicateKeyKeyAssignment).
@@ -297,7 +413,8 @@ func (q *BaseQuery) upsertInsertStyleRow(ctx context.Context, v reflect.Value, i
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
+		n, _ := res.RowsAffected()
+		if n == 0 {
 			row, err := q.upsertNotWritten(ctx, v, conflictCols, hasUpdate)
 			if err != nil {
 				return err
@@ -321,10 +438,23 @@ func (q *BaseQuery) upsertInsertStyleRow(ctx context.Context, v reflect.Value, i
 				q.invalidateRowTags(ctx, getPKValue(v, q.pk))
 			}
 		}
+		// Two rows affected is the update branch: the row moved to the
+		// carried version plus one, or, for a zero-version entity, to a
+		// version only the row knows (DEP-2026-004).
+		if vfm != nil && hasUpdate && n == 2 {
+			if readVersion(v, vfm) != 0 {
+				bumpVersion(v, vfm)
+			} else if err := q.syncVersion(ctx, v); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	if returning != "" {
-		err := q.scanReturning(q.executeQueryRow(ctx, insertSQL+clause+returning, args), v)
+		if vfm != nil {
+			returning = q.upsertReturning()
+		}
+		err := q.scanUpsertReturning(q.executeQueryRow(ctx, insertSQL+clause+returning, args), v)
 		if errors.Is(err, sql.ErrNoRows) {
 			// Nothing to return: DO NOTHING met a row, or the guarded DO
 			// UPDATE skipped it. The entity's key is not written back.

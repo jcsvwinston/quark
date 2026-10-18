@@ -314,11 +314,17 @@ func (wgVersioned) TableName() string { return "wg_versioned" }
 func TestVersionedWritesTellAConflictFromAnExclusion(t *testing.T) {
 	ctx := context.Background()
 	writes := []struct {
-		name  string
+		name string
+		// bumps: the write leaves the row, and the entity, at the next
+		// version; a delete leaves no row.
+		bumps bool
 		write func(q *Query[wgVersioned], e *wgVersioned) (int64, error)
 	}{
-		{"Update", func(q *Query[wgVersioned], e *wgVersioned) (int64, error) { return q.Update(e) }},
-		{"UpdateFields", func(q *Query[wgVersioned], e *wgVersioned) (int64, error) { return q.UpdateFields(e, "name") }},
+		{"Update", true, func(q *Query[wgVersioned], e *wgVersioned) (int64, error) { return q.Update(e) }},
+		{"UpdateFields", true, func(q *Query[wgVersioned], e *wgVersioned) (int64, error) { return q.UpdateFields(e, "name") }},
+		// DEP-2026-004: the deletes hold the row to the version too.
+		{"Delete", false, func(q *Query[wgVersioned], e *wgVersioned) (int64, error) { return q.Delete(e) }},
+		{"HardDelete", false, func(q *Query[wgVersioned], e *wgVersioned) (int64, error) { return q.HardDelete(e) }},
 	}
 	for i, w := range writes {
 		t.Run(w.name, func(t *testing.T) {
@@ -359,7 +365,7 @@ func TestVersionedWritesTellAConflictFromAnExclusion(t *testing.T) {
 
 			// Admitted at the current version: written, version bumped.
 			e = wgVersioned{ID: 1, Name: "x", Version: 1}
-			if n, err := w.write(For[wgVersioned](ctx, c).Where("owner", "=", "alice"), &e); err != nil || n != 1 || e.Version != 2 {
+			if n, err := w.write(For[wgVersioned](ctx, c).Where("owner", "=", "alice"), &e); err != nil || n != 1 || (w.bumps && e.Version != 2) {
 				t.Fatalf("admitted %s = (%d, %v), version %d; want (1, nil), version 2", w.name, n, err, e.Version)
 			}
 

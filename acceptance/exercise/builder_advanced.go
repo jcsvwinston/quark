@@ -274,17 +274,20 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 		return fmt.Errorf("PreloadWhere: %w", err)
 	}
 
-	// Aritmética y expresión en el SET: `x = x + 1` atómico.
-	if _, err := quark.For[domain.Account](ctx, client).
+	// Aritmética y expresión en el SET: `x = x + 1` atómico. Sobre la
+	// prioridad de Task, no sobre la versión de Account: la columna de
+	// versión la escribe Quark (DEP-2026-004) y un mapa que la nombra es
+	// ErrInvalidQuery.
+	if _, err := quark.For[domain.Task](ctx, client).
 		Where("id", "=", 1).
-		UpdateMap(map[string]any{"version": quark.Add(quark.Col("version"), quark.Lit(0))}); err != nil {
+		UpdateMap(map[string]any{"priority": quark.Add(quark.Col("priority"), quark.Lit(0))}); err != nil {
 		return fmt.Errorf("UpdateMap con Expr: %w", err)
 	}
 	rec.Note(QF("Add"), QF("Subtract"), QF("Multiply"), QF("Divide"))
 	for _, e := range []quark.Expr{
-		quark.Subtract(quark.Col("version"), quark.Lit(1)),
-		quark.Multiply(quark.Col("version"), quark.Lit(2)),
-		quark.Divide(quark.Col("version"), quark.Lit(2)),
+		quark.Subtract(quark.Col("priority"), quark.Lit(1)),
+		quark.Multiply(quark.Col("priority"), quark.Lit(2)),
+		quark.Divide(quark.Col("priority"), quark.Lit(2)),
 	} {
 		if _, _, err := e.ToSQL(quark.SQLite(), quark.NewSQLGuard()); err != nil {
 			return fmt.Errorf("aritmética: %w", err)

@@ -1084,10 +1084,13 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 // value is logged (event quark.tenant.foreign_value_replaced), as Create and
 // the updates by entity do. The caller's map is not modified.
 //
-// Changes in v2.0.0: on a model with a quark:"version" column UpdateMap
-// sends no version predicate and leaves the version where it was in v1; in
-// 2.0 it joins optimistic locking with the other writes of a versioned
-// model. See DEP-2026-004.
+// On a model with a quark:"version" column UpdateMap bumps the version of
+// every row it writes, so a holder of the row sees the write on their next
+// Update (ErrStaleEntity) instead of overwriting it (DEP-2026-004). It has
+// no entity and no loaded version, so it checks nothing; a map that names
+// the version column is ErrInvalidQuery, as UpdateFields refuses the
+// primary key. In v1 the version was left where it was, and the map's write
+// was invisible to anyone holding the row.
 //
 // Returns the number of rows affected.
 func (q *Query[T]) UpdateMap(data map[string]any) (int64, error) {
@@ -1105,6 +1108,15 @@ func (q *Query[T]) UpdateMap(data map[string]any) (int64, error) {
 	// Require WHERE clause for safety — validate BEFORE building SQL
 	if len(q.where) == 0 {
 		return 0, fmt.Errorf("%w: UpdateMap requires Where clause to prevent accidental full table update", ErrInvalidQuery)
+	}
+
+	// The version column is Quark's to write (DEP-2026-004).
+	if vfm := versionFieldOf(q.meta); vfm != nil {
+		for col := range data {
+			if strings.EqualFold(col, vfm.Column) {
+				return 0, fmt.Errorf("%w: UpdateMap: the version column %q is bumped by Quark and cannot be named in the map", ErrInvalidQuery, vfm.Column)
+			}
+		}
 	}
 
 	// Under RowLevelSecurityClient the tenant column holds the resolved
@@ -1327,11 +1339,19 @@ func (q *BaseQuery) buildUpdateMap(data map[string]any) (string, []any, error) {
 		argIndex++
 	}
 
+	// A versioned model: the rows written move to the next version, so a
+	// holder of one of them sees the write (DEP-2026-004).
+	bump, err := q.versionBump()
+	if err != nil {
+		return "", nil, err
+	}
+
 	var sql strings.Builder
 	sql.WriteString("UPDATE ")
 	sql.WriteString(q.fullTableName())
 	sql.WriteString(" SET ")
 	sql.WriteString(strings.Join(setClauses, ", "))
+	sql.WriteString(bump)
 
 	// WHERE clause from query conditions, rendered by the same renderer as
 	// a SELECT (QK-39); its placeholders continue after the SET arguments.
@@ -1392,10 +1412,13 @@ func isWarnableZero(v reflect.Value) bool {
 // key, or the row is already trashed — Delete removes nothing, returns
 // (0, nil), and runs no AfterDelete hook, audit entry or event (QK-46).
 //
-// Changes in v2.0.0: on a model with a quark:"version" column the DELETE
-// matches the key alone in v1, so a stale entity removes the row another
-// writer moved; in 2.0 it carries the version predicate and returns
-// ErrStaleEntity instead, for the soft delete too (DEP-2026-004).
+// On a model with a quark:"version" column the statement holds the row to
+// the version the entity was loaded with, as Update does (DEP-2026-004): a
+// stale entity — another writer moved the row — removes nothing and returns
+// ErrStaleEntity; without conditions a key no row has is the same conflict.
+// Under conditions a row they exclude is (0, nil), not a conflict. The soft
+// delete also bumps the version it writes, in the row and in the entity;
+// in v1 the DELETE matched the key alone.
 //
 // Returns the number of rows affected.
 func (q *Query[T]) Delete(entity *T) (int64, error) {
@@ -1432,17 +1455,22 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 	var rows int64
 	var err error
 	if hasDeletedAt {
-		rows, err = q.softDelete(pkValue)
+		rows, err = q.softDelete(v, pkValue)
 	} else {
-		rows, err = q.hardDeleteByPK(pkValue)
+		rows, err = q.hardDeleteByPK(v, pkValue)
 	}
 
 	// A delete that removed nothing found no row with the key that satisfies
-	// the conditions, or no row with the key at all: nothing happened, so
+	// the conditions, no row with the key at all, a row already trashed —
+	// or, on a versioned model, a row that moved: nothing happened, so
 	// nothing is reported to the hooks, the audit log or the event bus
-	// (QK-40, QK-46).
+	// (QK-40, QK-46), and the stale entity is ErrStaleEntity (DEP-2026-004).
 	if err == nil && rows == 0 {
-		return 0, nil
+		return q.deleteMissed(v, pkValue, hasDeletedAt)
+	}
+	// The soft delete bumped the row's version; the entity follows.
+	if err == nil && hasDeletedAt {
+		bumpVersion(v, versionFieldOf(q.meta))
 	}
 
 	if err == nil {
@@ -1484,10 +1512,9 @@ func (q *Query[T]) DeleteBy() (int64, error) {
 // The query's conditions are ANDed with the key, as in Delete: when no row
 // with the key satisfies them — or, without conditions, when no row has the
 // key — HardDelete removes nothing, returns (0, nil), and runs no
-// AfterDelete hook, audit entry or event (QK-40, QK-46).
-//
-// Changes in v2.0.0: as for [Query.Delete] — on a versioned model a stale
-// entity returns ErrStaleEntity instead of removing the row (DEP-2026-004).
+// AfterDelete hook, audit entry or event (QK-40, QK-46). On a versioned
+// model a stale entity removes nothing and returns ErrStaleEntity, as for
+// [Query.Delete] (DEP-2026-004).
 func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	if q.err != nil {
 		return 0, q.err
@@ -1509,10 +1536,11 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	v := reflect.ValueOf(entity).Elem()
 	pkValue := q.pkValueOf(v)
 
-	rows, err := q.hardDeleteByPK(pkValue)
+	rows, err := q.hardDeleteByPK(v, pkValue)
 	if err == nil && rows == 0 {
-		// Nothing removed: nothing to report (QK-40, QK-46).
-		return 0, nil
+		// Nothing removed: nothing to report (QK-40, QK-46), or a stale
+		// entity on a versioned model (DEP-2026-004).
+		return q.deleteMissed(v, pkValue, false)
 	}
 	if err == nil {
 		if hook, ok := any(entity).(AfterDeleteHook); ok {
@@ -1531,17 +1559,79 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	return rows, err
 }
 
+// deleteMissed is what a Delete or HardDelete that removed nothing returns.
+// On a model without a version column that is (0, nil). On a versioned model
+// the entity is stale — ErrStaleEntity — unless a probe says the row is one
+// the statement could not have matched anyway: excluded by the conditions,
+// or, for the soft delete, already trashed (DEP-2026-004). Without
+// conditions a hard delete of a missing key is the conflict it is for
+// Update, and no probe runs.
+func (q *Query[T]) deleteMissed(v reflect.Value, pkValue any, soft bool) (int64, error) {
+	if versionFieldOf(q.meta) == nil {
+		return 0, nil
+	}
+	extra := ""
+	if soft {
+		extra = q.dialect.Quote("deleted_at") + " IS NULL"
+	}
+	if len(q.where) > 0 || extra != "" || q.tenantGuarded() {
+		ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
+		defer cancel()
+		passes, err := q.keyPassesWhereExtra(ctx, pkValue, extra)
+		if err != nil {
+			return 0, err
+		}
+		if !passes {
+			return 0, nil
+		}
+	}
+	return 0, fmt.Errorf("%w: table %s pk=%v", ErrStaleEntity, q.meta.Table, pkValue)
+}
+
+// versionPredicate renders " AND <version> = <placeholder>" for a versioned
+// model, with the entity's version appended to args; nothing otherwise.
+func (q *BaseQuery) versionPredicate(v reflect.Value, argIndex int, args []any) (string, []any, error) {
+	vfm := versionFieldOf(q.meta)
+	if vfm == nil {
+		return "", args, nil
+	}
+	if err := q.guard.ValidateIdentifier(vfm.Column); err != nil {
+		return "", args, err
+	}
+	return " AND " + q.dialect.Quote(vfm.Column) + " = " + q.dialect.Placeholder(argIndex), append(args, readVersion(v, vfm)), nil
+}
+
+// versionBump renders ", <version> = <version> + 1" for a versioned model;
+// nothing otherwise.
+func (q *BaseQuery) versionBump() (string, error) {
+	vfm := versionFieldOf(q.meta)
+	if vfm == nil {
+		return "", nil
+	}
+	if err := q.guard.ValidateIdentifier(vfm.Column); err != nil {
+		return "", err
+	}
+	quoted := q.dialect.Quote(vfm.Column)
+	return ", " + quoted + " = " + quoted + " + 1", nil
+}
+
 // softDelete performs a soft delete (sets deleted_at = NOW()) of the row with
-// the key, ANDed with the query's conditions (QK-40).
-func (q *Query[T]) softDelete(pkValue any) (int64, error) {
+// the key, ANDed with the query's conditions (QK-40) and, on a versioned
+// model, with the entity's version, which it bumps (DEP-2026-004).
+func (q *Query[T]) softDelete(v reflect.Value, pkValue any) (int64, error) {
 	var sql strings.Builder
 
+	bump, err := q.versionBump()
+	if err != nil {
+		return 0, err
+	}
 	sql.WriteString("UPDATE ")
 	sql.WriteString(q.fullTableName())
 	sql.WriteString(" SET ")
 	sql.WriteString(q.dialect.Quote("deleted_at"))
 	sql.WriteString(" = ")
 	sql.WriteString(q.dialect.CurrentTimestamp())
+	sql.WriteString(bump)
 	sql.WriteString(" WHERE ")
 
 	keySQL, args := q.keyWhere(pkValue, 1)
@@ -1551,6 +1641,12 @@ func (q *Query[T]) softDelete(pkValue any) (int64, error) {
 	sql.WriteString(" AND ")
 	sql.WriteString(q.dialect.Quote("deleted_at"))
 	sql.WriteString(" IS NULL")
+
+	versionSQL, args, err := q.versionPredicate(v, len(args)+1, args)
+	if err != nil {
+		return 0, err
+	}
+	sql.WriteString(versionSQL)
 
 	whereSQL, whereArgs, err := q.whereForWrite(len(args) + 1)
 	if err != nil {
@@ -1580,10 +1676,11 @@ func (q *Query[T]) softDelete(pkValue any) (int64, error) {
 }
 
 // hardDeleteByPK performs a hard delete by primary key (single or composite),
-// ANDed with the query's conditions (QK-40).
+// ANDed with the query's conditions (QK-40) and, on a versioned model, with
+// the entity's version (DEP-2026-004).
 // For single-PK models pass the pk value; for composite PKs pass a []any of values
 // in the same order as ModelMeta.CompositePK.
-func (q *Query[T]) hardDeleteByPK(pkValue any) (int64, error) {
+func (q *Query[T]) hardDeleteByPK(v reflect.Value, pkValue any) (int64, error) {
 	var sql strings.Builder
 
 	sql.WriteString("DELETE FROM ")
@@ -1592,6 +1689,12 @@ func (q *Query[T]) hardDeleteByPK(pkValue any) (int64, error) {
 
 	keySQL, args := q.keyWhere(pkValue, 1)
 	sql.WriteString(keySQL)
+
+	versionSQL, args, err := q.versionPredicate(v, len(args)+1, args)
+	if err != nil {
+		return 0, err
+	}
+	sql.WriteString(versionSQL)
 
 	whereSQL, whereArgs, err := q.whereForWrite(len(args) + 1)
 	if err != nil {
@@ -1767,8 +1870,14 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 // on every engine — the entity keeps its key. A row of another tenant
 // gives no key. The entity is never given the key of another row.
 //
-// Changes in v2.0.0: on a model with a quark:"version" column the update
-// branch joins optimistic locking (DEP-2026-004).
+// On a model with a quark:"version" column the update branch is inside
+// optimistic locking (DEP-2026-004): it bumps the version it writes and,
+// when the entity carries a non-zero version, holds the row to it — a
+// conflicting row that moved is ErrStaleEntity, nothing written. An entity
+// with a zero version is treated as new and holds the row to nothing. After
+// the write the entity's version is the row's, inserted or updated. In v1
+// the update branch wrote a stale entity's columns over the winner's and
+// left the version where it was.
 //
 // Example:
 //
@@ -1862,6 +1971,11 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 				return err
 			case n == 1:
 				setPKValue(v, q.pk, key)
+				if hasUpdate {
+					// Inserted or updated, the MERGE does not say: the
+					// version the row ended at is read by key (DEP-2026-004).
+					return q.syncVersion(ctx, v)
+				}
 			}
 			// n > 1: the conflict columns matched several rows, and the
 			// entity's is not known.
@@ -1871,9 +1985,13 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 		if execErr != nil {
 			return execErr
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
+		n, _ := res.RowsAffected()
+		if n == 0 {
 			_, err := q.upsertNotWritten(ctx, v, conflictCols, hasUpdate)
 			return err
+		}
+		if n == 1 && hasUpdate {
+			return q.syncVersion(ctx, v)
 		}
 		return nil
 	case "on_conflict", "duplicate_key":
@@ -2009,15 +2127,27 @@ func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCol
 }
 
 // mergeMatchedClause renders a MERGE's WHEN MATCHED branch for the SET list
-// sets. Under RowLevelSecurityClient it only fires for a row of the resolved
-// tenant (QK-43): SQL Server takes the condition on the WHEN, Oracle as a
-// WHERE on the UPDATE. The tenant is bound at argIndex and appended to args.
+// sets, with the source aliased src. Under RowLevelSecurityClient it only
+// fires for a row of the resolved tenant (QK-43), bound at argIndex and
+// appended to args. On a versioned model it only fires for a row at the
+// version the source row carries — a zero version is treated as new and
+// holds the row to nothing — and bumps the version (DEP-2026-004). SQL
+// Server takes the conditions on the WHEN, Oracle as a WHERE on the UPDATE.
 func (q *BaseQuery) mergeMatchedClause(sets string, argIndex int, args *[]any) string {
-	if !q.tenantGuarded() {
+	var conds []string
+	if q.tenantGuarded() {
+		*args = append(*args, q.tenantID)
+		conds = append(conds, fmt.Sprintf("target.%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(argIndex)))
+	}
+	if vfm := versionFieldOf(q.meta); vfm != nil {
+		qv := q.dialect.Quote(vfm.Column)
+		conds = append(conds, fmt.Sprintf("(src.%s = 0 OR target.%s = src.%s)", qv, qv, qv))
+		sets += fmt.Sprintf(", target.%s = target.%s + 1", qv, qv)
+	}
+	if len(conds) == 0 {
 		return fmt.Sprintf("WHEN MATCHED THEN UPDATE SET %s\n", sets)
 	}
-	*args = append(*args, q.tenantID)
-	cond := fmt.Sprintf("target.%s = %s", q.dialect.Quote(q.tenantCol), q.dialect.Placeholder(argIndex))
+	cond := strings.Join(conds, " AND ")
 	if q.dialect.Name() == "oracle" {
 		return fmt.Sprintf("WHEN MATCHED THEN UPDATE SET %s WHERE %s\n", sets, cond)
 	}
@@ -2507,8 +2637,11 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 // SQLite and SQL Server are not transactional across chunks, as CreateBatch
 // is not; wrap the call in Client.Tx for all-or-nothing there.
 //
-// Changes in v2.0.0: as for [Query.Upsert] — the update branch of a
-// versioned model inside optimistic locking (DEP-2026-004).
+// On a model with a quark:"version" column the update branch is inside
+// optimistic locking, as for [Query.Upsert] (DEP-2026-004): with updateCols
+// the batch goes row by row on every engine, in a transaction, so a stale
+// row — ErrStaleEntity, naming it — leaves nothing written, and each
+// entity's version and key follow its row.
 //
 // Example:
 //
@@ -2587,17 +2720,21 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 	defer cancel()
 
 	// The engines that upsert one row at a time: Oracle (identity-sequence
-	// limitation, see upsertBatchOracle), and MySQL and MariaDB, whose
+	// limitation, see upsertBatchMergeRows), and MySQL and MariaDB, whose
 	// multi-row statement reports one rows-affected for the whole batch and
 	// cannot tell a row that was left alone — another tenant's, a duplicate
 	// of another key — from one that already held its values (QK-43, QK-65).
-	rowByRow := q.dialect.Name() == "oracle" || q.upsertFamily() == "duplicate_key"
+	// A versioned model with an update branch goes row by row everywhere:
+	// a stale row is named, and each entity's version follows its row
+	// (DEP-2026-004).
+	versioned := versionFieldOf(q.meta) != nil && len(updateCols) > 0
+	rowByRow := q.dialect.Name() == "oracle" || q.upsertFamily() == "duplicate_key" || versioned
 
 	run := func(bq *Query[T]) error {
-		if bq.dialect.Name() == "oracle" {
-			return bq.upsertBatchOracle(ctx, entities, conflictCols, updateCols)
-		}
-		if bq.upsertFamily() == "duplicate_key" {
+		if rowByRow {
+			if bq.upsertFamily() == "merge" {
+				return bq.upsertBatchMergeRows(ctx, entities, conflictCols, updateCols)
+			}
 			return bq.upsertBatchRows(ctx, entities, conflictCols, updateCols)
 		}
 
@@ -2651,7 +2788,8 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 }
 
 // upsertBatchRows upserts each entity on its own, through the single-row
-// INSERT-based path, for MySQL and MariaDB (QK-43, QK-65).
+// INSERT-based path: MySQL and MariaDB always (QK-43, QK-65), PostgreSQL and
+// SQLite for a versioned model with an update branch (DEP-2026-004).
 func (q *Query[T]) upsertBatchRows(ctx context.Context, entities []*T, conflictCols, updateCols []string) error {
 	for _, entity := range entities {
 		v := reflect.ValueOf(entity)
@@ -2930,10 +3068,12 @@ func (q *Query[T]) upsertBatchMSSQLKeys(ctx context.Context, entities []*T, merg
 	return nil
 }
 
-// upsertBatchOracle falls back to N individual MERGE calls because Oracle's
-// GENERATED ALWAYS AS IDENTITY sequence generates a single value for the whole
-// multi-row MERGE statement, causing ORA-00001 on the second inserted row.
-func (q *Query[T]) upsertBatchOracle(
+// upsertBatchMergeRows runs one MERGE per entity: Oracle always, because its
+// GENERATED ALWAYS AS IDENTITY sequence generates a single value for the
+// whole multi-row MERGE statement (ORA-00001 on the second inserted row); SQL
+// Server for a versioned model with an update branch, so that a stale row
+// is named and each entity's version follows its row (DEP-2026-004).
+func (q *Query[T]) upsertBatchMergeRows(
 	ctx context.Context,
 	entities []*T,
 	conflictCols, updateCols []string,
@@ -2946,7 +3086,7 @@ func (q *Query[T]) upsertBatchOracle(
 		// An entity carrying another row's integer key would make the MERGE
 		// insert a second row (QK-65).
 		if err := q.carriedKeyIsAnotherRow(ctx, v, conflictCols); err != nil {
-			return fmt.Errorf("upsert batch (oracle) failed: %w", err)
+			return fmt.Errorf("upsert batch (merge) failed: %w", err)
 		}
 		mergeSQL, mergeArgs, hasUpdate, err := q.buildMerge(v, conflictCols, updateCols)
 		if err != nil {
@@ -2959,7 +3099,7 @@ func (q *Query[T]) upsertBatchOracle(
 			var key int64
 			n, key, err = q.mergeRowKeys(ctx, mergeSQL, mergeArgs)
 			if err != nil {
-				return fmt.Errorf("upsert batch (oracle) failed: %w", err)
+				return fmt.Errorf("upsert batch (merge) failed: %w", err)
 			}
 			if n == 1 {
 				setPKValue(v, q.pk, key)
@@ -2967,13 +3107,20 @@ func (q *Query[T]) upsertBatchOracle(
 		} else {
 			res, err := q.executeExec(ctx, mergeSQL, mergeArgs)
 			if err != nil {
-				return fmt.Errorf("upsert batch (oracle) failed: %w", err)
+				return fmt.Errorf("upsert batch (merge) failed: %w", err)
 			}
 			n, _ = res.RowsAffected()
 		}
-		if n == 0 {
+		switch {
+		case n == 0:
 			if _, err := q.upsertNotWritten(ctx, v, conflictCols, hasUpdate); err != nil {
-				return fmt.Errorf("upsert batch (oracle) failed: %w", err)
+				return fmt.Errorf("upsert batch (merge) failed: %w", err)
+			}
+		case n == 1 && hasUpdate:
+			// Inserted or updated, the MERGE does not say: the version the
+			// row ended at is read by key (DEP-2026-004).
+			if err := q.syncVersion(ctx, v); err != nil {
+				return fmt.Errorf("upsert batch (merge) failed: %w", err)
 			}
 		}
 	}

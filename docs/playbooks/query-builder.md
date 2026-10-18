@@ -184,9 +184,41 @@ changed" case. `TestUpdateBatchChecksVersionsByDefault` and
 `UpdateBatchVersions/ChecksVersionsByDefault` hold the default; `OPS-04` of
 the enterprise bench measures it.
 
-Still without a version predicate, and outside the decision until M0 says
-otherwise (QK-58): `UpdateMap`, the update branch of `Upsert`/`UpsertBatch`,
-`Delete` and `HardDelete` of an entity, the soft delete and `Restore`.
+### The other writes of a versioned model (QK-58, DEP-2026-004)
+
+Every write that carries an entity is inside optimistic locking. `Delete`,
+`HardDelete`, the soft delete and `Restore` render `AND <version> = ?` with
+the entity's version (`versionPredicate`, `query_crud.go`), the soft delete
+and `Restore` add `, <version> = <version> + 1` (`versionBump`) and
+`bumpVersion` the entity on success; zero rows on a versioned model is
+`ErrStaleEntity` unless `keyPassesWhereExtra` says the row is one the
+statement could not have matched — excluded by the conditions, already
+trashed (`deleted_at IS NULL`), or live for `Restore` (`deleted_at IS NOT
+NULL`) — which is `(0, nil)` (`deleteMissed`). Without conditions a hard
+delete of a missing key is the conflict it is for `Update`, with no probe.
+`UpdateMap` has no entity: `buildUpdateMap` appends the bump so a holder of
+the row sees the write, and a map that names the version column is
+`ErrInvalidQuery` (the proposal of the notice, applied). The update branch
+of `Upsert`/`UpsertBatch` holds the row to the entity's version when it is
+not zero and bumps it: `conflictClause` renders `WHERE (excluded.<v> = 0 OR
+<table>.<v> = excluded.<v>)` on PostgreSQL/SQLite and `IF(<conflict match>
+AND (VALUES(<v>) = 0 OR <v> = VALUES(<v>)), …)` with the bump as the LAST
+assignment on MySQL/MariaDB (earlier IFs read the original version);
+`mergeMatchedClause` adds `(src.<v> = 0 OR target.<v> = src.<v>)` and
+`target.<v> = target.<v> + 1` on the MERGE engines. No bind: the INSERT
+carries the entity's version. `upsertNotWritten` turns a changed-nothing
+statement on a row at another version into `ErrStaleEntity`. The entity's
+version follows the row: `RETURNING <pk>, <v>` on PostgreSQL/SQLite
+(`upsertReturning`/`scanUpsertReturning`), bumped from the carried version
+on MySQL/MariaDB when the statement reports an update (rows affected 2), and
+read by key otherwise (`syncVersion`: a zero-version entity on MySQL, every
+MERGE — which reports its key but not whether it inserted or updated). A
+versioned `UpsertBatch` with `updateCols` goes row by row on every engine
+inside a transaction, so the stale row is named and nothing stays written.
+Regression: `optimistic_locking_scope_test.go`,
+`TestVersionedWritesTellAConflictFromAnExclusion` (Delete, HardDelete) and
+`internal/enginesuite/upsert_versioned_test.go` (`UpsertVersioned`, six
+engines). `OPS-04` of the enterprise bench records **present**.
 
 ### Reads by key stay inside the tenant
 

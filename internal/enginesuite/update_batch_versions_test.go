@@ -277,7 +277,9 @@ func testUpdateBatchVersions(ctx context.Context, t *testing.T, client *quark.Cl
 		if err != nil {
 			t.Fatalf("Tx on %s: %v", engine, err)
 		}
-		want := map[int64]string{ids[0]: "11@2", ids[1]: "22@3", ids[2]: "30@1"}
+		// The third row is at version 2: the caller's UpdateMap moved it
+		// (DEP-2026-004).
+		want := map[int64]string{ids[0]: "11@2", ids[1]: "22@3", ids[2]: "30@2"}
 		if got := table(t, quark.For[ubvRow](ctx, client)); !same(got, want) {
 			t.Errorf("after commit on %s: %v, want %v", engine, got, want)
 		}

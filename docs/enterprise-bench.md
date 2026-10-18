@@ -59,7 +59,7 @@ control needs a live engine to go further, its note says so, and
 
 ## The result
 
-**48 of 69 controls present. 17 partial. 4 absent.**
+**49 of 69 controls present. 16 partial. 4 absent.**
 
 ### migraciones — 12 present · 1 partial · 3 absent
 
@@ -82,14 +82,14 @@ control needs a live engine to go further, its note says so, and
 | `MIG-15` | Data backfill resumes where an interrupted run stopped | **present** | — |
 | `MIG-16` | On SQLite the resumable checkpoint table is never created (ApplyPlan takes the transactional path) | **absent** | Measured here, on the one dialect this bench runs: after a successful ApplyPlan, quark_migration_state is not in sqlite_master. Read, not measured: ApplyPlan asks Dialect.SupportsTransactionalDDL(), which is true for PostgreSQL and SQL Server too, so the checkpoint DDL written for those three dialects never runs there either — proving that needs a live engine. MySQL, MariaDB and Oracle take the other path and do exercise it, in internal/enginesuite. |
 
-### operacion — 7 present · 11 partial · 0 absent
+### operacion — 8 present · 10 partial · 0 absent
 
 | id | control | verdict | what is missing |
 |---|---|---|---|
 | `OPS-01` | Read replicas: reads served by the replica pool, spread round-robin, and pinned to the primary by Sticky | **present** | — |
 | `OPS-02` | Replica failure: an error that is not a transient connection failure is not retried on the primary and does not leave rotation; Raw() hands out the primary pool | **partial** | Measured: a replica that answers with a non-connection error is not retried on the primary, and the second read fails the same way — nothing took it out of rotation. Sticky is the only escape. Raw() hands out the primary pool, so replica health, replica pool stats and replication lag have no accessor. What is NOT measured here, and is therefore not in the title: that a TRANSIENT connection error does fall back, and whether a cooldown exists. Both need a replica that can be dropped mid-flight — internal/enginesuite and the acceptance harness, not SQLite in-process. |
 | `OPS-03` | Pessimistic locking: per-dialect FOR UPDATE / FOR SHARE / SKIP LOCKED / NOWAIT clauses, with a refusal where the engine has none | **present** | — |
-| `OPS-04` | Optimistic locking guards Update, Tracked.Save and UpdateBatch under CheckVersions; Delete carries no version predicate | **partial** | Measured: an Update with a stale entity returns ErrStaleEntity, and so does a Tracked.Save whose row moved underneath the handle. A Delete with the SAME stale entity removes the winner's row and returns nil — the emitted DELETE matches on the primary key alone. Of the batch paths, UpdateMap and DeleteBatch emit no version predicate at all. UpdateBatch emits one; under CheckVersions a stale entity rolls the whole batch back — the fresh row beside it included — with an ErrStaleEntity naming its key, but by default, until 2.0 makes the check the default, the batch still reports nothing when the predicate matches no row: the stale entity is dropped on the floor and the call returns nil. |
+| `OPS-04` | Optimistic locking guards every write of a versioned entity — Update, Tracked.Save, UpdateBatch and Delete — and UpdateMap moves the version; DeleteBatch addresses keys and carries none | **present** | — |
 | `OPS-05` | Savepoints and nested transactions, with the post-commit callbacks registered after a savepoint unwound with it | **present** | — |
 | `OPS-06` | Audit log written inside the write's own transaction, for single-row CRUD only | **partial** | Measured: Create/Update/Delete write quark_audit inside the transaction (a rolled-back write leaves no row), CreateBatch writes two rows and no audit line, and the table EnableAuditLog creates has zero indexes — the fastest-growing table in the schema, with no index to read it by. The audit surface an application holds is exactly EnableAuditLog and DisableAuditLog, and AuditConfig carries no retention knob, so nothing on the API shrinks the table either. |
 | `OPS-07` | Soft delete with scopes and Restore, on a column fixed to deleted_at | **partial** | Measured: Delete emits UPDATE … SET deleted_at, and the default/OnlyTrashed/Unscoped scopes and Restore all agree. On a model whose deletion timestamp is called removed_at the same call emits a physical DELETE and the row is gone; declaring that column with quark:"softdelete" does not name it either — the tag vocabulary is closed and the model is refused with ErrInvalidTag before it migrates. The table a soft delete writes into gains no author column, so there is no record of who deleted. DeleteBy is a hard delete even on a model that has deleted_at. |

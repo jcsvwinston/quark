@@ -76,7 +76,7 @@ types, and timezones.
 | `db:"-"` | parser | Ignores the field. |
 | `default:"value"` | `Migrate` | Emits `DEFAULT value` verbatim; **bool defaults are normalized per dialect** (below). |
 | `nullable:"false"` | `Migrate` | Also emits `NOT NULL`. |
-| `quark:"version"` | `Update`, `UpdateFields`, `Tracked.Save`, `UpdateBatch` | Optimistic-locking column (see below). |
+| `quark:"version"` | `Update`, `UpdateFields`, `Tracked.Save`, `UpdateBatch`, `Delete`, `HardDelete`, `Restore`, `Upsert`, `UpsertBatch`, `UpdateMap` | Optimistic-locking column (see below). |
 | `quark:"rename:old_col"` | `Sync` | Renames `old_col` to the current column on the next sync. |
 
 ```go
@@ -195,7 +195,9 @@ fmt.Println(live, all)
 
 `Restore` clears `deleted_at` for a row you've loaded. Restoring a row that is
 already live affects zero rows instead of writing anything, so a misuse can't
-corrupt live data:
+corrupt live data. On a model with a `quark:"version"` column `Restore` holds
+the row to the version the entity was loaded with and bumps it, as the soft
+delete does — see [Which writes check the version](#which-writes-check-the-version):
 
 ```go
 trashed, _ := quark.For[User](ctx, client).OnlyTrashed().Find(42)
@@ -284,13 +286,20 @@ keeps compiling and changes nothing.
 | --- | --- | --- |
 | `Update`, `UpdateFields`, `Tracked.Save` | yes | `ErrStaleEntity`, nothing written |
 | `UpdateBatch` | yes | `ErrStaleEntity`, the whole batch rolled back |
-| `Upsert`, `UpsertBatch`, `Delete`, `HardDelete`, `Restore` | no | the row is written, deleted or restored all the same |
+| `Delete`, `HardDelete` | yes | `ErrStaleEntity`, nothing removed; the soft delete bumps the version it writes |
+| `Restore` | yes | `ErrStaleEntity`, nothing restored; the version is bumped |
+| `Upsert`, `UpsertBatch`, the update branch | yes, when the entity carries a non-zero version | `ErrStaleEntity`, nothing written; the version is bumped, and the entity learns the row's |
 
-`UpdateMap`, `DeleteBatch` and `DeleteBy` take conditions or keys, not loaded
-entities, so there is no loaded version for them to check. A write without the
-predicate does what it would do on a model without a version column: a
-`Delete` of an entity loaded before another writer moved its row still
-deletes the row.
+Every write that carries an entity of a versioned model is inside optimistic
+locking. A `Delete` of an entity loaded before another writer moved its row
+removes nothing and returns `ErrStaleEntity`; under `Where` conditions a row
+they exclude is `(0, nil)`, not a conflict. An `Upsert` whose entity has a
+zero version is treated as new: the update branch holds the row to nothing,
+writes, and bumps. `UpdateMap` has no entity and no loaded version, so it
+checks nothing — but it bumps the version of every row it writes, so a
+holder of the row sees the write on their next `Update`; a map that names
+the version column is `ErrInvalidQuery`. `DeleteBatch` and `DeleteBy` take
+keys or conditions, not entities, and carry no version predicate.
 
 ## Validation
 
