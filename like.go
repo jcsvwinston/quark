@@ -130,8 +130,9 @@ func isLikeOperator(operator string) bool {
 // checkLikePattern validates the value of a LIKE or NOT LIKE condition before
 // it is stored on the query, and nothing for any other operator or for a
 // value that is not a pattern. The builder doors that take an operator
-// (Where, WhereNot, Having, HavingAggregate; Or goes through Where) call it,
-// so a dangling escape is refused at the call and never reaches the engine.
+// (Where, WhereNot, Having, HavingAggregate, WhereJSON, PreloadWhere; Or
+// goes through Where) call it, so a dangling escape is refused at the call
+// and never reaches the engine.
 func (q *BaseQuery) checkLikePattern(operator string, value any) error {
 	if !isLikeOperator(operator) {
 		return nil

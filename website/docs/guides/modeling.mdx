@@ -298,8 +298,11 @@ zero version is treated as new: the update branch holds the row to nothing,
 writes, and bumps. `UpdateMap` has no entity and no loaded version, so it
 checks nothing — but it bumps the version of every row it writes, so a
 holder of the row sees the write on their next `Update`; a map that names
-the version column is `ErrInvalidQuery`. `DeleteBatch` and `DeleteBy` take
-keys or conditions, not entities, and carry no version predicate.
+the version column is written as given, with no bump on top, so
+`Where("version", "=", v).UpdateMap(map[string]any{"balance": b, "version": v + 1})`
+holds the row to a version and moves it in one statement. `DeleteBatch` and
+`DeleteBy` take keys or conditions, not entities, and carry no version
+predicate.
 
 ## Validation
 

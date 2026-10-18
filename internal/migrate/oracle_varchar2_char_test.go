@@ -18,9 +18,6 @@ import (
 // NLS_LENGTH_SEMANTICS, and a value of n non-ASCII characters that fits on
 // the other five was ORA-12899 there. The string primary key and the text
 // forms of a uuid and an inet carry the qualifier too.
-//
-// The file keeps the path the notice cites under Validation, which the
-// internal-docs drift guard checks; it is renamed when the notice is closed.
 func TestOracleSizedStringsCountCharacters(t *testing.T) {
 	str := reflect.TypeOf("")
 	cases := []struct {

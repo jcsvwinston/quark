@@ -238,9 +238,15 @@ func (q *Query[T]) Preload(relations ...string) *Query[T] {
 // Preload for it.
 //
 // column and operator go through the same identifier and operator barriers as
-// Where.
+// Where, and a LIKE or NOT LIKE declares its escape character the way
+// [Query.Where] does: a pattern that ends in a dangling backslash is
+// ErrInvalidQuery at the call.
 func (q *Query[T]) PreloadWhere(relation, column, operator string, value any) *Query[T] {
 	c := q.clone()
+	if err := c.checkLikePattern(operator, value); err != nil {
+		c.err = err
+		return c
+	}
 	already := false
 	for _, p := range c.preloads {
 		if p == relation {
@@ -1012,9 +1018,16 @@ func (q *Query[T]) HavingExpr(e Expr) *Query[T] {
 // for the accepted grammar.
 //
 // On invalid path the error is stashed on the query and surfaces at execution
-// time (List, First, etc.), wrapping ErrInvalidJSONPath.
+// time (List, First, etc.), wrapping ErrInvalidJSONPath. A LIKE or NOT LIKE
+// declares its escape character the way [Query.Where] does, and a pattern
+// that ends in a dangling backslash is stashed as ErrInvalidQuery the same
+// way.
 func (q *Query[T]) WhereJSON(column, path, operator string, value any) *Query[T] {
 	c := q.clone()
+	if err := c.checkLikePattern(operator, value); err != nil {
+		c.err = err
+		return c
+	}
 	frag, pathArgs, err := q.dialect.JSONExtract(column, path)
 	if err != nil {
 		// guard.ValidateJSONPath returns a descriptive message; wrap with the

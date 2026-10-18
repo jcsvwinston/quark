@@ -197,8 +197,12 @@ trashed (`deleted_at IS NULL`), or live for `Restore` (`deleted_at IS NOT
 NULL`) — which is `(0, nil)` (`deleteMissed`). Without conditions a hard
 delete of a missing key is the conflict it is for `Update`, with no probe.
 `UpdateMap` has no entity: `buildUpdateMap` appends the bump so a holder of
-the row sees the write, and a map that names the version column is
-`ErrInvalidQuery` (the proposal of the notice, applied). The update branch
+the row sees the write, unless the map names the version column
+(`mapNamesColumn`), in which case the map's value is written and no bump is
+added — the notice's v1 exit (`Where("version", "=", v).UpdateMap(map{…,
+"version": v + 1})`) keeps working; the notice's proposal to refuse such a
+map with `ErrInvalidQuery` was NOT applied at the 2.0 dry run because it
+contradicted that exit. The update branch
 of `Upsert`/`UpsertBatch` holds the row to the entity's version when it is
 not zero and bumps it: `conflictClause` renders `WHERE (excluded.<v> = 0 OR
 <table>.<v> = excluded.<v>)` on PostgreSQL/SQLite and `IF(<conflict match>

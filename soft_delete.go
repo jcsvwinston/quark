@@ -80,7 +80,6 @@ func (q *BaseQuery) softDeletePredicate() *condition {
 // version the entity was loaded with and bumps it, in the row and in the
 // entity (DEP-2026-004): a stale entity restores nothing and returns
 // ErrStaleEntity; a live row, or a row the conditions exclude, is (0, nil).
-// In v1 the version was neither checked nor moved.
 //
 // Phase-1 F1-5. Returns ErrInvalidModel when the model has no deleted_at.
 func (q *Query[T]) Restore(entity *T) (int64, error) {

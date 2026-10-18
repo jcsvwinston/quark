@@ -238,8 +238,13 @@ func testUpsertVersioned(ctx context.Context, t *testing.T, client *quark.Client
 		if _, err := q().Update(holder); !errors.Is(err, quark.ErrStaleEntity) {
 			t.Errorf("Update after UpdateMap on %s = %v, want ErrStaleEntity", engine, err)
 		}
-		if _, err := q().Where("code", "=", "a").UpdateMap(map[string]any{"version": int64(9)}); !errors.Is(err, quark.ErrInvalidQuery) {
-			t.Errorf("UpdateMap naming the version column on %s = %v, want ErrInvalidQuery", engine, err)
+		// A map that names the version column is written as given, no bump
+		// on top: the v1 exit (hold in Where, move in the map) keeps working.
+		if n, err := q().Where("code", "=", "a").Where("version", "=", int64(2)).UpdateMap(map[string]any{"balance": int64(60), "version": int64(3)}); err != nil || n != 1 {
+			t.Errorf("UpdateMap naming the version column on %s = (%d, %v), want (1, nil)", engine, n, err)
+		}
+		if got := table(t)["a"]; got != "60@3" {
+			t.Errorf("after an UpdateMap naming the version on %s row a is %s, want 60@3", engine, got)
 		}
 	})
 

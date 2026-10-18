@@ -276,8 +276,8 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 
 	// Aritmética y expresión en el SET: `x = x + 1` atómico. Sobre la
 	// prioridad de Task, no sobre la versión de Account: la columna de
-	// versión la escribe Quark (DEP-2026-004) y un mapa que la nombra es
-	// ErrInvalidQuery.
+	// versión la mueve Quark (DEP-2026-004) y un mapa que la nombra la
+	// escribe tal cual, sin el bump encima.
 	if _, err := quark.For[domain.Task](ctx, client).
 		Where("id", "=", 1).
 		UpdateMap(map[string]any{"priority": quark.Add(quark.Col("priority"), quark.Lit(0))}); err != nil {

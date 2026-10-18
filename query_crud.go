@@ -1087,10 +1087,13 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 // On a model with a quark:"version" column UpdateMap bumps the version of
 // every row it writes, so a holder of the row sees the write on their next
 // Update (ErrStaleEntity) instead of overwriting it (DEP-2026-004). It has
-// no entity and no loaded version, so it checks nothing; a map that names
-// the version column is ErrInvalidQuery, as UpdateFields refuses the
-// primary key. In v1 the version was left where it was, and the map's write
-// was invisible to anyone holding the row.
+// no entity and no loaded version, so it checks nothing. A map that names
+// the version column is written as given and Quark adds no bump of its own:
+// the caller is moving the version by hand, as in
+//
+//	Where("version", "=", v).UpdateMap(map[string]any{"balance": b, "version": v + 1})
+//
+// which holds the row to a version and moves it in one statement.
 //
 // Returns the number of rows affected.
 func (q *Query[T]) UpdateMap(data map[string]any) (int64, error) {
@@ -1108,15 +1111,6 @@ func (q *Query[T]) UpdateMap(data map[string]any) (int64, error) {
 	// Require WHERE clause for safety — validate BEFORE building SQL
 	if len(q.where) == 0 {
 		return 0, fmt.Errorf("%w: UpdateMap requires Where clause to prevent accidental full table update", ErrInvalidQuery)
-	}
-
-	// The version column is Quark's to write (DEP-2026-004).
-	if vfm := versionFieldOf(q.meta); vfm != nil {
-		for col := range data {
-			if strings.EqualFold(col, vfm.Column) {
-				return 0, fmt.Errorf("%w: UpdateMap: the version column %q is bumped by Quark and cannot be named in the map", ErrInvalidQuery, vfm.Column)
-			}
-		}
 	}
 
 	// Under RowLevelSecurityClient the tenant column holds the resolved
@@ -1340,10 +1334,15 @@ func (q *BaseQuery) buildUpdateMap(data map[string]any) (string, []any, error) {
 	}
 
 	// A versioned model: the rows written move to the next version, so a
-	// holder of one of them sees the write (DEP-2026-004).
-	bump, err := q.versionBump()
-	if err != nil {
-		return "", nil, err
+	// holder of one of them sees the write (DEP-2026-004) — unless the map
+	// names the version column, in which case the caller is moving it by
+	// hand and the map's value is the one written.
+	var bump string
+	if vfm := versionFieldOf(q.meta); vfm != nil && !mapNamesColumn(data, vfm.Column) {
+		var err error
+		if bump, err = q.versionBump(); err != nil {
+			return "", nil, err
+		}
 	}
 
 	var sql strings.Builder
@@ -1417,8 +1416,7 @@ func isWarnableZero(v reflect.Value) bool {
 // stale entity — another writer moved the row — removes nothing and returns
 // ErrStaleEntity; without conditions a key no row has is the same conflict.
 // Under conditions a row they exclude is (0, nil), not a conflict. The soft
-// delete also bumps the version it writes, in the row and in the entity;
-// in v1 the DELETE matched the key alone.
+// delete also bumps the version it writes, in the row and in the entity.
 //
 // Returns the number of rows affected.
 func (q *Query[T]) Delete(entity *T) (int64, error) {
@@ -1599,6 +1597,17 @@ func (q *BaseQuery) versionPredicate(v reflect.Value, argIndex int, args []any) 
 		return "", args, err
 	}
 	return " AND " + q.dialect.Quote(vfm.Column) + " = " + q.dialect.Placeholder(argIndex), append(args, readVersion(v, vfm)), nil
+}
+
+// mapNamesColumn reports whether an UpdateMap map names the column, the
+// way the identifiers are compared on every engine: ignoring case.
+func mapNamesColumn(data map[string]any, column string) bool {
+	for col := range data {
+		if strings.EqualFold(col, column) {
+			return true
+		}
+	}
+	return false
 }
 
 // versionBump renders ", <version> = <version> + 1" for a versioned model;
@@ -1837,7 +1846,7 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 // updateCols is insert-or-ignore: the conflicting row is left as it was,
 // Upsert returns nil, and the entity's key is written back only where a row
 // was inserted (QK-59). On SQL Server and Oracle the MERGE then has no WHEN
-// MATCHED branch; in v1 it updated every non-conflict column there.
+// MATCHED branch.
 //
 // The conflict columns name the key the update branch is for. A duplicate
 // of a unique key other than the conflict columns — the entity carries the
@@ -1849,9 +1858,7 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 // the conflict columns and a statement that changed nothing reads the row
 // back; on SQL Server and Oracle an entity carrying another row's integer
 // key is refused before the MERGE, whose insert branch does not write the
-// identity key. In v1 MySQL and MariaDB updated the row holding the
-// duplicate whichever key it was, and SQL Server and Oracle inserted a
-// second row.
+// identity key.
 //
 // Under RowLevelSecurityClient the update branch only touches a row of the
 // resolved tenant (QK-43). When the conflicting row belongs to another
@@ -1875,9 +1882,7 @@ func (q *BaseQuery) saveAssociations(v reflect.Value, isUpdate bool) error {
 // when the entity carries a non-zero version, holds the row to it — a
 // conflicting row that moved is ErrStaleEntity, nothing written. An entity
 // with a zero version is treated as new and holds the row to nothing. After
-// the write the entity's version is the row's, inserted or updated. In v1
-// the update branch wrote a stale entity's columns over the winner's and
-// left the version where it was.
+// the write the entity's version is the row's, inserted or updated.
 //
 // Example:
 //
@@ -2019,9 +2024,8 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 // buildMerge constructs a MERGE (UPSERT) statement for MSSQL and Oracle.
 // hasUpdate reports whether it has a WHEN MATCHED branch: only with
 // updateCols — without them the MERGE is insert-or-ignore, as ON CONFLICT
-// DO NOTHING is (QK-59); in v1 it updated every column the insert writes but
-// the conflict columns, the key and created_at. Under RowLevelSecurityClient
-// the branch only fires for a row of the resolved tenant (QK-43).
+// DO NOTHING is (QK-59). Under RowLevelSecurityClient the branch only fires
+// for a row of the resolved tenant (QK-43).
 func (q *BaseQuery) buildMerge(v reflect.Value, conflictCols []string, updateCols []string) (string, []any, bool, error) {
 	// Stamp the resolved tenant: UpsertBatch on Oracle reaches here without
 	// going through buildInsert, which is where Upsert stamps it.

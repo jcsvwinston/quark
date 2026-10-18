@@ -192,12 +192,17 @@ conditions, when no row has the key at all:
 | Loaded associations are not written either, under conditions. | `Update` checks the row before writing a `belongs_to` association, which it writes ahead of the entity's row. |
 | A versioned model returns `(0, nil)`, not `ErrStaleEntity`, under conditions. | `ErrStaleEntity` means the row satisfies the conditions and its version moved. `UpdateBatch` skips such a row the same way. Without conditions a missing key on a versioned model is `ErrStaleEntity`, as it always was. |
 
-A write that matched its row and changed no value is reported as a write of
-one row on every engine: MySQL and MariaDB count changed rows, so Quark
-checks the row is there before reporting. The answer does not say whether
-the row exists outside the conditions: a row of another tenant and a row
-that does not exist look the same. An entity whose key is zero is inserted,
-as before; the conditions do not apply to an insert.
+A write that matched its row and changed no value runs its `After*` hook,
+writes its audit row and publishes its event on every engine: when the
+statement reports zero rows, Quark checks the row is there before deciding
+that nothing happened. The count it returns is the engine's: `Update` and
+`UpdateFields` return `1` on PostgreSQL, SQLite, SQL Server and Oracle, which
+count matched rows, and `0` on MySQL and MariaDB, which count changed rows —
+so on those two a `0` from a write by entity means "matched, unchanged" or
+"not there", and the hook, audit row and event tell the two apart. The answer
+does not say whether the row exists outside the conditions: a row of another
+tenant and a row that does not exist look the same. An entity whose key is
+zero is inserted, as before; the conditions do not apply to an insert.
 
 Hooks: `BeforeUpdate` and `AfterUpdate`.
 
@@ -291,7 +296,7 @@ Rules:
 | Map keys are sorted. | Produces deterministic SQL. |
 | Keys are validated as identifiers. | Protects dynamic update maps. |
 | Under `RowLevelSecurityClient` the tenant column, if the map names it, is written with the resolved tenant. | A map cannot move a row to another tenant; a different value is logged (`quark.tenant.foreign_value_replaced`). |
-| On a model with a `quark:"version"` column the version of every row written is bumped, and a map that names the version column is `ErrInvalidQuery`. | A holder of the row sees the write on their next `Update` (`ErrStaleEntity`) instead of overwriting it; the column is Quark's to write. `UpdateMap` has no entity, so it checks nothing. |
+| On a model with a `quark:"version"` column the version of every row written is bumped. A map that names the version column is written as given, with no bump on top. | A holder of the row sees the write on their next `Update` (`ErrStaleEntity`) instead of overwriting it. `UpdateMap` has no entity, so it checks nothing; to hold the row to a version, name it in `Where` and move it in the map: `Where("version", "=", v).UpdateMap(map[string]any{"balance": b, "version": v + 1})`. |
 
 `UpdateMap` is the preferred API for explicit zero values, admin bulk changes,
 and computed updates that do not require loading a full entity.

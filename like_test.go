@@ -172,10 +172,6 @@ func TestWhereNotLikeExcludesTheLiteralMatch(t *testing.T) {
 	}
 }
 
-// The plain form is unchanged: Where(col, "LIKE", …) hands the engine an
-// opaque pattern with no tail, exactly as it always did. Its meaning is
-// published, and making it escape-aware would change what a backslash means
-// on three engines — that is A12 material, not this change.
 // QK-32. The plain forms — Where with the operator, the typed Like, the AST
 // Cmp — declare the escape character like the escaped forms do, so a pattern
 // means one thing on the six engines. On SQLite, which has no default escape,
@@ -272,6 +268,8 @@ func TestDanglingEscapeIsRefusedBeforeTheEngine(t *testing.T) {
 		"WhereExpr(Cmp)":  For[likeRow](ctx, c).WhereExpr(Cmp(Col("name"), "LIKE", Lit(`abc\`))),
 		"Having":          For[likeRow](ctx, c).Select("name").GroupBy("name").Having("name", "LIKE", `abc\`),
 		"HavingAggregate": For[likeRow](ctx, c).Select("name").GroupBy("name").HavingAggregate("MAX", "name", "LIKE", `abc\`),
+		"WhereJSON":       For[likeRow](ctx, c).WhereJSON("name", "x", "LIKE", `abc\`),
+		"PreloadWhere":    For[likeRow](ctx, c).PreloadWhere("Rows", "name", "LIKE", `abc\`),
 	} {
 		rec.reset()
 		_, err := q.List()

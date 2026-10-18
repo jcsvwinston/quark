@@ -20,10 +20,11 @@ import (
 // Restore bump the version they write; the update branch of Upsert and
 // UpsertBatch does the same, treating a zero version as new; UpdateMap has
 // no entity, so it checks nothing and bumps the version of the rows it
-// writes, and refuses a map that names the version column. In v1 none of
-// them sent a version predicate or moved the version: a stale Delete removed
-// the winner's row, a stale Upsert wrote over it, and an UpdateMap's write
-// was invisible to a holder of the row.
+// writes, and a map that names the version column is written as given (the
+// exit the notice gives for v1 keeps working). In v1 none of them sent a
+// version predicate or moved the version: a stale Delete removed the
+// winner's row, a stale Upsert wrote over it, and an UpdateMap's write was
+// invisible to a holder of the row.
 //
 // The fixtures are those of update_batch_versions_test.go (QK-45).
 // internal/enginesuite (UpsertVersioned, WhereGuards/Versioned) runs the
@@ -83,14 +84,19 @@ func TestWritesOfAVersionedModelJoinOptimisticLocking(t *testing.T) {
 		if got := ubvTable(t, c)[1]; got != "50@2" {
 			t.Fatalf("after the holder's Update row 1 is %s, want the map's 50@2 kept", got)
 		}
-		// A map that names the version column is refused: the column is
-		// Quark's to write.
-		_, err = For[ubvAccount](ctx, c).Where("id", "=", int64(1)).UpdateMap(map[string]any{"balance": int64(60), "version": int64(9)})
-		if !errors.Is(err, ErrInvalidQuery) {
-			t.Fatalf("UpdateMap naming the version column = %v, want ErrInvalidQuery", err)
+		// A map that names the version column is written as given, with no
+		// bump on top: the v1 exit of DEP-2026-004 — hold the row to a
+		// version in Where, move it in the map — keeps working at 2.0.
+		n, err = For[ubvAccount](ctx, c).Where("id", "=", int64(1)).Where("version", "=", int64(2)).UpdateMap(map[string]any{"balance": int64(60), "version": int64(3)})
+		if err != nil || n != 1 {
+			t.Fatalf("UpdateMap naming the version column = (%d, %v), want (1, nil)", n, err)
 		}
-		if got := ubvTable(t, c)[1]; got != "50@2" {
-			t.Fatalf("the refused UpdateMap wrote: row 1 is %s", got)
+		if got := ubvTable(t, c)[1]; got != "60@3" {
+			t.Fatalf("after an UpdateMap naming the version row 1 is %s, want 60@3: the map's value, not bumped again", got)
+		}
+		// Held to a version the row left, the same statement writes nothing.
+		if n, err := For[ubvAccount](ctx, c).Where("id", "=", int64(1)).Where("version", "=", int64(2)).UpdateMap(map[string]any{"balance": int64(70), "version": int64(3)}); err != nil || n != 0 {
+			t.Fatalf("UpdateMap held to a stale version = (%d, %v), want (0, nil)", n, err)
 		}
 		// A model without a version column: the map is written as given.
 		if n, err := For[ubvPlain](ctx, c).Where("id", "=", int64(1)).UpdateMap(map[string]any{"balance": int64(50)}); err != nil || n != 1 {

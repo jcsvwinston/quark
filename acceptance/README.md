@@ -128,8 +128,10 @@ codegen, scatter-gather + shard-key-from-entity, stampede cross-instancia) **no
 están en el denominador** —no son símbolos exportados hoy (el binder vive en
 internals de codegen; scatter-gather/stampede son features futuras sin símbolo)—
 así que **no necesitan entrada de allowlist**. La allowlist se reserva para
-símbolos que SÍ existen pero el exerciser no debe cubrir (p.ej. el alias
-deprecado `RowLevelSecurity`).
+símbolos que SÍ existen pero el exerciser no debe cubrir (p.ej. los contratos
+de `quarkdriver` que implementa un driver, no una aplicación; el alias
+deprecado `RowLevelSecurity` que la estrenó se retiró en el 2.0,
+DEP-2026-001).
 
 Capacidad desigual por motor (no es fallo): `RowLevelSecurityNative` y
 `LISTEN/NOTIFY` son PG-only; el lock de migración no está en SQLite/Oracle. La

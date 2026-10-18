@@ -27,9 +27,8 @@ import (
 // QK-46 (DEP-2026-005). The same holds without conditions: a write by entity
 // on a key no row has — Update, UpdateFields, Delete, HardDelete on a model
 // without a version column — touches nothing, returns (0, nil) and reports
-// nothing. In v1 it ran the After hook, wrote the audit row and published
-// the event as if it had written. On a versioned model a missing key without
-// conditions stays the version conflict it was: ErrStaleEntity.
+// nothing. On a versioned model a missing key without conditions is the
+// version conflict: ErrStaleEntity.
 
 // errExcludedByWhere is how saveAny tells its caller that no row with the
 // key satisfies the query's conditions — or, without conditions, that no

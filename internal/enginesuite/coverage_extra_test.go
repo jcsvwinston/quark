@@ -595,7 +595,7 @@ func TestDistinctGroupByHaving(t *testing.T) {
 	results2, err := quark.For[GbItem](ctx, c).
 		Select("category").
 		GroupBy("category").
-		Having("category", "!=", "Z").
+		Having("score", ">", 5).
 		List()
 	if err != nil {
 		t.Fatalf("Having: %v", err)
