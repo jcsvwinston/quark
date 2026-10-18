@@ -58,7 +58,7 @@ Te invocan tras un cambio. Pasos en orden:
 ### `tenant_router.go`, `rls_native.go`
 
 - [ ] **`RowLevelSecurityClient` vs `RowLevelSecurityNative`**: son **mutuamente excluyentes por router** en PG. Cualquier cambio en `tenant_router.go` que toque el switch de estrategias debe respetarlo. La modalidad Client inyecta `WHERE tenant_id = ?`; la Native delega en `set_config` + `CREATE POLICY` (PG-only, fail-fast con `ErrUnsupportedFeature` en otros motores).
-- [ ] **Alias `RowLevelSecurity` deprecado** desde v1.0; se retira en v2.0. No retirarlo en la línea `v1.x` — tests de backward-compat existen (`tenant_router_test.go:TestRowLevelSecurityAliasBackwardCompat`).
+- [ ] **Alias `RowLevelSecurity` retirado** en v2.0 (DEP-2026-001; deprecado desde v1.0). No reintroducirlo: el nombre canónico es `RowLevelSecurityClient` y la doc pública lo dice.
 - [ ] **`nativeRLSExecutor` (rls_native.go)**: cualquier cambio en cómo se emite `set_config` o cómo se cierra la tx implícita (`context.AfterFunc`) debe mantener: (a) PG enforza vía policy, (b) `client.Raw()` / `client.Exec()` emiten warning estructurado `quark.tenant.raw_under_native_rls`. Caveats request-scoped vs long-lived ctx en el doc-comment.
 - [ ] **Factory de tenant nuevo no bloquea bajo `mu`.** Si tocas `routeTenant`, considera `singleflight`.
 

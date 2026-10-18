@@ -87,7 +87,7 @@ Si encuentras una sesión abriendo PRs que tocan API pero no `website/docs/`, re
 
 - **Active Record, no Data Mapper.** Modelos son structs con tags + hooks. Nada de Unit of Work / Identity Map al estilo Hibernate.
 - **Reflect por defecto, codegen opt-in (entregado en Fase 6, v1.0.0).** No bifurcar la API.
-- **Multi-tenancy: tres estrategias coexisten** (DBPerTenant / SchemaPerTenant / RowLevelSecurityClient — antes `RowLevelSecurity`, alias deprecado desde v1.0; se retira en v2.0). La modalidad cliente es WHERE-injection en el builder; `RowLevelSecurityNative` (Fase 5, F5-2, PG-only) entrega aislamiento por motor (`SET LOCAL app.tenant_id` + `CREATE POLICY`).
+- **Multi-tenancy: tres estrategias coexisten** (DBPerTenant / SchemaPerTenant / RowLevelSecurityClient — antes `RowLevelSecurity`, alias deprecado desde v1.0 y retirado en v2.0, DEP-2026-001). La modalidad cliente es WHERE-injection en el builder; `RowLevelSecurityNative` (Fase 5, F5-2, PG-only) entrega aislamiento por motor (`SET LOCAL app.tenant_id` + `CREATE POLICY`).
 - **Caché L2 integrada** (memory/redis), no plugin externo. Stampede protection y singleflight llegan en Fase 4.
 - **No NoSQL.** Quark es relacional.
 - **Sin GraphQL/admin auto-generado.** Eso es territorio ent.

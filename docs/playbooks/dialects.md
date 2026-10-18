@@ -108,8 +108,9 @@ Rules that follow:
   them.
 - **A plumbing interface may gain a method in a minor** (never a patch), and
   the release notes name it. Its existing methods do not change, and the
-  plumbing function types (`Option`, `TypedScanner`, `TypedBinder`,
-  `NewListenerFunc`) keep their signatures within v1.
+  plumbing function types (`Option`, `TypedScanner`, `TypedBinder`) keep
+  their signatures within v1. `NewListenerFunc`, the listener contract
+  before `ListenerFactory`, left the census at 2.0 (DEP-2026-002).
 - **Signatures are frozen.** `acceptance/apisurface.json` records the `sig`
   of every func, method and type; changing a parameter of a contract method
   makes CI's freshness check fail with the diff, and `CON-02` checks that the

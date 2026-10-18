@@ -12,7 +12,7 @@
 //     través de sus métodos (contados aparte) y de las funcs/métodos que los
 //     consumen.
 //
-// Las excepciones manuales (p.ej. el alias deprecado RowLevelSecurity) viven en
+// Las excepciones manuales (p.ej. las opciones del migrador) viven en
 // manualReasons y se preservan en cada regeneración. El fichero es
 // determinista (claves ordenadas, sin timestamp) para que un símbolo público
 // nuevo produzca un diff limpio y CI pueda exigir regenerar.
@@ -92,10 +92,9 @@ var manualReasons = map[string]string{
 	"github.com/jcsvwinston/quark/migrate.WithLockName":                    "opción del migrador (QK-6): documentada y probada en migrate/; el superapp no la varía (denominador S7-coverage)",
 	"github.com/jcsvwinston/quark/migrate.WithLogger":                      "opción del migrador (QK-6): la ejerce migrate/a1_lock_tx_test.go (denominador S7-coverage)",
 	"github.com/jcsvwinston/quark.(*Client).Logger":                        "accesor del logger del cliente (QK-6): lo consume el migrador; no es un entry point de aplicación (denominador S7-coverage)",
-	"github.com/jcsvwinston/quark/quarkdriver.RegisterListenerFactory":     "contrato de módulo de driver (QK-8): lo llama el init() del módulo de PostgreSQL al adoptar el contrato público; RegisterListener lo adapta mientras tanto (denominador S7-coverage)",
+	"github.com/jcsvwinston/quark/quarkdriver.RegisterListenerFactory":     "contrato de módulo de driver (QK-8): lo llama el init() del módulo de PostgreSQL (denominador S7-coverage)",
 	"github.com/jcsvwinston/quark/quarkdriver.MustRegisterListenerFactory": "contrato de módulo de driver (QK-8): init() del módulo, no código de aplicación (denominador S7-coverage)",
 	"github.com/jcsvwinston/quark/quarkdriver.LookupListenerFactory":       "contrato de módulo de driver (QK-8): lo llama el ORM al abrir un listener (events.go); no es un entry point de aplicación (denominador S7-coverage)",
-	"github.com/jcsvwinston/quark.RowLevelSecurity":                        "alias deprecado de RowLevelSecurityClient (desde v1.0, se retira en v2.0); el exerciser cubre RowLevelSecurityClient en su lugar",
 
 	// Contrato de los módulos de driver (ADR-0023). Es superficie de AUTOR DE
 	// DRIVER, no de aplicación: lo llama el init() de cada módulo, no el
@@ -103,14 +102,11 @@ var manualReasons = map[string]string{
 	// probaría que la función existe, no que el driver clasifica bien — que es
 	// lo que sí prueba la suite de conformidad de cada módulo
 	// (quarkdriver/drivertest), con errores REALES del motor.
-	"github.com/jcsvwinston/quark/quarkdriver.Register":             reasonDriverContract,
-	"github.com/jcsvwinston/quark/quarkdriver.MustRegister":         reasonDriverContract,
-	"github.com/jcsvwinston/quark/quarkdriver.Classifiers":          reasonDriverContract,
-	"github.com/jcsvwinston/quark/quarkdriver.RegisteredEngines":    reasonDriverContract,
-	"github.com/jcsvwinston/quark/quarkdriver.HasEngine":            reasonDriverContract,
-	"github.com/jcsvwinston/quark/quarkdriver.RegisterListener":     reasonDriverContract,
-	"github.com/jcsvwinston/quark/quarkdriver.MustRegisterListener": reasonDriverContract,
-	"github.com/jcsvwinston/quark/quarkdriver.LookupListener":       reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.Register":          reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.MustRegister":      reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.Classifiers":       reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.RegisteredEngines": reasonDriverContract,
+	"github.com/jcsvwinston/quark/quarkdriver.HasEngine":         reasonDriverContract,
 
 	// El enum de kinds de columna del contrato de dialecto (A11 Q2): String
 	// sirve a los mensajes y a los tests de quien escribe un dialecto; el ORM

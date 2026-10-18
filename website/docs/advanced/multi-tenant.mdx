@@ -237,8 +237,9 @@ type TenantConfig struct {
 }
 ```
 
-(The strategy `RowLevelSecurityClient` was once called `RowLevelSecurity`; the old
-name still works as a deprecated alias and is removed in v2.)
+(The strategy `RowLevelSecurityClient` was called `RowLevelSecurity` before
+`v0.9.0`; v2 does not declare the old name, so a `TenantConfig` that still
+writes it does not compile.)
 
 ## Relations, cache, and the bigger picture
 
