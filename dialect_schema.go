@@ -42,6 +42,8 @@ var (
 	_ quarkdriver.AutoIncrementer = (*OracleDialect)(nil)
 	_ quarkdriver.IdempotentDDL   = (*OracleDialect)(nil)
 
+	_ quarkdriver.ReferentialActioner = (*MySQLDialect)(nil)
+	_ quarkdriver.ReferentialActioner = (*MariaDBDialect)(nil)
 	_ quarkdriver.ReferentialActioner = (*MSSQLDialect)(nil)
 	_ quarkdriver.ReferentialActioner = (*OracleDialect)(nil)
 )
@@ -216,9 +218,20 @@ func (o *OracleDialect) IsAlreadyExists(object quarkdriver.SchemaObject, err err
 
 // --- the referential actions of a foreign key (quarkdriver.ReferentialActioner)
 
-// PostgreSQL, SQLite, MySQL and MariaDB accept the SQL standard's five
-// actions in both clauses and take the default: every action written as
-// given.
+// PostgreSQL and SQLite accept the SQL standard's five actions in both
+// clauses and take the default: every action written as given.
+
+// ReferentialAction: MySQL and MariaDB (which embeds this dialect) accept SET
+// DEFAULT in both clauses and do not run it — InnoDB refuses the delete or
+// the update, as NO ACTION would, and MariaDB's catalog records RESTRICT for
+// it — so SET DEFAULT is refused before anything is sent, as Oracle refuses
+// it (DEP-2026-007, QK-60). The other four actions are written as given.
+func (m *MySQLDialect) ReferentialAction(_ quarkdriver.ReferentialEvent, action string) quarkdriver.ActionSupport {
+	if action == "SET DEFAULT" {
+		return quarkdriver.ActionUnsupported
+	}
+	return quarkdriver.ActionWritten
+}
 
 // ReferentialAction: SQL Server takes NO ACTION, CASCADE, SET NULL and SET
 // DEFAULT in both clauses, and has no RESTRICT — a syntax error (Msg 156).

@@ -104,9 +104,11 @@ err := client.AddForeignKey(
 `SET DEFAULT`, `RESTRICT`, `NO ACTION` — and an empty one writes no clause, so
 the engine applies its default, `NO ACTION`. They are written as the engine
 takes them: Oracle has no clause for `NO ACTION` and Quark leaves it out, and
-an action the engine does not have — `RESTRICT` on SQL Server; on Oracle
-anything but `ON DELETE CASCADE` and `ON DELETE SET NULL` — returns an error
-wrapping `ErrUnsupportedFeature` that names it, without sending the statement.
+an action the engine does not have — `RESTRICT` on SQL Server; `SET DEFAULT`
+on MySQL and MariaDB, whose InnoDB accepts the clause and runs `NO ACTION`
+instead; on Oracle anything but `ON DELETE CASCADE` and `ON DELETE SET NULL` —
+returns an error wrapping `ErrUnsupportedFeature` that names it, without
+sending the statement.
 `ApplyPlan` treats the foreign keys of a plan the same way, and refuses the
 whole plan before its first operation. The table per engine is in the
 [dialects reference](dialects#what-the-schema-path-asks-a-dialect).

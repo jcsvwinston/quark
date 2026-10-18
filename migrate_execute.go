@@ -104,7 +104,8 @@ import (
 //     written as the dialect's engine takes them
 //     (quarkdriver.ReferentialActioner): Oracle's NO ACTION is left out,
 //     and an action the engine does not have (SQL Server's RESTRICT,
-//     Oracle's ON UPDATE CASCADE) refuses the whole plan with
+//     MySQL's and MariaDB's SET DEFAULT, Oracle's ON UPDATE CASCADE)
+//     refuses the whole plan with
 //     ErrUnsupportedFeature before its first operation runs (QK-49).
 //   - **On SQLite** (a quarkdriver.TableRebuilder) a column change and
 //     the constraint ops rebuild the table inside the plan's

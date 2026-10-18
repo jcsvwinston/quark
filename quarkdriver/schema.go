@@ -364,21 +364,15 @@ const (
 //
 // A dialect that does not implement ReferentialActioner gets every action
 // written as the caller gave it, which is right on the engines that accept
-// the SQL standard's five: PostgreSQL, SQLite, MySQL and MariaDB. SQL Server
-// has no RESTRICT, and implements the interface to refuse it. Oracle has ON
-// DELETE CASCADE and ON DELETE SET NULL only — no ON UPDATE clause, and no
-// clause for NO ACTION, which is what it does for a foreign key that names
-// no action — and implements the interface to leave NO ACTION out and refuse
-// the rest.
-//
-// MySQL and MariaDB accept SET DEFAULT and do not do it: InnoDB refuses the
-// delete or the update, as NO ACTION would, and MariaDB records RESTRICT in
-// its catalog. They keep the default all the same, because refusing the
-// action would fail a statement that succeeds today.
-//
-// Changes in v2.0.0: SET DEFAULT is refused on MySQL and MariaDB before
-// anything is sent, as Oracle refuses it, with ErrUnsupportedFeature naming
-// the clause. See DEP-2026-007 in Quark's docs/deprecations.
+// the SQL standard's five: PostgreSQL and SQLite. SQL Server has no
+// RESTRICT, and implements the interface to refuse it. MySQL and MariaDB
+// accept SET DEFAULT and do not do it — InnoDB refuses the delete or the
+// update, as NO ACTION would, and MariaDB records RESTRICT in its catalog —
+// so they implement the interface to refuse it before anything is sent
+// (DEP-2026-007). Oracle has ON DELETE CASCADE and ON DELETE SET NULL only —
+// no ON UPDATE clause, and no clause for NO ACTION, which is what it does for
+// a foreign key that names no action — and implements the interface to leave
+// NO ACTION out and refuse the rest.
 type ReferentialActioner interface {
 	ReferentialAction(event ReferentialEvent, action string) ActionSupport
 }

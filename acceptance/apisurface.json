@@ -764,6 +764,12 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
+      "name": "(*MySQLDialect).ReferentialAction",
+      "kind": "method",
+      "sig": "func(quarkdriver.ReferentialEvent, string) quarkdriver.ActionSupport"
+    },
+    {
+      "pkg": "github.com/jcsvwinston/quark",
       "name": "(*MySQLDialect).RenameColumn",
       "kind": "method",
       "sig": "func(string, string, string) string"

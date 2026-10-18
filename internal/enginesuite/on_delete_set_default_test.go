@@ -15,26 +15,21 @@ import (
 )
 
 // testOnDeleteSetDefault pins what the engine this lane runs does with a
-// foreign key that declares ON DELETE SET DEFAULT (QK-60). PostgreSQL,
-// SQLite and SQL Server run it: deleting the referenced row writes the
-// column's default into the rows that referenced it. MySQL and MariaDB
-// accept the clause and do not run it: InnoDB refuses the delete, as NO
-// ACTION would, and nothing says so. Oracle has no such clause, and the
-// dialect refuses it before anything is sent (ErrUnsupportedFeature, as
-// TestReferentialClauses pins in the root module).
-//
-// Quark 2.0 refuses the action on MySQL and MariaDB the way it refuses it on
-// Oracle (DEP-2026-007): the MySQL and MariaDB branch of this test is what
-// that PR changes.
+// foreign key that declares ON DELETE SET DEFAULT (QK-60): the action means
+// the same on the six. PostgreSQL, SQLite and SQL Server run it: deleting
+// the referenced row writes the column's default into the rows that
+// referenced it. Oracle has no such clause, and MySQL and MariaDB accept it
+// and run NO ACTION instead (InnoDB refuses the delete, and MariaDB's
+// catalog records RESTRICT), so on those three the dialect refuses it before
+// anything is sent (ErrUnsupportedFeature, as TestReferentialClauses pins in
+// the root module; DEP-2026-007).
 func testOnDeleteSetDefault(ctx context.Context, t *testing.T, client *quark.Client) {
 	engine := client.Dialect().Name()
-	var runsIt, acceptsAndIgnores, refuses bool
+	var runsIt, refuses bool
 	switch engine {
 	case "postgres", "sqlite", "mssql":
 		runsIt = true
-	case "mysql", "mariadb":
-		acceptsAndIgnores = true
-	case "oracle":
+	case "mysql", "mariadb", "oracle":
 		refuses = true
 	default:
 		t.Skipf("no behaviour pinned for ON DELETE SET DEFAULT on dialect %q", engine)
@@ -127,25 +122,17 @@ func testOnDeleteSetDefault(ctx context.Context, t *testing.T, client *quark.Cli
 	if err := client.Raw().QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM %s", q(client, "parent_code"), child)).Scan(&parentCode); err != nil {
 		t.Fatalf("read the child on %s: %v", engine, err)
 	}
-	switch {
-	case runsIt:
+	if runsIt {
 		if delErr != nil {
 			t.Fatalf("on %s the delete of a referenced row under ON DELETE SET DEFAULT failed: %v, want the action to run", engine, delErr)
 		}
 		if parentCode.String != "keep" {
 			t.Errorf("on %s the child references %q after the delete, want the column's default %q", engine, parentCode.String, "keep")
 		}
-	case acceptsAndIgnores:
-		if delErr == nil {
-			t.Errorf("on %s the delete of a referenced row under ON DELETE SET DEFAULT succeeded: the engine ran an action it is pinned to accept and ignore (v1 behaviour)", engine)
-		}
-		if parentCode.String != "gone" {
-			t.Errorf("on %s the child references %q, want %q: the engine accepted SET DEFAULT and did not run it", engine, parentCode.String, "gone")
-		}
 	}
 
 	// For the record: what the catalog says the action is, and whether the
-	// applied schema re-plans the key (MariaDB stores RESTRICT for it).
+	// applied schema re-plans the key.
 	live, err := client.IntrospectSchema(ctx)
 	if err != nil {
 		t.Fatalf("introspect after apply on %s: %v", engine, err)

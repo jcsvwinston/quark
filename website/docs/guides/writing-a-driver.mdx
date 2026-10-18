@@ -459,10 +459,6 @@ other one cannot get it from its dialect today.
   SQL Server's `[` is escaped in the text only under the name `mssql`. An engine
   whose literals treat a backslash as MySQL's do, or with metacharacters of its
   own, gets a clause or a pattern it does not read as Quark means.
-- **Referential actions.** The `ON DELETE` and `ON UPDATE` a model declares reach
-  the DDL as written. No interface lets a dialect refuse or translate one, so an
-  engine that does not accept an action fails the statement. Oracle is the
-  built-in example: it refuses `ON UPDATE` and `ON DELETE NO ACTION`.
 - **The unit of a length.** `ColumnSpec.Size` is the `size=N` of a field's tag,
   and the contract does not say whether `N` counts characters or bytes. The
   dialect's type decides — Oracle's built-in `VARCHAR2(n)` counts bytes, so a
