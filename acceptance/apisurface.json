@@ -3642,12 +3642,6 @@
     },
     {
       "pkg": "github.com/jcsvwinston/quark",
-      "name": "RowLevelSecurity",
-      "kind": "const",
-      "sig": "TenantStrategy"
-    },
-    {
-      "pkg": "github.com/jcsvwinston/quark",
       "name": "RowLevelSecurityClient",
       "kind": "const",
       "sig": "TenantStrategy"

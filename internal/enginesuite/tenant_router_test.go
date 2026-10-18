@@ -10,37 +10,6 @@ import (
 	"github.com/jcsvwinston/quark"
 )
 
-// TestRowLevelSecurityAliasBackwardCompat guards the contract from F5-1
-// (Fase 5): the legacy name RowLevelSecurity must remain a usable alias
-// of RowLevelSecurityClient for as long as it is declared. If this test
-// breaks, the alias was removed prematurely or the underlying value
-// drifted — both would break existing callers compiled against v0.x.
-//
-// Sunset: remove this test in the same PR that removes the
-// RowLevelSecurity alias declaration (v2.0.0, no earlier than
-// 2026-12-08 — see docs/deprecations/DEP-2026-001-rowlevelsecurity-alias.md).
-// Leaving it here after the alias is gone does not compile.
-//
-// See ADR-0012 §"Renombrado y deprecation" and tenant_router.go's
-// RowLevelSecurity declaration.
-func TestRowLevelSecurityAliasBackwardCompat(t *testing.T) {
-	// Both spellings must refer to the same TenantStrategy value.
-	if quark.RowLevelSecurity != quark.RowLevelSecurityClient {
-		t.Fatalf("alias drift: RowLevelSecurity(%d) != RowLevelSecurityClient(%d)",
-			quark.RowLevelSecurity, quark.RowLevelSecurityClient)
-	}
-
-	// The deprecated alias must still type-check in a TenantConfig.
-	// We do not exercise the router runtime here — the canonical name is
-	// exercised by every other test in this file; the alias only needs
-	// to compile and equal the canonical value.
-	//nolint:staticcheck // intentional use of the deprecated alias.
-	cfg := quark.TenantConfig{Strategy: quark.RowLevelSecurity}
-	if cfg.Strategy != quark.RowLevelSecurityClient {
-		t.Fatalf("config assignment drift via alias: got %d", cfg.Strategy)
-	}
-}
-
 // orRLSCapture records the SELECT SQL emitted while a query runs.
 type orRLSCapture struct {
 	mu   sync.Mutex

@@ -328,7 +328,6 @@
     "github.com/jcsvwinston/quark.Result": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.Routine": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.Row": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",
-    "github.com/jcsvwinston/quark.RowLevelSecurity": "alias deprecado de RowLevelSecurityClient (desde v1.0, se retira en v2.0); el exerciser cubre RowLevelSecurityClient en su lugar",
     "github.com/jcsvwinston/quark.RowLevelSecurityClient": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.RowLevelSecurityNative": "const: no invocable (se referencia como valor, nunca se llama) (denominador S7-coverage)",
     "github.com/jcsvwinston/quark.SQLGuard": "tipo: no invocable por el gate; su comportamiento se ejerce vía sus métodos (contados aparte) y las funcs/métodos que lo consumen (denominador S7-coverage)",

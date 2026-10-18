@@ -19,8 +19,8 @@ apertura), las dos modalidades de fila se distinguen explícitamente:
 
 1. **`DatabasePerTenant`**: una DB por tenant. `TenantRouter` mantiene un LRU de `*Client` por tenant ID. Aislamiento físico fuerte.
 2. **`SchemaPerTenant`** (sólo PG y MSSQL real, MySQL no tiene schemas): una DB, un schema por tenant. `q.schema = tenantID` en `client.go:170`.
-3. **`RowLevelSecurityClient`** (constante actual `RowLevelSecurity`,
-   renombrado en F5-1 con alias deprecado): inyecta `WHERE tenant_id = ?`
+3. **`RowLevelSecurityClient`** (antes `RowLevelSecurity`, renombrado en
+   F5-1; el alias deprecado se retiró en v2.0, DEP-2026-001): inyecta `WHERE tenant_id = ?`
    en cada query del builder. **Disponible en los 6 motores. NO es RLS
    de motor** — ver "Limitaciones críticas" abajo.
 4. **`RowLevelSecurityNative`** (Fase 5, F5-2 entregado, PG-only):

@@ -52,8 +52,7 @@ func TestExtractKnownSymbols(t *testing.T) {
 		root + "(*Query[T]).CreateBatch": "method",
 		root + "For":                     "func", // func de paquete (genérica)
 		root + "New":                     "func",
-		root + "RowLevelSecurity":        "const", // alias deprecado (allowlist)
-		root + "Nullable":                "type",  // alias genérico
+		root + "Nullable":                "type", // alias genérico
 	}
 	for key, want := range mustHave {
 		got, ok := kind[key]

@@ -30,10 +30,12 @@ start with [Multi-Tenant](../../advanced/multi-tenant).
 | `RowLevelSecurityClient` | Client-side `WHERE tenant_id = ?` injection on every Quark-built query (raw SQL bypasses it). | Shared table, simple scaling. On PG, [`RowLevelSecurityNative`](../../advanced/row-level-native) offers engine-enforced policies as the alternative. |
 | `RowLevelSecurityNative` | PostgreSQL-only. Engine-enforced via `set_config('app.tenant_id', ...)` per implicit transaction + `CREATE POLICY` clauses on each tenant-scoped table. `client.Raw()` is also filtered server-side. | PG deployments where bypass risk matters; mutually exclusive with `RowLevelSecurityClient` per router. |
 
-:::caution `RowLevelSecurity` is deprecated
-`RowLevelSecurity` is a deprecated alias for `RowLevelSecurityClient`.
-Use `RowLevelSecurityClient` in new code; the alias is scheduled for
-removal in v2.0.
+:::note `RowLevelSecurity` is not a constant in v2
+The pre-`v0.9.0` spelling `RowLevelSecurity` is gone: v2 declares only
+`RowLevelSecurityClient` and `RowLevelSecurityNative`. A program that still
+writes the old name fails to compile with `undefined: quark.RowLevelSecurity`;
+the fix is the rename, and nothing stored on disk changes because the
+constant's value did not.
 :::
 
 ## TenantRouter
