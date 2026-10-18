@@ -3073,16 +3073,24 @@ func (q *Query[T]) upsertBatchOracle(
 // count, so a caller that needs to know which rows were written calls Update
 // per entity.
 //
-// On a model with a quark:"version" field each UPDATE carries the version
-// predicate, but by default a row it does not match is skipped in silence:
-// the call returns nil and no in-memory version is bumped. Chain
-// [Query.CheckVersions] to have the batch rolled back with ErrStaleEntity
-// for every such row instead, and the versions of the written rows bumped
-// (QK-45). That becomes the default in Quark 2.0 (DEP-2026-003).
+// On a model with a quark:"version" field the batch is all or nothing over
+// the versions, as Update is for one row: each UPDATE carries the version
+// predicate, a row it does not match is stale — another writer moved its
+// version, or its key does not exist — unless the query's conditions exclude
+// it, which skips it without error. Every stale row is collected, the whole
+// batch is rolled back, and the error joins one ErrStaleEntity per stale
+// row, each naming its key. When the batch is written, each entity's
+// in-memory version is bumped, so the next Update of the same struct does
+// not report a conflict that did not happen; a batch that fails bumps none
+// (QK-45, DEP-2026-003). [Query.CheckVersions] is redundant and kept for
+// code written against v1.
 //
 // Example:
 //
 //	err := quark.For[User](ctx, client).UpdateBatch(users)
+//	if errors.Is(err, quark.ErrStaleEntity) {
+//	    // nothing was written; err names every row whose version moved
+//	}
 func (q *Query[T]) UpdateBatch(entities []*T) error {
 	if q.err != nil {
 		return q.err
@@ -3100,14 +3108,11 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
 
-	// Under CheckVersions on a versioned model (QK-45) every row's count is
-	// read: the rows written are bumped in memory once the batch is through,
-	// and the stale ones fail it. vfm stays nil otherwise, and the batch is
-	// the v1 one, statement for statement.
-	var vfm *FieldMeta
-	if q.checkVersions {
-		vfm = versionFieldOf(q.meta)
-	}
+	// On a versioned model every row's count is read (QK-45): the rows
+	// written are bumped in memory once the batch is through, and the stale
+	// ones fail it. vfm is nil on a model without a version column, and the
+	// batch reads no count then.
+	vfm := versionFieldOf(q.meta)
 	var written []reflect.Value
 
 	err := q.atomically(ctx, func(tx *Tx) error {

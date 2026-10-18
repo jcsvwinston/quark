@@ -501,34 +501,48 @@ var BUILDERADV = Exerciser{Name: "builder-advanced", Fn: func(ctx context.Contex
 	}
 	ub := []*domain.Account{&rows[0], &rows[1]}
 	ub[0].Name, ub[1].Name = "badv-batch0", "badv-batch1"
+	loaded := ub[0].Version
 	if err := quark.For[domain.Account](rec.Mark(ctx, QM("UpdateBatch")), client).UpdateBatch(ub); err != nil {
 		return fmt.Errorf("UpdateBatch: %w", err)
 	}
-	// CheckVersions (QK-45). Account is versioned, and the unchecked batch
-	// above moved both rows' versions in the database but not in ub, so a
-	// checked batch of the same structs is stale and writes nothing. Reloaded,
-	// it goes through and bumps the in-memory versions.
+	// Account is versioned, and UpdateBatch holds every row to its version
+	// (QK-45, DEP-2026-003): the batch bumped the in-memory versions of the
+	// rows it wrote, so the same structs go on being written.
+	if ub[0].Version != loaded+1 {
+		return fmt.Errorf("UpdateBatch: in-memory version %d after the batch, want %d", ub[0].Version, loaded+1)
+	}
+	// A row another writer moved makes the batch stale: it is rolled back
+	// whole, nothing written, and the error names the row. CheckVersions,
+	// the v1 opt-in, is redundant and still compiles.
+	mover, err := quark.For[domain.Account](ctx, client).Find(ub[1].ID)
+	if err != nil {
+		return fmt.Errorf("load the row to move: %w", err)
+	}
+	mover.Name = "badv-moved1"
+	if _, err := quark.For[domain.Account](ctx, client).Update(&mover); err != nil {
+		return fmt.Errorf("move the row underneath: %w", err)
+	}
 	ub[0].Name = "badv-checked0"
 	if err := quark.For[domain.Account](rec.Mark(ctx, QM("CheckVersions")), client).CheckVersions().UpdateBatch(ub); !errors.Is(err, quark.ErrStaleEntity) {
-		return fmt.Errorf("CheckVersions with stale versions: err=%v, want ErrStaleEntity", err)
+		return fmt.Errorf("UpdateBatch with a stale row: err=%v, want ErrStaleEntity", err)
 	}
 	for i := range ub {
 		fresh, err := quark.For[domain.Account](ctx, client).Find(ub[i].ID)
 		if err != nil {
-			return fmt.Errorf("reload after the stale checked batch: %w", err)
+			return fmt.Errorf("reload after the stale batch: %w", err)
 		}
 		if i == 0 && fresh.Name != "badv-batch0" {
-			return fmt.Errorf("the stale checked batch wrote %q", fresh.Name)
+			return fmt.Errorf("the stale batch wrote %q", fresh.Name)
 		}
 		ub[i] = &fresh
 	}
 	ub[0].Name = "badv-checked0"
-	loaded := ub[0].Version
-	if err := quark.For[domain.Account](ctx, client).CheckVersions().UpdateBatch(ub); err != nil {
-		return fmt.Errorf("CheckVersions with fresh versions: %w", err)
+	loaded = ub[0].Version
+	if err := quark.For[domain.Account](ctx, client).UpdateBatch(ub); err != nil {
+		return fmt.Errorf("UpdateBatch after the reload: %w", err)
 	}
 	if ub[0].Version != loaded+1 {
-		return fmt.Errorf("CheckVersions: in-memory version %d after the batch, want %d", ub[0].Version, loaded+1)
+		return fmt.Errorf("UpdateBatch: in-memory version %d after the reloaded batch, want %d", ub[0].Version, loaded+1)
 	}
 	// DeleteBatch por ids (soft) + DeleteBy por predicado.
 	if n, err := quark.For[domain.Account](rec.Mark(ctx, QM("DeleteBatch")), client).DeleteBatch([]any{ub[0].ID, ub[1].ID}); err != nil || n != 2 {

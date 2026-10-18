@@ -25,19 +25,15 @@ type ubvRow struct {
 func (ubvRow) TableName() string { return "ubv_rows" }
 
 // testUpdateBatchVersions proves QK-45 on the engine this lane runs.
-// CheckVersions makes UpdateBatch on a versioned model all or nothing over
-// the versions: a row its version predicate does not match — moved by
+// UpdateBatch on a versioned model is all or nothing over the versions
+// (DEP-2026-003): a row its version predicate does not match — moved by
 // another writer, or a key that does not exist — rolls the batch back with
 // one ErrStaleEntity per such row; a row the query's conditions exclude is
 // skipped; the in-memory versions of the written rows are bumped once the
 // batch is through. Inside the caller's transaction the batch is a savepoint,
 // so a stale batch leaves the caller's transaction usable — on PostgreSQL it
-// is not aborted — and the caller's own writes commit.
-//
-// Without CheckVersions UpdateBatch keeps its v1 behaviour, pinned here too:
-// the stale row is not written and nothing reports it, and the written rows
-// keep their old version in memory. Quark 2.0 makes the check the default
-// (DEP-2026-003), and the pinned subtest is the one that changes with it.
+// is not aborted — and the caller's own writes commit. CheckVersions, the v1
+// opt-in, changes nothing; the subtests below call it and do not call it.
 func testUpdateBatchVersions(ctx context.Context, t *testing.T, client *quark.Client) {
 	engine := client.Dialect().Name()
 	dropTable(client, "ubv_rows")
@@ -113,26 +109,49 @@ func testUpdateBatchVersions(ctx context.Context, t *testing.T, client *quark.Cl
 	// missingID is a key no row holds.
 	missingID := func(ids []int64) int64 { return ids[len(ids)-1] + 1000 }
 
-	t.Run("WithoutCheckVersionsKeepsTheV1Behaviour", func(t *testing.T) {
+	// Without CheckVersions: the stale row and the missing key fail the
+	// batch, nothing is written, and a reloaded batch bumps the versions it
+	// writes. In v1 the same call returned nil and left the in-memory
+	// versions behind.
+	t.Run("ChecksVersionsByDefault", func(t *testing.T) {
 		ids := reseed(t)
 		rows := load(t, quark.For[ubvRow](ctx, client), ids[0], ids[1])
 		moveUnderneath(t, ids[1])
+		before := table(t, quark.For[ubvRow](ctx, client))
 		rows[0].Balance, rows[1].Balance = 11, 22
 		missing := &ubvRow{ID: missingID(ids), Owner: "nobody", Balance: 1, Version: 1}
 
-		if err := quark.For[ubvRow](ctx, client).UpdateBatch([]*ubvRow{rows[0], rows[1], missing}); err != nil {
-			t.Fatalf("UpdateBatch with a stale row and a missing key on %s = %v, want nil (v1 behaviour)", engine, err)
+		err := quark.For[ubvRow](ctx, client).UpdateBatch([]*ubvRow{rows[0], rows[1], missing})
+		if !errors.Is(err, quark.ErrStaleEntity) {
+			t.Fatalf("UpdateBatch with a stale row and a missing key on %s = %v, want ErrStaleEntity", engine, err)
 		}
-		want := map[int64]string{ids[0]: "11@2", ids[1]: "1020@2", ids[2]: "30@1"}
+		for _, id := range []int64{ids[1], missing.ID} {
+			if !strings.Contains(err.Error(), pkIn(id)) {
+				t.Errorf("the error on %s does not name %q: %v", engine, pkIn(id), err)
+			}
+		}
+		if got := table(t, quark.For[ubvRow](ctx, client)); !same(got, before) {
+			t.Fatalf("the failed batch on %s left %v, want %v", engine, got, before)
+		}
+		if rows[0].Version != 1 {
+			t.Fatalf("a failed batch on %s bumped the in-memory version to %d", engine, rows[0].Version)
+		}
+
+		rows = load(t, quark.For[ubvRow](ctx, client), ids[0], ids[1])
+		rows[0].Balance, rows[1].Balance = 11, 22
+		if err := quark.For[ubvRow](ctx, client).UpdateBatch(rows); err != nil {
+			t.Fatalf("UpdateBatch of fresh rows on %s: %v", engine, err)
+		}
+		want := map[int64]string{ids[0]: "11@2", ids[1]: "22@3", ids[2]: "30@1"}
 		if got := table(t, quark.For[ubvRow](ctx, client)); !same(got, want) {
 			t.Fatalf("after the batch on %s: %v, want %v", engine, got, want)
 		}
-		if rows[0].Version != 1 {
-			t.Fatalf("UpdateBatch on %s bumped the in-memory version to %d without CheckVersions", engine, rows[0].Version)
+		if rows[0].Version != 2 || rows[1].Version != 3 {
+			t.Fatalf("in-memory versions on %s: %d and %d, want 2 and 3", engine, rows[0].Version, rows[1].Version)
 		}
 		rows[0].Balance = 12
-		if _, err := quark.For[ubvRow](ctx, client).Update(rows[0]); !errors.Is(err, quark.ErrStaleEntity) {
-			t.Fatalf("Update after an unchecked UpdateBatch on %s = %v, want the ErrStaleEntity v1 leaves behind", engine, err)
+		if _, err := quark.For[ubvRow](ctx, client).Update(rows[0]); err != nil {
+			t.Fatalf("Update after UpdateBatch on %s = %v, want nil: the batch bumped the in-memory version", engine, err)
 		}
 	})
 

@@ -71,12 +71,11 @@ surface the conflict to the caller. See
 [Optimistic Locking](/docs/guides/modeling#optimistic-locking) for the tag
 contract and a retry example.
 
-`UpdateBatch` returns it only under `CheckVersions()`: the whole batch is
-rolled back, and the error joins one `ErrStaleEntity` per stale row, each
-naming its key (`table accounts pk=7`). `errors.Is(err, quark.ErrStaleEntity)`
-matches the joined error. Without `CheckVersions`, `UpdateBatch` skips a stale
-row and returns `nil`; Quark 2.0 makes the check the default. See
-[`UpdateBatch`](/docs/reference/api/crud#versioned-models-and-checkversions).
+`UpdateBatch` returns it for the whole batch: the batch is rolled back, and
+the error joins one `ErrStaleEntity` per stale row, each naming its key
+(`table accounts pk=7`). `errors.Is(err, quark.ErrStaleEntity)` matches the
+joined error. See
+[`UpdateBatch`](/docs/reference/api/crud#versioned-models).
 
 ### `ErrInvalidJoin`
 

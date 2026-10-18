@@ -17,12 +17,12 @@ import (
 
 // QK-45. Update, UpdateFields and Tracked.Save hold a versioned row to the
 // version it was loaded with and return ErrStaleEntity when it moved.
-// UpdateBatch sends the same version predicate and then reads nothing back:
-// a stale row is not written, the call returns nil, and the rows it did write
-// keep their old version in memory, so the next Update of the same struct
-// reports a conflict nobody caused. CheckVersions makes the batch hold every
-// row to its version, all or nothing; without it UpdateBatch stays as it was
-// until Quark 2.0 makes the check the default (DEP-2026-003).
+// UpdateBatch holds every row to its version the same way, all or nothing
+// (DEP-2026-003): in v1 it sent the predicate and read nothing back — a
+// stale row was not written, the call returned nil, and the rows it did
+// write kept their old version in memory, so the next Update of the same
+// struct reported a conflict nobody caused. CheckVersions, the v1 opt-in,
+// changes nothing now.
 //
 // internal/enginesuite (UpdateBatchVersions) runs the same on the six engines.
 
@@ -122,33 +122,54 @@ func ubvMoveUnderneath(t *testing.T, c *Client, id int64) {
 	}
 }
 
-// Without CheckVersions UpdateBatch is what it was, and this test pins it, so
-// the change of default in 2.0 is a test that has to change with it.
-func TestUpdateBatchWithoutCheckVersionsKeepsTheV1Behaviour(t *testing.T) {
+// UpdateBatch checks the versions without CheckVersions: a batch with a
+// stale row and a missing key is rolled back whole and names both, and a
+// fresh batch bumps the in-memory versions so the next Update of the same
+// struct is not a false conflict. In v1 the same call returned nil, wrote the
+// fresh row, and left its in-memory version behind.
+func TestUpdateBatchChecksVersionsByDefault(t *testing.T) {
 	ctx := context.Background()
 	c := ubvClient(t)
 	rows := ubvLoad(t, c, 1, 2)
 	ubvMoveUnderneath(t, c, 2) // row 2 → 1020@2
+	before := ubvTable(t, c)
 	rows[0].Balance, rows[1].Balance = 11, 22
 
 	missing := &ubvAccount{ID: 99, Owner: "nobody", Balance: 1, Version: 1}
-	if err := For[ubvAccount](ctx, c).UpdateBatch([]*ubvAccount{rows[0], rows[1], missing}); err != nil {
-		t.Fatalf("UpdateBatch with a stale row and a missing key = %v, want nil (v1 behaviour)", err)
+	err := For[ubvAccount](ctx, c).UpdateBatch([]*ubvAccount{rows[0], rows[1], missing})
+	if !errors.Is(err, ErrStaleEntity) {
+		t.Fatalf("UpdateBatch with a stale row and a missing key = %v, want ErrStaleEntity", err)
 	}
-	// The fresh row is written and its version moves in the database; the
-	// stale one is not written; nothing reports either.
-	want := map[int64]string{1: "11@2", 2: "1020@2", 3: "30@1"}
+	for _, want := range []string{"pk=2", "pk=99"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not name %q: %v", want, err)
+		}
+	}
+	// All or nothing: the fresh row is not written either, and no in-memory
+	// version moves.
+	if got := ubvTable(t, c); !sameTable(got, before) {
+		t.Fatalf("the failed batch left %v, want %v", got, before)
+	}
+	if rows[0].Version != 1 {
+		t.Fatalf("a failed batch bumped the in-memory version to %d", rows[0].Version)
+	}
+
+	// Reloaded, the batch goes through and bumps the versions it wrote.
+	rows = ubvLoad(t, c, 1, 2)
+	rows[0].Balance, rows[1].Balance = 11, 22
+	if err := For[ubvAccount](ctx, c).UpdateBatch(rows); err != nil {
+		t.Fatalf("UpdateBatch of fresh rows: %v", err)
+	}
+	want := map[int64]string{1: "11@2", 2: "22@3", 3: "30@1"}
 	if got := ubvTable(t, c); !sameTable(got, want) {
 		t.Fatalf("after the batch: %v, want %v", got, want)
 	}
-	// The in-memory versions are not bumped…
-	if rows[0].Version != 1 {
-		t.Fatalf("UpdateBatch bumped the in-memory version to %d without CheckVersions", rows[0].Version)
+	if rows[0].Version != 2 || rows[1].Version != 3 {
+		t.Fatalf("in-memory versions after the batch: %d and %d, want 2 and 3", rows[0].Version, rows[1].Version)
 	}
-	// …so the next Update of the same struct reports a conflict nobody caused.
 	rows[0].Balance = 12
-	if _, err := For[ubvAccount](ctx, c).Update(rows[0]); !errors.Is(err, ErrStaleEntity) {
-		t.Fatalf("Update after an unchecked UpdateBatch = %v, want the ErrStaleEntity v1 leaves behind", err)
+	if _, err := For[ubvAccount](ctx, c).Update(rows[0]); err != nil {
+		t.Fatalf("Update after UpdateBatch = %v, want nil: the batch bumped the in-memory version", err)
 	}
 }
 
@@ -347,16 +368,18 @@ func TestCheckVersionsOnAModelWithoutAVersionColumn(t *testing.T) {
 	}
 }
 
-// CheckVersions is a builder method: it leaves the query it was called on
-// unchecked.
-func TestCheckVersionsLeavesItsReceiverAlone(t *testing.T) {
+// CheckVersions is redundant: the query it was called on and the one it
+// returns check the same way.
+func TestCheckVersionsIsRedundant(t *testing.T) {
 	ctx := context.Background()
 	c := ubvClient(t)
 	base := For[ubvAccount](ctx, c)
-	_ = base.CheckVersions()
+	checked := base.CheckVersions()
 	rows := ubvLoad(t, c, 1)
 	ubvMoveUnderneath(t, c, 1)
-	if err := base.UpdateBatch(rows); err != nil {
-		t.Fatalf("the base query became checked: %v", err)
+	for name, q := range map[string]*Query[ubvAccount]{"base": base, "checked": checked} {
+		if err := q.UpdateBatch(rows); !errors.Is(err, ErrStaleEntity) {
+			t.Errorf("the %s query's UpdateBatch of a stale row = %v, want ErrStaleEntity", name, err)
+		}
 	}
 }
