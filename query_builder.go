@@ -767,12 +767,12 @@ func (q *Query[T]) Distinct() *Query[T] {
 }
 
 // GroupBy adds a GROUP BY clause. Name the projection with [Query.Select] or
-// [Query.SelectExpr]: without one the statement is SELECT * … GROUP BY,
-// which only SQLite and MySQL in its permissive mode run, and the builder
-// logs a WARN naming the fix.
-//
-// Changes in v2.0.0: GroupBy without a projection is ErrInvalidQuery instead
-// of a warning. See DEP-2026-008.
+// [Query.SelectExpr]: without one the statement would be SELECT * … GROUP BY,
+// which PostgreSQL, SQL Server, Oracle and MySQL in its strict mode reject,
+// so the builder refuses it with ErrInvalidQuery before any engine sees it,
+// on every path that renders the statement (List, First, Find, Cursor,
+// Paginate, PaginateAfter, a subquery, a CTE body). Count and the aggregates
+// (Sum, Avg, Min, Max) render their own projection and are not affected.
 func (q *Query[T]) GroupBy(columns ...string) *Query[T] {
 	c := q.clone()
 	c.groupBy = ownedAppend(c.groupBy, columns...)
@@ -817,10 +817,11 @@ var allowedAggregateFns = map[string]struct{}{
 // Example:
 //
 //	groups, err := quark.For[Order](ctx, client).
+//	    Select("status").
 //	    GroupBy("status").
 //	    HavingAggregate("COUNT", "*", ">", 5).
 //	    List()
-//	// emitted: ... GROUP BY "status" HAVING COUNT(*) > $1
+//	// emitted: SELECT "status" FROM "orders" GROUP BY "status" HAVING COUNT(*) > $1
 //
 // This closes the historic Having(column, op, value) limitation where the
 // column went through ValidateIdentifier and aggregates therefore could

@@ -28,7 +28,7 @@ q := quark.For[User](ctx, client)
 | `Offset(n int)` | Sets offset. |
 | `Select(columns ...string)` | Selects model-table columns. |
 | `Distinct()` | Adds `SELECT DISTINCT`. |
-| `GroupBy(columns ...string)` | Adds `GROUP BY`. |
+| `GroupBy(columns ...string)` | Adds `GROUP BY`. Needs a `Select` or `SelectExpr` naming the projection; without one the query is `ErrInvalidQuery` before any SQL runs. |
 | `Having(column, operator string, value any)` | Adds `HAVING`. |
 | `Join(table string) *JoinBuilder[T]` | Inner join; complete with `.On(left, op, right)` or `.OnRaw(clause)`. |
 | `LeftJoin(table string) *JoinBuilder[T]` | Left join; same completion. |
@@ -217,6 +217,12 @@ rows, err := quark.For[Order](ctx, client).
     Having("status", "!=", "cancelled").
     List()
 ```
+
+The projection is part of the query: a `GroupBy` with no `Select` and no
+`SelectExpr` would emit `SELECT * … GROUP BY`, which PostgreSQL, SQL Server,
+Oracle and MySQL in strict mode reject, so the builder refuses it with
+`ErrInvalidQuery` on every engine, before the statement is sent. `Count`, `Sum`,
+`Avg`, `Min` and `Max` render their own projection and are not affected.
 
 Grouped aggregate projections such as `COUNT(*) AS count` are not currently
 accepted by `Select` because SQLGuard validates simple identifiers. Use a

@@ -573,8 +573,9 @@ func TestDistinctGroupByHaving(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// GroupBy only
+	// GroupBy with the grouped column projected
 	results, err := quark.For[GbItem](ctx, c).
+		Select("category").
 		GroupBy("category").
 		List()
 	if err != nil {
@@ -584,10 +585,17 @@ func TestDistinctGroupByHaving(t *testing.T) {
 		t.Errorf("expected 2 groups, got %d", len(results))
 	}
 
+	// GroupBy without a projection is refused before the engine (QK-24):
+	// SELECT * … GROUP BY is not a statement the strict engines run.
+	if _, err := quark.For[GbItem](ctx, c).GroupBy("category").List(); !errors.Is(err, quark.ErrInvalidQuery) {
+		t.Fatalf("GroupBy without Select = %v, want ErrInvalidQuery", err)
+	}
+
 	// Having with a simple valid column expression
 	results2, err := quark.For[GbItem](ctx, c).
+		Select("category").
 		GroupBy("category").
-		Having("score", ">", 5).
+		Having("category", "!=", "Z").
 		List()
 	if err != nil {
 		t.Fatalf("Having: %v", err)

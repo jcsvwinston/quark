@@ -214,17 +214,17 @@ func qbFamilyC() []qbCase {
 				SelectExpr("n", quark.Func("COUNT", quark.Col("*"))).Limit(10).List()
 			return err
 		}},
-		{"Q22", "aggregation", "GROUP BY ... HAVING COUNT(*) > ?", qbWrong,
-			`the HAVING is right, but no Select() means the projection stays "SELECT *", which is invalid with GROUP BY on every engine except SQLite and MySQL in its permissive mode. S3 made it WARN; making it an ERROR breaks callers on the permissive engines, so it waits for the major QADR-0010 collects breaking changes into. Adding Select() makes the query correct today`,
+		{"Q22", "aggregation", "GROUP BY ... HAVING COUNT(*) > ?", qbTyped,
+			`the grouped column is projected with Select(). Without one the projection would stay "SELECT *", which is invalid with GROUP BY on every engine except SQLite and MySQL in its permissive mode; the builder refuses that form with ErrInvalidQuery before the engine (QK-24), so the case cannot be recorded wrong-sql any more — it is either typed, as here, or an error`,
 			func(ctx context.Context, c *quark.Client) error {
-				_, err := quark.For[qbOrder](ctx, c).GroupBy("user_id").
+				_, err := quark.For[qbOrder](ctx, c).Select("user_id").GroupBy("user_id").
 					HavingAggregate("COUNT", "*", ">", 3).Limit(10).List()
 				return err
 			}},
-		{"Q23", "aggregation", "GROUP BY ... HAVING SUM(col) > ?", qbWrong,
-			`same "SELECT *" with GROUP BY as Q22, and the same WARN`,
+		{"Q23", "aggregation", "GROUP BY ... HAVING SUM(col) > ?", qbTyped,
+			`same projection as Q22, with the aggregate in the HAVING as an expression`,
 			func(ctx context.Context, c *quark.Client) error {
-				_, err := quark.For[qbOrder](ctx, c).GroupBy("user_id").
+				_, err := quark.For[qbOrder](ctx, c).Select("user_id").GroupBy("user_id").
 					HavingExpr(quark.Gt(quark.Func("SUM", quark.Col("total")), quark.Lit(1000))).Limit(10).List()
 				return err
 			}},

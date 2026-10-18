@@ -54,9 +54,10 @@ var BUILDER = Exerciser{Name: "builder", Fn: func(ctx context.Context, client *q
 	}
 
 	// --- Select + GroupBy + Having: agrupa por done; ambos grupos existen.
-	// El Select("done") es OBLIGATORIO para portabilidad: sin él, List() emite
-	// SELECT * ... GROUP BY done, que SQLite tolera pero PG/SQL-estándar rechaza
-	// (columnas no agregadas fuera del GROUP BY). Patrón canónico = Select+GroupBy.
+	// El Select("done") es OBLIGATORIO: sin él, List() emitiría
+	// SELECT * ... GROUP BY done, que PG/SQL-estándar rechaza (columnas no
+	// agregadas fuera del GROUP BY), y el builder lo rehúsa con
+	// ErrInvalidQuery antes del motor (QK-24). Patrón canónico = Select+GroupBy.
 	// Having compara la columna bool `done` con un bool (NO con 0/1: pgx es
 	// estricto con los tipos y no encodea int→bool, aunque SQLite lo tolere).
 	rec.Note(QM("Select"), QM("GroupBy"), QM("Having"))

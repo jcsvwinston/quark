@@ -289,15 +289,28 @@ and tenant isolation.
 ### Grouped aggregates and HAVING
 
 `GroupBy` with `HavingAggregate` filters on a group's aggregate without dropping
-to raw SQL:
+to raw SQL. Name the projection with `Select` or `SelectExpr`: the grouped
+columns, and each aggregate as an expression.
 
 ```go
 groups, err := quark.For[Order](ctx, client).
+    Select("status").
+    SelectExpr("total", quark.Func("COUNT", quark.Col("id"))).
     GroupBy("status").
     HavingAggregate("COUNT", "*", ">", 5).
     List()
-// SELECT * FROM "orders" GROUP BY "status" HAVING COUNT(*) > $1
+// SELECT "status", COUNT("id") AS "total" FROM "orders" GROUP BY "status" HAVING COUNT(*) > $1
 ```
+
+A `GroupBy` with no `Select` and no `SelectExpr` is refused with
+`ErrInvalidQuery` before any SQL is sent, on every engine: the statement would
+be `SELECT * … GROUP BY`, which PostgreSQL, SQL Server, Oracle and MySQL in its
+strict mode reject because the non-aggregated columns are not functionally
+dependent on the grouping key, and which SQLite and permissive MySQL answer
+with an arbitrary row per group. `Count` and the aggregates render their own
+projection and are not affected. A result whose shape is not the model's goes
+through `FromTable` or a DTO, as [Projecting onto a DTO](#projecting-onto-a-dto)
+shows.
 
 `HavingAggregate(fn, column, op, value)` rules:
 
