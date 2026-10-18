@@ -1,7 +1,7 @@
 # Deprecation Notice: the previous listener-registration shape in `quarkdriver`
 
 - ID: `DEP-2026-002`
-- Status: `active`
+- Status: `removed`
 - Announced in: `v1.11.0` (2026-09-05)
 - Earliest removal: `v2.0.0`, no earlier than `2026-12-08`
 - Scope: `api`
@@ -151,9 +151,10 @@ nothing: the fix belongs to whoever ships the driver module.
   a listener registered through the new contract — which is precisely the
   adapter path this notice covers. That assertion is removed in the same PR
   that removes the symbols.
-- **Exported-surface manifest:** all four names carry their reason in
-  `examples/superapp/allowlist.json`, so the acceptance gate does not demand
-  that a driver-module contract be exercised as an application entry point.
+- **Exported-surface manifest:** all four names carried their reason in
+  `acceptance/allowlist.json`, so the acceptance gate did not demand that a
+  driver-module contract be exercised as an application entry point; the
+  removal regenerated the manifest and the four entries are gone.
 - **Release note updated:** no. This is a documentation and godoc change; it
   does not cut a release, and there is no `Unreleased` changelog section to
   write into. The contract change itself was announced in the `v1.11.0` notes.
@@ -172,6 +173,11 @@ nothing: the fix belongs to whoever ships the driver module.
 - Removal: at `v2.0.0` planning. The removal PR deletes the type, the three
   registrars and the compatibility assertion in
   `drivers/postgres/postgres_test.go` together.
+- Applied: `dry-run/2.0`, 2026-10-18 — `NewListenerFunc`, `RegisterListener`,
+  `MustRegisterListener` and `LookupListener` deleted from `quarkdriver`, the
+  compatibility assertion in `drivers/postgres/postgres_test.go` resolves
+  through `LookupListenerFactory`, and the extension census moved 53 → 52
+  (`CON-01`).
 
 ## Notes
 

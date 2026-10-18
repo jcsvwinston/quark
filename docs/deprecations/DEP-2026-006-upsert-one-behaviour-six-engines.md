@@ -1,7 +1,7 @@
 # Behaviour-Change Notice: `Upsert` does the same on the six engines in 2.0
 
 - ID: `DEP-2026-006`
-- Status: `active`
+- Status: `completed`
 - Announced in: the first release after `v1.17.0` that carries this file — a
   documentation-only change cuts no release of its own
 - Earliest change: `v2.0.0`, no earlier than `2027-01-17`
@@ -205,3 +205,11 @@ that names its columns and carries no foreign key.
   confirms or amends the proposed semantics before the PR.
 - Change: at `v2.0.0` planning (`M1`), in one PR that rewrites the four
   engine-specific branches, the pinned tests and the per-engine tables.
+- Applied: `dry-run/2.0`, 2026-10-18 — the semantics proposed above, as
+  written: an empty `updateCols` is insert-or-ignore on the six, a duplicate
+  on another unique key is `ErrConstraintViolation` on the six (MySQL and
+  MariaDB guard every assignment by the conflict columns and read back a
+  statement that changed nothing; SQL Server and Oracle refuse a carried
+  foreign key before the `MERGE`); `UpsertBatch` goes row by row on
+  MySQL/MariaDB and runs in a transaction wherever it is more than one
+  statement. `Dialect.UpsertSQL` unchanged.

@@ -1,7 +1,7 @@
 # Deprecation Notice: the `RowLevelSecurity` tenant-strategy alias
 
 - ID: `DEP-2026-001`
-- Status: `active`
+- Status: `removed`
 - Announced in: `v0.9.0` (2026-05-21), re-dated by this notice
 - Earliest removal: `v2.0.0`, no earlier than `2026-12-08`
 - Scope: `api`
@@ -113,13 +113,15 @@ one-word rename described above.
 ## Validation
 
 - **Compatibility test:** `TestRowLevelSecurityAliasBackwardCompat` in
-  `tenant_router_test.go` asserts that both spellings name the same value and
-  that the alias still type-checks inside a `TenantConfig`. It carries a
-  sunset comment pointing at the alias declaration; that comment was re-dated
-  alongside the marker.
-- **Exported-surface manifest:** the alias is recorded in
-  `examples/superapp/allowlist.json` with its reason, so the acceptance gate
-  does not demand that a deprecated symbol be exercised.
+  `internal/enginesuite/tenant_router_test.go` asserted that both spellings
+  name the same value and that the alias still type-checks inside a
+  `TenantConfig`. It carried a sunset comment pointing at the alias
+  declaration; that comment was re-dated alongside the marker. The removal
+  deleted the test with the alias.
+- **Exported-surface manifest:** the alias was recorded in
+  `acceptance/allowlist.json` with its reason, so the acceptance gate did not
+  demand that a deprecated symbol be exercised; the removal regenerated the
+  manifest (`make regen`) and the entry is gone.
 - **Release note updated:** no. This is a documentation and godoc change; it
   does not cut a release, and there is no `Unreleased` changelog section to
   write into.
@@ -136,6 +138,10 @@ one-word rename described above.
 - Removal: at `v2.0.0` planning. The removal PR deletes the constant and
   `TestRowLevelSecurityAliasBackwardCompat` together; leaving the test behind
   would not compile.
+- Applied: `dry-run/2.0`, 2026-10-18 — the constant, its marker, the
+  compatibility test, the manual allowlist exception and the `mustHave` row
+  of `gen-apisurface` deleted together; `RowLevelSecurityClient` is the one
+  spelling.
 
 ## Notes
 

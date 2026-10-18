@@ -1,7 +1,7 @@
 # Behaviour-Change Notice: a write that touches no row reports nothing in 2.0
 
 - ID: `DEP-2026-005`
-- Status: `active`
+- Status: `completed`
 - Announced in: the first release after `v1.17.0` that carries this file — a
   documentation-only change cuts no release of its own
 - Earliest change: `v2.0.0`, no earlier than `2027-01-17`
@@ -150,3 +150,8 @@ the same `(0, nil)` it is today, so a program that checks it sees no change.
 - Review checkpoint: `2027-01-17`, when the window opens.
 - Change: at `v2.0.0` planning (`M1`), in one PR that drops the side effects
   on zero rows and changes the pinned test.
+- Applied: `dry-run/2.0`, 2026-10-18 — the probe runs without conditions
+  too; `Update`, `UpdateFields`, `Delete` and `HardDelete` on a key no row
+  has report nothing; the pinned tests flipped
+  (`TestAWriteWithoutConditionsOnAMissingKeyReportsNothing`,
+  `WhereGuards/MissingKeyWithoutConditions`, `TestF5_6_Update_NoMatch_EmitsNothing`).

@@ -1,7 +1,7 @@
 # Behaviour-Change Notice: the plain `LIKE` declares its escape character on every engine in 2.0
 
 - ID: `DEP-2026-009`
-- Status: `active`
+- Status: `completed`
 - Announced in: the first release after `v1.17.0` that carries this file — a
   documentation-only change cuts no release of its own
 - Earliest change: `v2.0.0`, no earlier than `2027-01-17`
@@ -196,3 +196,10 @@ counterparts, nor for a plain pattern with no backslash in it.
 - Change: at `v2.0.0` planning (`M1`), in one PR that declares the clause
   on the five renderers and the AST, validates the plain pattern, and
   changes the two pinned tests.
+- Applied: `dry-run/2.0`, 2026-10-18 — every `LIKE`/`NOT LIKE` the five
+  renderers and the AST emit declares `ESCAPE '\'`; the pattern is validated
+  at `Where`, `WhereNot`, `Having`, `HavingAggregate`, `WhereJSON`,
+  `PreloadWhere`, the typed `Like`/`NotLike` and `Cmp` with a literal; the
+  pinned tests flipped (`TestPlainLikeDeclaresTheEscape`,
+  `LikeEscape/PlainFormDeclaresTheEscape`) and `LIKE-01/02/05` re-recorded
+  with the tail as the ground.

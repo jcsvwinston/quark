@@ -1,7 +1,7 @@
 # Behaviour-Change Notice: every write of a versioned model joins optimistic locking in 2.0
 
 - ID: `DEP-2026-004`
-- Status: `active`
+- Status: `completed`
 - Announced in: the first release after `v1.17.0` that carries this file — a
   documentation-only change cuts no release of its own
 - Earliest change: `v2.0.0`, no earlier than `2027-01-17`
@@ -72,7 +72,9 @@ decision names the writes that carry an entity).
   it bumps the version column it leaves alone today, so that a holder of the
   row sees the write on their next `Update` (`ErrStaleEntity`) instead of
   overwriting it. Proposed for the 2.0 PR: a map that names the version
-  column is `ErrInvalidQuery`, as `UpdateFields` refuses the primary key.
+  column is `ErrInvalidQuery`, as `UpdateFields` refuses the primary key —
+  not applied (see Timeline): it contradicted the v1 exit below, which keeps
+  working; such a map is written as given, with no bump on top.
 
 ## Migration path
 
@@ -179,3 +181,12 @@ version, except that the version now moves.
 - Review checkpoint: `2027-01-17`, when the window opens.
 - Change: at `v2.0.0` planning (`M1`), in one PR that adds the predicates,
   changes the pinned tests and re-records `OPS-04`.
+- Applied: `dry-run/2.0`, 2026-10-18 — the predicates, the bumps and the
+  per-engine upsert shapes; the pinned tests flipped
+  (`TestWritesOfAVersionedModelJoinOptimisticLocking`,
+  `internal/enginesuite/upsert_versioned_test.go`) and `OPS-04` re-recorded
+  as `present`. The proposal above to refuse a map naming the version column
+  with `ErrInvalidQuery` was NOT applied: it contradicted this notice's own
+  v1 exit for `UpdateMap` (`Where("version", "=", v).UpdateMap(map{…,
+  "version": v + 1})`), which keeps working — such a map is written as given
+  and Quark adds no bump of its own.

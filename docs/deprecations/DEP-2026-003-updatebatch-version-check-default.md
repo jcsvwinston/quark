@@ -1,7 +1,7 @@
 # Behaviour-Change Notice: `UpdateBatch` checks versions by default in 2.0
 
 - ID: `DEP-2026-003`
-- Status: `active`
+- Status: `completed`
 - Announced in: the release that ships `Query.CheckVersions` — the next minor
   after `v1.16.0`
 - Earliest change: `v2.0.0`, no earlier than `2027-01-04`
@@ -135,3 +135,7 @@ versions now move.
 - Review checkpoint: `2027-01-04`, when the window opens.
 - Change: at `v2.0.0` planning, in one PR that flips the default, the pinned
   tests and `OPS-04`.
+- Applied: `dry-run/2.0`, 2026-10-18 — `UpdateBatch` reads every row's
+  count on a versioned model; `CheckVersions()` is a no-op that keeps
+  compiling; the pinned tests flipped and `OPS-04` re-recorded with
+  `DEP-2026-004`.

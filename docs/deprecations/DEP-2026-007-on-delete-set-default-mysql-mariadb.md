@@ -1,7 +1,7 @@
 # Behaviour-Change Notice: `ON DELETE SET DEFAULT` means the same on the six engines in 2.0
 
 - ID: `DEP-2026-007`
-- Status: `active`
+- Status: `completed`
 - Announced in: the first release after `v1.17.0` that carries this file — a
   documentation-only change cuts no release of its own
 - Earliest change: `v2.0.0`, no earlier than `2027-01-17`
@@ -176,3 +176,8 @@ Server or Oracle, nor for any other action.
 - Review checkpoint: `2027-01-17`, when the window opens.
 - Change: at `v2.0.0` planning (`M1`), in one PR that gives the MySQL
   dialect its `ReferentialActioner` and changes the pinned tests.
+- Applied: `dry-run/2.0`, 2026-10-18 — `*MySQLDialect` (and MariaDB, which
+  embeds it) implements `quarkdriver.ReferentialActioner` and answers
+  `ActionUnsupported` for `SET DEFAULT` in both clauses; `AddForeignKey`,
+  `ApplyPlan`, `Sync` and the CLI refuse it with `ErrUnsupportedFeature`
+  before anything is sent; the pinned tests flipped.

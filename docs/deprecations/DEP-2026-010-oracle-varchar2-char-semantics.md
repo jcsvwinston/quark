@@ -1,7 +1,7 @@
 # Behaviour-Change Notice: on Oracle a sized string column counts characters in 2.0
 
 - ID: `DEP-2026-010`
-- Status: `active`
+- Status: `completed`
 - Announced in: the first release after `v1.17.0` that carries this file — a
   documentation-only change cuts no release of its own
 - Earliest change: `v2.0.0`, no earlier than `2027-01-17`
@@ -126,13 +126,17 @@ fewer, so no stored value is rejected by the change itself.
 
 ## Validation
 
-- **The v1 rendering is pinned.** `TestOracleSizedStringsCountBytesUntilV2`
-  (`internal/migrate/oracle_varchar2_v1_test.go`) asserts `VARCHAR2(255)`,
+- **The v1 rendering was pinned.** `TestOracleSizedStringsCountBytesUntilV2`
+  (in `internal/migrate`, a file then named `oracle_varchar2_v1_test.go`)
+  asserted `VARCHAR2(255)`,
   `VARCHAR2(40)`, `VARCHAR2(36)` and `VARCHAR2(45)` without `CHAR` through
   `SQLType`, `SQLTypeWithOpts` and `EngineColumnType`. The pre-existing
   `TestSQLType_NonPK_String`, `TestSQLType_StringPK_UUID` and
-  `TestPrecisionScaleRefinesFloatsOnly` carry the same literals. The 2.0 PR
-  changes them in the same commit as the renderer.
+  `TestPrecisionScaleRefinesFloatsOnly` carried the same literals. The 2.0
+  change flipped them in the same commit as the renderer: the pin is now
+  `TestOracleSizedStringsCountCharacters`
+  (`internal/migrate/oracle_varchar2_char_test.go`), which fails on any
+  `VARCHAR2` without ` CHAR)`.
 - **Introspection today:** `dialect_introspection.go` reads `CHAR_LENGTH`
   for `VARCHAR2`, `CHAR`, `NVARCHAR2` and `NCHAR`; the 2.0 PR adds
   `CHAR_USED` and its test on the Oracle lane of the engine matrix.
@@ -140,3 +144,18 @@ fewer, so no stored value is rejected by the change itself.
 - **Rollback plan:** not applicable in v1 — nothing changes. After 2.0, a
   column modified to `CHAR` semantics can be modified back by hand; the plan
   does not shrink columns.
+
+## Timeline
+
+- Decided: `2026-10-16` (QK-50, D7 of A12 `M0`).
+- Written: `2026-10-16` (A12 `M0-Q`, quark#471).
+- Review checkpoint: `2027-01-17`, when the window opens.
+- Change: at `v2.0.0` planning (`M1`), in one PR that changes the renderer,
+  the introspection and the pinned tests.
+- Applied: `dry-run/2.0`, 2026-10-18 — `internal/migrate/engines.go` renders
+  `VARCHAR2(n CHAR)` for every sized string, the string key and the text
+  forms of uuid/inet; the Oracle introspection reads `CHAR_USED` and reports
+  `VARCHAR2(n CHAR|BYTE)`; `normalizeType` treats a bare length as `BYTE` so
+  a hand-written `VARCHAR2(n)` does not re-plan and a byte column under the
+  model's form is one `MODIFY`; the Oracle lane (`OracleLengthSemantics`)
+  was not run here (no engine).

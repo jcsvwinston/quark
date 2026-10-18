@@ -1,7 +1,7 @@
 # Behaviour-Change Notice: `GroupBy` without a projection is an error in 2.0
 
 - ID: `DEP-2026-008`
-- Status: `active`
+- Status: `completed`
 - Announced in: the first release after `v1.17.0` that carries this file — a
   documentation-only change cuts no release of its own
 - Earliest change: `v2.0.0`, no earlier than `2027-01-17`
@@ -150,3 +150,8 @@ the engine's error text has to match `ErrInvalidQuery` instead.
 - Review checkpoint: `2027-01-17`, when the window opens.
 - Change: at `v2.0.0` planning (`M1`), in one PR that turns the warning
   into the error and changes the pinned test and the bench cases.
+- Applied: `dry-run/2.0`, 2026-10-18 — `buildSelect` returns an error
+  wrapping `ErrInvalidQuery` on every path that renders the statement; the
+  `WARN` is gone; `TestGroupByWithoutSelectIsRefused`, Q22/Q23 projected and
+  the query bench at 60/0/0. `Paginate` still sends its `COUNT` first (its
+  own projection) and refuses the grouped `SELECT` after it.
