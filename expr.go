@@ -124,8 +124,9 @@ func (n notExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 // SQLGuard.ValidateOperator so the AST cannot smuggle arbitrary tokens
 // into the SQL surface.
 //
-// Changes in v2.0.0: Cmp(lhs, "LIKE", Lit(pattern)) declares ESCAPE '\' on
-// every engine, as [Like] does. See DEP-2026-009.
+// With the operators LIKE and NOT LIKE the statement declares ESCAPE '\' as
+// [Like] does, and a [Lit] pattern that ends in a dangling backslash is
+// ErrInvalidQuery before it reaches the engine.
 func Cmp(lhs Expr, op string, rhs Expr) Expr { return cmpExpr{lhs: lhs, op: op, rhs: rhs} }
 
 // Eq, Ne, Lt, Gt, Lte, Gte are the syntactic shortcuts for Cmp with the
@@ -164,7 +165,19 @@ func (c cmpExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	// keyword handling (Oracle, some MSSQL collations) see the canonical
 	// spelling regardless of how the caller typed it.
 	op := strings.ToUpper(strings.TrimSpace(c.op))
-	return lsql + " " + op + " " + rsql, args, nil
+	if !isLikeOperator(op) {
+		return lsql + " " + op + " " + rsql, args, nil
+	}
+	// A LIKE declares its escape character, whichever constructor built
+	// it, and a literal pattern is validated under it (QK-32).
+	if lit, ok := c.rhs.(litExpr); ok {
+		if pattern, ok := lit.value.(string); ok {
+			if err := likePattern(g, pattern); err != nil {
+				return "", nil, err
+			}
+		}
+	}
+	return lsql + " " + op + " " + rsql + " " + likeEscapeTail(d), args, nil
 }
 
 // --- IN / NOT IN ---

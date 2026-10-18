@@ -452,9 +452,10 @@ other one cannot get it from its dialect today.
   `LastInsertIDQuery`; `LimitOffset` with no `ORDER BY` added; and
   `WITH RECURSIVE`. An engine whose upsert is a `MERGE`,
   or whose row limit needs an `ORDER BY`, cannot express that in a dialect.
-- **The escape clause of `LIKE`.** `WhereLike`, `WhereContains`, `WhereStartsWith`
-  and `WhereEndsWith` declare a backslash as the escape character. The clause is
-  chosen by name: `ESCAPE '\\'` for `mysql` and `mariadb`, whose string literals
+- **The escape clause of `LIKE`.** Every `LIKE` the builder renders — `Where`
+  with the operator, `WhereLike`, `WhereContains`, `WhereStartsWith`,
+  `WhereEndsWith`, the typed and AST forms — declares a backslash as the escape
+  character. The clause is chosen by name: `ESCAPE '\\'` for `mysql` and `mariadb`, whose string literals
   read a backslash as an escape, and `ESCAPE '\'` for every other dialect;
   SQL Server's `[` is escaped in the text only under the name `mssql`. An engine
   whose literals treat a backslash as MySQL's do, or with metacharacters of its

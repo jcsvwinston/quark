@@ -128,16 +128,17 @@ func qk25LastArgs(rec *recorder) string {
 // owes it; some doors is `partial`, none is `absent`.
 //
 // The plain Where(col, "LIKE", pattern) is asserted as the ground and NOT
-// measured: it hands the engine an opaque pattern under the engine's own
-// default escape rules, its meaning is published, and turning it escape-aware
-// would change what a backslash means on three engines (QK-32, A12).
+// measured: since 2.0 it declares the escape character like every other
+// LIKE Quark renders (QK-32), and a wildcard pattern through it answers every
+// row, with the tail. Its meaning is published; what this control measures
+// is that the doors named by the title emit the tail and answer the rows.
 func probeQk25BuilderEmitsEscape(t *testing.T, e *env) verdict {
 	c, rec := e.fresh(t, "qk25_builder_escape")
 	qk25Fixture(t, e, c)
 
 	rec.reset()
 	plain, err := quark.For[qk25Row](e.ctx, c).Where("name", "LIKE", qk25ContainsLiteralPercent).List()
-	if err != nil || len(plain) != qk25AllRows || qk25HasEscape(rec.last()) {
+	if err != nil || len(plain) != qk25AllRows || !qk25HasEscape(rec.last()) {
 		t.Fatalf("the plain LIKE no longer behaves as published (rows=%d err=%v stmt=%s): "+
 			"this control measures the escaped doors AGAINST that ground, and the ground moved",
 			len(plain), err, rec.last())
@@ -200,15 +201,16 @@ func probeQk25BuilderEmitsEscape(t *testing.T, e *env) verdict {
 // the user's percent sign from the two the application added, so the one
 // correct answer (the "100% off" row alone) was unreachable there; the surface
 // that receives the TEXT is what makes it reachable, and that is what is
-// measured now. The plain form is asserted as the ground: it still answers
-// every row for that pattern, because its meaning is published.
+// measured now. The plain form is asserted as the ground: it answers every
+// row for that pattern, with the escape character declared (QK-32), because
+// its meaning is published.
 func probeQk25LikeValueIsLiteralText(t *testing.T, e *env) verdict {
 	c, rec := e.fresh(t, "qk25_user_wildcard")
 	qk25Fixture(t, e, c)
 
 	rec.reset()
 	plain, err := quark.For[qk25Row](e.ctx, c).Where("name", "LIKE", qk25ContainsLiteralPercent).List()
-	if err != nil || len(plain) != qk25AllRows || qk25HasEscape(rec.last()) {
+	if err != nil || len(plain) != qk25AllRows || !qk25HasEscape(rec.last()) {
 		t.Fatalf("the plain LIKE no longer behaves as published (rows=%d err=%v stmt=%s): "+
 			"the ground of this control moved, which is not the capability being measured",
 			len(plain), err, rec.last())
@@ -448,10 +450,11 @@ func probeQk25TypedLikeGuardsValue(t *testing.T, e *env) verdict {
 	}
 
 	// `Like` keeps its published pattern meaning: the wildcard pattern still
-	// answers every row, with no tail. That is the ground, not the gap.
+	// answers every row, with the escape character declared (QK-32). That is
+	// the ground, not the gap.
 	rec.reset()
 	if pat, err := quark.For[qk25Row](e.ctx, c).WhereP(name.Like(qk25ContainsLiteralPercent)).List(); err != nil ||
-		len(pat) != qk25AllRows || qk25HasEscape(rec.last()) {
+		len(pat) != qk25AllRows || !qk25HasEscape(rec.last()) {
 		t.Fatalf("the typed Like no longer behaves as published (rows=%d err=%v stmt=%s): "+
 			"this control measures Contains AGAINST that ground, and the ground moved",
 			len(pat), err, rec.last())

@@ -20,10 +20,10 @@ func controlsQk25() []control {
 			want:   present,
 			note: "Through the escaped surfaces added in A8 S2 — WhereLike / WhereNotLike, " +
 				"the typed LikeEscaped, the AST Like — each of which emits the tail and " +
-				"answers the one row with a literal percent sign. The plain " +
-				"Where(col, \"LIKE\", pattern) is unchanged on purpose: it hands the engine " +
-				"an opaque pattern under the engine's default escape rules, and changing " +
-				"what a backslash means there on three engines is A12 material (QK-32).",
+				"answers the one row with a literal percent sign. Since 2.0 the plain " +
+				"Where(col, \"LIKE\", pattern) declares the same escape character (QK-32), " +
+				"so the escaped names are the same statement under a name that says so; " +
+				"the probe asserts the plain form as its ground and measures the four doors.",
 			probe: probeQk25BuilderEmitsEscape,
 		},
 		{
@@ -38,7 +38,8 @@ func controlsQk25() []control {
 				"TEXT apart from the wildcards the application wraps around it, so that a " +
 				"typed `%` answers the one row that holds one: that surface exists now, and " +
 				"this is what the control measures. The plain form keeps answering every row " +
-				"for that pattern, asserted here as the ground.",
+				"for that pattern, with the escape character declared since 2.0, asserted " +
+				"here as the ground.",
 			probe: probeQk25LikeValueIsLiteralText,
 		},
 		{
@@ -69,7 +70,8 @@ func controlsQk25() []control {
 			family: "qk25",
 			title:  "The generated typed string column offers a search accessor that neutralises a user's wildcard (Contains), beside the pattern form (Like)",
 			want:   present,
-			note: "Retitled at S2: `Like` keeps the pattern meaning it was published with, " +
+			note: "Retitled at S2: `Like` keeps the pattern meaning it was published with " +
+				"(declaring the escape character since 2.0, as `LikeEscaped` does), " +
 				"and `Contains` / `StartsWith` / `EndsWith` / `LikeEscaped` are the accessors " +
 				"a search box calls. The probe still reads the generator's golden output " +
 				"and fails outright if a string column stopped being a " +

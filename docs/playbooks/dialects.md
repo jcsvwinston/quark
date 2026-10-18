@@ -333,7 +333,7 @@ Mezcla SQL builder + DDL + procedures + JSON. Cuando MariaDB añade `CreateSeque
   branches on the names `mssql` and `oracle` (`query_crud.go`,
   `query_exec.go`: generated keys, MERGE upserts, the implicit ORDER BY of
   OFFSET/FETCH, the RECURSIVE keyword, Oracle's lock with a row limit), the
-  LIKE escape tail and `[` escaping by name (`like.go`), the batch
+  LIKE escape tail — declared on every LIKE since 2.0 — and `[` escaping by name (`like.go`), the batch
   bind-parameter ceiling by name, referential actions written unasked (Oracle
   refuses `ON UPDATE` and `ON DELETE NO ACTION`), and the unit of a length
   (`VARCHAR2(n)` counts bytes). Closing one removes its bullet from the guide

@@ -18,12 +18,11 @@ const likeEscapeChar = `\`
 
 // EscapeLike escapes text so that a LIKE pattern built around it matches the
 // text literally: `%`, `_` and the backslash itself are prefixed with a
-// backslash. The result is meant for the escaped LIKE surfaces —
-// [Query.WhereLike], [TypedStringColumn.LikeEscaped], [Like] — which declare
-// the escape character on the statement; in a plain
-// `Where(col, "LIKE", …)` the backslash keeps whatever meaning the engine
-// gives it by default, until v2.0.0 declares the escape there too
-// (DEP-2026-009).
+// backslash. Every LIKE Quark renders declares that backslash as the escape
+// character on the statement — `Where(col, "LIKE", …)` and
+// [Query.WhereLike], [TypedStringColumn.Like] and
+// [TypedStringColumn.LikeEscaped], [Cmp] with the operator and [Like] alike —
+// so a pattern built around the result matches the text on every engine.
 //
 // The set is the portable one. SQL Server also reads `[` as the start of a
 // character class, but Oracle refuses an escape character in front of
@@ -110,11 +109,38 @@ func likeEscapeTail(d Dialect) string {
 	return `ESCAPE '\'`
 }
 
-// likePattern is the operator + value pair the escaped surfaces lower into a
-// condition: the pattern is validated once, here, so the five renderers and
-// the AST share one rule.
+// likePattern validates a LIKE pattern under the declared escape character:
+// the rule is one, here, so the builder doors, the typed predicates and the
+// AST refuse the same patterns.
 func likePattern(g *SQLGuard, pattern string) error {
 	return g.ValidateLikePattern(pattern, likeEscapeChar)
+}
+
+// isLikeOperator reports whether the operator, in any case and with
+// surrounding spaces, is LIKE or NOT LIKE: the two whose statement declares
+// the escape character and whose pattern is validated.
+func isLikeOperator(operator string) bool {
+	switch strings.ToUpper(strings.TrimSpace(operator)) {
+	case "LIKE", "NOT LIKE":
+		return true
+	}
+	return false
+}
+
+// checkLikePattern validates the value of a LIKE or NOT LIKE condition before
+// it is stored on the query, and nothing for any other operator or for a
+// value that is not a pattern. The builder doors that take an operator
+// (Where, WhereNot, Having, HavingAggregate; Or goes through Where) call it,
+// so a dangling escape is refused at the call and never reaches the engine.
+func (q *BaseQuery) checkLikePattern(operator string, value any) error {
+	if !isLikeOperator(operator) {
+		return nil
+	}
+	pattern, ok := value.(string)
+	if !ok {
+		return nil
+	}
+	return likePattern(q.guard, pattern)
 }
 
 // WhereLike adds `column LIKE pattern` with the escape character declared on
@@ -122,26 +148,22 @@ func likePattern(g *SQLGuard, pattern string) error {
 // engine: `%` and `_` are wildcards, and a backslash makes the next character
 // literal. Compose the pattern from user text with [EscapeLike].
 //
-// It differs from Where(column, "LIKE", pattern) in exactly that: the plain
-// form hands the engine an opaque pattern and lets the engine's own default
-// decide what a backslash means, which is not the same on SQLite, SQL Server
-// and Oracle as it is on PostgreSQL and MySQL (QK-25). The plain form keeps
-// that meaning until v2.0.0, when it declares the escape as this one does
-// (DEP-2026-009); this one is the portable form, and a call that uses it
-// does not change.
+// It is Where(column, "LIKE", pattern) under a name that says what the
+// statement declares: every LIKE Quark renders carries the clause (QK-25,
+// QK-32), on the six engines alike, so the two forms are the same statement.
 //
 // A pattern that ends in a dangling escape character is refused with
 // ErrInvalidQuery before it reaches the engine: PostgreSQL rejects it, other
 // engines match nothing or match the backslash, and none of those is what
 // the caller meant.
 func (q *Query[T]) WhereLike(column, pattern string) *Query[T] {
-	return q.whereLike(column, "LIKE", pattern)
+	return q.Where(column, "LIKE", pattern)
 }
 
 // WhereNotLike is the negation of [Query.WhereLike], with the same escape
 // character declared.
 func (q *Query[T]) WhereNotLike(column, pattern string) *Query[T] {
-	return q.whereLike(column, "NOT LIKE", pattern)
+	return q.Where(column, "NOT LIKE", pattern)
 }
 
 // WhereContains adds a case-sensitive "contains" search for text the user
@@ -149,47 +171,33 @@ func (q *Query[T]) WhereNotLike(column, pattern string) *Query[T] {
 // a LIKE that declares its escape character. A `%` or `_` in the text is
 // matched as that character, on every engine.
 func (q *Query[T]) WhereContains(column, text string) *Query[T] {
-	return q.whereLike(column, "LIKE", likePatternFor(q.dialect, likeContains, text))
+	return q.Where(column, "LIKE", likePatternFor(q.dialect, likeContains, text))
 }
 
 // WhereStartsWith adds a prefix search for text the user typed; see
 // [Query.WhereContains] for what happens to wildcards in it.
 func (q *Query[T]) WhereStartsWith(column, text string) *Query[T] {
-	return q.whereLike(column, "LIKE", likePatternFor(q.dialect, likeStartsWith, text))
+	return q.Where(column, "LIKE", likePatternFor(q.dialect, likeStartsWith, text))
 }
 
 // WhereEndsWith adds a suffix search for text the user typed; see
 // [Query.WhereContains] for what happens to wildcards in it.
 func (q *Query[T]) WhereEndsWith(column, text string) *Query[T] {
-	return q.whereLike(column, "LIKE", likePatternFor(q.dialect, likeEndsWith, text))
-}
-
-func (q *Query[T]) whereLike(column, operator, pattern string) *Query[T] {
-	c := q.clone()
-	if err := likePattern(c.guard, pattern); err != nil {
-		c.err = err
-		return c
-	}
-	c.where = ownedAppend(c.where, condition{
-		column:   column,
-		operator: operator,
-		value:    pattern,
-		logic:    "AND",
-		escape:   true,
-	})
-	return c
+	return q.Where(column, "LIKE", likePatternFor(q.dialect, likeEndsWith, text))
 }
 
 // LikeEscaped builds `column LIKE pattern` with the escape character declared
-// on the statement — the typed counterpart of [Query.WhereLike]. [TypedStringColumn.Like]
-// keeps the plain, engine-default form until v2.0.0 (DEP-2026-009).
+// on the statement — the typed counterpart of [Query.WhereLike]. It is
+// [TypedStringColumn.Like] under a name that says what the statement
+// declares; the two are the same predicate.
 func (c TypedStringColumn) LikeEscaped(pattern string) Predicate {
-	return Predicate{column: c.name, operator: "LIKE", value: pattern, escape: true}
+	return c.Like(pattern)
 }
 
-// NotLikeEscaped is the negation of [TypedStringColumn.LikeEscaped].
+// NotLikeEscaped is the negation of [TypedStringColumn.LikeEscaped], the same
+// predicate as [TypedStringColumn.NotLike].
 func (c TypedStringColumn) NotLikeEscaped(pattern string) Predicate {
-	return Predicate{column: c.name, operator: "NOT LIKE", value: pattern, escape: true}
+	return c.NotLike(pattern)
 }
 
 // Contains builds a "contains" search for text the user typed, escaped with
@@ -197,25 +205,24 @@ func (c TypedStringColumn) NotLikeEscaped(pattern string) Predicate {
 // accessor a search box should call: a `%` the user typed is matched as a
 // percent sign, not as a wildcard.
 func (c TypedStringColumn) Contains(text string) Predicate {
-	return Predicate{column: c.name, operator: "LIKE", escape: true, likeShape: likeContains, likeText: text}
+	return Predicate{column: c.name, operator: "LIKE", likeShape: likeContains, likeText: text}
 }
 
 // StartsWith builds a prefix search for text the user typed; see
 // [TypedStringColumn.Contains].
 func (c TypedStringColumn) StartsWith(text string) Predicate {
-	return Predicate{column: c.name, operator: "LIKE", escape: true, likeShape: likeStartsWith, likeText: text}
+	return Predicate{column: c.name, operator: "LIKE", likeShape: likeStartsWith, likeText: text}
 }
 
 // EndsWith builds a suffix search for text the user typed; see
 // [TypedStringColumn.Contains].
 func (c TypedStringColumn) EndsWith(text string) Predicate {
-	return Predicate{column: c.name, operator: "LIKE", escape: true, likeShape: likeEndsWith, likeText: text}
+	return Predicate{column: c.name, operator: "LIKE", likeShape: likeEndsWith, likeText: text}
 }
 
 // Like is the AST form of [Query.WhereLike]: `lhs LIKE pattern` with the
 // escape character declared, so the pattern means the same on every engine.
-// The plain, engine-default form is Cmp(lhs, "LIKE", Lit(pattern)) until
-// v2.0.0, when it declares the escape too (DEP-2026-009).
+// Cmp(lhs, "LIKE", Lit(pattern)) renders the same statement.
 func Like(lhs Expr, pattern string) Expr { return likeExpr{lhs: lhs, pattern: pattern} }
 
 // NotLike is the negation of [Like].
@@ -263,12 +270,13 @@ func (e likeExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	return fmt.Sprintf("%s %s ? %s", lsql, op, likeEscapeTail(d)), args, nil
 }
 
-// likeTail is what a renderer appends after the bound pattern of an escaped
-// LIKE condition, and nothing for every other condition. One helper, called
-// from every renderer that writes a condition, so a condition built through
-// WhereLike reaches UPDATE and DELETE with the same clause a SELECT gets.
+// likeTail is what a renderer appends after the bound pattern of a LIKE or
+// NOT LIKE condition, and nothing for every other condition. One helper,
+// called from every renderer that writes a condition, so a LIKE reaches
+// UPDATE and DELETE with the same clause a SELECT gets, whichever door built
+// it (QK-25, QK-32).
 func likeTail(cond condition, d Dialect) string {
-	if !cond.escape {
+	if !isLikeOperator(cond.operator) {
 		return ""
 	}
 	return " " + likeEscapeTail(d)

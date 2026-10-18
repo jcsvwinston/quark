@@ -346,8 +346,8 @@ func testLikeEscape(ctx context.Context, t *testing.T, client *quark.Client) {
 		}
 	}
 
-	// And the plain form is what it always was on this engine: an opaque
-	// pattern, no tail.
+	// And the plain form carries the same tail this engine needs: every
+	// LIKE Quark renders declares its escape character (QK-32).
 	rec.mu.Lock()
 	rec.events = nil
 	rec.mu.Unlock()
@@ -357,35 +357,32 @@ func testLikeEscape(ctx context.Context, t *testing.T, client *quark.Client) {
 	rec.mu.Lock()
 	plain := rec.events[len(rec.events)-1].SQL
 	rec.mu.Unlock()
-	// The clause, not the word: the table is called like_escape_rows.
-	if strings.Contains(plain, " ESCAPE '") {
-		t.Errorf("the plain LIKE grew an ESCAPE tail on %s: %s", engine, plain)
+	if !strings.Contains(plain, tail) {
+		t.Errorf("the plain LIKE on %s does not carry %q: %s", engine, tail, plain)
 	}
 
-	// And what that opaque pattern means is the engine's default, which is
-	// not the same on the six (QK-32): on PostgreSQL, MySQL and MariaDB a
-	// backslash escapes the character after it, so `%\%%` finds the name
-	// with a literal percent sign; on SQLite, SQL Server and Oracle the
-	// backslash is a character, so the same pattern finds the name with a
-	// backslash in it. Quark 2.0 declares ESCAPE '\' on the plain form too
-	// (DEP-2026-009); this subtest is what that PR changes — every engine
-	// then answers "100% off".
-	t.Run("PlainFormKeepsTheEngineDefault", func(t *testing.T) {
-		want := `back\slash`
-		switch engine {
-		case "postgres", "mysql", "mariadb":
-			want = "100% off"
-		}
-		rows, err := quark.For[LikeEscapeRow](ctx, client).Where("name", "LIKE", `%\%%`).List()
-		if err != nil {
-			t.Fatalf("plain LIKE %%\\%%%% on %s: %v", engine, err)
-		}
-		names := make([]string, len(rows))
-		for i, r := range rows {
-			names[i] = r.Name
-		}
-		if len(rows) != 1 || rows[0].Name != want {
-			t.Fatalf("plain LIKE %%\\%%%% on %s answered %v, want exactly %q (the engine's default escape, v1 behaviour)", engine, names, want)
+	// And what a pattern means under the declared escape is the same on the
+	// six (QK-32): a backslash escapes the character after it, so `%\%%`
+	// finds the name with a literal percent sign on SQLite, SQL Server and
+	// Oracle as it does on PostgreSQL, MySQL and MariaDB — the engine's own
+	// default no longer decides. A doubled backslash is the character
+	// itself, so the name with a backslash in it is reachable too.
+	t.Run("PlainFormDeclaresTheEscape", func(t *testing.T) {
+		for pattern, want := range map[string]string{
+			`%\%%`: "100% off",
+			`%\\%`: `back\slash`,
+		} {
+			rows, err := quark.For[LikeEscapeRow](ctx, client).Where("name", "LIKE", pattern).List()
+			if err != nil {
+				t.Fatalf("plain LIKE %q on %s: %v", pattern, engine, err)
+			}
+			names := make([]string, len(rows))
+			for i, r := range rows {
+				names[i] = r.Name
+			}
+			if len(rows) != 1 || rows[0].Name != want {
+				t.Fatalf("plain LIKE %q on %s answered %v, want exactly %q (the declared escape, on every engine)", pattern, engine, names, want)
+			}
 		}
 	})
 }

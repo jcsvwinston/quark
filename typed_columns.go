@@ -31,7 +31,6 @@ type Predicate struct {
 	column   string
 	operator string
 	value    any
-	escape   bool // an escaped LIKE: see condition.escape
 	// likeShape / likeText describe a text search (Contains, StartsWith,
 	// EndsWith) whose pattern is composed in WhereP, once the dialect is
 	// known: what needs escaping in the text depends on the engine.
@@ -47,7 +46,6 @@ func (p Predicate) toCondition(logic string) condition {
 		operator: p.operator,
 		value:    p.value,
 		logic:    logic,
-		escape:   p.escape,
 	}
 }
 
@@ -146,20 +144,19 @@ func NewTypedStringColumn(name string) TypedStringColumn {
 	return TypedStringColumn{TypedColumn[string]{name: name}}
 }
 
-// Like builds `column LIKE pattern` under the engine's default escape;
-// [TypedStringColumn.LikeEscaped] declares it.
-//
-// Changes in v2.0.0: Like declares ESCAPE '\' on every engine, as
-// LikeEscaped does. See DEP-2026-009.
+// Like builds `column LIKE pattern` with the escape character declared on
+// the statement (`ESCAPE '\'`), the typed counterpart of [Query.Where] with
+// the LIKE operator: `%` and `_` are wildcards and a backslash makes the next
+// character literal, on every engine. A pattern that ends in a dangling
+// backslash is ErrInvalidQuery when the predicate is applied with
+// [Query.WhereP]. Compose a pattern from user text with [EscapeLike], or call
+// [TypedStringColumn.Contains] and friends, which do.
 func (c TypedStringColumn) Like(pattern string) Predicate {
 	return Predicate{column: c.name, operator: "LIKE", value: pattern}
 }
 
-// NotLike builds `column NOT LIKE pattern` under the engine's default
-// escape; [TypedStringColumn.NotLikeEscaped] declares it.
-//
-// Changes in v2.0.0: NotLike declares ESCAPE '\' on every engine, as
-// NotLikeEscaped does. See DEP-2026-009.
+// NotLike builds `column NOT LIKE pattern` with the escape character
+// declared, the negation of [TypedStringColumn.Like].
 func (c TypedStringColumn) NotLike(pattern string) Predicate {
 	return Predicate{column: c.name, operator: "NOT LIKE", value: pattern}
 }
@@ -175,15 +172,12 @@ func (q *Query[T]) WhereP(preds ...Predicate) *Query[T] {
 	// re-clamping and reallocating per predicate.
 	conds := make([]condition, len(preds))
 	for i, p := range preds {
-		if p.escape {
-			if p.likeShape != likeGivenPattern {
-				p.value = likePatternFor(c.dialect, p.likeShape, p.likeText)
-			}
-			pattern, _ := p.value.(string)
-			if err := likePattern(c.guard, pattern); err != nil {
-				c.err = err
-				return c
-			}
+		if p.likeShape != likeGivenPattern {
+			p.value = likePatternFor(c.dialect, p.likeShape, p.likeText)
+		}
+		if err := c.checkLikePattern(p.operator, p.value); err != nil {
+			c.err = err
+			return c
 		}
 		conds[i] = p.toCondition("AND")
 	}
