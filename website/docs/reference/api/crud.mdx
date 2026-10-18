@@ -22,7 +22,7 @@ see [Getting Started](../../guides/getting-started) and
 | `DeleteBatch` | `DeleteBatch(ids []any) (int64, error)` | Hard-delete rows by primary-key values. |
 | `DeleteBatchOf` | `DeleteBatchOf[T, V](q *Query[T], ids []V) (int64, error)` | Package-level typed-slice form of `DeleteBatch`. |
 | `WithoutAssociations` | `WithoutAssociations() *Query[T]` | Disable the recursive association save for this `Create`/`Update`. |
-| `CheckVersions` | `CheckVersions() *Query[T]` | Make `UpdateBatch` on a versioned model fail with `ErrStaleEntity`, all or nothing, when a row's version moved. |
+| `CheckVersions` | `CheckVersions() *Query[T]` | Kept for code written against v1: `UpdateBatch` on a versioned model checks every row's version with or without it. |
 | `Upsert` | `Upsert(entity *T, conflictCols, updateCols []string) error` | Insert or update one entity on conflict. |
 | `UpsertBatch` | `UpsertBatch(entities []*T, conflictCols, updateCols []string) error` | Bulk insert-or-update. |
 | `UpdateBatch` | `UpdateBatch(entities []*T) error` | Update many entities by PK in one transaction. |
@@ -182,19 +182,22 @@ The same holds for every write that addresses a row by key: `Update`,
 `RowLevelSecurityClient` tenant strategy the tenant predicate is one of the
 conditions, so these writes never touch another tenant's row.
 
-When no row with the key satisfies the conditions:
+When no row with the key satisfies the conditions — or, on a query without
+conditions, when no row has the key at all:
 
 | Outcome | Why |
 | --- | --- |
 | Nothing is written, and `(0, nil)` is returned. | The same answer `UpdateMap` and `DeleteBy` give when their conditions match nothing; check the count. |
 | `AfterUpdate` / `AfterDelete` do not run, no audit row is written, no event is emitted. | Nothing happened. `BeforeUpdate` / `BeforeDelete` have already run: they run before the statement. |
-| Loaded associations are not written either. | `Update` checks the row before writing a `belongs_to` association, which it writes ahead of the entity's row. |
-| A versioned model returns `(0, nil)`, not `ErrStaleEntity`. | `ErrStaleEntity` means the row satisfies the conditions and its version moved. `UpdateBatch` under `CheckVersions` skips such a row the same way. |
+| Loaded associations are not written either, under conditions. | `Update` checks the row before writing a `belongs_to` association, which it writes ahead of the entity's row. |
+| A versioned model returns `(0, nil)`, not `ErrStaleEntity`, under conditions. | `ErrStaleEntity` means the row satisfies the conditions and its version moved. `UpdateBatch` skips such a row the same way. Without conditions a missing key on a versioned model is `ErrStaleEntity`, as it always was. |
 
-The answer does not say whether the row exists outside the conditions: a row
-of another tenant and a row that does not exist look the same. An entity
-whose key is zero is inserted, as before; the conditions do not apply to an
-insert.
+A write that matched its row and changed no value is reported as a write of
+one row on every engine: MySQL and MariaDB count changed rows, so Quark
+checks the row is there before reporting. The answer does not say whether
+the row exists outside the conditions: a row of another tenant and a row
+that does not exist look the same. An entity whose key is zero is inserted,
+as before; the conditions do not apply to an insert.
 
 Hooks: `BeforeUpdate` and `AfterUpdate`.
 
@@ -288,6 +291,7 @@ Rules:
 | Map keys are sorted. | Produces deterministic SQL. |
 | Keys are validated as identifiers. | Protects dynamic update maps. |
 | Under `RowLevelSecurityClient` the tenant column, if the map names it, is written with the resolved tenant. | A map cannot move a row to another tenant; a different value is logged (`quark.tenant.foreign_value_replaced`). |
+| On a model with a `quark:"version"` column the version of every row written is bumped, and a map that names the version column is `ErrInvalidQuery`. | A holder of the row sees the write on their next `Update` (`ErrStaleEntity`) instead of overwriting it; the column is Quark's to write. `UpdateMap` has no entity, so it checks nothing. |
 
 `UpdateMap` is the preferred API for explicit zero values, admin bulk changes,
 and computed updates that do not require loading a full entity.
@@ -340,9 +344,18 @@ If the model does not have `deleted_at`, `Delete` performs a hard delete by
 primary key.
 
 The query's `Where` conditions are ANDed with the key, as for `Update`: when no
-row with the key satisfies them, nothing is deleted, `(0, nil)` is returned and
-`AfterDelete`, the audit row and the event are skipped. See
+row with the key satisfies them — or, without conditions, when no row has the
+key or the row is already trashed — nothing is deleted, `(0, nil)` is returned
+and `AfterDelete`, the audit row and the event are skipped. See
 [Guarding a write by key](#guarding-a-write-by-key-with-where).
+
+On a model with a `quark:"version"` column `Delete`, `HardDelete` and
+`Restore` hold the row to the version the entity was loaded with, as
+`Update` does: a stale entity removes or restores nothing and returns
+`ErrStaleEntity`; without conditions a key no row has is the same conflict.
+The soft delete and `Restore` also bump the version, in the row and in the
+entity. See
+[Which writes check the version](/docs/guides/modeling#which-writes-check-the-version).
 
 ```go
 rows, err := quark.For[Document](ctx, client).
@@ -421,55 +434,60 @@ err := quark.For[Product](ctx, client).Upsert(
 ```
 
 `conflictCols` should match a unique constraint or primary key (empty
-`conflictCols` returns `ErrInvalidQuery`). Pass `updateCols` explicitly for
-portable behavior.
+`conflictCols` returns `ErrInvalidQuery`). `Upsert` does the same on the
+six engines.
 
-**An empty `updateCols` does not mean the same on every engine.** On four
-engines the conflicting row is left as it was — insert-or-ignore; on the two
-whose upsert is a `MERGE`, the non-conflict columns are overwritten:
+**An empty `updateCols` is insert-or-ignore.** The conflicting row is left
+as it was, `Upsert` returns `nil`, and the entity's key is written back only
+where a row was inserted:
 
 | Dialect | Empty `updateCols`, the key conflicts | Error | Key written back |
 | --- | --- | --- | --- |
 | PostgreSQL, SQLite | the row is left as it was (`ON CONFLICT … DO NOTHING`) | `nil` | no |
-| MySQL, MariaDB | the row is left as it was (`ON DUPLICATE KEY UPDATE` assigns the first conflict column to itself) | `nil` | the conflicting row's |
-| SQL Server, Oracle | every column the insert writes is overwritten, except the conflict columns, the primary key and `created_at` (`MERGE … WHEN MATCHED THEN UPDATE SET …`) | `nil` | the updated row's |
+| MySQL, MariaDB | the row is left as it was (`ON DUPLICATE KEY UPDATE` assigns the first conflict column to itself) | `nil` | no |
+| SQL Server, Oracle | the row is left as it was (the `MERGE` has no `WHEN MATCHED` branch) | `nil` | no |
 
-On SQL Server and Oracle the update branch leaves the row's key and its
-`created_at` as they were, as `Update` does, and writes `updated_at` with the
-rest. An entity that carries a non-zero integer key is upserted like one that
-does not: the key is an identity column there, which the update branch does
-not set and the insert branch does not write. A new row gets the key the
-engine assigns, and that key is written into the entity — see
-[the key written into the entity](#the-key-written-into-the-entity). The other
-four engines insert the entity's key. A new key is inserted on every engine.
+A caller who wants columns updated names them. On SQL Server and Oracle an
+entity that carries a non-zero integer key is upserted like one that does
+not: the key is an identity column there, which the insert branch does not
+write. A new row gets the key the engine assigns, and that key is written
+into the entity — see
+[the key written into the entity](#the-key-written-into-the-entity). The
+other four engines insert the entity's key. A new key is inserted on every
+engine, and `UpsertBatch` does the same per row.
 
-`UpsertBatch` does the same per row. Bringing the engines together changes
-what callers see on one side or the other, so it waits for the next major
-release; until then, pass `updateCols`.
+**Which duplicate takes the update branch.** `conflictCols` names the key
+`Upsert` arbitrates, on every engine. A duplicate of another unique key — the
+entity carries the key of an existing row and a `conflictCols` value no row
+has, say — is `ErrConstraintViolation`, with nothing written: the error a
+`Create` of the same row would be.
 
-**Which duplicate takes the update branch.** On PostgreSQL and SQLite
-`conflictCols` is the conflict target: a duplicate of another unique key — the
-primary key, say — fails with `ErrConstraintViolation`. On SQL Server and
-Oracle the `MERGE` matches on `conflictCols` only. MySQL and MariaDB have no
-conflict target: `ON DUPLICATE KEY UPDATE` fires on a duplicate of any unique
-key, so the row that holds the duplicate takes the update branch whichever key
-it is:
-
-| Dialect | The entity carries the key of an existing row and a `conflictCols` value no row has |
+| Dialect | How |
 | --- | --- |
-| PostgreSQL, SQLite | `ErrConstraintViolation`; nothing is written |
-| MySQL, MariaDB | `nil`; with `updateCols`, that row's `updateCols` are written; without, the row is left as it was |
-| SQL Server, Oracle | `nil`; a new row is inserted, with a key the engine assigns, which the entity gets |
+| PostgreSQL, SQLite | `ON CONFLICT (…)` names its arbiter; the engine raises the error |
+| MySQL, MariaDB | `ON DUPLICATE KEY UPDATE` fires on a duplicate of any unique key, so every assignment is guarded by the conflict columns (`c = IF(k <=> VALUES(k), VALUES(c), c)`); a statement that changed nothing reads the row back, and no row with the conflict key means the duplicate was elsewhere |
+| SQL Server, Oracle | the `MERGE` matches on `conflictCols` only and its insert branch does not write the identity key, so an entity carrying a non-zero integer key is checked against the table before the `MERGE` |
 
-`conflictCols` does not choose the row on MySQL and MariaDB. When a table has
-more than one unique key, upsert entities whose other keys do not collide with
-another row's, or use `Create` and `Update`.
+A row that holds the conflict key takes the update branch whatever key the
+entity carries, as `ON CONFLICT` does; the entity then gets that row's key.
+
+**Versioned models.** On a model with a `quark:"version"` column the update
+branch is inside optimistic locking: it bumps the version it writes and, when
+the entity carries a non-zero version, holds the row to it — a conflicting
+row that moved is `ErrStaleEntity`, nothing written. An entity with a zero
+version is treated as new and holds the row to nothing. After the write the
+entity's version is the row's, inserted or updated. The guard is one more
+condition on the update branch — `ON CONFLICT … DO UPDATE … WHERE`, a guarded
+`ON DUPLICATE KEY UPDATE`, `MERGE … WHEN MATCHED AND` — and binds nothing:
+the `INSERT` carries the entity's version. `UpsertBatch` with `updateCols`
+goes row by row on a versioned model, in a transaction, so a stale row is
+named and nothing is written.
 
 | Dialect | Shape |
 | --- | --- |
 | PostgreSQL | `INSERT ... ON CONFLICT (...) DO UPDATE SET ...` |
 | SQLite | `INSERT ... ON CONFLICT (...) DO UPDATE SET ...` |
-| MySQL / MariaDB | `INSERT ... ON DUPLICATE KEY UPDATE ...` |
+| MySQL / MariaDB | `INSERT ... ON DUPLICATE KEY UPDATE c = IF(k <=> VALUES(k), VALUES(c), c), ...` |
 | SQL Server | `MERGE INTO ... USING ...` |
 | Oracle | `MERGE INTO ... USING ...` |
 
@@ -497,20 +515,20 @@ carried. It is never set to the key of another row.
 | Dialect | Row inserted | Row updated | Conflict, nothing written | Read with |
 | --- | --- | --- | --- | --- |
 | PostgreSQL, SQLite | its key | its key | kept: `DO NOTHING` returns no row | `RETURNING` |
-| MySQL | its key | its key | the conflicting row's | the statement's own insert id; the clause ends with `<pk> = LAST_INSERT_ID(<pk>)`, which changes no value |
-| MariaDB | its key | its key | the conflicting row's | `RETURNING` |
-| SQL Server | its key, the one the identity assigned | its key | kept: a `MERGE` with no column to update has no update branch | `MERGE … OUTPUT INSERTED.<pk> INTO` a table variable |
+| MySQL | its key | its key | kept | the statement's own insert id; the clause ends with `<pk> = LAST_INSERT_ID(<pk>)`, which changes no value |
+| MariaDB | its key | its key | kept | `RETURNING` |
+| SQL Server | its key, the one the identity assigned | its key | kept: a `MERGE` without `updateCols` has no update branch | `MERGE … OUTPUT INSERTED.<pk> INTO` a table variable |
 | Oracle | its key, the one the identity assigned | its key | kept, as on SQL Server | `MERGE … RETURNING <pk> BULK COLLECT INTO` |
 
-"Conflict, nothing written" is an empty `updateCols` on PostgreSQL and
-SQLite, an update branch that changes no value on MySQL and MariaDB, and a
-model with no column outside the key and the conflict columns on SQL Server
-and Oracle. When the conflict columns match more than one row — they are not
-a unique key — SQL Server and Oracle update all of them and the entity keeps
-its key. MySQL reads the key from the statement's result, not from
-`SELECT LAST_INSERT_ID()`: that value belongs to a pooled connection, and on
-the update branch it is the last key that connection generated, not the
-conflicting row's. The same holds for a MariaDB server driven through
+"Conflict, nothing written" is an empty `updateCols`, on every engine. An
+update branch that changes no value on MySQL and MariaDB — the row already
+held the values — counts as a row updated: the row is read back and the
+entity gets its key. When the conflict columns match more than one row —
+they are not a unique key — SQL Server and Oracle update all of them and the
+entity keeps its key. MySQL reads the key from the statement's result, not
+from `SELECT LAST_INSERT_ID()`: that value belongs to a pooled connection,
+and on the update branch it is the last key that connection generated, not
+the conflicting row's. The same holds for a MariaDB server driven through
 `quark.MySQL()`. A key of another type or of more than one column is not
 read back on MySQL, SQL Server and Oracle; the entity keeps the one it
 carried.
@@ -523,7 +541,7 @@ inserted under the resolved tenant whatever the entity's tenant field holds:
 | Dialect | Update branch under the tenant |
 | --- | --- |
 | PostgreSQL, SQLite | `ON CONFLICT (...) DO UPDATE SET ... WHERE <table>.tenant_id = ?` |
-| MySQL, MariaDB | `ON DUPLICATE KEY UPDATE c = IF(tenant_id = ?, VALUES(c), c), ..., id = IF(tenant_id = ?, LAST_INSERT_ID(id), id)` |
+| MySQL, MariaDB | `ON DUPLICATE KEY UPDATE c = IF(k <=> VALUES(k) AND tenant_id = ?, VALUES(c), c), ..., id = IF(tenant_id = ?, LAST_INSERT_ID(id), id)` |
 | SQL Server | `MERGE ... WHEN MATCHED AND target.tenant_id = @p THEN UPDATE ...` |
 | Oracle | `MERGE ... WHEN MATCHED THEN UPDATE SET ... WHERE target.tenant_id = :n` |
 
@@ -539,21 +557,18 @@ if errors.Is(err, quark.ErrConstraintViolation) {
 }
 ```
 
-Without an update branch — empty `updateCols` on PostgreSQL, SQLite, MySQL
-and MariaDB — a conflict with another tenant's row writes nothing and is not
-reported, as a conflict with the tenant's own row is not: `Upsert` returns
-`nil`. On SQL Server and Oracle an empty `updateCols` is an update branch, and
-a conflict with another tenant's row returns `ErrConstraintViolation`. A
-unique key that includes the tenant column (`(tenant_id, sku)`) avoids the collision
-altogether. On MySQL and MariaDB the last assignment reports the key of
-the tenant's row the statement met, and no key for another tenant's row:
-that is how the two are told apart when no value changed, and the key
-written into the entity is the one [the table](#the-key-written-into-the-entity)
-gives. A model whose key is not one integer column reads the row back by
-its conflict key within the tenant instead. On every engine a conflict with
-another tenant's row leaves the entity's key as it was. A dialect Quark has
-no guarded form for refuses the upsert under this strategy with
-`ErrUnsupportedFeature`, and so does a model without the tenant column.
+Without an update branch — empty `updateCols`, on every engine — a conflict
+with another tenant's row writes nothing and is not reported, as a conflict
+with the tenant's own row is not: `Upsert` returns `nil`. A unique key that
+includes the tenant column (`(tenant_id, sku)`) avoids the collision
+altogether. On MySQL and MariaDB a statement that changed no value reads
+the row back by its conflict key: the tenant's own row, which already held
+the values, hands the entity its key as
+[the table](#the-key-written-into-the-entity) gives; another tenant's row is
+the conflict. On every engine a conflict with another tenant's row leaves
+the entity's key as it was. A dialect Quark has no guarded form for refuses
+the upsert under this strategy with `ErrUnsupportedFeature`, and so does a
+model without the tenant column.
 
 ## UpsertBatch
 
@@ -592,7 +607,8 @@ column:
 
 | Dialect | Key written back |
 | --- | --- |
-| PostgreSQL, SQLite, MySQL, MariaDB | none: the multi-row `INSERT` reports no key per row, and each entity keeps the one it carried. Under `RowLevelSecurityClient` MySQL and MariaDB upsert one row at a time and write each key as `Upsert` does. |
+| PostgreSQL, SQLite | none: the multi-row `INSERT` reports no key per row, and each entity keeps the one it carried. |
+| MySQL, MariaDB | each entity gets its row's key, as `Upsert` does: the batch is one statement per row. |
 | SQL Server | each entity gets its row's key, as `Upsert` does: the `MERGE` reads the keys back next to each row's position in the statement (`OUTPUT src.quark_ord, INSERTED.<pk>`). |
 | Oracle | each entity gets its row's key, as `Upsert` does, from its own `MERGE … RETURNING`. |
 
@@ -603,10 +619,14 @@ bound with [`ForTx`](transactions), in a savepoint of the caller's — and a
 row whose conflict key belongs to another tenant fails the whole batch with
 `ErrConstraintViolation`. Inside the caller's transaction the savepoint undoes
 the rows the batch wrote, so they are not in the commit of a caller that goes
-on. MySQL and MariaDB upsert one row
-at a time under this strategy: a multi-row statement reports one count for
-the batch, which cannot tell a row of another tenant from a row of this one
-that already held its values.
+on. MySQL and MariaDB upsert one row at a time, under this strategy and
+without it: a multi-row statement reports one count for the batch, which
+cannot tell a row left alone — another tenant's, or a duplicate of another
+unique key — from a row of this tenant that already held its values. Where
+the batch is more than one statement (MySQL, MariaDB, Oracle) it runs in a
+transaction, so an error leaves nothing written; the chunked statements of
+PostgreSQL, SQLite and SQL Server are not transactional across chunks, as
+`CreateBatch` is not.
 
 ## UpdateBatch
 
@@ -638,38 +658,37 @@ the query timeout) and committed apart from the caller.
 
 `UpdateBatch` returns `nil` for empty input.
 
-### Versioned models and `CheckVersions`
+### Versioned models
 
 On a model with a `quark:"version"` field every `UPDATE` of the batch carries
-the version predicate, as `Update` does. What the batch does when a row's
-version moved depends on `CheckVersions()`:
+the version predicate, as `Update` does, and the batch is all or nothing over
+the versions:
 
 ```go
-err := quark.For[Account](ctx, client).CheckVersions().UpdateBatch(accounts)
+err := quark.For[Account](ctx, client).UpdateBatch(accounts)
 if errors.Is(err, quark.ErrStaleEntity) {
     // nothing was written: reload, replay, retry
 }
 ```
 
-| Case | `UpdateBatch` | `CheckVersions().UpdateBatch` |
-| --- | --- | --- |
-| A row whose version moved | not written; the rest of the batch is | the whole batch is rolled back |
-| A key that does not exist | not written | stale, as for `Update`, when the query has no conditions |
-| A row the query's conditions exclude | not written | not written, and not an error |
-| Error | `nil` | one `ErrStaleEntity` per stale row, joined, each naming its key: `stale entity (optimistic-locking conflict): table accounts pk=7` |
-| In-memory version of a written row | unchanged, so the next `Update` of the same struct returns `ErrStaleEntity` | bumped once the batch is through; a batch that fails bumps none |
+| Case | `UpdateBatch` |
+| --- | --- |
+| A row whose version moved | the whole batch is rolled back |
+| A key that does not exist | stale, as for `Update`, when the query has no conditions |
+| A row the query's conditions exclude | not written, and not an error |
+| Error | one `ErrStaleEntity` per stale row, joined, each naming its key: `stale entity (optimistic-locking conflict): table accounts pk=7` |
+| In-memory version of a written row | bumped once the batch is through; a batch that fails bumps none |
 
 Every row is tried before the batch is rolled back, so the error names every
 stale row, not just the first. `errors.Is(err, quark.ErrStaleEntity)` holds
 for the joined error. On a [`ForTx`](transactions) query "the batch is
 through" means its savepoint was released without error; the caller's own
 rollback afterwards does not take the in-memory versions back, as it does not
-for `Update`. On a model without a version column `CheckVersions` changes
-nothing.
+for `Update`.
 
-Quark 2.0 makes the `CheckVersions` behaviour the default for `UpdateBatch`.
-Until then the default stays as it was, because a batch that returned `nil`
-would start returning an error.
+`CheckVersions()` was the v1 opt-in for this behaviour. It keeps compiling
+and changes nothing: a batch with or without it checks the same way. On a
+model without a version column there is nothing to check.
 
 ## Composite Primary Keys
 

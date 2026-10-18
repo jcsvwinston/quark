@@ -143,9 +143,13 @@ type Dialect interface {
 	// UpsertSQL returns the dialect-specific upsert (INSERT … ON CONFLICT … DO UPDATE)
 	// fragment that is appended after the VALUES clause.
 	// conflictCols: columns that define the conflict target (e.g. primary key or unique index).
+	//               Only a duplicate of these columns takes the update branch; a
+	//               duplicate of another unique key is a constraint violation on
+	//               every built-in dialect (MySQL and MariaDB guard each assignment
+	//               by the conflict columns to that end).
 	// updateCols:   columns to update on conflict; if empty, a conflicting row is left as
-	//               it was (the built-in INSERT-based dialects: ON CONFLICT … DO NOTHING,
-	//               or MySQL's ON DUPLICATE KEY UPDATE c = c).
+	//               it was on every built-in dialect (ON CONFLICT … DO NOTHING, MySQL's
+	//               ON DUPLICATE KEY UPDATE c = c, a MERGE without a WHEN MATCHED branch).
 	// argOffset:    current placeholder index (1-based) so positional dialects stay in sync.
 	// Returns the SQL fragment and the additional argument list (for the SET clause values).
 	UpsertSQL(conflictCols, updateCols []string, argOffset int) string

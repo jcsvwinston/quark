@@ -49,9 +49,8 @@ func controlsOperacion() []control {
 		{
 			id:     "OPS-04",
 			family: "operacion",
-			title:  "Optimistic locking guards Update, Tracked.Save and UpdateBatch under CheckVersions; Delete carries no version predicate",
-			want:   partial,
-			note:   "Measured: an Update with a stale entity returns ErrStaleEntity, and so does a Tracked.Save whose row moved underneath the handle. A Delete with the SAME stale entity removes the winner's row and returns nil — the emitted DELETE matches on the primary key alone. Of the batch paths, UpdateMap and DeleteBatch emit no version predicate at all. UpdateBatch emits one; under CheckVersions a stale entity rolls the whole batch back — the fresh row beside it included — with an ErrStaleEntity naming its key, but by default, until 2.0 makes the check the default, the batch still reports nothing when the predicate matches no row: the stale entity is dropped on the floor and the call returns nil.",
+			title:  "Optimistic locking guards every write of a versioned entity — Update, Tracked.Save, UpdateBatch and Delete — and UpdateMap moves the version; DeleteBatch addresses keys and carries none",
+			want:   present,
 			probe:  probeOptimisticLocking,
 		},
 		{

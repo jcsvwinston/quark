@@ -14,8 +14,8 @@ import (
 // QK-63 and QK-64: the key Upsert and UpsertBatch write into the entity,
 // pinned per engine and per branch. The rule: when Upsert returns nil, the
 // entity's key is the key of the row the statement inserted or updated, or
-// it is left as it was where the engine does not say which row that is —
-// never the key of another row.
+// it is left as it was where nothing was written or the engine does not say
+// which row that is — never the key of another row.
 //
 // QK-63 (MySQL, and MariaDB through the MySQL path). The key was read with
 // SELECT LAST_INSERT_ID() as a second statement, from whichever connection
@@ -28,6 +28,12 @@ import (
 // the MERGE's insert branch does not write: an entity that carried a
 // non-zero key got a row with the key the engine assigned and kept its own,
 // 424242 against 2.
+//
+// DEP-2026-006 (QK-59, QK-65): a conflict without updateCols writes nothing
+// on every engine and leaves the key as carried, and a duplicate of another
+// unique key is ErrConstraintViolation everywhere with the key as carried.
+// MySQL and MariaDB upsert a batch row by row, so each entity gets its key
+// as with Upsert.
 
 type ukRow struct {
 	ID   int64  `db:"id" pk:"true"`
@@ -78,8 +84,9 @@ func testUpsertKey(ctx context.Context, t *testing.T, client *quark.Client) {
 
 func runUpsertKey(ctx context.Context, t *testing.T, client *quark.Client) {
 	engine := client.Dialect().Name()
-	// returning: PostgreSQL and SQLite, whose upsert without updateCols is
-	// ON CONFLICT DO NOTHING and RETURNING has no row for a conflict.
+	// returning: PostgreSQL and SQLite, whose multi-row INSERT reports no
+	// key per row; duplicateKey and merge: the engines that upsert a batch
+	// row by row, or read every key back from the MERGE.
 	var returning, duplicateKey, merge bool
 	switch engine {
 	case "postgres", "sqlite":
@@ -141,23 +148,19 @@ func runUpsertKey(ctx context.Context, t *testing.T, client *quark.Client) {
 	rowKey := func(code string) func(map[string]int64) int64 {
 		return func(rows map[string]int64) int64 { return rows[code] }
 	}
-	// keptOn answers the key the entity carried on the engines that do not
-	// write it on that branch, and the row's key elsewhere.
-	keptOn := func(kept bool, carried int64, code string) func(map[string]int64) int64 {
-		return func(rows map[string]int64) int64 {
-			if kept {
-				return carried
-			}
-			return rows[code]
-		}
+	// kept answers the key the entity carried: nothing was written, so
+	// nothing is written back, on every engine.
+	kept := func(carried int64) func(map[string]int64) int64 {
+		return func(map[string]int64) int64 { return carried }
 	}
 	cases := []upsertCase{
 		// QK-63: the update branch of a zero key. MySQL wrote b's key.
 		{"ZeroKeyUpdateBranch", ukRow{Code: "a", Name: "x"}, []string{"name"}, rowKey("a")},
 		{"ZeroKeyInsertBranch", ukRow{Code: "n", Name: "x"}, []string{"name"}, rowKey("n")},
-		// Without updateCols PostgreSQL and SQLite do nothing and return no
-		// row; the other four answer the conflicting row.
-		{"ZeroKeyWithoutUpdateCols", ukRow{Code: "a", Name: "x"}, nil, keptOn(returning, 0, "a")},
+		// Without updateCols nothing is written and no key is written back
+		// (QK-59), on the engines that used to answer the conflicting row
+		// too.
+		{"ZeroKeyWithoutUpdateCols", ukRow{Code: "a", Name: "x"}, nil, kept(0)},
 		// QK-64: the insert branch with a key the entity carried. The
 		// INSERT-based engines write it; the MERGE's identity assigns
 		// another, which the entity now gets.
@@ -166,7 +169,7 @@ func runUpsertKey(ctx context.Context, t *testing.T, client *quark.Client) {
 		// The row that took the update has a key of its own, which the
 		// entity gets, as the RETURNING engines always gave it.
 		{"NonZeroKeyUpdateBranch", ukRow{ID: ukCarried, Code: "a", Name: "x"}, []string{"name"}, rowKey("a")},
-		{"NonZeroKeyWithoutUpdateCols", ukRow{ID: ukCarried, Code: "a", Name: "x"}, nil, keptOn(returning, ukCarried, "a")},
+		{"NonZeroKeyWithoutUpdateCols", ukRow{ID: ukCarried, Code: "a", Name: "x"}, nil, kept(ukCarried)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -183,33 +186,26 @@ func runUpsertKey(ctx context.Context, t *testing.T, client *quark.Client) {
 	}
 
 	// The duplicate is on the primary key, not on the conflict column:
-	// MySQL and MariaDB update that row, the MERGE inserts a new one with a
-	// key the identity assigns (QK-64), PostgreSQL and SQLite refuse it.
+	// ErrConstraintViolation on every engine, nothing written, the key as
+	// carried (QK-65). MySQL and MariaDB used to update that row, the MERGE
+	// to insert a new one with a key the identity assigned.
 	t.Run("DuplicateOnTheKey", func(t *testing.T) {
 		seed(t)
 		a := keys(t)["a"]
 		e := ukRow{ID: a, Code: "z", Name: "x"}
 		err := quark.For[ukRow](ctx, client).Upsert(&e, []string{"code"}, []string{"name"})
 		rows := keys(t)
-		switch {
-		case returning:
-			if !errors.Is(err, quark.ErrConstraintViolation) || e.ID != a {
-				t.Errorf("on %s: err %v, key %d; want ErrConstraintViolation and the key carried, %d", engine, err, e.ID, a)
-			}
-		case duplicateKey:
-			if err != nil || e.ID != a {
-				t.Errorf("on %s: err %v, key %d; want nil and the key of the row updated, %d", engine, err, e.ID, a)
-			}
-		case merge:
-			if err != nil || e.ID != rows["z"] || e.ID == a {
-				t.Errorf("on %s: err %v, key %d; want nil and the key of the row inserted, %d (rows %v)", engine, err, e.ID, rows["z"], rows)
-			}
+		if !errors.Is(err, quark.ErrConstraintViolation) || e.ID != a {
+			t.Errorf("on %s: err %v, key %d; want ErrConstraintViolation and the key carried, %d", engine, err, e.ID, a)
+		}
+		if _, inserted := rows["z"]; inserted || len(rows) != 2 {
+			t.Errorf("on %s the refused upsert wrote: rows %v", engine, rows)
 		}
 	})
 
-	// A MERGE of a model with no column to update has no update branch: a
-	// conflict writes nothing and returns nil, as on the other engines, and
-	// the key is not written. The INSERT-based engines answer as above.
+	// A model with no column outside the key and the conflict column: a
+	// conflict without updateCols writes nothing, returns nil, and leaves
+	// the key as carried on every engine.
 	t.Run("NoUpdateBranch", func(t *testing.T) {
 		bare := func(t *testing.T) map[string]int64 {
 			t.Helper()
@@ -237,12 +233,8 @@ func runUpsertKey(ctx context.Context, t *testing.T, client *quark.Client) {
 			if err := quark.For[ukBare](ctx, client).Upsert(&e, []string{"code"}, nil); err != nil {
 				t.Fatalf("Upsert of an existing code, key %d, no update branch on %s: %v, want nil", carried, engine, err)
 			}
-			want := rows["a"]
-			if returning || merge {
-				want = carried
-			}
-			if e.ID != want {
-				t.Errorf("on %s a conflict with no update branch left key %d (carried %d), want %d", engine, e.ID, carried, want)
+			if e.ID != carried {
+				t.Errorf("on %s a conflict with no update branch left key %d, want the carried %d (rows %v)", engine, e.ID, carried, rows)
 			}
 
 			e = ukBare{ID: carried, Code: "n"}
@@ -288,8 +280,9 @@ func runUpsertKey(ctx context.Context, t *testing.T, client *quark.Client) {
 
 	// UpsertBatch: the MERGE engines write each entity's key, read back
 	// with the row's position in the statement (SQL Server) or per row
-	// (Oracle). The multi-row INSERT of the other four reports no key per
-	// row, and the entities keep what they carried.
+	// (Oracle); MySQL and MariaDB upsert row by row and write each key as
+	// Upsert does. The multi-row INSERT of PostgreSQL and SQLite reports no
+	// key per row, and the entities keep what they carried.
 	t.Run("UpsertBatch", func(t *testing.T) {
 		for _, carried := range []int64{0, ukCarried} {
 			seed(t)
@@ -307,7 +300,7 @@ func runUpsertKey(ctx context.Context, t *testing.T, client *quark.Client) {
 			rows := keys(t)
 			for i, code := range []string{"n", "a"} {
 				want := before[i]
-				if merge {
+				if merge || duplicateKey {
 					want = rows[code]
 				}
 				if batch[i].ID != want {
@@ -373,13 +366,13 @@ func runUpsertKey(ctx context.Context, t *testing.T, client *quark.Client) {
 		zero := func(map[string]int64) int64 { return 0 }
 		for _, c := range []guardedCase{
 			{"OwnRowUpdated", ukTenantRow{Code: "a", Name: "x"}, []string{"name"}, false, rowKey("a")},
-			{"OwnRowWithoutUpdateCols", ukTenantRow{Code: "a", Name: "x"}, nil, false, keptOn(returning, 0, "a")},
+			{"OwnRowWithoutUpdateCols", ukTenantRow{Code: "a", Name: "x"}, nil, false, zero},
 			{"Inserted", ukTenantRow{Code: "n", Name: "x"}, []string{"name"}, false, rowKey("n")},
 			{"InsertedCarryingAKey", ukTenantRow{ID: ukCarried, Code: "n", Name: "x"}, []string{"name"}, false, rowKey("n")},
 			{"AnotherTenantsRow", ukTenantRow{Code: "b", Name: "x"}, []string{"name"}, true, zero},
-			// Without updateCols only the MERGE has an update branch, and
-			// only the MERGE reports the other tenant's row.
-			{"AnotherTenantsRowWithoutUpdateCols", ukTenantRow{Code: "b", Name: "x"}, nil, merge, zero},
+			// Without updateCols there is no update branch on any engine:
+			// another tenant's row is left alone and not reported (QK-59).
+			{"AnotherTenantsRowWithoutUpdateCols", ukTenantRow{Code: "b", Name: "x"}, nil, false, zero},
 		} {
 			t.Run(c.name, func(t *testing.T) {
 				seedT(t)

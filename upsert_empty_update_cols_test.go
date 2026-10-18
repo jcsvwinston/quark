@@ -12,11 +12,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// QK-48: an Upsert with no updateCols on a conflicting key leaves the row as
-// it was on SQLite (DO NOTHING) and returns nil — it returned sql.ErrNoRows,
-// from the RETURNING that had no row, while MySQL, MariaDB, SQL Server and
-// Oracle answered nil. internal/enginesuite (UpsertEmptyUpdateCols) pins what
-// each of the six engines does with an empty updateCols.
+// QK-48, QK-59: an Upsert with no updateCols on a conflicting key leaves the
+// row as it was (DO NOTHING on SQLite) and returns nil — it returned
+// sql.ErrNoRows, from the RETURNING that had no row. internal/enginesuite
+// (UpsertEmptyUpdateCols) holds the six engines to the same behaviour
+// (DEP-2026-006).
 func TestUpsertWithoutUpdateColsOnAConflictIsNotAnError(t *testing.T) {
 	type row struct {
 		ID   int64  `db:"id" pk:"true"`

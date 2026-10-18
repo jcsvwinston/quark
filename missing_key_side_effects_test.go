@@ -13,16 +13,15 @@ import (
 	"testing"
 )
 
-// QK-46. A write by entity that carries no conditions, on a key no row has,
-// writes nothing and returns (0, nil) — and still runs the After hook, writes
-// the audit row and publishes the event, as if it had written. Under
-// conditions the same write reports nothing (QK-40,
-// TestAWriteTheConditionsExcludeReportsNothing). Quark 2.0 makes the
-// unconditioned write report nothing too (DEP-2026-005); this test pins the
-// v1 behaviour so the change at the major is a diff to it.
+// QK-46 (DEP-2026-005). A write by entity that carries no conditions, on a
+// key no row has, writes nothing and returns (0, nil) — and runs no After
+// hook, writes no audit row and publishes no event, as the same write does
+// under conditions (QK-40, TestAWriteTheConditionsExcludeReportsNothing). In
+// v1 it ran the hook, wrote the row and published the event as if it had
+// written: an audit row saying "deleted" for a row that was never there.
 //
 // The fixtures are those of where_guard_test.go.
-func TestAWriteWithoutConditionsOnAMissingKeyStillReportsInV1(t *testing.T) {
+func TestAWriteWithoutConditionsOnAMissingKeyReportsNothing(t *testing.T) {
 	ctx := context.Background()
 	writes := []struct {
 		name  string
@@ -51,25 +50,40 @@ func TestAWriteWithoutConditionsOnAMissingKeyStillReportsInV1(t *testing.T) {
 			if err != nil || n != 0 {
 				t.Fatalf("%s on a missing key = (%d, %v), want (0, nil)", w.name, n, err)
 			}
-			if got := w.hooks.Load() - hooksBefore; got != 1 {
-				t.Errorf("%s on a missing key ran the After hook %d times, want 1 (v1 behaviour)", w.name, got)
+			if got := w.hooks.Load() - hooksBefore; got != 0 {
+				t.Errorf("%s on a missing key ran the After hook %d times, want 0", w.name, got)
 			}
-			if got := audits(); got != 1 {
-				t.Errorf("%s on a missing key wrote %d audit rows, want 1 (v1 behaviour)", w.name, got)
+			if got := audits(); got != 0 {
+				t.Errorf("%s on a missing key wrote %d audit rows, want 0", w.name, got)
 			}
-			if got := bus.count(); got != 1 {
-				t.Errorf("%s on a missing key emitted %d events, want 1 (v1 behaviour)", w.name, got)
+			if got := bus.count(); got != 0 {
+				t.Errorf("%s on a missing key emitted %d events, want 0", w.name, got)
 			}
 			if n, err := For[wgHooked](ctx, c).Count(); err != nil || n != 2 {
 				t.Errorf("the table changed: %d rows, %v", n, err)
+			}
+
+			// The same write on a key a row has reports it once.
+			hooksBefore = w.hooks.Load()
+			n, err = w.write(For[wgHooked](ctx, c), &wgHooked{ID: 1, Owner: "alice", Name: "x"})
+			if err != nil || n != 1 {
+				t.Fatalf("%s on an existing key = (%d, %v), want (1, nil)", w.name, n, err)
+			}
+			if got := w.hooks.Load() - hooksBefore; got != 1 {
+				t.Errorf("%s on an existing key ran the After hook %d times, want 1", w.name, got)
+			}
+			if got := audits(); got != 1 {
+				t.Errorf("%s on an existing key wrote %d audit rows, want 1", w.name, got)
+			}
+			if got := bus.count(); got != 1 {
+				t.Errorf("%s on an existing key emitted %d events, want 1", w.name, got)
 			}
 		})
 	}
 
 	// Out of the notice: on a versioned model Update and UpdateFields read a
-	// missing key as a version conflict already, so no hook, audit row or
-	// event runs there in v1 either.
-	t.Run("VersionedUpdateIsAlreadyAnError", func(t *testing.T) {
+	// missing key as a version conflict, and report nothing either.
+	t.Run("VersionedUpdateIsAnError", func(t *testing.T) {
 		c, err := New("sqlite", "file:qk46_versioned?mode=memory&cache=shared",
 			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
 		if err != nil {

@@ -320,14 +320,21 @@ func (m *MySQLDialect) SupportsTransactionalDDL() bool {
 	return false
 }
 
-// UpsertSQL for MySQL: INSERT … ON DUPLICATE KEY UPDATE col = VALUES(col)
+// UpsertSQL for MySQL: INSERT … ON DUPLICATE KEY UPDATE col = IF(<the
+// conflict columns match>, VALUES(col), col)
+//
+// ON DUPLICATE KEY UPDATE has no conflict target: it fires on a duplicate of
+// any unique key, the primary key included. The conflict columns name the
+// key the caller asked Upsert to arbitrate, so every assignment is guarded
+// by them — the existing row's conflict columns must equal the incoming
+// row's (NULL-safe, `<=>`) — and a duplicate elsewhere changes nothing;
+// Upsert then reads the row back and reports it as ErrConstraintViolation,
+// what PostgreSQL and SQLite answer (QK-65, DEP-2026-006).
 //
 // Without updateCols the clause is a no-op, `<first conflict col> =
 // <itself>`: ON DUPLICATE KEY UPDATE needs one assignment, and the row must
 // be left as it was. It was `= VALUES(<col>)`, which is the same thing only
-// when the duplicate is on that column. ON DUPLICATE KEY UPDATE fires on a
-// duplicate of any unique key, so a duplicate on the primary key wrote the
-// incoming value into the existing row's column (QK-61).
+// when the duplicate is on that column (QK-61).
 func (m *MySQLDialect) UpsertSQL(conflictCols, updateCols []string, _ int) string {
 	if len(updateCols) == 0 {
 		if len(conflictCols) == 0 {
@@ -338,11 +345,26 @@ func (m *MySQLDialect) UpsertSQL(conflictCols, updateCols []string, _ int) strin
 		}
 		return " ON DUPLICATE KEY UPDATE " + m.Quote(conflictCols[0]) + " = " + m.Quote(conflictCols[0])
 	}
+	match := mysqlConflictMatch(m, conflictCols)
 	sets := make([]string, len(updateCols))
 	for i, c := range updateCols {
-		sets[i] = fmt.Sprintf("%s = VALUES(%s)", m.Quote(c), m.Quote(c))
+		qc := m.Quote(c)
+		sets[i] = fmt.Sprintf("%s = IF(%s, VALUES(%s), %s)", qc, match, qc, qc)
 	}
 	return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", ")
+}
+
+// mysqlConflictMatch is the condition under which the row ON DUPLICATE KEY
+// UPDATE met is the row the conflict columns name: its conflict columns equal
+// the incoming row's, NULL-safe. `VALUES(c)` is the incoming value, so the
+// condition binds nothing and holds row by row in a multi-row INSERT.
+func mysqlConflictMatch(d Dialect, conflictCols []string) string {
+	parts := make([]string, len(conflictCols))
+	for i, c := range conflictCols {
+		qc := d.Quote(c)
+		parts[i] = fmt.Sprintf("%s <=> VALUES(%s)", qc, qc)
+	}
+	return strings.Join(parts, " AND ")
 }
 
 // SQLiteDialect implements the SQLite dialect.

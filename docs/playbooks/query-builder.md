@@ -168,25 +168,57 @@ every row's UPDATE, so `UpdateBatch` on a versioned model has always sent
 them — and, until QK-45, never read the count: a stale row was skipped in
 silence, a missing key too, and the written rows' in-memory versions stayed
 behind, so the next `Update` of the same struct returned a false
-`ErrStaleEntity`. The owner's decision (2026-10-06): an opt-in now,
-`CheckVersions()` (field `checkVersions` on `BaseQuery`), and the default in
-2.0 (`docs/deprecations/DEP-2026-003-updatebatch-version-check-default.md`). Under it `UpdateBatch` reads each
-row's count: zero is skipped when the query has conditions and
-`keyPassesWhere` says they exclude the key, stale otherwise; the stale rows
-are collected and `errors.Join`ed, which makes `atomically` roll the whole
-batch back (a savepoint inside a `ForTx` query); the written rows'
-`bumpVersion` runs only after `atomically` returns nil, and the list is reset
-at the start of the closure because `Client.Tx` re-runs it after a deadlock.
-The SET bumps the version, so a matched row is a changed row on MySQL and
-MariaDB too — no "matched, nothing changed" case. Without `CheckVersions` the
-batch is the v1 one statement for statement (no count read, no probe), and
-`TestUpdateBatchWithoutCheckVersionsKeepsTheV1Behaviour` plus
-`UpdateBatchVersions/WithoutCheckVersionsKeepsTheV1Behaviour` pin it: the 2.0
-flip is a diff to them and to `OPS-04` of the enterprise bench.
+`ErrStaleEntity`. The owner's decision (2026-10-06): an opt-in in v1,
+`CheckVersions()` (field `checkVersions` on `BaseQuery`, which records the
+call and changes nothing now), and the default since 2.0
+(`docs/deprecations/DEP-2026-003-updatebatch-version-check-default.md`).
+`UpdateBatch` reads each row's count on a versioned model: zero is skipped
+when the query has conditions and `keyPassesWhere` says they exclude the
+key, stale otherwise; the stale rows are collected and `errors.Join`ed,
+which makes `atomically` roll the whole batch back (a savepoint inside a
+`ForTx` query); the written rows' `bumpVersion` runs only after `atomically`
+returns nil, and the list is reset at the start of the closure because
+`Client.Tx` re-runs it after a deadlock. The SET bumps the version, so a
+matched row is a changed row on MySQL and MariaDB too — no "matched, nothing
+changed" case. `TestUpdateBatchChecksVersionsByDefault` and
+`UpdateBatchVersions/ChecksVersionsByDefault` hold the default; `OPS-04` of
+the enterprise bench measures it.
 
-Still without a version predicate, and outside the decision until M0 says
-otherwise (QK-58): `UpdateMap`, the update branch of `Upsert`/`UpsertBatch`,
-`Delete` and `HardDelete` of an entity, the soft delete and `Restore`.
+### The other writes of a versioned model (QK-58, DEP-2026-004)
+
+Every write that carries an entity is inside optimistic locking. `Delete`,
+`HardDelete`, the soft delete and `Restore` render `AND <version> = ?` with
+the entity's version (`versionPredicate`, `query_crud.go`), the soft delete
+and `Restore` add `, <version> = <version> + 1` (`versionBump`) and
+`bumpVersion` the entity on success; zero rows on a versioned model is
+`ErrStaleEntity` unless `keyPassesWhereExtra` says the row is one the
+statement could not have matched — excluded by the conditions, already
+trashed (`deleted_at IS NULL`), or live for `Restore` (`deleted_at IS NOT
+NULL`) — which is `(0, nil)` (`deleteMissed`). Without conditions a hard
+delete of a missing key is the conflict it is for `Update`, with no probe.
+`UpdateMap` has no entity: `buildUpdateMap` appends the bump so a holder of
+the row sees the write, and a map that names the version column is
+`ErrInvalidQuery` (the proposal of the notice, applied). The update branch
+of `Upsert`/`UpsertBatch` holds the row to the entity's version when it is
+not zero and bumps it: `conflictClause` renders `WHERE (excluded.<v> = 0 OR
+<table>.<v> = excluded.<v>)` on PostgreSQL/SQLite and `IF(<conflict match>
+AND (VALUES(<v>) = 0 OR <v> = VALUES(<v>)), …)` with the bump as the LAST
+assignment on MySQL/MariaDB (earlier IFs read the original version);
+`mergeMatchedClause` adds `(src.<v> = 0 OR target.<v> = src.<v>)` and
+`target.<v> = target.<v> + 1` on the MERGE engines. No bind: the INSERT
+carries the entity's version. `upsertNotWritten` turns a changed-nothing
+statement on a row at another version into `ErrStaleEntity`. The entity's
+version follows the row: `RETURNING <pk>, <v>` on PostgreSQL/SQLite
+(`upsertReturning`/`scanUpsertReturning`), bumped from the carried version
+on MySQL/MariaDB when the statement reports an update (rows affected 2), and
+read by key otherwise (`syncVersion`: a zero-version entity on MySQL, every
+MERGE — which reports its key but not whether it inserted or updated). A
+versioned `UpsertBatch` with `updateCols` goes row by row on every engine
+inside a transaction, so the stale row is named and nothing stays written.
+Regression: `optimistic_locking_scope_test.go`,
+`TestVersionedWritesTellAConflictFromAnExclusion` (Delete, HardDelete) and
+`internal/enginesuite/upsert_versioned_test.go` (`UpsertVersioned`, six
+engines). `OPS-04` of the enterprise bench records **present**.
 
 ### Reads by key stay inside the tenant
 
@@ -219,46 +251,62 @@ no RETURNING row or zero rows affected, SQL Server/Oracle zero rows from the
 MERGE, and MySQL/MariaDB — whose zero also means "own row already held the
 values" — end the clause with `<pk> = IF(<tenant> = ?, LAST_INSERT_ID(<pk>),
 <pk>)`, so the statement reports the tenant's row it met and no key (0) for
-another tenant's (QK-63, `duplicateKeyKeyAssignment`); a model without a
-single integer key still reads the row back by conflict key within the
-tenant (`finishGuardedDuplicateKey`). RETURNING is not used there under the
-guard because MariaDB would hand back the other tenant's id. `UpsertBatch` under the guard runs in a
-transaction and goes row by row on MySQL/MariaDB. QK-44: `UpdateMap` passes
-its map through `confineTenantColumn`. Regression: `upsert_tenant_test.go` and
-`internal/enginesuite/upsert_tenant_test.go` (`UpsertTenant`, six engines).
+another tenant's (QK-63, `duplicateKeyKeyAssignment`); a statement that
+changed nothing reads the row back by conflict key (`upsertNotWritten`,
+`upsert_conflict.go`), which tells the tenant's own unchanged row from
+another tenant's. RETURNING is not used there under the guard because
+MariaDB would hand back the other tenant's id. `UpsertBatch` runs in a
+transaction under the guard, and on every engine that upserts row by row.
+QK-44: `UpdateMap` passes its map through `confineTenantColumn`. Regression:
+`upsert_tenant_test.go` and `internal/enginesuite/upsert_tenant_test.go`
+(`UpsertTenant`, six engines).
 
-### An empty `updateCols` is not one behaviour (QK-48)
+### An empty `updateCols` is one behaviour (QK-48, QK-59, DEP-2026-006)
 
-`Upsert`/`UpsertBatch` with no `updateCols`: PostgreSQL and SQLite write
-`ON CONFLICT … DO NOTHING`, MySQL and MariaDB `ON DUPLICATE KEY UPDATE
-<first conflict col> = <it>` — the conflicting row stays as it was —
-while the MERGE of SQL Server and Oracle (`buildMerge`,
-`upsertBatchMSSQLBulk`) overwrites every column the insert writes except the
-conflict columns, the key and `created_at` (`mergeInferredUpdateCols`). The
-godoc promised the MERGE behaviour everywhere; making the engines agree
-changes what callers see on one side, so it is a decision for the major
-(QADR-0010): `DEP-2026-006` announces one behaviour for 2.0. Until then
+`Upsert`/`UpsertBatch` with no `updateCols` is insert-or-ignore on the six
+engines: PostgreSQL and SQLite write `ON CONFLICT … DO NOTHING`, MySQL and
+MariaDB `ON DUPLICATE KEY UPDATE <first conflict col> = <it>`, and the
+MERGE of SQL Server and Oracle (`buildMerge`, `upsertBatchMSSQLBulk`) has no
+`WHEN MATCHED` branch (`hasUpdate` is false). The conflicting row stays as
+it was, the call returns nil, and no key is written back. In v1 the MERGE
+inferred an update set — every column the insert writes except the conflict
+columns, the key and `created_at` (`mergeInferredUpdateCols`, gone) — and
 `internal/enginesuite/upsert_empty_update_cols_test.go`
-(`UpsertEmptyUpdateCols`) pins each engine. What QK-48 did fix: on
-PostgreSQL and SQLite the RETURNING after DO NOTHING had no row and `Upsert`
-returned `sql.ErrNoRows` — the other four answered nil — in both the plain
-path and `upsertGuardedInsertStyle`.
+(`UpsertEmptyUpdateCols`) pinned each engine; it holds the six to the same
+now. What QK-48 fixed within v1: on PostgreSQL and SQLite the RETURNING after
+DO NOTHING had no row and `Upsert` returned `sql.ErrNoRows` — the other four
+answered nil.
 
-QK-61: the MySQL/MariaDB no-op was `= VALUES(<it>)`, the same thing only when
-the duplicate is on that column; ON DUPLICATE KEY UPDATE fires on a duplicate
-of any unique key, so a duplicate on the PK wrote the incoming value into the
-existing row — in `MySQLDialect.UpsertSQL` and in `guardedConflictClause`
-(`IF(<tenant> = ?, VALUES(c), c)`). Both are `c = c` now. With `updateCols`
-the row holding the duplicate is still updated whichever key it is: that is
-ON DUPLICATE KEY UPDATE, which has no conflict target, and the CRUD reference
-says so; PostgreSQL and SQLite answer `ErrConstraintViolation`, the MERGE
-matches on the conflict columns only. QK-62: the MERGE's inferred set held a
-non-zero integer key — an identity, refused at compile time even for a row
-it would insert (Msg 8102, ORA-32796) — and the `created_at` the convention
-stamped. Neither is in it now; `updated_at` is, as in `Update`. An explicit
-`updateCols` is written as given. Regression:
+### A duplicate of another unique key is `ErrConstraintViolation` (QK-61, QK-65, DEP-2026-006)
+
+The conflict columns name the key `Upsert` arbitrates. ON CONFLICT names its
+arbiter on PostgreSQL and SQLite, so a duplicate of another key — the
+entity carries an existing row's primary key and a conflict value no row has
+— is the engine's own error. ON DUPLICATE KEY UPDATE has no conflict target
+and fires on a duplicate of any unique key: in v1 MySQL and MariaDB updated
+the row holding the duplicate whichever key it was (QK-61 made the no-op
+clause `c = c` so it no longer rewrote the conflict column). Now every
+assignment is guarded by the conflict columns — `c = IF(<k> <=> VALUES(<k>)
+[AND <tenant> = ?], VALUES(c), c)` (`mysqlConflictMatch`, in
+`MySQLDialect.UpsertSQL` and `conflictClause`) — and a statement that
+changed nothing reads the row back (`upsertNotWritten`): no row with the
+conflict key means the duplicate was elsewhere, `ErrConstraintViolation`; a
+row with the conflict key whose key is not the one the entity carries, while
+a row holds the carried key, is the same error (MySQL met the carried key
+first). The MERGE matches on the conflict columns only and its insert branch
+does not write the identity key, so the same entity inserted a second row
+with a key of its own: an entity carrying a non-zero integer key is checked
+before the MERGE (`carriedKeyIsAnotherRow`) — no row with the conflict key
+and a row with the carried key is the error; a row with the conflict key is
+met by the MERGE whatever key the entity carried, as ON CONFLICT does. A key
+of another type is written by the insert branch, where the engine refuses
+the duplicate itself. `UpsertBatch` on MySQL and MariaDB goes row by row,
+always: a multi-row statement reports one count for the whole batch and
+cannot tell a row left alone from one written; the rows run inside a
+transaction so the error leaves nothing written, on Oracle's per-row MERGE
+too. QK-62 is moot without the inferred set. Regression:
 `internal/enginesuite/upsert_engine_edges_test.go` (`UpsertEngineEdges`, six
-engines).
+engines) and `upsert_engine_edges_test.go`.
 
 ### The key an upsert writes into the entity (QK-63, QK-64)
 
@@ -349,7 +397,7 @@ Since A12 Q3 (QK-36, ADR-0028) the per-row form is the fallback, not the rule: `
 - `write_where_test.go` and `internal/enginesuite/write_where_test.go` — the write paths and PreloadWhere select the same rows as a SELECT with the same conditions (QK-39).
 - `upsert_tenant_test.go` and `internal/enginesuite/upsert_tenant_test.go` — the upserts' update branch and UpdateMap stay inside the tenant (QK-43, QK-44).
 - `where_guard_test.go` and `internal/enginesuite/where_guard_test.go` — reads by key stay inside the tenant and inserts/updates store the resolved tenant (QK-42); the writes by key honour the query's conditions and the tenant, report nothing when excluded, keep `ErrStaleEntity` for real conflicts (QK-40); the scopes AND with the caller's whole expression (QK-41).
-- `update_batch_versions_test.go` and `internal/enginesuite/update_batch_versions_test.go` — `CheckVersions().UpdateBatch` is all or nothing over the versions, names every stale key, skips what the conditions exclude and bumps in memory only after the batch; without it the v1 batch is pinned (QK-45).
+- `update_batch_versions_test.go` and `internal/enginesuite/update_batch_versions_test.go` — `UpdateBatch` is all or nothing over the versions, names every stale key, skips what the conditions exclude and bumps in memory only after the batch, with or without `CheckVersions()` (QK-45, DEP-2026-003).
 
 Cualquier cambio en `Query[T]` debe pasar la suite completa, no sólo SQLite.
 

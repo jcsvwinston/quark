@@ -683,7 +683,8 @@ func probeOptimisticLocking(t *testing.T, e *env) verdict {
 		return absent // the tracking path writes over a concurrent change in silence
 	}
 
-	// UpdateMap: a WHERE the caller wrote, and no version in it.
+	// UpdateMap: a WHERE the caller wrote; the SET moves the version
+	// (DEP-2026-004), which is how a holder of the row sees the write.
 	rec.reset()
 	if _, err := quark.For[opsAccount](ctx, c).Where("id", "=", 1).
 		UpdateMap(map[string]any{"balance": 888}); err != nil {
@@ -691,10 +692,10 @@ func probeOptimisticLocking(t *testing.T, e *env) verdict {
 	}
 	updateMapGuarded := strings.Contains(strings.ToLower(rec.last()), "version")
 
-	// UpdateBatch: the predicate IS there, and nothing reports the miss. A
-	// stale entity in a batch is dropped on the floor and the call returns
-	// nil, which is the shape of the gap on this path — not the absence of
-	// the predicate.
+	// UpdateBatch: the predicate is there and the miss is reported
+	// (DEP-2026-003): a stale entity rolls the batch back with an
+	// ErrStaleEntity naming its key, and nothing is written. In v1 the stale
+	// entity was dropped on the floor and the call returned nil.
 	fresh, err := quark.For[opsAccount](ctx, c).Find(1)
 	if err != nil {
 		t.Fatalf("reload before the batch: %v", err)
@@ -762,44 +763,39 @@ func probeOptimisticLocking(t *testing.T, e *env) verdict {
 	}
 	deleteBatchGuarded := strings.Contains(strings.ToLower(rec.last()), "version")
 
-	// The same stale entity, deleted instead of updated.
+	// The same stale entity, deleted instead of updated: the DELETE carries
+	// the version predicate, removes nothing and returns ErrStaleEntity
+	// (DEP-2026-004). In v1 it matched on the key alone and removed the
+	// winner's row.
 	rec.reset()
 	rows, err := quark.For[opsAccount](ctx, c).Delete(&stale)
 	deleteSQL := rec.last()
-	deleteGuarded := errors.Is(err, quark.ErrStaleEntity) || rows == 0
-	if !deleteGuarded {
-		if strings.Contains(strings.ToLower(deleteSQL), "version") {
-			t.Fatalf("the DELETE carried a version predicate yet removed the row: %s", deleteSQL)
-		}
-		// Measured: the stale delete removed the winner's row, and the
-		// statement never mentioned the version column.
-		var left int64
-		if err := c.Raw().QueryRowContext(ctx, `SELECT COUNT(*) FROM ops_account WHERE id = 1`).Scan(&left); err != nil {
-			t.Fatalf("count after stale delete: %v", err)
-		}
-		if left != 0 {
-			t.Fatalf("stale delete reported %d rows but left %d behind", rows, left)
-		}
+	deleteGuarded := errors.Is(err, quark.ErrStaleEntity) && rows == 0 &&
+		strings.Contains(strings.ToLower(deleteSQL), "version")
+	var left int64
+	if err := c.Raw().QueryRowContext(ctx, `SELECT COUNT(*) FROM ops_account WHERE id = 1`).Scan(&left); err != nil {
+		t.Fatalf("count after stale delete: %v", err)
+	}
+	if left != 1 {
+		// Not a grade: a stale delete that removes the winner's row is a
+		// lost write, whatever it returned.
+		t.Fatalf("the stale delete removed the winner's row (reported %d rows, err %v): %s", rows, err, deleteSQL)
 	}
 
-	// The verdict is the conjunction of the facts the title and the note
-	// assert. Every other split has to read differently, or a path that gains
-	// the predicate — or loses it — leaves the bench green.
+	// The verdict is the conjunction of the facts the title asserts. Every
+	// other split has to read differently, or a path that loses the
+	// predicate — or the report of a miss — leaves the bench green.
 	// updateBatchGuarded and updateBatchReports are two different facts about
-	// UpdateBatch — the predicate went out, and the miss was never reported —
-	// and only their conjunction is the gap the note publishes. Left out of
-	// the switch, a UpdateBatch that lost its predicate entirely would read as
-	// the same `partial` as the one that carries it and stays quiet.
-	// updateBatchCheckedReports is the third: under CheckVersions the miss IS
-	// reported and the batch undone. The note publishes it, so a CheckVersions
-	// that stopped reporting has to fail here, not stay `partial`; and the
-	// default turning checked (2.0) moves updateBatchReports, which no
-	// recorded split absorbs either.
+	// UpdateBatch — the predicate went out, and the miss was reported — and
+	// updateBatchCheckedReports is the third, the v1 opt-in that is now
+	// redundant: a CheckVersions that stopped reporting has to fail here.
+	// deleteBatchGuarded is false by design: DeleteBatch addresses keys and
+	// carries no entity whose version could be stale (DEP-2026-004 names
+	// the writes that carry an entity), so a predicate appearing there is a
+	// change to record, not a gain.
 	switch {
-	case deleteGuarded && updateMapGuarded && deleteBatchGuarded && updateBatchGuarded && updateBatchReports && updateBatchCheckedReports:
+	case deleteGuarded && updateMapGuarded && !deleteBatchGuarded && updateBatchGuarded && updateBatchReports && updateBatchCheckedReports:
 		return present
-	case !deleteGuarded && !updateMapGuarded && !deleteBatchGuarded && updateBatchGuarded && !updateBatchReports && updateBatchCheckedReports:
-		return partial
 	default:
 		t.Fatalf("the version predicate moved on some paths and not others: "+
 			"delete=%v updateMap=%v deleteBatch=%v updateBatchGuarded=%v updateBatchReports=%v updateBatchCheckedReports=%v — "+

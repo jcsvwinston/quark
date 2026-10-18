@@ -102,10 +102,9 @@ type BaseQuery struct {
 	// own row is written; loaded belongs_to/has_one/has_many/m2m fields are
 	// left untouched in the database.
 	skipAssociations bool
-	// checkVersions makes UpdateBatch on a versioned model report a row its
-	// version predicate did not match (set by CheckVersions, QK-45): the
-	// batch is rolled back and ErrStaleEntity names every such row. Off, the
-	// batch keeps its v1 behaviour and the miss goes unreported.
+	// checkVersions is set by CheckVersions (QK-45). UpdateBatch on a
+	// versioned model holds every row to its version whether or not it is
+	// set (DEP-2026-003); the field records the call and changes nothing.
 	checkVersions bool
 	unscoped      bool   // if true, soft-delete filter is dropped (WithTrashed semantics)
 	onlyTrashed   bool   // if true, the soft-delete filter is inverted to IS NOT NULL
@@ -290,29 +289,21 @@ func (q *Query[T]) WithoutAssociations() *Query[T] {
 	return c
 }
 
-// CheckVersions makes [Query.UpdateBatch] on a model with a quark:"version"
-// field hold every row to the version it was loaded with, as Update,
-// UpdateFields and Tracked.Save already do for one row:
+// CheckVersions is the v1 opt-in that made [Query.UpdateBatch] on a model
+// with a quark:"version" field hold every row to the version it was loaded
+// with (QK-45). UpdateBatch does that on its own since 2.0 (DEP-2026-003),
+// so the call changes nothing: a batch with or without it is all or nothing
+// over the versions, returns ErrStaleEntity naming every stale row, and
+// bumps the in-memory versions of the rows it wrote. It keeps compiling for
+// code written against v1:
 //
-//	err := quark.For[Account](ctx, client).CheckVersions().UpdateBatch(accounts)
+//	err := quark.For[Account](ctx, client).UpdateBatch(accounts)
 //	if errors.Is(err, quark.ErrStaleEntity) {
 //	    // nothing was written; err names every row whose version moved
 //	}
 //
-// The batch is all or nothing. A row whose UPDATE matches nothing is stale —
-// another writer moved its version, or its key does not exist — unless the
-// query's conditions exclude it, which skips it without error, as Update
-// does. Every stale row is collected, the whole batch is rolled back, and
-// the error joins one ErrStaleEntity per stale row, each naming its key.
-// When the batch is written, each entity's in-memory version is bumped, so
-// the next Update of the same struct does not report a conflict that did not
-// happen; a batch that fails bumps none.
-//
-// Without CheckVersions, UpdateBatch keeps its v1 behaviour: the version
-// predicate is sent, a row it does not match is not written, the call
-// returns nil, and the in-memory versions are not bumped. Quark 2.0 makes
-// the checked behaviour the default for UpdateBatch (DEP-2026-003). On a
-// model without a version column CheckVersions changes nothing.
+// On a model without a version column there is nothing to check, with or
+// without the call.
 func (q *Query[T]) CheckVersions() *Query[T] {
 	c := q.clone()
 	c.checkVersions = true

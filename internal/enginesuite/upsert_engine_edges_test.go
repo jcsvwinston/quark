@@ -12,25 +12,24 @@ import (
 	"github.com/jcsvwinston/quark"
 )
 
-// QK-61 and QK-62: two edges of Upsert that QK-48 measured and documented,
-// pinned per engine.
+// QK-61, QK-62, QK-65 and QK-59: two edges of Upsert, the same on the six
+// engines since DEP-2026-006.
 //
-// QK-61 (MySQL, MariaDB). Without updateCols the no-op assignment was
-// `<first conflict col> = VALUES(<it>)`. ON DUPLICATE KEY UPDATE fires on a
-// duplicate of ANY unique key, so when the duplicate was on another key —
-// the primary key, say — the existing row's first conflict column took the
-// incoming value, and Upsert returned nil. The no-op is `<col> = <col>` now:
-// the row is left as it was, as on the engines that do nothing. With
-// updateCols the update branch still fires on a duplicate of any unique key:
-// that is what ON DUPLICATE KEY UPDATE is, there is no conflict target to
-// name, and the reference says so.
+// A duplicate of a unique key other than the conflict columns — the entity
+// carries an existing row's primary key and a conflict value no row has —
+// is ErrConstraintViolation everywhere, nothing written (QK-65). ON
+// CONFLICT names its arbiter on PostgreSQL and SQLite; on MySQL and MariaDB,
+// whose ON DUPLICATE KEY UPDATE fires on a duplicate of any unique key,
+// every assignment is guarded by the conflict columns and a statement that
+// changed nothing reads the row back; on SQL Server and Oracle the entity's
+// key is checked before the MERGE, whose insert branch does not write the
+// identity key. In v1 MySQL and MariaDB updated the row holding the
+// duplicate whichever key it was (QK-61 made the no-op clause a no-op), and
+// SQL Server and Oracle inserted a second row.
 //
-// QK-62 (SQL Server, Oracle). Without updateCols the MERGE updated every
-// column the insert writes except the conflict columns: a non-zero integer
-// key was in the update set, which the engine refuses even when the row would
-// be inserted (Msg 8102, ORA-32796), and a created_at the timestamp
-// convention stamped overwrote the row's. The inferred update set leaves out
-// the primary key and created_at now, as Update does; updated_at stays in it.
+// An empty updateCols is insert-or-ignore everywhere (QK-59): the MERGE has
+// no WHEN MATCHED branch. In v1 it inferred an update set — every column the
+// insert writes but the conflict columns, the key and created_at (QK-62).
 
 type uxRow struct {
 	ID        int64     `db:"id" pk:"true"`
@@ -60,11 +59,11 @@ var uxPast = time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
 
 func testUpsertEngineEdges(ctx context.Context, t *testing.T, client *quark.Client) {
 	engine := client.Dialect().Name()
-	var merge, duplicateKey bool
+	// merge: the key is an identity the MERGE's insert branch does not
+	// write, so an inserted row has the key the engine assigned (QK-64).
+	var merge bool
 	switch engine {
-	case "postgres", "sqlite":
-	case "mysql", "mariadb":
-		duplicateKey = true
+	case "postgres", "sqlite", "mysql", "mariadb":
 	case "mssql", "oracle":
 		merge = true
 	default:
@@ -112,30 +111,21 @@ func testUpsertEngineEdges(ctx context.Context, t *testing.T, client *quark.Clie
 		return r.ID == s.ID && r.Code == s.Code && r.Name == s.Name && keptCreated(r) && !refreshedUpdated(r)
 	}
 
-	// QK-62: the entity carries the row's key, the conflict is on code.
+	// QK-59: the entity carries the row's key, the conflict is on code, no
+	// updateCols: the row is left as it was.
 	t.Run("NonZeroKeyWithoutUpdateCols", func(t *testing.T) {
 		s := seed(t, "a")["a"]
 		if err := q().Upsert(&uxRow{ID: s.ID, Code: "a", Name: "second"}, []string{"code"}, nil); err != nil {
 			t.Fatalf("Upsert of the row's own key with no updateCols on %s: %v, want nil", engine, err)
 		}
-		got := rows(t)["a"]
-		if merge {
-			if got.ID != s.ID || got.Name != "second" {
-				t.Errorf("on %s the MERGE updates every non-conflict column but the key: got %+v, want id %d name second", engine, got, s.ID)
-			}
-			if !keptCreated(got) {
-				t.Errorf("on %s the update branch overwrote created_at: %v, want the seeded %v", engine, got.CreatedAt, uxPast)
-			}
-			if !refreshedUpdated(got) {
-				t.Errorf("on %s the update branch left updated_at at %v; it is refreshed, as by Update", engine, got.UpdatedAt)
-			}
-		} else if !untouched(got, s) {
+		if got := rows(t)["a"]; !untouched(got, s) {
 			t.Errorf("on %s an upsert with no updateCols changed the conflicting row: %+v, seeded %+v", engine, got, s)
 		}
 	})
 
-	// QK-62: "even when the row would be inserted" — Msg 8102 and
-	// ORA-32796 are raised when the statement is compiled.
+	// QK-64: a new code carrying a key no row holds is inserted. The
+	// INSERT-based engines write the entity's key; the MERGE's identity
+	// assigns another.
 	t.Run("NonZeroKeyInserts", func(t *testing.T) {
 		seed(t, "a")
 		const key = 424242
@@ -146,8 +136,6 @@ func testUpsertEngineEdges(ctx context.Context, t *testing.T, client *quark.Clie
 		if !ok || got.Name != "new" {
 			t.Errorf("Upsert of a new code carrying a non-zero key on %s inserted %+v (found %v)", engine, got, ok)
 		}
-		// The MERGE's insert branch does not write an identity key; the
-		// INSERT-based engines insert the entity's.
 		if merge && got.ID == key {
 			t.Errorf("on %s the inserted row has the entity's key %d; the identity assigns it", engine, got.ID)
 		}
@@ -156,28 +144,21 @@ func testUpsertEngineEdges(ctx context.Context, t *testing.T, client *quark.Clie
 		}
 	})
 
-	// QK-62: with a zero key, created_at is the one the convention stamped
-	// on the entity, and it used to overwrite the row's.
+	// QK-59, QK-62: with a zero key and no updateCols the row is left as it
+	// was, created_at included — the stamp the convention put on the entity
+	// used to overwrite the row's on the MERGE engines.
 	t.Run("ZeroKeyWithoutUpdateColsKeepsCreatedAt", func(t *testing.T) {
 		s := seed(t, "a")["a"]
 		if err := q().Upsert(&uxRow{Code: "a", Name: "second"}, []string{"code"}, nil); err != nil {
 			t.Fatalf("Upsert with no updateCols on %s: %v", engine, err)
 		}
-		got := rows(t)["a"]
-		if !keptCreated(got) {
-			t.Errorf("on %s an upsert with no updateCols overwrote created_at: %v, want the seeded %v", engine, got.CreatedAt, uxPast)
-		}
-		if merge && (got.Name != "second" || !refreshedUpdated(got)) {
-			t.Errorf("on %s the MERGE updates name and updated_at: %+v", engine, got)
-		}
-		if !merge && !untouched(got, s) {
+		if got := rows(t)["a"]; !untouched(got, s) {
 			t.Errorf("on %s an upsert with no updateCols changed the conflicting row: %+v, seeded %+v", engine, got, s)
 		}
 	})
 
-	// QK-62, UpsertBatch: one bulk MERGE on SQL Server, one MERGE per row on
-	// Oracle. The first entity's non-zero key puts the key column in the
-	// statement.
+	// QK-59, UpsertBatch: the rows' own keys, no updateCols — every row
+	// left as it was, on the bulk MERGE of SQL Server too.
 	t.Run("UpsertBatchNonZeroKeysWithoutUpdateCols", func(t *testing.T) {
 		s := seed(t, "a", "b")
 		batch := []*uxRow{
@@ -188,23 +169,15 @@ func testUpsertEngineEdges(ctx context.Context, t *testing.T, client *quark.Clie
 			t.Fatalf("UpsertBatch of the rows' own keys with no updateCols on %s: %v, want nil", engine, err)
 		}
 		got := rows(t)
-		for code, want := range map[string]string{"a": "a2", "b": "b2"} {
-			r := got[code]
-			if !keptCreated(r) {
-				t.Errorf("UpsertBatch on %s overwrote created_at of %q: %v", engine, code, r.CreatedAt)
-			}
-			if merge && (r.ID != s[code].ID || r.Name != want || !refreshedUpdated(r)) {
-				t.Errorf("UpsertBatch on %s: row %q is %+v, want id %d name %s and updated_at refreshed", engine, code, r, s[code].ID, want)
-			}
-			if !merge && !untouched(r, s[code]) {
-				t.Errorf("UpsertBatch with no updateCols on %s changed row %q: %+v", engine, code, r)
+		for _, code := range []string{"a", "b"} {
+			if !untouched(got[code], s[code]) {
+				t.Errorf("UpsertBatch with no updateCols on %s changed row %q: %+v, seeded %+v", engine, code, got[code], s[code])
 			}
 		}
 	})
 
-	// The update branch never overwrites created_at on any engine when
-	// updateCols does not name it — answered here for the four engines whose
-	// update branch writes only updateCols.
+	// The update branch never overwrites created_at when updateCols does
+	// not name it, and refreshes updated_at when it does.
 	t.Run("UpdateColsLeaveCreatedAt", func(t *testing.T) {
 		seed(t, "a")
 		if err := q().Upsert(&uxRow{Code: "a", Name: "second"}, []string{"code"}, []string{"name", "updated_at"}); err != nil {
@@ -222,78 +195,77 @@ func testUpsertEngineEdges(ctx context.Context, t *testing.T, client *quark.Clie
 		}
 	})
 
-	// QK-61: the duplicate is on the primary key, not on the conflict
+	// QK-65: the duplicate is on the primary key, not on the conflict
 	// column. The entity carries the existing row's key and a code no row
-	// holds.
+	// holds: ErrConstraintViolation, nothing written, on every engine.
 	t.Run("DuplicateOnAnotherKey", func(t *testing.T) {
-		// checkOther holds every engine to what it does when the duplicate
-		// is on a key other than conflictCols.
-		checkOther := func(t *testing.T, err error, s uxRow, wantName string) {
+		checkOther := func(t *testing.T, err error, s uxRow, carried int64) {
 			t.Helper()
+			if !errors.Is(err, quark.ErrConstraintViolation) {
+				t.Errorf("on %s: err %v, want ErrConstraintViolation: the conflict columns name the key Upsert arbitrates", engine, err)
+			}
 			got := rows(t)
 			a, ok := got["a"]
 			switch {
 			case !ok:
 				t.Errorf("on %s no row has code a any more: the row holding key %d had its conflict column rewritten (rows %+v)", engine, s.ID, got)
-			case a.ID != s.ID:
-				t.Errorf("on %s the row with code a has key %d, want %d", engine, a.ID, s.ID)
-			case !keptCreated(a):
-				t.Errorf("on %s the row holding the key lost its created_at: %v", engine, a.CreatedAt)
-			case a.Name != wantName:
-				t.Errorf("on %s the row holding the key has name %q, want %q", engine, a.Name, wantName)
+			case !untouched(a, s):
+				t.Errorf("on %s the row holding the key was written: %+v, seeded %+v", engine, a, s)
 			}
-			z, inserted := got["z"]
-			if inserted && z.ID == s.ID {
-				// Reported above: it is the existing row, rewritten.
-				inserted = false
+			if z, inserted := got["z"]; inserted {
+				t.Errorf("on %s a row with the new code was inserted: %+v", engine, z)
 			}
-			switch {
-			case duplicateKey:
-				if err != nil || inserted {
-					t.Errorf("on %s: err %v, inserted %+v (%v); want nil and no row: ON DUPLICATE KEY UPDATE takes a duplicate of any unique key", engine, err, z, inserted)
-				}
-			case merge:
-				// The MERGE matches on the conflict columns only; the
-				// integer key is an identity, which its insert branch
-				// does not write.
-				if err != nil || !inserted || z.ID == s.ID {
-					t.Errorf("on %s: err %v, inserted %+v (%v); want nil and a new row with a key of its own", engine, err, z, inserted)
-				}
-			default:
-				// ON CONFLICT (code) names its arbiter: a duplicate of
-				// another key is the error it always was.
-				if !errors.Is(err, quark.ErrConstraintViolation) || inserted {
-					t.Errorf("on %s: err %v, inserted %v; want ErrConstraintViolation and no row", engine, err, inserted)
-				}
+			if n := len(got); n != 1 {
+				t.Errorf("on %s the table has %d rows after the refused upsert, want 1", engine, n)
+			}
+			if carried != s.ID {
+				t.Errorf("on %s the refused upsert changed the entity's key to %d, want %d kept", engine, carried, s.ID)
 			}
 		}
 
 		t.Run("WithoutUpdateCols", func(t *testing.T) {
 			s := seed(t, "a")["a"]
-			err := q().Upsert(&uxRow{ID: s.ID, Code: "z", Name: "other"}, []string{"code"}, nil)
-			checkOther(t, err, s, "first")
+			e := uxRow{ID: s.ID, Code: "z", Name: "other"}
+			err := q().Upsert(&e, []string{"code"}, nil)
+			checkOther(t, err, s, e.ID)
 		})
 		t.Run("UpsertBatchWithoutUpdateCols", func(t *testing.T) {
 			s := seed(t, "a")["a"]
-			err := q().UpsertBatch([]*uxRow{{ID: s.ID, Code: "z", Name: "other"}}, []string{"code"}, nil)
-			checkOther(t, err, s, "first")
+			e := uxRow{ID: s.ID, Code: "z", Name: "other"}
+			err := q().UpsertBatch([]*uxRow{&e}, []string{"code"}, nil)
+			checkOther(t, err, s, e.ID)
 		})
-		// With updateCols MySQL and MariaDB update the row that holds the
-		// duplicate key, whichever key it is: the reference says so.
 		t.Run("WithUpdateCols", func(t *testing.T) {
 			s := seed(t, "a")["a"]
-			err := q().Upsert(&uxRow{ID: s.ID, Code: "z", Name: "other"}, []string{"code"}, []string{"name"})
-			want := "first"
-			if duplicateKey {
-				want = "other"
+			e := uxRow{ID: s.ID, Code: "z", Name: "other"}
+			err := q().Upsert(&e, []string{"code"}, []string{"name"})
+			checkOther(t, err, s, e.ID)
+		})
+		// A batch that meets the duplicate after a row it would insert
+		// leaves nothing written: one statement for both rows on
+		// PostgreSQL, SQLite and SQL Server, a transaction around the rows
+		// on MySQL, MariaDB and Oracle. Both entities carry a key: the
+		// multi-row INSERT writes the key column only when the first
+		// entity carries one.
+		t.Run("UpsertBatchWritesNothing", func(t *testing.T) {
+			s := seed(t, "a")["a"]
+			batch := []*uxRow{{ID: 424242, Code: "n", Name: "new"}, {ID: s.ID, Code: "z", Name: "other"}}
+			err := q().UpsertBatch(batch, []string{"code"}, []string{"name"})
+			if !errors.Is(err, quark.ErrConstraintViolation) {
+				t.Fatalf("UpsertBatch meeting a duplicate on another key on %s = %v, want ErrConstraintViolation", engine, err)
 			}
-			checkOther(t, err, s, want)
+			got := rows(t)
+			if _, inserted := got["n"]; inserted {
+				t.Errorf("on %s the failed batch left the row written before the duplicate: %+v", engine, got)
+			}
+			if !untouched(got["a"], s) {
+				t.Errorf("on %s the failed batch wrote the row holding the key: %+v", engine, got["a"])
+			}
 		})
 	})
 
-	// QK-61 under RowLevelSecurityClient: the guarded no-op assignment on
-	// MySQL and MariaDB was IF(<tenant> = ?, VALUES(<col>), <col>), which
-	// wrote the incoming value into the tenant's own row.
+	// QK-65 under RowLevelSecurityClient: the tenant's own row holds the
+	// key, the code is new — refused, nothing written.
 	t.Run("TenantGuardedDuplicateOnAnotherKey", func(t *testing.T) {
 		dropTable(client, "upsert_edge_tenant_rows")
 		if err := client.Migrate(ctx, &uxTenantRow{}); err != nil {
@@ -313,35 +285,17 @@ func testUpsertEngineEdges(ctx context.Context, t *testing.T, client *quark.Clie
 		if err := quark.For[uxTenantRow](ctx, client).Create(&s); err != nil {
 			t.Fatalf("seed on %s: %v", engine, err)
 		}
-		err := quark.For[uxTenantRow](ta, router).Upsert(&uxTenantRow{ID: s.ID, Code: "z", Name: "a-z"}, []string{"code"}, nil)
-		got, lerr := quark.For[uxTenantRow](ctx, client).List()
-		if lerr != nil {
-			t.Fatalf("list on %s: %v", engine, lerr)
-		}
-		byCode := make(map[string]uxTenantRow, len(got))
-		for _, r := range got {
-			byCode[r.Code] = r
-		}
-		if y, ok := byCode["y"]; !ok || y != s {
-			t.Errorf("on %s the tenant's row holding key %d is not as seeded: rows %+v, want %+v among them", engine, s.ID, got, s)
-		}
-		z, inserted := byCode["z"]
-		if inserted && z.ID == s.ID {
-			// Reported above: it is the tenant's row, rewritten.
-			inserted = false
-		}
-		switch {
-		case duplicateKey:
-			if err != nil || inserted {
-				t.Errorf("on %s: err %v, inserted %+v (%v); want nil and no row", engine, err, z, inserted)
+		for _, update := range [][]string{nil, {"name"}} {
+			err := quark.For[uxTenantRow](ta, router).Upsert(&uxTenantRow{ID: s.ID, Code: "z", Name: "a-z"}, []string{"code"}, update)
+			if !errors.Is(err, quark.ErrConstraintViolation) {
+				t.Errorf("on %s with updateCols %v: err %v, want ErrConstraintViolation", engine, update, err)
 			}
-		case merge:
-			if err != nil || !inserted || z.TenantID != "ta" || z.ID == s.ID {
-				t.Errorf("on %s: err %v, inserted %+v (%v); want nil and a new row of ta with a key of its own", engine, err, z, inserted)
+			got, lerr := quark.For[uxTenantRow](ctx, client).List()
+			if lerr != nil {
+				t.Fatalf("list on %s: %v", engine, lerr)
 			}
-		default:
-			if !errors.Is(err, quark.ErrConstraintViolation) || inserted {
-				t.Errorf("on %s: err %v, inserted %v; want ErrConstraintViolation and no row", engine, err, inserted)
+			if len(got) != 1 || got[0] != s {
+				t.Errorf("on %s with updateCols %v the table is %+v, want the seeded %+v alone", engine, update, got, s)
 			}
 		}
 	})

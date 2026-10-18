@@ -110,16 +110,23 @@ func TestDuplicateKeyRowKey(t *testing.T) {
 
 // QK-63, QK-64: the statement each engine sends reads the key back from
 // itself. The SQL is recorded as sent; SQLite underneath does not run it.
+// On SQL Server and Oracle an entity carrying a key is checked against the
+// table before the MERGE (QK-65): that probe is the first statement, and
+// SQLite underneath refuses its syntax, so the MERGE is pinned with a zero
+// key there.
 func TestUpsertReadsTheKeyFromItsOwnStatement(t *testing.T) {
 	for _, tc := range []struct {
 		dialect Dialect
 		want    []string
+		probe   string
 		batch   string
 	}{
-		{MySQL(), []string{"ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `id` = LAST_INSERT_ID(`id`)"}, ""},
+		{MySQL(), []string{"ON DUPLICATE KEY UPDATE `name` = IF(`code` <=> VALUES(`code`), VALUES(`name`), `name`), `id` = LAST_INSERT_ID(`id`)"}, "", ""},
 		{MSSQL(), []string{"DECLARE @quark_keys TABLE (quark_key BIGINT NOT NULL);", "OUTPUT INSERTED.[id] INTO @quark_keys (quark_key);\nSELECT quark_key FROM @quark_keys;"},
+			"SELECT [id] FROM [ut_rows] WHERE [code] = @p1",
 			"OUTPUT src.quark_ord, INSERTED.[id] INTO @quark_keys (quark_ord, quark_key);"},
 		{Oracle(), []string{`RETURNING "ID" BULK COLLECT INTO quark_keys;`, ":quark_n := quark_keys.COUNT;"},
+			`SELECT "ID" FROM "UT_ROWS" WHERE "CODE" = :1`,
 			`RETURNING "ID" BULK COLLECT INTO quark_keys;`},
 	} {
 		t.Run(tc.dialect.Name(), func(t *testing.T) {
@@ -134,6 +141,12 @@ func TestUpsertReadsTheKeyFromItsOwnStatement(t *testing.T) {
 			for _, carried := range []int64{0, 424242} {
 				rec.reset()
 				_ = For[utRow](ctx, c).Upsert(&utRow{ID: carried, Code: "x", Name: "n"}, []string{"code"}, []string{"name"})
+				if carried != 0 && tc.probe != "" {
+					if len(rec.all) == 0 || rec.all[0] != tc.probe {
+						t.Errorf("Upsert with key %d did not probe the conflict row first: want %q, sent %q", carried, tc.probe, rec.all)
+					}
+					continue
+				}
 				for _, w := range tc.want {
 					if !rec.any(w) {
 						t.Errorf("Upsert with key %d sent no statement with %q; sent %q", carried, w, rec.all)

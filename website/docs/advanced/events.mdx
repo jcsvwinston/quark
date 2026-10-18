@@ -79,9 +79,13 @@ after the statement.
 WHERE-based methods (`CreateBatch`, `UpdateBatch`, `DeleteBatch`, `DeleteBy`,
 `UpdateMap`) do **not** emit, because there is no single `*T` to attach.
 
-Emission is not gated on rows affected. Read an event as "the operation
-committed", not "a row definitely changed" — whether a no-op update counts
-varies by engine, so gating would be engine-dependent.
+An event is published when the write found its row. A write by entity on a
+key no row has, or on a row the query's `Where` conditions exclude, writes
+nothing, returns `(0, nil)` and publishes nothing (QK-40, QK-46). A no-op
+update that matched its row still publishes: read an event as "the operation
+committed on a row that is there", not "a value definitely changed" — on
+MySQL and MariaDB, whose rows-affected count changed rows, Quark checks the
+row is there before reporting.
 
 **When `Publish` fails**, the write is already saved — an emit failure never rolls
 anything back:

@@ -10,20 +10,20 @@ import (
 	"github.com/jcsvwinston/quark"
 )
 
-// QK-48: Upsert and UpsertBatch with an empty updateCols, pinned per engine.
+// QK-48, QK-59 (DEP-2026-006): Upsert and UpsertBatch with an empty
+// updateCols do the same on the six engines — insert-or-ignore. A
+// conflicting row is left as it was, the call returns nil, and the entity's
+// key is written back only where a row was inserted.
 //
-// The engines do not agree, and the reference says so. On PostgreSQL, SQLite,
-// MySQL and MariaDB a conflicting row is left as it was — insert-or-ignore.
-// On SQL Server and Oracle the MERGE updates every non-conflict column but
-// the key and created_at (QK-62; UpsertEngineEdges pins those two). The
-// godoc used to promise the second everywhere. Making the engines agree
-// changes what callers observe on one side or the other, which is a decision
-// for the major (QADR-0010); until then this test holds each engine to what it
-// does, so a change on either side turns that engine's lane red.
+// In v1 the engines did not agree: on SQL Server and Oracle the MERGE
+// updated every non-conflict column but the key and created_at (QK-62),
+// and this test pinned each engine to what it did. The MERGE has no WHEN
+// MATCHED branch now without updateCols, so the two take the branch the
+// other four took.
 //
-// What did change: on PostgreSQL and SQLite a conflict without updateCols
-// returned sql.ErrNoRows — RETURNING after DO NOTHING has no row — while the
-// other four engines returned nil for the same outcome. It returns nil now.
+// What QK-48 changed within v1: on PostgreSQL and SQLite a conflict without
+// updateCols returned sql.ErrNoRows — RETURNING after DO NOTHING has no row —
+// while the other four engines returned nil for the same outcome.
 
 type ueRow struct {
 	ID   int64  `db:"id" pk:"true"`
@@ -36,15 +36,6 @@ func (ueRow) TableName() string { return "upsert_empty_rows" }
 
 func testUpsertEmptyUpdateCols(ctx context.Context, t *testing.T, client *quark.Client) {
 	engine := client.Dialect().Name()
-	var overwrites bool
-	switch engine {
-	case "postgres", "sqlite", "mysql", "mariadb":
-		overwrites = false
-	case "mssql", "oracle":
-		overwrites = true
-	default:
-		t.Skipf("no behaviour pinned for an empty updateCols on dialect %q", engine)
-	}
 	dropTable(client, "upsert_empty_rows")
 	if err := client.Migrate(ctx, &ueRow{}); err != nil {
 		t.Fatalf("migrate on %s: %v", engine, err)
@@ -71,22 +62,18 @@ func testUpsertEmptyUpdateCols(ctx context.Context, t *testing.T, client *quark.
 		}
 		return got[0]
 	}
-	// wantAfter is the conflicting row after an upsert that carried name and
-	// n, with no updateCols.
-	wantAfter := func(seed ueRow, name string, n int64) ueRow {
-		if overwrites {
-			return ueRow{ID: seed.ID, Code: seed.Code, Name: name, N: n}
-		}
-		return seed
-	}
 
 	t.Run("Upsert", func(t *testing.T) {
 		seed := reseed(t)
-		if err := q().Upsert(&ueRow{Code: "a", Name: "second", N: 2}, []string{"code"}, nil); err != nil {
+		again := ueRow{Code: "a", Name: "second", N: 2}
+		if err := q().Upsert(&again, []string{"code"}, nil); err != nil {
 			t.Fatalf("Upsert on a conflicting key with no updateCols on %s: %v, want nil", engine, err)
 		}
-		if got, want := read(t, "a"), wantAfter(seed, "second", 2); got != want {
-			t.Errorf("Upsert with no updateCols on %s left the conflicting row %+v, want %+v (overwrites every non-conflict column: %v)", engine, got, want, overwrites)
+		if got := read(t, "a"); got != seed {
+			t.Errorf("Upsert with no updateCols on %s changed the conflicting row: %+v, want it left as %+v", engine, got, seed)
+		}
+		if again.ID != 0 {
+			t.Errorf("Upsert with no updateCols on %s wrote key %d into the entity; nothing was written, so nothing is written back", engine, again.ID)
 		}
 		if n, err := q().Count(); err != nil || n != 1 {
 			t.Errorf("Upsert on a conflicting key on %s: the table has %d rows (%v), want 1", engine, n, err)
@@ -99,11 +86,14 @@ func testUpsertEmptyUpdateCols(ctx context.Context, t *testing.T, client *quark.
 		if err := q().UpsertBatch(batch, []string{"code"}, []string{}); err != nil {
 			t.Fatalf("UpsertBatch with no updateCols on %s: %v", engine, err)
 		}
-		if got, want := read(t, "a"), wantAfter(seed, "third", 3); got != want {
-			t.Errorf("UpsertBatch with no updateCols on %s left the conflicting row %+v, want %+v (overwrites every non-conflict column: %v)", engine, got, want, overwrites)
+		if got := read(t, "a"); got != seed {
+			t.Errorf("UpsertBatch with no updateCols on %s changed the conflicting row: %+v, want it left as %+v", engine, got, seed)
 		}
 		if got := read(t, "b"); got.Name != "new" || got.N != 9 {
 			t.Errorf("UpsertBatch with no updateCols on %s inserted %+v, want name=new n=9", engine, got)
+		}
+		if batch[0].ID != 0 {
+			t.Errorf("UpsertBatch with no updateCols on %s wrote key %d into the entity it left alone", engine, batch[0].ID)
 		}
 	})
 
@@ -117,9 +107,7 @@ func testUpsertEmptyUpdateCols(ctx context.Context, t *testing.T, client *quark.
 		if got.Name != "fresh" || got.N != 5 {
 			t.Errorf("Upsert of a new key with no updateCols on %s inserted %+v", engine, got)
 		}
-		// Oracle's MERGE has no RETURNING: the key stays zero there, as with
-		// updateCols (documented).
-		if engine != "oracle" && fresh.ID != got.ID {
+		if fresh.ID != got.ID {
 			t.Errorf("Upsert of a new key with no updateCols on %s wrote back key %d, the row's is %d", engine, fresh.ID, got.ID)
 		}
 	})

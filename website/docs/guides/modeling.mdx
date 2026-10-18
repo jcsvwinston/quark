@@ -76,7 +76,7 @@ types, and timezones.
 | `db:"-"` | parser | Ignores the field. |
 | `default:"value"` | `Migrate` | Emits `DEFAULT value` verbatim; **bool defaults are normalized per dialect** (below). |
 | `nullable:"false"` | `Migrate` | Also emits `NOT NULL`. |
-| `quark:"version"` | `Update`, `UpdateFields`, `Tracked.Save`, `UpdateBatch` under `CheckVersions` | Optimistic-locking column (see below). |
+| `quark:"version"` | `Update`, `UpdateFields`, `Tracked.Save`, `UpdateBatch`, `Delete`, `HardDelete`, `Restore`, `Upsert`, `UpsertBatch`, `UpdateMap` | Optimistic-locking column (see below). |
 | `quark:"rename:old_col"` | `Sync` | Renames `old_col` to the current column on the next sync. |
 
 ```go
@@ -195,7 +195,9 @@ fmt.Println(live, all)
 
 `Restore` clears `deleted_at` for a row you've loaded. Restoring a row that is
 already live affects zero rows instead of writing anything, so a misuse can't
-corrupt live data:
+corrupt live data. On a model with a `quark:"version"` column `Restore` holds
+the row to the version the entity was loaded with and bumps it, as the soft
+delete does — see [Which writes check the version](#which-writes-check-the-version):
 
 ```go
 trashed, _ := quark.For[User](ctx, client).OnlyTrashed().Find(42)
@@ -256,48 +258,48 @@ On success, Quark bumps the in-memory version so the next `Update` sees the new
 value without a re-read. The version column is automatically `NOT NULL`, and one
 model may carry the tag on only one field.
 
-#### Batches: `CheckVersions`
+#### Batches
 
-`UpdateBatch` sends the same version predicate for every row, but by default it
-does not read the result: a row whose version moved is not written, the rest of
-the batch is, the call returns `nil`, and no in-memory version is bumped — so
-the next `Update` of a struct the batch wrote returns `ErrStaleEntity` although
-nobody else touched the row. Chain `CheckVersions()` to hold the batch to the
-same contract as `Update`:
+`UpdateBatch` holds every row to its version, under the same contract as
+`Update`:
 
 ```go
-err := quark.For[Account](ctx, client).CheckVersions().UpdateBatch(accounts)
+err := quark.For[Account](ctx, client).UpdateBatch(accounts)
 if errors.Is(err, quark.ErrStaleEntity) {
     // the whole batch was rolled back; err names every stale row:
     // stale entity (optimistic-locking conflict): table accounts pk=7
 }
 ```
 
-Under `CheckVersions` a stale row — or, without `Where` conditions, a key that
-does not exist — rolls back the whole batch, and the error joins one
-`ErrStaleEntity` per stale row. A row the query's `Where` conditions exclude is
-skipped, as `Update` skips it. When the batch is written, every entity's
-in-memory version is bumped. See
-[`UpdateBatch`](../reference/api/crud#versioned-models-and-checkversions) for
-the details inside a transaction.
-
-Quark 2.0 makes this the default for `UpdateBatch`; until then the default
-stays as it was.
+A stale row — or, without `Where` conditions, a key that does not exist —
+rolls back the whole batch, and the error joins one `ErrStaleEntity` per
+stale row. A row the query's `Where` conditions exclude is skipped, as
+`Update` skips it. When the batch is written, every entity's in-memory
+version is bumped, so the same structs can be written again. See
+[`UpdateBatch`](../reference/api/crud#versioned-models) for the details
+inside a transaction. `CheckVersions()`, the v1 opt-in for this behaviour,
+keeps compiling and changes nothing.
 
 #### Which writes check the version
 
 | Write | Version predicate | When the entity's row moved since it was loaded |
 | --- | --- | --- |
 | `Update`, `UpdateFields`, `Tracked.Save` | yes | `ErrStaleEntity`, nothing written |
-| `UpdateBatch` with `CheckVersions()` | yes | `ErrStaleEntity`, the whole batch rolled back |
-| `UpdateBatch` | yes | that row not written, `nil` returned |
-| `Upsert`, `UpsertBatch`, `Delete`, `HardDelete`, `Restore` | no | the row is written, deleted or restored all the same |
+| `UpdateBatch` | yes | `ErrStaleEntity`, the whole batch rolled back |
+| `Delete`, `HardDelete` | yes | `ErrStaleEntity`, nothing removed; the soft delete bumps the version it writes |
+| `Restore` | yes | `ErrStaleEntity`, nothing restored; the version is bumped |
+| `Upsert`, `UpsertBatch`, the update branch | yes, when the entity carries a non-zero version | `ErrStaleEntity`, nothing written; the version is bumped, and the entity learns the row's |
 
-`UpdateMap`, `DeleteBatch` and `DeleteBy` take conditions or keys, not loaded
-entities, so there is no loaded version for them to check. A write without the
-predicate does what it would do on a model without a version column: a
-`Delete` of an entity loaded before another writer moved its row still
-deletes the row.
+Every write that carries an entity of a versioned model is inside optimistic
+locking. A `Delete` of an entity loaded before another writer moved its row
+removes nothing and returns `ErrStaleEntity`; under `Where` conditions a row
+they exclude is `(0, nil)`, not a conflict. An `Upsert` whose entity has a
+zero version is treated as new: the update branch holds the row to nothing,
+writes, and bumps. `UpdateMap` has no entity and no loaded version, so it
+checks nothing — but it bumps the version of every row it writes, so a
+holder of the row sees the write on their next `Update`; a map that names
+the version column is `ErrInvalidQuery`. `DeleteBatch` and `DeleteBy` take
+keys or conditions, not entities, and carry no version predicate.
 
 ## Validation
 

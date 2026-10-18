@@ -12,8 +12,8 @@ generates the right dialect-specific SQL and chunks large inputs for you.
 | Method | SQL shape | Atomicity |
 |---|---|---|
 | `CreateBatch` | `INSERT … VALUES (…), (…)`, chunked; for generated keys without `RETURNING`: a `MERGE` per chunk on SQL Server, a multi-row `INSERT` per chunk on MySQL where the server's settings allow it, one row at a time otherwise | One statement per chunk |
-| `UpsertBatch` | Dialect-specific bulk upsert, chunked | One statement per chunk (N `MERGE` on Oracle) |
-| `UpdateBatch` | N `UPDATE` statements | Single transaction — a savepoint of the caller's on a `ForTx` query; all or nothing over the versions with `CheckVersions()` |
+| `UpsertBatch` | Dialect-specific bulk upsert, chunked; one statement per row on MySQL, MariaDB and Oracle | One statement per chunk; a transaction around the rows where it is one statement per row |
+| `UpdateBatch` | N `UPDATE` statements | Single transaction — a savepoint of the caller's on a `ForTx` query; all or nothing over the versions |
 | `DeleteBatch` | `DELETE … WHERE pk IN (…)`, chunked | One statement per chunk |
 
 ## CreateBatch
@@ -115,32 +115,38 @@ err := quark.For[Product](ctx, client).UpsertBatch(
 )
 ```
 
-**Always pass `updateCols` explicitly.** An empty slice is not a portable "update
-everything" signal. PostgreSQL, SQLite, MySQL and MariaDB leave a conflicting
-row as it was (`DO NOTHING`, or an assignment of the first conflict column to
-itself); SQL Server and Oracle, whose upsert is a `MERGE`, overwrite every
-non-conflict column but the primary key and `created_at`. On MySQL and MariaDB
-a duplicate of any unique key takes the update branch, not only one of the
-conflict columns. The
-[CRUD reference](../reference/api/crud#upsert)
-has the tables per engine.
+**An empty `updateCols` is insert-or-ignore**, on every engine: a conflicting
+row is left as it was. Name the columns you want updated. A duplicate of a
+unique key other than the conflict columns is `ErrConstraintViolation` on
+every engine, with nothing written. The
+[CRUD reference](../reference/api/crud#upsert) has the details per engine.
 
 When the first entity has a zero primary key, Quark omits the PK column so the
 database assigns it, just like `CreateBatch`. Each dialect gets its native form:
 
 | Dialect | SQL generated |
 |---|---|
-| PostgreSQL | `INSERT … ON CONFLICT (sku) DO UPDATE SET …` |
-| SQLite | `INSERT … ON CONFLICT (sku) DO UPDATE SET col = excluded.col` |
-| MySQL / MariaDB | `INSERT … ON DUPLICATE KEY UPDATE name = VALUES(name), …` |
-| SQL Server | `MERGE INTO products … WHEN MATCHED … WHEN NOT MATCHED …` |
-| Oracle | N individual `MERGE INTO … USING (SELECT …)` (identity columns aren't compatible with the multi-row MERGE shape) |
+| PostgreSQL | `INSERT … ON CONFLICT (sku) DO UPDATE SET …`, chunked |
+| SQLite | `INSERT … ON CONFLICT (sku) DO UPDATE SET col = excluded.col`, chunked |
+| MySQL / MariaDB | one `INSERT … ON DUPLICATE KEY UPDATE name = IF(sku <=> VALUES(sku), VALUES(name), name), …` per row, in a transaction |
+| SQL Server | `MERGE INTO products … WHEN MATCHED … WHEN NOT MATCHED …`, chunked |
+| Oracle | N individual `MERGE INTO … USING (SELECT …)` in a transaction (identity columns aren't compatible with the multi-row MERGE shape) |
 
-SQL Server and Oracle write each row's key into its entity — the key the
-identity assigned to an inserted row, whatever key the entity carried. The
-multi-row `INSERT` of the other four reports no key per row, so there the
-entities keep what they carried; call `Upsert` per entity inside a
-transaction when you need the keys. The
+MySQL and MariaDB upsert one row at a time because a multi-row statement
+reports one count for the whole batch, which cannot tell a row left alone
+from one written; where the batch is more than one statement it runs in a
+transaction, so an error leaves nothing written. A model with a
+`quark:"version"` column goes row by row on every engine when `updateCols`
+is given: the update branch holds each row to its entity's version, a stale
+row fails the batch with `ErrStaleEntity` naming it, and each entity's
+version follows its row. See
+[Upsert](../reference/api/crud#upsert) for the contract.
+
+SQL Server, Oracle, MySQL and MariaDB write each row's key into its entity —
+on SQL Server and Oracle the key the identity assigned to an inserted row,
+whatever key the entity carried. The multi-row `INSERT` of PostgreSQL and
+SQLite reports no key per row, so there the entities keep what they carried;
+call `Upsert` per entity inside a transaction when you need the keys. The
 [CRUD reference](../reference/api/crud#the-key-written-into-the-entity) has the
 table.
 
@@ -178,10 +184,9 @@ To write an explicit zero value, use `UpdateMap` on the individual row.
 ### Versioned models
 
 On a model with a `quark:"version"` field, each `UPDATE` carries the version
-predicate, but `UpdateBatch` does not report a row it did not match: a row
-another writer moved since you loaded it is left alone, the rest of the batch
-is written, and the call returns `nil`. Chain `CheckVersions()` to make the
-batch all or nothing over the versions:
+predicate, and the batch is all or nothing over the versions: a row another
+writer moved since you loaded it rolls the whole batch back, and the error
+names it.
 
 ```go
 accounts, _ := quark.For[Account](ctx, client).Where("owner", "=", owner).List()
@@ -192,7 +197,7 @@ for i := range accounts {
     ptrs[i] = &accounts[i]
 }
 
-err := quark.For[Account](ctx, client).CheckVersions().UpdateBatch(ptrs)
+err := quark.For[Account](ctx, client).UpdateBatch(ptrs)
 if errors.Is(err, quark.ErrStaleEntity) {
     // nothing was written; err names every account that moved:
     // stale entity (optimistic-locking conflict): table accounts pk=7
@@ -200,16 +205,13 @@ if errors.Is(err, quark.ErrStaleEntity) {
 }
 ```
 
-Under `CheckVersions` every row is tried, every stale row is collected, and
-then the whole batch is rolled back; a key that does not exist counts as stale
-unless the query has `Where` conditions, and a row the conditions exclude is
-skipped. A batch that is written bumps every entity's in-memory version, so
-the same structs can be updated again. Without `CheckVersions` the in-memory
-versions are not bumped, and the next `Update` of a struct the batch wrote
-returns `ErrStaleEntity`. Quark 2.0 makes `CheckVersions` the default for
-`UpdateBatch`. See
-[`UpdateBatch`](../reference/api/crud#versioned-models-and-checkversions) for
-the full table.
+Every row is tried, every stale row is collected, and then the whole batch is
+rolled back; a key that does not exist counts as stale unless the query has
+`Where` conditions, and a row the conditions exclude is skipped. A batch that
+is written bumps every entity's in-memory version, so the same structs can be
+updated again. `CheckVersions()`, the v1 opt-in for this behaviour, keeps
+compiling and changes nothing. See
+[`UpdateBatch`](../reference/api/crud#versioned-models) for the full table.
 
 ## DeleteBatch
 

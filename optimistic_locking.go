@@ -34,6 +34,26 @@ func readVersion(entityVal reflect.Value, fm *FieldMeta) int64 {
 	return 0
 }
 
+// setVersion writes version into the version field on entityVal in place:
+// the value a row was read back at (DEP-2026-004).
+func setVersion(entityVal reflect.Value, fm *FieldMeta, version int64) {
+	if fm == nil {
+		return
+	}
+	f := entityVal.Field(fm.Index)
+	if !f.CanSet() {
+		return
+	}
+	switch f.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		f.SetInt(version)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if version >= 0 {
+			f.SetUint(uint64(version))
+		}
+	}
+}
+
 // bumpVersion increments the version field on entityVal in place. Used after
 // a successful UPDATE that included the optimistic-locking predicate so the
 // entity reflects the freshly-written value without a re-read.
