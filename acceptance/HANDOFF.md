@@ -155,7 +155,8 @@ verifica `pool InUse/Open==0` + goroutines estables. Verde en SQLite in-process
   builders/funcs sin SQL propio, con asserts funcionales que devuelven error.
 - **Gotchas de portabilidad (los cazó el run en PG; valen para todos los
   exercisers):** (1) `GroupBy(col)` **exige** `Select(col)` — sin él, `List()`
-  emite `SELECT * … GROUP BY`, que SQLite tolera pero PG/SQL-estándar rechaza.
+  emitiría `SELECT * … GROUP BY`, que PG/SQL-estándar rechaza; desde 2.0 el
+  builder lo rehúsa con `ErrInvalidQuery` en todos los motores (QK-24).
   (2) Compara columnas `bool` con un **bool**, nunca con `0`/`1` — pgx es estricto
   y no encodea int→bool (SQLite sí lo tolera). En general: escribe SQL portable y
   pasa los tipos exactos; el motor laxo (SQLite) esconde lo que el estricto (PG)

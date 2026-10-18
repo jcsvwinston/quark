@@ -1114,19 +1114,6 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 
 	// GROUP BY clause
 	if len(q.groupBy) > 0 {
-		// GROUP BY without an explicit projection leaves "SELECT *", which is
-		// invalid on every engine except SQLite and MySQL in its permissive
-		// mode: the non-aggregated columns are not functionally dependent on
-		// the grouping key. It passes in development and fails on deploy,
-		// which is the worst shape a defect can take, so it is said out loud.
-		//
-		// Making it an error is the right end state and is a breaking change
-		// for anyone relying on the permissive engines, so it waits for the
-		// major QADR-0010 collects breaking changes into (DEP-2026-008).
-		if len(q.selectCols) == 0 && len(q.selectExprs) == 0 && q.client != nil && q.client.logger != nil {
-			q.client.logger.Warn("GROUP BY without Select() or SelectExpr() emits SELECT *, which PostgreSQL, SQL Server, Oracle and MySQL in strict mode reject: only the grouped columns and aggregates may appear. Add Select(...) naming the grouped columns, or SelectExpr for the aggregates.",
-				"table", q.table, "group_by", strings.Join(q.groupBy, ", "))
-		}
 		quotedGrp := make([]string, len(q.groupBy))
 		for i, col := range q.groupBy {
 			// Qualified form under JOINs (AQ-01) + opt-in strict-columns
@@ -1139,6 +1126,19 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 				return "", nil, err
 			}
 			quotedGrp[i] = qc
+		}
+		// GROUP BY without an explicit projection leaves "SELECT *", which
+		// PostgreSQL, SQL Server, Oracle and MySQL in its strict mode reject:
+		// the non-aggregated columns are not functionally dependent on the
+		// grouping key. SQLite and permissive MySQL run it and answer an
+		// arbitrary row per group, so the query passed in development and
+		// failed on deploy. It is refused here, before any engine sees it,
+		// on every path that renders through buildSelect (QK-24). The
+		// identifiers are validated first so a hostile grouped column is
+		// still ErrInvalidIdentifier, whatever the projection.
+		if len(q.selectCols) == 0 && len(q.selectExprs) == 0 {
+			return "", nil, fmt.Errorf("%w: GROUP BY without Select() or SelectExpr() would emit SELECT *, which PostgreSQL, SQL Server, Oracle and MySQL in strict mode reject: add Select(...) naming the grouped columns, or SelectExpr for the aggregates (table=%s group_by=%s)",
+				ErrInvalidQuery, q.table, strings.Join(q.groupBy, ", "))
 		}
 		sqlBuf.WriteString(" GROUP BY ")
 		sqlBuf.WriteString(strings.Join(quotedGrp, ", "))

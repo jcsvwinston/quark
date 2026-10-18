@@ -176,17 +176,61 @@ func TestWhereNotLikeExcludesTheLiteralMatch(t *testing.T) {
 // opaque pattern with no tail, exactly as it always did. Its meaning is
 // published, and making it escape-aware would change what a backslash means
 // on three engines — that is A12 material, not this change.
-func TestPlainLikeIsUnchanged(t *testing.T) {
+// QK-32. The plain forms — Where with the operator, the typed Like, the AST
+// Cmp — declare the escape character like the escaped forms do, so a pattern
+// means one thing on the six engines. On SQLite, which has no default escape,
+// `%\%%` therefore finds the row with a literal percent sign and not the row
+// with a backslash; a wildcard pattern still answers every row.
+func TestPlainLikeDeclaresTheEscape(t *testing.T) {
 	c, rec := likeClient(t, "qk25_plain")
-	rows, err := For[likeRow](context.Background(), c).Where("name", "LIKE", "%%%").List()
+	ctx := context.Background()
+	rows, err := For[likeRow](ctx, c).Where("name", "LIKE", "%%%").List()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 6 {
 		t.Fatalf("plain LIKE with a wildcard pattern answered %d rows, want all 6", len(rows))
 	}
-	if strings.Contains(strings.ToUpper(rec.read()), "ESCAPE") {
-		t.Fatalf("the plain form grew an ESCAPE tail, which changes what a backslash means on SQLite, SQL Server and Oracle: %s", rec.read())
+	if !strings.Contains(rec.read(), `LIKE ? ESCAPE '\'`) {
+		t.Fatalf("the plain form does not declare the escape character: %s", rec.read())
+	}
+
+	name := NewTypedStringColumn("name")
+	for door, q := range map[string]*Query[likeRow]{
+		"Where":            For[likeRow](ctx, c).Where("name", "LIKE", `%\%%`),
+		"Where lower-case": For[likeRow](ctx, c).Where("name", " like ", `%\%%`),
+		"WhereNot":         For[likeRow](ctx, c).WhereNot("name", "NOT LIKE", `%\%%`),
+		"Or":               For[likeRow](ctx, c).Where("id", "<", 0).Or(func(q *Query[likeRow]) *Query[likeRow] { return q.Where("name", "LIKE", `%\%%`) }),
+		"WhereP(Like)":     For[likeRow](ctx, c).WhereP(name.Like(`%\%%`)),
+		"WhereExpr(Cmp)":   For[likeRow](ctx, c).WhereExpr(Cmp(Col("name"), "LIKE", Lit(`%\%%`))),
+		"Having":           For[likeRow](ctx, c).Select("name").GroupBy("name").Having("name", "LIKE", `%\%%`),
+	} {
+		rec.reset()
+		rows, err := q.List()
+		if err != nil {
+			t.Fatalf("%s: %v", door, err)
+		}
+		if !strings.Contains(rec.read(), `ESCAPE '\'`) {
+			t.Errorf("%s: no ESCAPE tail: %s", door, rec.read())
+		}
+		if len(rows) != 1 || rows[0].Name != "100% off" {
+			t.Errorf("%s: answered %v, want exactly the row with the literal percent sign", door, rows)
+		}
+	}
+
+	// The negation excludes exactly that row, with the same clause.
+	rec.reset()
+	rows, err = For[likeRow](ctx, c).Where("name", "NOT LIKE", `%\%%`).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 5 || !strings.Contains(rec.read(), `NOT LIKE ? ESCAPE '\'`) {
+		t.Fatalf("plain NOT LIKE answered %d rows with %s, want 5 and the tail", len(rows), rec.read())
+	}
+
+	// And a backslash is matched as itself when doubled, on every door.
+	if rows, err := For[likeRow](ctx, c).Where("name", "LIKE", `%\\%`).List(); err != nil || len(rows) != 1 || rows[0].Name != `back\slash` {
+		t.Fatalf("plain LIKE with a doubled backslash answered %v (%v), want the back\\slash row", rows, err)
 	}
 }
 
@@ -217,10 +261,17 @@ func TestDanglingEscapeIsRefusedBeforeTheEngine(t *testing.T) {
 	c, rec := likeClient(t, "qk25_dangling")
 	ctx := context.Background()
 	for name, q := range map[string]*Query[likeRow]{
-		"WhereLike":    For[likeRow](ctx, c).WhereLike("name", `abc\`),
-		"WhereP":       For[likeRow](ctx, c).WhereP(NewTypedStringColumn("name").LikeEscaped(`abc\`)),
-		"WhereExpr":    For[likeRow](ctx, c).WhereExpr(Like(Col("name"), `abc\`)),
-		"WhereNotLike": For[likeRow](ctx, c).WhereNotLike("name", `\`),
+		"WhereLike":       For[likeRow](ctx, c).WhereLike("name", `abc\`),
+		"WhereP":          For[likeRow](ctx, c).WhereP(NewTypedStringColumn("name").LikeEscaped(`abc\`)),
+		"WhereExpr":       For[likeRow](ctx, c).WhereExpr(Like(Col("name"), `abc\`)),
+		"WhereNotLike":    For[likeRow](ctx, c).WhereNotLike("name", `\`),
+		"Where":           For[likeRow](ctx, c).Where("name", "LIKE", `abc\`),
+		"Where NOT LIKE":  For[likeRow](ctx, c).Where("name", "NOT LIKE", `abc\`),
+		"WhereNot":        For[likeRow](ctx, c).WhereNot("name", "LIKE", `abc\`),
+		"WhereP(Like)":    For[likeRow](ctx, c).WhereP(NewTypedStringColumn("name").Like(`abc\`)),
+		"WhereExpr(Cmp)":  For[likeRow](ctx, c).WhereExpr(Cmp(Col("name"), "LIKE", Lit(`abc\`))),
+		"Having":          For[likeRow](ctx, c).Select("name").GroupBy("name").Having("name", "LIKE", `abc\`),
+		"HavingAggregate": For[likeRow](ctx, c).Select("name").GroupBy("name").HavingAggregate("MAX", "name", "LIKE", `abc\`),
 	} {
 		rec.reset()
 		_, err := q.List()

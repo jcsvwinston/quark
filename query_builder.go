@@ -23,11 +23,6 @@ type condition struct {
 	group     []condition // sub-conditions for grouping
 	isRaw     bool        // if true, column is not quoted (used for JSON/Expressions)
 	extraArgs []any       // additional bind args carried by the column SQL fragment
-	// escape marks a LIKE / NOT LIKE whose statement declares the escape
-	// character (WhereLike, WhereContains, the typed and AST forms). Every
-	// renderer appends likeTail for it, so the clause is the same in a
-	// SELECT, an UPDATE and a DELETE (QK-25).
-	escape bool
 	// (e.g. JSON path components). The fragment uses '?' as a neutral
 	// bind marker that buildWhereClause substitutes for the dialect's
 	// placeholder syntax at the correct argIndex.
@@ -364,19 +359,20 @@ func (q *Query[T]) Select(columns ...string) *Query[T] {
 
 // Where adds a WHERE condition with AND logic.
 //
-// With the LIKE and NOT LIKE operators the pattern reaches the engine as
-// given, under the engine's own default escape: PostgreSQL, MySQL and
-// MariaDB read a backslash as an escape, SQLite, SQL Server and Oracle as a
-// character. [Query.WhereLike], [Query.WhereContains],
-// [Query.WhereStartsWith] and [Query.WhereEndsWith] declare the escape and
-// mean the same on every engine.
-//
-// Changes in v2.0.0: Where(col, "LIKE", pattern) declares ESCAPE '\' on
-// every engine, as WhereLike does; a backslash in the pattern then escapes
-// the character after it on SQLite, SQL Server and Oracle too. A call that
-// already uses the escaped forms does not change. See DEP-2026-009.
+// With the LIKE and NOT LIKE operators the statement declares ESCAPE '\'
+// (spelled ESCAPE '\\' on MySQL and MariaDB), so the pattern means the same
+// on every engine: % and _ are wildcards, and a backslash makes the next
+// character literal — \%, \_ and \\ are the literal characters. A pattern
+// that ends in a dangling backslash is ErrInvalidQuery before it reaches the
+// engine. [Query.WhereLike] is the same statement under a name that says so;
+// [Query.WhereContains], [Query.WhereStartsWith] and [Query.WhereEndsWith]
+// compose the pattern from text the user typed, with [EscapeLike].
 func (q *Query[T]) Where(column string, operator string, value any) *Query[T] {
 	c := q.clone()
+	if err := c.checkLikePattern(operator, value); err != nil {
+		c.err = err
+		return c
+	}
 	c.where = ownedAppend(c.where, condition{
 		column:   column,
 		operator: operator,
@@ -748,8 +744,15 @@ func (q *Query[T]) Cache(ttl time.Duration, tags ...string) *Query[T] {
 //	quark.For[User](ctx, client).WhereNot("active", "=", false).List()
 //
 // Generates: WHERE NOT ("active" = $1)
+//
+// A LIKE or NOT LIKE declares its escape character the way [Query.Where]
+// does.
 func (q *Query[T]) WhereNot(column string, operator string, value any) *Query[T] {
 	c := q.clone()
+	if err := c.checkLikePattern(operator, value); err != nil {
+		c.err = err
+		return c
+	}
 	c.where = ownedAppend(c.where, condition{
 		column:   column,
 		operator: operator,
@@ -767,12 +770,12 @@ func (q *Query[T]) Distinct() *Query[T] {
 }
 
 // GroupBy adds a GROUP BY clause. Name the projection with [Query.Select] or
-// [Query.SelectExpr]: without one the statement is SELECT * … GROUP BY,
-// which only SQLite and MySQL in its permissive mode run, and the builder
-// logs a WARN naming the fix.
-//
-// Changes in v2.0.0: GroupBy without a projection is ErrInvalidQuery instead
-// of a warning. See DEP-2026-008.
+// [Query.SelectExpr]: without one the statement would be SELECT * … GROUP BY,
+// which PostgreSQL, SQL Server, Oracle and MySQL in its strict mode reject,
+// so the builder refuses it with ErrInvalidQuery before any engine sees it,
+// on every path that renders the statement (List, First, Find, Cursor,
+// Paginate, PaginateAfter, a subquery, a CTE body). Count and the aggregates
+// (Sum, Avg, Min, Max) render their own projection and are not affected.
 func (q *Query[T]) GroupBy(columns ...string) *Query[T] {
 	c := q.clone()
 	c.groupBy = ownedAppend(c.groupBy, columns...)
@@ -783,9 +786,14 @@ func (q *Query[T]) GroupBy(columns ...string) *Query[T] {
 //
 // The column argument is validated as a plain identifier — no parentheses,
 // function calls, or expressions. To filter on aggregates such as
-// COUNT(*) or SUM(col), use HavingAggregate instead.
+// COUNT(*) or SUM(col), use HavingAggregate instead. A LIKE or NOT LIKE
+// declares its escape character the way [Query.Where] does.
 func (q *Query[T]) Having(column string, operator string, value any) *Query[T] {
 	c := q.clone()
+	if err := c.checkLikePattern(operator, value); err != nil {
+		c.err = err
+		return c
+	}
 	c.having = ownedAppend(c.having, condition{
 		column:   column,
 		operator: operator,
@@ -812,15 +820,17 @@ var allowedAggregateFns = map[string]struct{}{
 // either a regular column name (validated through SQLGuard) or "*" — only
 // accepted with COUNT, since "SUM(*)" / "AVG(*)" / etc. are not valid SQL.
 // operator goes through the same whitelist Where uses (=, !=, <>, <, <=,
-// >, >=, IN, NOT IN, BETWEEN, NOT BETWEEN, IS [NOT] NULL, LIKE, NOT LIKE).
+// >, >=, IN, NOT IN, BETWEEN, NOT BETWEEN, IS [NOT] NULL, LIKE, NOT LIKE);
+// a LIKE or NOT LIKE declares its escape character the way Where does.
 //
 // Example:
 //
 //	groups, err := quark.For[Order](ctx, client).
+//	    Select("status").
 //	    GroupBy("status").
 //	    HavingAggregate("COUNT", "*", ">", 5).
 //	    List()
-//	// emitted: ... GROUP BY "status" HAVING COUNT(*) > $1
+//	// emitted: SELECT "status" FROM "orders" GROUP BY "status" HAVING COUNT(*) > $1
 //
 // This closes the historic Having(column, op, value) limitation where the
 // column went through ValidateIdentifier and aggregates therefore could
@@ -834,6 +844,10 @@ func (q *Query[T]) HavingAggregate(fn, column, operator string, value any) *Quer
 	upperFn := strings.ToUpper(strings.TrimSpace(fn))
 	if _, ok := allowedAggregateFns[upperFn]; !ok {
 		c.err = fmt.Errorf("%w: HavingAggregate fn %q must be one of COUNT/SUM/AVG/MIN/MAX", ErrInvalidQuery, fn)
+		return c
+	}
+	if err := c.checkLikePattern(operator, value); err != nil {
+		c.err = err
 		return c
 	}
 	var expr string

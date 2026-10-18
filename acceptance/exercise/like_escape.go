@@ -126,9 +126,14 @@ var LIKEESCAPE = Exerciser{Name: "like-escape", Fn: func(ctx context.Context, cl
 		return fmt.Errorf("AST NotLike: n=%d err=%v, esperaba 3", n, err)
 	}
 
-	// Y la forma plana sigue siendo la publicada: el patrón opaco ensancha.
+	// Y la forma plana declara el mismo escape (QK-32): un patrón de
+	// comodines sigue ensanchando, y `%\%%` encuentra el porcentaje literal
+	// en los seis motores, no la barra.
 	if n, err := scoped(ctx).Where("name", "LIKE", "%%%").Count(); err != nil || n != 4 {
-		return fmt.Errorf("Where LIKE plano: n=%d err=%v, esperaba 4 (la forma plana no cambia: QK-32)", n, err)
+		return fmt.Errorf("Where LIKE plano: n=%d err=%v, esperaba 4", n, err)
+	}
+	if err := one("Where LIKE plano con escape", scoped(ctx).Where("name", "LIKE", `%\%%`), "lesc 100% off"); err != nil {
+		return err
 	}
 	return nil
 }}

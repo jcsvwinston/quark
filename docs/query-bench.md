@@ -4,7 +4,7 @@ This is the numerator of the A4 gate ("the bench of 60 queries is expressed
 typed, without `RawQuery`"). It exists because that gate needs a number, and a
 number needs something that produces it.
 
-**Measured on 2026-09-11 against quark v1.13.0; updated as A4 closes gaps.** Regenerate with:
+**Measured on 2026-09-11 against quark v1.13.0; updated as A4 closed gaps, and at 2.0 (Q22/Q23).** Regenerate with:
 
 ```bash
 cd internal/enginesuite && go test -run TestQueryBench -v .
@@ -31,13 +31,13 @@ whether the call returned an error.
 
 ## The result
 
-**58 of 60 typed. 2 emit the wrong SQL. 0 have no API.**
+**60 of 60 typed. 0 emit the wrong SQL. 0 have no API.**
 
 | family | typed | wrong-sql | no-api |
 |---|---|---|---|
 | filtering | 10 | 0 | 0 |
 | joins | 8 | 0 | 0 |
-| aggregation | 6 | 2 | 0 |
+| aggregation | 8 | 0 | 0 |
 | subquery | 7 | 0 | 0 |
 | cte | 5 | 0 | 0 |
 | window | 7 | 0 | 0 |
@@ -46,9 +46,12 @@ whether the call returned an error.
 | locking | 4 | 0 | 0 |
 | writes | 4 | 0 | 0 |
 
-**Every query in the bench can now be written with the typed API.** The two
-that remain are not a missing capability — they run, and emit SQL that is
-portable only to SQLite.
+**Every query in the bench is written with the typed API, and every one emits
+SQL that is portable to the six engines.** The two cases that S3 left as
+`wrong-sql` — a `GROUP BY` with no projection — are typed now that the
+builder refuses the unprojected form (QK-24): a case that returns
+`ErrInvalidQuery` on every engine cannot be recorded as "runs, with the wrong
+SQL".
 
 ### Progress
 
@@ -57,11 +60,14 @@ portable only to SQLite.
 | S0 (measurement) | 44 | — |
 | S1 | 48 | the four cases that needed a function the AST would not render |
 | S2 | 52 | `FromCTE`, plus two cases S0 had measured wrong |
-| **S3** | **58** | the six one-offs: DTO projection, filtered preload, window frames, arithmetic in `SET`, `OnExpr`, `FullJoin`/`CrossJoin` |
+| S3 | 58 | the six one-offs: DTO projection, filtered preload, window frames, arithmetic in `SET`, `OnExpr`, `FullJoin`/`CrossJoin` |
+| **2.0** | **60** | Q22/Q23 projected, because the builder refuses `GroupBy` without `Select`/`SelectExpr` (QK-24) |
 
 ## What remains
 
-Two cases, one cause, and it is not a missing capability.
+Nothing: the sixty cases are typed. The sections below record how each gap
+was closed, and the one that was closed by refusing a statement rather than
+by adding a capability.
 
 ### CLOSED by S1 — the four cases the AST would not render
 
@@ -132,18 +138,19 @@ The lesson generalises past this bench: a measurement that trusts a comment
 measures the comment. Both cases now run against a real database and assert
 their result, not just their SQL.
 
-### `GROUP BY` without a projection — 2 cases
+### CLOSED by 2.0 — `GROUP BY` without a projection
 
-`GroupBy` with no `Select` or `SelectExpr` leaves the projection as
+`GroupBy` with no `Select` or `SelectExpr` would leave the projection as
 `SELECT *`. That is invalid with `GROUP BY` on every engine except SQLite and
 MySQL in its permissive mode: the non-aggregated columns are not functionally
 dependent on the grouping key.
 
-It passes in development and fails on deploy, which is the worst shape a
-defect can take, so **S3 made it WARN**, naming the fix. Making it an *error*
-is the right end state and breaks callers relying on the permissive engines,
-so it waits for the major that QADR-0010 collects breaking changes into.
-Adding `Select(...)` makes the query correct today.
+It passed in development and failed on deploy, which is the worst shape a
+defect can take. S3 made it WARN, naming the fix; since 2.0 the builder
+**refuses the unprojected form with `ErrInvalidQuery`** before any engine sees
+it, on every engine (QK-24). Q22 and Q23 name their projection with
+`Select("user_id")` and are typed; the `wrong-sql` verdict stays in the ledger
+for a case that may need it, and no case holds it today.
 
 ### CLOSED by S3 — the six one-offs
 
@@ -175,9 +182,8 @@ Worth recording, because each one cost a wrong first attempt:
 
 - **Engines other than SQLite.** The bench runs on SQLite so it is cheap
   enough to be a gate. Cases whose answer depends on the engine say so in
-  their `Note`, and the two `wrong-sql` aggregation cases are exactly the ones
-  that would change verdict on PostgreSQL. Pointing the bench at the other
-  five engines is worth doing and has not been done.
+  their `Note`. Pointing the bench at the other five engines is worth doing
+  and has not been done.
 - **Row-level locking on the engines that have it.** Family I is marked typed
   on the strength of `locking_test.go`, which exercises `FOR UPDATE`,
   `SKIP LOCKED` and `NOWAIT` against PostgreSQL, MySQL and Oracle. SQLite
