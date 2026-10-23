@@ -603,9 +603,11 @@ Behavior:
 | Oracle | One `MERGE` per entity; Oracle 23ai or later, as for [`Upsert`](#upsert). |
 
 Empty input returns `nil`. All entities are validated before any SQL is built.
-An empty `updateCols` leaves a conflicting row as it was on PostgreSQL,
-SQLite, MySQL and MariaDB, and overwrites its non-conflict columns on SQL
-Server and Oracle — see [`Upsert`](#upsert).
+`UpsertBatch` does the same on the six engines, as [`Upsert`](#upsert)
+does: an empty `updateCols` is insert-or-ignore everywhere — a conflicting
+row is left as it was and the call returns `nil` — and a row that duplicates
+another unique key than `conflictCols` is `ErrConstraintViolation`, with
+nothing written.
 
 The key written into each entity, for a model whose key is one integer
 column:

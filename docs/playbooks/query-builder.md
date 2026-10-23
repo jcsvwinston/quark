@@ -243,11 +243,11 @@ positively and records **present**.
 
 ### Upserts and map updates stay inside the tenant
 
-Before QK-43 the update branch of `Upsert`/`UpsertBatch` carried no tenant
-predicate on any engine: tenant A upserting a key tenant B held rewrote B's
-row, and on SQL Server and Oracle an empty `updateCols` ("every non-conflict
-column") also wrote A's id into B's tenant column. `upsert_tenant.go` builds
-the guarded branch per family (`upsertFamily`: `on_conflict`,
+The update branch of `Upsert`/`UpsertBatch` carries the tenant predicate on
+every engine (QK-43; before it, tenant A upserting a key tenant B held
+rewrote B's row), and an empty `updateCols` is insert-or-ignore on the six
+engines, so no branch can write A's id into B's tenant column.
+`upsert_tenant.go` builds the guarded branch per family (`upsertFamily`: `on_conflict`,
 `duplicate_key`, `merge`); a dialect outside them refuses under
 RowLevelSecurityClient (`checkTenantUpsert`). A conflict with another
 tenant's row is reported as `ErrConstraintViolation`: PostgreSQL/SQLite see
