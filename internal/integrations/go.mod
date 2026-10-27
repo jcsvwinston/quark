@@ -17,11 +17,11 @@ replace github.com/jcsvwinston/quark/drivers/sqlite => ../../drivers/sqlite
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/jcsvwinston/nucleus v1.30.1
 	github.com/jcsvwinston/quark v1.16.0
 	github.com/jcsvwinston/quark/drivers/sqlite v0.1.3
-	github.com/labstack/echo/v5 v5.4.0
+	github.com/labstack/echo/v5 v5.4.2
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 )
