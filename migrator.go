@@ -20,6 +20,12 @@ import (
 //
 // Its statements pass the middleware chain and reach the observers as
 // schema work (StatementDDL).
+//
+// Changes in v2.0.0: a db tag whose column name is a bare Nucleus
+// pkg/model directive (db:"pk", db:"readonly", db:"tenant", db:"fk"…)
+// is logged as a WARN and migrated as a column of that name in v1; in
+// 2.0 it is ErrInvalidTag and nothing is sent, unless the field carries
+// quark:"literal_column". See DEP-2026-011.
 func (c *Client) Migrate(ctx context.Context, models ...any) error {
 	exec := c.schemaExec(c.db)
 	for _, model := range models {

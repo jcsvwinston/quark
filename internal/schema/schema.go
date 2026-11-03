@@ -128,8 +128,14 @@ type ModelMeta struct {
 	// motivates it: a db tag whose column name is exactly a Nucleus
 	// pkg/model directive — `db:"pk"`, `db:"readonly"` — which Quark reads
 	// as a column called "pk". A table really can have a column named pk,
-	// so this warns rather than fails. RegisterModel and Migrate surface
-	// them through the client logger.
+	// so this warns rather than fails; a field that carries
+	// quark:"literal_column" says the column really has that name and is
+	// not warned about. RegisterModel and Migrate surface them through the
+	// client logger.
+	//
+	// Changes in v2.0.0: the directive-shaped db tag moves from here to
+	// TagError (ErrInvalidTag) unless the field carries
+	// quark:"literal_column". See DEP-2026-011.
 	TagWarnings []string
 }
 
@@ -678,7 +684,7 @@ func parseDBEnum(tag, column string) string {
 func lintFieldTags(t reflect.Type) error {
 	var problems []string
 
-	quarkTokens := "rename:<old>, tz=<iana>, not_null, unique, version, index, index=<name>, check=<expr>"
+	quarkTokens := "rename:<old>, tz=<iana>, not_null, unique, version, index, index=<name>, check=<expr>, literal_column"
 	dbOptions := "size, precision, scale, enum=<a|b|c>"
 
 	for i := 0; i < t.NumField(); i++ {
@@ -723,6 +729,7 @@ func lintFieldTags(t reflect.Type) error {
 				part = strings.TrimSpace(part)
 				switch {
 				case part == "", part == "not_null", part == "unique", part == "version", part == "index":
+				case part == literalColumnToken:
 				case strings.HasPrefix(part, "rename:"), strings.HasPrefix(part, "tz="):
 				case strings.HasPrefix(part, "check="):
 					if strings.TrimSpace(strings.TrimPrefix(part, "check=")) == "" {
@@ -820,10 +827,12 @@ func firstNonIdentifierRune(s string) rune {
 }
 
 // nucleusDBDirectives are the tokens Nucleus's pkg/model reads inside its own
-// `db` tag. Each is a legal column name, so finding one cannot be an error —
-// but a field whose column is called "pk" or "readonly" is far more likely to
-// be a model written for the other layer than a table that really has such a
-// column.
+// `db` tag. Each is a legal column name, so in v1 finding one is a warning,
+// not an error — but a field whose column is called "pk" or "readonly" is far
+// more likely to be a model written for the other layer than a table that
+// really has such a column. In v2.0.0 it is ErrInvalidTag (DEP-2026-011);
+// quark:"literal_column" on the field is the explicit way to keep such a
+// column, in v1 and after.
 var nucleusDBDirectives = map[string]string{
 	"pk":             `pk:"true"`,
 	"primarykey":     `pk:"true"`,
@@ -831,7 +840,7 @@ var nucleusDBDirectives = map[string]string{
 	"readonly":       "no Quark equivalent; the framework decides what is writable",
 	"read_only":      "no Quark equivalent; the framework decides what is writable",
 	"ro":             "no Quark equivalent; the framework decides what is writable",
-	"index":          "declare indexes on the model, not in the db tag",
+	"index":          `quark:"index"`,
 	"unique":         `quark:"unique"`,
 	"tenant":         "tenancy is configured on the client, not in the tag",
 	"fk":             `rel:"belongs_to"` + " with " + `join:"..."`,
@@ -840,8 +849,31 @@ var nucleusDBDirectives = map[string]string{
 	"autoupdatetime": "set the value in a BeforeUpdate hook",
 }
 
+// literalColumnToken is the quark tag token that says a field's db tag is
+// the column's real name even when that name spells a Nucleus pkg/model
+// directive (`db:"pk" quark:"literal_column"`). It silences the warning of
+// warnForeignTagGrammar in v1 and is the way to keep such a column when
+// v2.0.0 makes the bare directive ErrInvalidTag (DEP-2026-011). On any other
+// field it changes nothing: the db tag is always the column name in Quark.
+const literalColumnToken = "literal_column"
+
+// hasQuarkToken reports whether the field's quark tag carries token.
+func hasQuarkToken(field reflect.StructField, token string) bool {
+	for _, part := range splitTagTokens(field.Tag.Get("quark")) {
+		if strings.TrimSpace(part) == token {
+			return true
+		}
+	}
+	return false
+}
+
 // warnForeignTagGrammar reports db tags whose column name is exactly a
-// Nucleus pkg/model directive. See ModelMeta.TagWarnings.
+// Nucleus pkg/model directive, unless the field carries
+// quark:"literal_column". See ModelMeta.TagWarnings.
+//
+// Changes in v2.0.0: these become TagError (ErrInvalidTag). See
+// DEP-2026-011; TestDirectiveShapedColumnNameWarnsAndMigratesInV1 pins the
+// v1 behaviour.
 func warnForeignTagGrammar(t reflect.Type) []string {
 	var out []string
 	for i := 0; i < t.NumField(); i++ {
@@ -855,15 +887,16 @@ func warnForeignTagGrammar(t reflect.Type) []string {
 		}
 		col := strings.ToLower(strings.TrimSpace(strings.SplitN(dbTag, ",", 2)[0]))
 		hint, isDirective := nucleusDBDirectives[col]
-		if !isDirective {
+		if !isDirective || hasQuarkToken(field, literalColumnToken) {
 			continue
 		}
 		out = append(out, fmt.Sprintf(
 			"%s.%s: db:%q names a column called %q. That is a directive in the Nucleus "+
 				"pkg/model tag grammar, not a column name — in Quark the db tag holds the "+
 				"column name. If you meant the directive, write %s. If the column really "+
-				"is called %q, ignore this.",
-			t.Name(), field.Name, dbTag, col, hint, col))
+				"is called %q, add quark:%q to the field. From v2.0.0 this tag is "+
+				"ErrInvalidTag without it (DEP-2026-011).",
+			t.Name(), field.Name, dbTag, col, hint, col, literalColumnToken))
 	}
 	return out
 }
