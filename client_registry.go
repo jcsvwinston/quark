@@ -39,6 +39,11 @@ import (
 // `reflect.Type`). F3-7 only adds per-Client state for "which
 // models does this Client manage", not for "what's the cached
 // meta of type X".
+//
+// Changes in v2.0.0: a db tag whose column name is a bare Nucleus
+// pkg/model directive (db:"pk", db:"readonly", db:"tenant", db:"fk"…)
+// is logged as a WARN in v1 and is ErrInvalidTag in 2.0, unless the
+// field carries quark:"literal_column". See DEP-2026-011.
 func (c *Client) RegisterModel(models ...any) error {
 	if len(models) == 0 {
 		return nil

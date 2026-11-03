@@ -51,6 +51,11 @@ const auditTableName = "quark_audit"
 // port to MySQL/MSSQL/Oracle/SQLite). The diff is stored via
 // [JSON][map[string]any], which serialises to the engine's JSON or
 // text column.
+//
+// The column that names the audited row is really called pk, which is also
+// a Nucleus pkg/model directive: quark:"literal_column" says so, or
+// EnableAuditLog would log the tag warning on every call in v1 and fail
+// with ErrInvalidTag in v2.0.0 (DEP-2026-011).
 type quarkAuditRow struct {
 	ID          int64                `db:"id" pk:"true"`
 	Timestamp   time.Time            `db:"ts"`
@@ -58,7 +63,7 @@ type quarkAuditRow struct {
 	UserID      string               `db:"user_id"`
 	TargetTable string               `db:"table_name"`
 	Operation   string               `db:"operation"`
-	PK          string               `db:"pk"`
+	PK          string               `db:"pk" quark:"literal_column"`
 	Diff        JSON[map[string]any] `db:"diff"`
 }
 

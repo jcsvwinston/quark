@@ -71,7 +71,7 @@ type AuditEntry struct {
     UserID    string    `db:"user_id"`
     Operation string    `db:"operation"`
     Table     string    `db:"table_name"`
-    PK        string    `db:"pk"`
+    PK        string    `db:"pk" quark:"literal_column"` // the column is really called pk
 }
 
 func (AuditEntry) TableName() string { return "quark_audit" }

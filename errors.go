@@ -86,6 +86,11 @@ var (
 	// Client.Migrate so a typo breaks at startup naming every offending
 	// field, instead of producing DDL that silently omits NOT NULL, UNIQUE
 	// or whole columns (DX-8).
+	//
+	// Changes in v2.0.0: it also covers a db tag whose column name is a
+	// bare Nucleus pkg/model directive (db:"pk", db:"readonly"…), which v1
+	// only warns about, unless the field carries quark:"literal_column".
+	// See DEP-2026-011.
 	ErrInvalidTag = errors.New("invalid struct tag")
 
 	// ErrDialectNotSupported indicates that the database dialect is not supported.

@@ -43,9 +43,12 @@ method stays — so the guard above has nothing to read; the notice and the
 godoc of the affected method are the announcement, and the tests that pin the
 v1 behaviour are named in the notice so the change at the major is a diff to
 them. See [`DEP-2026-003`](DEP-2026-003-updatebatch-version-check-default.md),
-and `DEP-2026-004` to `DEP-2026-010`, the behaviour changes of the 2.0 list
-the owner decided on 2026-10-06 and 2026-10-16; each names the test that
-pins v1, the exit that exists in 1.x and the date its window opens.
+and `DEP-2026-004` to `DEP-2026-011`, the behaviour changes of the 2.0 list
+the owner decided on 2026-10-06 and 2026-10-16 and the re-audit of 1.42.0
+added on 2026-10-27; each names the test that pins v1, the exit that exists
+in 1.x and the date its window opens. `DEP-2026-004` to `DEP-2026-010` were
+first dated 2027-01-17, for the set of 2026-10-19; Quark cut no release in
+it, so they are published with the next one, and re-dated 2027-02-07.
 
 ## Removal rules
 
@@ -80,10 +83,11 @@ specification and a changelog entry. Quark has neither home:
 | [`DEP-2026-001`](DEP-2026-001-rowlevelsecurity-alias.md) | `quark.RowLevelSecurity` | `v0.9.0` | `v2.0.0`, no earlier than 2026-12-08 |
 | [`DEP-2026-002`](DEP-2026-002-listener-registration-contract.md) | `quarkdriver` listener registration, previous shape (4 symbols) | `v1.11.0` | `v2.0.0`, no earlier than 2026-12-08 |
 | [`DEP-2026-003`](DEP-2026-003-updatebatch-version-check-default.md) | `UpdateBatch` on a versioned model checks versions by default (behaviour; the opt-in `CheckVersions` becomes the default) | the minor after `v1.16.0` | `v2.0.0`, no earlier than 2027-01-04 |
-| [`DEP-2026-004`](DEP-2026-004-versioned-writes-optimistic-locking.md) | `UpdateMap`, the update branch of `Upsert`/`UpsertBatch`, `Delete`/`HardDelete` of an entity, the soft delete and `Restore` on a versioned model join optimistic locking (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
-| [`DEP-2026-005`](DEP-2026-005-zero-row-write-side-effects.md) | a write by entity that touches no row runs no `After*` hook, writes no audit row and publishes no event, conditions or not (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
-| [`DEP-2026-006`](DEP-2026-006-upsert-one-behaviour-six-engines.md) | `Upsert`/`UpsertBatch` do the same on the six engines: an empty `updateCols` ignores the conflict, a duplicate on another unique key is `ErrConstraintViolation` (behaviour; semantics proposed for `M1`) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
-| [`DEP-2026-007`](DEP-2026-007-on-delete-set-default-mysql-mariadb.md) | `SET DEFAULT` in a foreign key is refused on MySQL and MariaDB before anything is sent, as on Oracle (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
-| [`DEP-2026-008`](DEP-2026-008-group-by-without-select-error.md) | `GroupBy` without `Select`/`SelectExpr` is `ErrInvalidQuery` instead of a `WARN` (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
-| [`DEP-2026-009`](DEP-2026-009-plain-like-declares-escape.md) | the plain `LIKE` forms (`Where(col, "LIKE", p)`, typed `Like`, `Cmp`) declare `ESCAPE '\'` on every engine (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
-| [`DEP-2026-010`](DEP-2026-010-oracle-varchar2-char-semantics.md) | on Oracle a sized string column is rendered `VARCHAR2(n CHAR)`: the length counts characters, as on the other five engines (behaviour; the DDL the plan renders, not the data) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-01-17 |
+| [`DEP-2026-004`](DEP-2026-004-versioned-writes-optimistic-locking.md) | `UpdateMap`, the update branch of `Upsert`/`UpsertBatch`, `Delete`/`HardDelete` of an entity, the soft delete and `Restore` on a versioned model join optimistic locking (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-02-07 |
+| [`DEP-2026-005`](DEP-2026-005-zero-row-write-side-effects.md) | a write by entity that touches no row runs no `After*` hook, writes no audit row and publishes no event, conditions or not (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-02-07 |
+| [`DEP-2026-006`](DEP-2026-006-upsert-one-behaviour-six-engines.md) | `Upsert`/`UpsertBatch` do the same on the six engines: an empty `updateCols` ignores the conflict, a duplicate on another unique key is `ErrConstraintViolation` (behaviour; semantics proposed for `M1`) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-02-07 |
+| [`DEP-2026-007`](DEP-2026-007-on-delete-set-default-mysql-mariadb.md) | `SET DEFAULT` in a foreign key is refused on MySQL and MariaDB before anything is sent, as on Oracle (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-02-07 |
+| [`DEP-2026-008`](DEP-2026-008-group-by-without-select-error.md) | `GroupBy` without `Select`/`SelectExpr` is `ErrInvalidQuery` instead of a `WARN` (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-02-07 |
+| [`DEP-2026-009`](DEP-2026-009-plain-like-declares-escape.md) | the plain `LIKE` forms (`Where(col, "LIKE", p)`, typed `Like`, `Cmp`) declare `ESCAPE '\'` on every engine (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-02-07 |
+| [`DEP-2026-010`](DEP-2026-010-oracle-varchar2-char-semantics.md) | on Oracle a sized string column is rendered `VARCHAR2(n CHAR)`: the length counts characters, as on the other five engines (behaviour; the DDL the plan renders, not the data) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-02-07 |
+| [`DEP-2026-011`](DEP-2026-011-pkg-model-directive-in-db-tag.md) | a `db` tag whose column name is a bare `pkg/model` directive (`db:"pk"`, `db:"readonly"`, …) is `ErrInvalidTag` instead of a `WARN`; `quark:"literal_column"` keeps a column really named so (behaviour) | the release after `v1.17.0` | `v2.0.0`, no earlier than 2027-02-07 |

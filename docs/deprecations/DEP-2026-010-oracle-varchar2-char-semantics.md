@@ -4,7 +4,7 @@
 - Status: `active`
 - Announced in: the first release after `v1.17.0` that carries this file — a
   documentation-only change cuts no release of its own
-- Earliest change: `v2.0.0`, no earlier than `2027-01-17`
+- Earliest change: `v2.0.0`, no earlier than `2027-02-07`
 - Scope: `behaviour` (the DDL the migration plan renders)
 - Affected lifecycle tag: `stable`
 - Owner: `@jcsvwinston`
@@ -117,10 +117,12 @@ fewer, so no stored value is rejected by the change itself.
 - **Why `v2.0.0`:** the DDL a model renders is part of what a migration
   pipeline compares against; changing it within `v1.x` would make every
   Oracle `Diff` non-empty at a minor upgrade (QADR-0010).
-- **Why `2027-01-17`:** the suite's support policy sets a minimum of 90
+- **Why `2027-02-07`:** the suite's support policy sets a minimum of 90
   calendar days of notice. The owner decided on 2026-10-16 and this notice
-  rides the first release after `v1.17.0`, expected in the set of
-  2026-10-19; 90 days later is 2027-01-17.
+  rides the first release after `v1.17.0`. It was first dated 2027-01-17,
+  for the set of 2026-10-19, but Quark cut no release in that set; the next
+  Quark release is expected in the set of 2026-11-09, and 90 days later is
+  2027-02-07 (re-dated 2026-11-03).
 - The date opens the window; the version is where the change can land.
   Whichever comes second governs.
 

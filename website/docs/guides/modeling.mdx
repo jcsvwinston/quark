@@ -78,6 +78,7 @@ types, and timezones.
 | `nullable:"false"` | `Migrate` | Also emits `NOT NULL`. |
 | `quark:"version"` | `Update`, `UpdateFields`, `Tracked.Save`, `UpdateBatch` under `CheckVersions` | Optimistic-locking column (see below). |
 | `quark:"rename:old_col"` | `Sync` | Renames `old_col` to the current column on the next sync. |
+| `quark:"literal_column"` | `RegisterModel`, `Migrate` | Says the `db` tag is the column's real name when that name is also a Nucleus `pkg/model` directive (`db:"pk"`, `db:"readonly"`, …); see the note below. On any other field it changes nothing. |
 
 ```go
 type Profile struct {
@@ -109,8 +110,18 @@ could query. Quark now refuses a `db` tag whose column name cannot be an
 identifier, and the error says how to spell it here.
 
 A tag whose column name happens to be a legal identifier but reads like a
-directive — `db:"pk"`, `db:"readonly"` — only warns: a table really can have a
-column called `pk`, so refusing it would be wrong.
+directive — `db:"pk"`, `db:"readonly"`, `db:"tenant"`, `db:"fk"` — warns in
+1.x and migrates a column with that name. In Quark 2.0 it is refused with
+`ErrInvalidTag`, like the semicolon form above. A table really can have a
+column called `pk`; say so on the field, which silences the warning now and
+keeps the model valid in 2.0:
+
+```go
+type Ledger struct {
+    ID  int64  `db:"id" pk:"true"`
+    PK  string `db:"pk" quark:"literal_column"` // a column really named pk
+}
+```
 :::
 
 ## Primary keys

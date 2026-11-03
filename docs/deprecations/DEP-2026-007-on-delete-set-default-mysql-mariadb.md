@@ -4,7 +4,7 @@
 - Status: `active`
 - Announced in: the first release after `v1.17.0` that carries this file — a
   documentation-only change cuts no release of its own
-- Earliest change: `v2.0.0`, no earlier than `2027-01-17`
+- Earliest change: `v2.0.0`, no earlier than `2027-02-07`
 - Scope: `behaviour`
 - Affected lifecycle tag: `stable`
 - Owner: `@jcsvwinston`
@@ -124,13 +124,16 @@ Server or Oracle, nor for any other action.
 - **Why `v2.0.0`:** a statement that succeeds today must not start failing
   within `v1.x` (QADR-0010), even when what it declares is not what the
   engine does. The change lands with the major.
-- **Why `2027-01-17`:** the suite's support policy sets a minimum of 90
+- **Why `2027-02-07`:** the suite's support policy sets a minimum of 90
   calendar days of notice, counted from the set that publishes the notice.
-  The owner decided on 2026-10-06; this notice is dated 2026-10-16; the first
-  set in cadence that can pin it is the one of 2026-10-19, and 90 days later
-  is 2027-01-17. If a later set is the first to pin it, the date moves with
-  that set, and the suite's list of the major
-  (`quantum/docs/planes/quantum-2.0.md` §3.0) carries the date that governs.
+  The owner decided on 2026-10-06; this notice is dated 2026-10-16. It was
+  first dated 2027-01-17, for the set of 2026-10-19, but Quark cut no release
+  in that set — a documentation-only change cuts none — so the notice is
+  published with the next Quark release, expected in the set of 2026-11-09,
+  and 90 days later is 2027-02-07 (re-dated 2026-11-03). If a later set is
+  the first to pin it, the date moves with that set, and the suite's list of
+  the major (`quantum/docs/planes/quantum-2.0.md` §3.0) carries the date
+  that governs.
 - The date opens the window; the version is where the change can land.
   Whichever comes second governs.
 
@@ -173,6 +176,8 @@ Server or Oracle, nor for any other action.
 - Decided: `2026-10-06` (QK-60): the same on the six.
 - Written: `2026-10-16` (A12 `M0-Q`), with "refuse, as Oracle does" as the
   mechanism.
-- Review checkpoint: `2027-01-17`, when the window opens.
+- Re-dated: `2026-11-03` (A12 `M0-R`), from 2027-01-17: Quark cut no
+  release in the set of 2026-10-19.
+- Review checkpoint: `2027-02-07`, when the window opens.
 - Change: at `v2.0.0` planning (`M1`), in one PR that gives the MySQL
   dialect its `ReferentialActioner` and changes the pinned tests.

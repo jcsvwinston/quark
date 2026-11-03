@@ -29,7 +29,7 @@ type auditReadRow struct {
 	UserID    string                     `db:"user_id"`
 	TgtTable  string                     `db:"table_name"`
 	Operation string                     `db:"operation"`
-	PK        string                     `db:"pk"`
+	PK        string                     `db:"pk" quark:"literal_column"`
 	Diff      quark.JSON[map[string]any] `db:"diff"`
 }
 
