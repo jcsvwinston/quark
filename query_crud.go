@@ -2106,6 +2106,14 @@ func (q *BaseQuery) mergeMatchedClause(sets string, argIndex int, args *[]any) s
 // Each entity gets its PK populated when the dialect supports RETURNING; otherwise
 // PKs are left at their zero value (callers can re-query if needed).
 //
+// An entity whose single primary key is zero has the key column left out of
+// its INSERT, so the database assigns it; an entity that carries a key
+// writes it, as [Query.Create] does. A batch that mixes the two is written
+// as consecutive runs of entities that agree, in the batch's order, each run
+// with its own statements (QK-70). Until then the first entity decided for
+// the whole batch: a later entity's key was dropped, and an entity without
+// one was inserted with a zero key.
+//
 // Example:
 //
 //	users := []*User{{Name: "Alice"}, {Name: "Bob"}}
@@ -2150,6 +2158,80 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		}
 	}
 
+	// Whether the key column goes into the INSERT is decided per run of
+	// entities that agree on carrying one, not by the first entity for the
+	// whole batch (QK-70). A batch whose entities all agree is one run and
+	// takes the same statements it always did.
+	for _, run := range q.batchKeyRuns(entities) {
+		if err := q.createBatchRun(run.entities, run.withKey); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// batchKeyRun is a run of consecutive entities of a batch that agree on
+// whether they carry their single primary key (withKey), so one column list
+// serves them all.
+type batchKeyRun[T any] struct {
+	entities []*T
+	withKey  bool
+}
+
+// batchKeyRuns splits a batch into consecutive runs of entities that agree
+// on whether they carry their single primary key, in the batch's order. A
+// run whose entities carry no key has the key column left out, so the
+// database assigns it; a run whose entities carry one writes it. Keeping the
+// batch's order means the rows are inserted — and, on an engine that hands
+// keys out in sequence, numbered — in the order the caller gave them; the
+// cost is one set of statements per run, so a batch that alternates goes
+// row by row.
+//
+// Before QK-70 the first entity decided for every row: a later entity's key
+// was silently left out of the INSERT, and an entity without one after a
+// first that carried one was inserted with a zero key. The test is the one
+// the column loop made on the first entity alone — a composite key is
+// always written, so every entity of such a model counts as carrying it.
+func (q *Query[T]) batchKeyRuns(entities []*T) []batchKeyRun[T] {
+	var runs []batchKeyRun[T]
+	start := 0
+	withKey := q.batchEntityCarriesKey(entities[0])
+	for i := 1; i < len(entities); i++ {
+		if k := q.batchEntityCarriesKey(entities[i]); k != withKey {
+			runs = append(runs, batchKeyRun[T]{entities: entities[start:i], withKey: withKey})
+			start, withKey = i, k
+		}
+	}
+	return append(runs, batchKeyRun[T]{entities: entities[start:], withKey: withKey})
+}
+
+// batchEntityCarriesKey reports whether entity carries its single primary
+// key: a non-zero value in the key field. A model with a composite key has
+// no column the batch leaves out, so its entities always count as carrying
+// it.
+func (q *Query[T]) batchEntityCarriesKey(entity *T) bool {
+	if q.meta.HasCompositePK {
+		return true
+	}
+	v := reflect.ValueOf(entity)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if q.pk.Index >= v.NumField() {
+		return true
+	}
+	return !isZeroPKValue(v.Field(q.pk.Index))
+}
+
+// createBatchRun inserts one run of a batch — entities that agree on whether
+// they carry their key (withKey) — with the column list that run needs:
+// the key column left out when they carry none, so the database assigns it,
+// and the same per-engine forms as before QK-70 (an Oracle row at a time
+// with the key read back, the back-fill forms where the engine has no
+// RETURNING, the chunked multi-row INSERT elsewhere). Validation and the
+// BeforeCreate hooks ran once for the whole batch before this; each run is
+// bounded by QueryTimeout on its own, as each form always was.
+func (q *Query[T]) createBatchRun(entities []*T, withKey bool) error {
 	// Build column list from the first entity
 	first := reflect.ValueOf(entities[0])
 	if first.Kind() == reflect.Ptr {
@@ -2167,7 +2249,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		if dbTag == "" || dbTag == "-" {
 			continue
 		}
-		if !q.meta.HasCompositePK && i == q.pk.Index && isZeroPKValue(first.Field(i)) {
+		if !q.meta.HasCompositePK && i == q.pk.Index && !withKey {
 			continue
 		}
 		if err := q.guard.ValidateIdentifier(dbTag); err != nil {
@@ -2198,8 +2280,8 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		// carry it, so without this the per-row loop leaves entity.ID == 0 on
 		// Oracle while the rows insert fine — a silent divergence from every other
 		// engine (Finding C). The condition matches the column loop's PK skip
-		// above: a single, non-composite PK that was zero on the first entity.
-		returnPK := q.pk.Column != "" && !q.meta.HasCompositePK && isZeroPKValue(first.Field(q.pk.Index))
+		// above: a single, non-composite PK that this run does not carry.
+		returnPK := q.pk.Column != "" && !q.meta.HasCompositePK && !withKey
 		execSQL := insertSQL
 		if returnPK {
 			execSQL = "BEGIN " + insertSQL + " " + q.dialect.Returning(q.pk.Column) + " INTO :ret_id; END;"
@@ -2250,7 +2332,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 	// engine can PROVE which key each row got, a chunk goes in one round trip
 	// with the same rows and the same keys (createBatchBackfill, QK-36).
 	if !q.dialect.SupportsReturning() &&
-		q.pk.Column != "" && !q.meta.HasCompositePK && isZeroPKValue(first.Field(q.pk.Index)) {
+		q.pk.Column != "" && !q.meta.HasCompositePK && !withKey {
 		return q.createBatchBackfill(entities, columns, colIndexes, colTags)
 	}
 
@@ -2271,7 +2353,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		rowsPerChunk = 1
 	}
 
-	// One timeout context for the whole batch (matches DeleteBatch and the
+	// One timeout context for the whole run (matches DeleteBatch and the
 	// Oracle path above): QueryTimeout bounds the operation, not each chunk.
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
@@ -2572,6 +2654,11 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 // RowLevelSecurityClient MySQL and MariaDB upsert one row at a time and
 // write each key as Upsert does.
 //
+// As in [Query.CreateBatch], an entity whose single primary key is zero has
+// the key column left out of its row, so the database assigns it, and one
+// that carries a key writes it; a batch that mixes the two is written as
+// consecutive runs of entities that agree, in the batch's order (QK-70).
+//
 // Dialect strategies:
 //   - Postgres / SQLite / MySQL / MariaDB: multi-row INSERT … ON CONFLICT / ON DUPLICATE KEY
 //   - MSSQL: single MERGE … USING (VALUES …) AS src(…)
@@ -2631,28 +2718,6 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 	q.ensureTenantID(first)
 
 	t := first.Type()
-	// Skip an auto-increment single PK when the first entity has a zero value,
-	// so the database assigns it (mirrors the same guard in CreateBatch).
-	skipAutoIncrPK := !q.meta.HasCompositePK && isZeroPKValue(first.Field(q.pk.Index))
-	var cols []batchColDef
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		dbTag := columnFromDBTag(field.Tag.Get("db"))
-		if dbTag == "" || dbTag == "-" {
-			continue
-		}
-		if skipAutoIncrPK && i == q.pk.Index {
-			continue
-		}
-		if err := q.guard.ValidateIdentifier(dbTag); err != nil {
-			return err
-		}
-		cols = append(cols, batchColDef{
-			quoted: q.dialect.Quote(dbTag),
-			dbTag:  dbTag,
-			index:  i,
-		})
-	}
 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)
 	defer cancel()
@@ -2671,33 +2736,45 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 			return bq.upsertBatchGuardedRows(ctx, entities, conflictCols, updateCols)
 		}
 
-		// Chunk to the dialect's bind-parameter ceiling, exactly like
-		// CreateBatch (QK-P1-4): a large UpsertBatch used to build one giant
-		// statement and blow SQL Server's ~2100-parameter cap (and the other
-		// engines' higher ones). Same non-transactional chunk contract as
-		// CreateBatch — wrap in client.Tx for all-or-nothing across chunks.
-		// The tenant guard binds one more argument per statement on
-		// PostgreSQL, SQLite and SQL Server; one column's worth of headroom
-		// covers it.
-		width := len(cols)
-		if bq.tenantGuarded() {
-			width++
-		}
-		rowsPerChunk := batchBindParamCeiling(bq.dialect.Name()) / width
-		if rowsPerChunk < 1 {
-			rowsPerChunk = 1
-		}
-		for start := 0; start < len(entities); start += rowsPerChunk {
-			end := min(start+rowsPerChunk, len(entities))
-			chunk := entities[start:end]
-			var err error
-			if bq.dialect.Name() == "mssql" {
-				err = bq.upsertBatchMSSQLBulk(ctx, chunk, cols, conflictCols, updateCols)
-			} else {
-				err = bq.upsertBatchStandard(ctx, chunk, cols, conflictCols, updateCols)
-			}
+		// The multi-row forms take one column list per statement, so
+		// whether the key column is in it is decided per run of entities
+		// that agree on carrying one, not by the first entity for the whole
+		// batch (QK-70) — the same runs as CreateBatch. The row-at-a-time
+		// forms above build each row's own columns and need no runs.
+		for _, kr := range bq.batchKeyRuns(entities) {
+			cols, err := bq.upsertBatchColumns(t, kr.withKey)
 			if err != nil {
 				return err
+			}
+
+			// Chunk to the dialect's bind-parameter ceiling, exactly like
+			// CreateBatch (QK-P1-4): a large UpsertBatch used to build one giant
+			// statement and blow SQL Server's ~2100-parameter cap (and the other
+			// engines' higher ones). Same non-transactional chunk contract as
+			// CreateBatch — wrap in client.Tx for all-or-nothing across chunks.
+			// The tenant guard binds one more argument per statement on
+			// PostgreSQL, SQLite and SQL Server; one column's worth of headroom
+			// covers it.
+			width := len(cols)
+			if bq.tenantGuarded() {
+				width++
+			}
+			rowsPerChunk := batchBindParamCeiling(bq.dialect.Name()) / width
+			if rowsPerChunk < 1 {
+				rowsPerChunk = 1
+			}
+			for start := 0; start < len(kr.entities); start += rowsPerChunk {
+				end := min(start+rowsPerChunk, len(kr.entities))
+				chunk := kr.entities[start:end]
+				var err error
+				if bq.dialect.Name() == "mssql" {
+					err = bq.upsertBatchMSSQLBulk(ctx, chunk, cols, conflictCols, updateCols)
+				} else {
+					err = bq.upsertBatchStandard(ctx, chunk, cols, conflictCols, updateCols)
+				}
+				if err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -2718,6 +2795,34 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 		})
 	}
 	return run(q)
+}
+
+// upsertBatchColumns is the column list of one run of UpsertBatch's
+// multi-row forms: every db-tagged field of t, less the single primary key
+// when the run carries none (withKey false), so the database assigns it —
+// the same skip CreateBatch makes. A composite key is always written.
+func (q *Query[T]) upsertBatchColumns(t reflect.Type, withKey bool) ([]batchColDef, error) {
+	skipPK := !q.meta.HasCompositePK && !withKey
+	var cols []batchColDef
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		dbTag := columnFromDBTag(field.Tag.Get("db"))
+		if dbTag == "" || dbTag == "-" {
+			continue
+		}
+		if skipPK && i == q.pk.Index {
+			continue
+		}
+		if err := q.guard.ValidateIdentifier(dbTag); err != nil {
+			return nil, err
+		}
+		cols = append(cols, batchColDef{
+			quoted: q.dialect.Quote(dbTag),
+			dbTag:  dbTag,
+			index:  i,
+		})
+	}
+	return cols, nil
 }
 
 // upsertBatchGuardedRows upserts each entity on its own, through the guarded
