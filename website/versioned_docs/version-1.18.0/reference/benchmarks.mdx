@@ -1,0 +1,448 @@
+---
+sidebar_position: 2
+title: Benchmarks
+description: Quark measured against database/sql and pgx on a real PostgreSQL, with a recorded verdict per operation; and a dated comparison with GORM, ent and sqlc on SQLite.
+---
+
+# Benchmarks
+
+Two measurements live in the
+[`benchmarks/`](https://github.com/jcsvwinston/quark/tree/main/benchmarks)
+module of the repository:
+
+- **The engine bench** — Quark against `database/sql` over pgx and against
+  pgx's native pool, on a real PostgreSQL 16, plus MySQL's primary-key read
+  with and without a reused prepared statement and a MySQL batch insert. Every operation is a control with a
+  recorded verdict, a CI job measures it on every change to `main`, and the
+  verdicts below are written from it. This is the measurement that is kept
+  current.
+- **A comparison with GORM, ent and sqlc on in-memory SQLite**, measured once
+  on 2026-05-27 against Quark v0.13 and not re-measured since. It is kept, dated,
+  at the end of this page.
+
+## The engine bench
+
+### What is measured
+
+| Operation | What one iteration does | Judged against |
+| --- | --- | --- |
+| InsertOne | insert one row and read its generated id back (`RETURNING id`) | `database/sql` and pgx |
+| FindByPK | select one row by primary key | `database/sql` and pgx |
+| List100 | select 100 rows with a `WHERE`, an `ORDER BY` and a `LIMIT` | `database/sql` |
+| Preload100 | select 100 parents and their 500 children, two queries, assembled into the parents | `database/sql` |
+| InsertBatch1000 | insert 1000 rows in one statement and read the 1000 ids back | `database/sql` |
+| InsertBatch10000 | insert 10 000 rows in one statement and read the 10 000 ids back | `database/sql` |
+| FindByPK on MySQL | select one row by primary key | `database/sql` per call, and with the statement reused |
+| FindByPK on MySQL, with `WithStatementCache` | the same, with Quark reusing its statements | `database/sql` with the statement reused, and per call |
+| InsertBatch1000 on MySQL | insert 1000 rows and read the 1000 ids back | `database/sql`, one multi-row `INSERT` |
+
+On PostgreSQL there are three arms: **`database/sql`** over pgx's stdlib
+driver, with the SQL written by hand and scanned by hand; **pgx**, the same
+SQL through pgx's own pool with no `database/sql` in between; and **Quark**,
+the `quark.For[T]` API with default options. The baselines do what a careful
+hand-written program does — the preload asks for the children with
+`= ANY($1)`, the batch is one multi-row `INSERT … RETURNING id` — and every
+arm checks that it got the rows it asked for, so an arm cannot look faster by
+doing less.
+
+On MySQL the read is the operation where the protocol shows. With arguments
+and without `interpolateParams`, `go-sql-driver/mysql` prepares the statement
+on the server, executes it and closes it, on every query; a program that
+prepares once and reuses the `*sql.Stmt` pays one round trip instead of two.
+With its defaults Quark prepares nothing. A fourth arm runs Quark with
+`interpolateParams=true` in the DSN — a setting an application can choose
+today, so the bench shows what it buys — and no verdict is judged against it.
+The second MySQL read runs Quark with `WithStatementCache`, which prepares each
+statement once per connection and reuses it, next to Quark without it in the
+same rounds.
+
+The batches read their generated keys back. On PostgreSQL that is
+`RETURNING id`; InsertBatch10000 adds an informational arm, pgx's `CopyFrom`,
+which loads the same rows with `COPY` and reads no keys back — the distance to
+the fastest way PostgreSQL loads rows, which no form that hands each entity
+its key can match. MySQL has no `RETURNING`: Quark sends one multi-row `INSERT`
+and computes the keys from the first only where MySQL documents them as
+consecutive, which needs `innodb_autoinc_lock_mode` 0 or 1, and the bench's
+MySQL runs with 1. Under MySQL 8's default, 2, Quark sends one `INSERT` per
+row; an informational arm measures that form.
+
+### The target, which is not decided yet
+
+Each control is judged by **Quark's time divided by the baseline's time**,
+and the target is that this ratio stays at or under **1.15** — "within 15 %" —
+against `database/sql` for every operation, and against pgx's native pool too
+for the single-row operations, InsertOne and FindByPK.
+
+**This target is a proposal. The project has not adopted it.** The bench
+measures against it so the work it is meant to steer has a number to move,
+and the verdicts below mean "against the proposed target".
+
+Why two baselines and not one: a single-row read through pgx's pool costs no
+less than through `database/sql`, so there is no reason Quark should be
+further from either. A 100-row list is different — pgx scans rows faster than
+`database/sql` can, 10–25 % before any ORM code runs — so a target of 15 % from
+pgx on lists would ask Quark to beat the interface it is built on. The MySQL
+control applies the same 15 % to both ways a hand-written program sends the
+query; the proposal names PostgreSQL only, and that part is as open as the
+rest.
+
+A control is **present** when Quark is within the limit of every baseline it
+is judged against, **partial** when within the limit of some, **absent** when
+within none.
+
+### The recorded verdicts
+
+{/* engine-bench:begin — written by TestEngineBenchPage from benchmarks/engines/cases_test.go; do not edit by hand */}
+
+| control | engine | operation | judged against | recorded ratio | verdict | Quark allocs/op · B/op |
+|---|---|---|---|---:|---|---:|
+| `PG-01` | PostgreSQL | Insert one row and read its generated id back | `database/sql` · pgx | 1.26 · 1.29 | **absent** | 79 · 3706 |
+| `PG-02` | PostgreSQL | Select one row by primary key | `database/sql` · pgx | 1.24 · 1.29 | **absent** | 72 · 4755 |
+| `PG-03` | PostgreSQL | Select 100 rows with a WHERE, an ORDER BY and a LIMIT | `database/sql` | 1.17 | **absent** | 573 · 25780 |
+| `PG-04` | PostgreSQL | Select 100 parents and their 500 children | `database/sql` | 1.25 | **absent** | 2869 · 156240 |
+| `PG-05` | PostgreSQL | Insert 1000 rows in one statement with their ids back | `database/sql` | 1.09 | **present** | 13040 · 1401900 |
+| `PG-06` | PostgreSQL | Insert 10 000 rows in one statement with their ids back | `database/sql` | 1.09 | **present** | 129900 · 17667762 |
+| `MY-01` | MySQL | Select one row by primary key | `database/sql` · `database/sql`, statement reused | 1.40 · 2.71 (2.68–3.21 by CPU model) | **absent** | 67 · 4390 |
+| `MY-02` | MySQL | Select one row by primary key, with WithStatementCache | `database/sql`, statement reused · `database/sql` | 1.65 · 0.81 | **partial** | 61 · 4242 |
+| `MY-03` | MySQL | Insert 1000 rows with their ids back (innodb_autoinc_lock_mode=1) | `database/sql` | 1.10 | **present** | 11954 · 857862 |
+
+Recorded per CPU model as well, because the reference runner's models are further apart on these ratios than the drift tolerance absorbs around one figure. A run on one of these models is checked against its own model's ratio; the figure in the table above is the median of the record's runs on all models together:
+
+| control | judged against | CPU model | recorded ratio |
+|---|---|---|---:|
+| `MY-01` | `database/sql`, statement reused | AMD EPYC 7763 64-Core Processor | 2.68 |
+| `MY-01` | `database/sql`, statement reused | AMD EPYC 9V45 96-Core Processor | 2.89 |
+| `MY-01` | `database/sql`, statement reused | AMD EPYC 9V74 80-Core Processor | 3.21 |
+| `MY-01` | `database/sql`, statement reused | Intel(R) Xeon(R) 6973P-C | 2.75 |
+| `MY-01` | `database/sql`, statement reused | Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz | 3.10 |
+
+What each distance is made of, as measured:
+
+- **`PG-01`** (InsertOne) — Over the limit against both baselines on the reference runners (1.20–1.36 against database/sql and 1.22–1.41 against pgx across ten runs). Quark allocates 79 times and 3.7 KB per insert, against 21 times and 1.1 KB for database/sql and 13 times and 0.6 KB for pgx: the INSERT is built from the struct on every call, 9 % of the client's CPU in a profile. Validating a model that declares no rule and reading the clock for one with no timestamp columns no longer happen (A12 Q2); they were five allocations, and no move a run can see in the ratio. Since A11 Q7 the single-row read of the generated id goes through the execution seam, which calls the engine directly when no middleware is registered: the per-call func value that captured the query is gone, and with it the heap copy of the query Create makes for the insert — two allocations and 0.65 KB (81 and 4.4 KB before, measured on the same machine). Quark's share costs about 30 µs per insert on the EPYC runner and a few µs on a laptop, where the same code sits on the threshold (1.14 and 1.16).
+- **`PG-02`** (FindByPK) — Over the limit on the reference runners: 1.10–1.25 against database/sql, inside the band, and 1.12–1.30 against pgx; on a laptop it sits on the threshold (1.09 and 1.13). Find goes through the list path — the SELECT is assembled by the query builder (8 % of the client's CPU in a profile) and the row goes through the generic scanner — and allocates 72 times and 4.8 KB per row, against 29 times for database/sql and 10 for pgx.
+- **`PG-03`** (List100) — 17 % over database/sql on the reference runners (1.14–1.29 across ten runs), inside the band, so the verdict is not asserted; 15 % on a laptop. It was 35 % until A12 Q2: List serialized the whole result to JSON when no cache was configured and discarded it (QK-34), and decided for every row and column whether the field needed a scan target of its own. It now allocates 25.8 KB per call instead of 37 KB. What remains, in a CPU profile: pointing the scan targets at each row's fields through reflection (about 8 % of the client's CPU besides the driver's own Scan) and assembling the SELECT (5 %).
+- **`PG-04`** (Preload100) — A quarter over database/sql (1.22–1.31 across ten runs); it was twice. Since A12 Q2 the children are selected with = ANY($1) and one array parameter instead of an IN list of 100 placeholders, and assembled onto their parents with one growth per parent instead of a reflect.Append per row (QK-35). The informational arm keeps the old shape: the hand-written program sending the IN list took 1.25 ms on the EPYC runner where = ANY($1) took 0.79 ms. What remains: the parent list (PG-03), and mapping the 500 children — each row's key read through reflection and looked up, the row copied — about 15 % of the client's CPU besides the driver's Next and Scan.
+- **`PG-05`** (InsertBatch1000) — Within the limit in every run (1.08–1.11 across ten), and inside the band, so the verdict is not asserted. It was a third over database/sql until A12 Q2 (QK-36): each of the 4000 placeholders was formatted with fmt.Sprintf, the validator walked every struct of the batch although the model declares no rule, and each row's placeholders went through a slice and a join. Quark allocates 13 000 times per batch against 9 000 for database/sql; reading each field through reflection to bind it is 8 % of the client's CPU in a profile.
+- **`PG-06`** (InsertBatch10000) — The same statement as the baseline — one INSERT of 10 000 rows, 40 000 parameters, RETURNING id — and the distance PG-05 has: 1.09 (1.08–1.10 across five runs on three CPU models), inside the band, so the verdict is not asserted (A12 Q3). The informational arm is pgx's CopyFrom, COPY in binary format, which reads no ids back: 25.9 ms against 66.8 ms for Quark and 61.4 ms for database/sql on the EPYC 7763 runner, so 2.6 times faster than any form that hands each entity its key. Quark does not use COPY: it cannot return the generated keys CreateBatch promises, and for rows whose keys the caller supplies it is not the same operation — it ignores rules, refuses tables under row-level security, and needs a binary encoding for every column type. An opt-in bulk load is what would close that distance, and it is not built.
+- **`MY-01`** (FindByPK) — 1.4 times a program that sends the query per call, and 2.7 to 3.2 times one that prepares the statement once, depending on the CPU model the runner draws. With arguments and without interpolateParams, the driver prepares, executes and closes a server-side statement on every query; Quark reuses none, so every Find pays all three. Across 36 runs of the reference runner on its five CPU models, on 2026-10-05 and 06, the ratio to the per-call program, which pays the same three, had medians from 1.40 (AMD EPYC 7763 and 9V45) to 1.57 (EPYC 9V74), 12 % apart. The ratio to the reused statement multiplies that by the per-call program's own time over the reused statement's, which has no Quark code in it and moves with the model too (1.88–2.05 in medians): its medians run from 2.68 on the EPYC 7763 to 3.21 on the 9V74 (2.60–3.29 across the 36 runs), 20 % apart, more than the drift tolerance absorbs around one figure. So that ratio is recorded per CPU model, and a run is checked against the ratio of the model it drew. With interpolateParams=true in the DSN the driver sends one text query instead: on the EPYC runner Quark's Find drops from 268 µs to 157 µs, against 102 µs for the reused statement.
+- **`MY-02`** (FindByPKStmtCache) — MY-01's operation with the option on (A12 Q3): Quark prepares each statement once per connection and reuses it, as the reused-statement baseline does. In the same rounds, Find took 46–48 % less time with the cache than without it on every reference runner (145 µs against 270 µs on the EPYC 7763); 0.81 times the program that sends the query per call (0.74–0.83 across five runs) and 1.65 times the one that reuses its statement (1.44–1.73). What remains over that baseline is MY-01's CPU share — the SELECT assembled by the query builder and the row through the generic scanner — not the protocol. The option is off by default; with it off, Find is MY-01.
+- **`MY-03`** (InsertBatch1000) — Measured on a server started with innodb_autoinc_lock_mode=1, the setting under which MySQL documents that a multi-row INSERT's keys are consecutive (A12 Q3): CreateBatch sends one INSERT for the chunk and computes the keys, as the baseline does. 1.10 (1.04–1.12 across five runs), inside the band, so the verdict is not asserted. Quark adds three round trips the baseline does not take — BEGIN, the read of auto_increment_increment on the INSERT's connection, COMMIT — so that a failed chunk can be undone and run row by row. Under MySQL 8's default, 2, the manual does not promise consecutive keys and CreateBatch keeps one INSERT per row: the informational arm, 237–245 ms on the EPYC 7763 runner against 9.6–9.7 ms for Quark.
+
+{/* engine-bench:end */}
+
+### Reference runs
+
+The record is taken on **the CI runner**, because that is where the bench runs
+on every change: a GitHub-hosted `ubuntu-latest` machine with 4 vCPUs, which
+GitHub draws from more than one CPU model. The recorded ratios are the medians
+of ten runs on 2026-10-05 that drew five models — five on an AMD EPYC 7763,
+two on an Intel Xeon 6973P-C, and one each on an AMD EPYC 9V45, an AMD EPYC
+9V74 and an Intel Xeon Platinum 8370C; the time checks are asserted on those
+five models only (see *Method*). The times below are the EPYC 7763 runs'; the
+ratios are the ten runs' medians, with their range. The Xeon 6973P-C ran every
+arm 40–50 % faster than the EPYC 7763 and gave the same ratios within 5 %,
+which is the point of recording ratios.
+
+| Operation | `database/sql` | pgx | Quark | Quark ÷ `database/sql` | Quark ÷ pgx |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| InsertOne | 123.8 µs | 120.9 µs | 155.4 µs | 1.26 (1.20–1.36) | 1.29 (1.22–1.41) |
+| FindByPK | 132.2 µs | 128.1 µs | 165.2 µs | 1.24 (1.10–1.25) | 1.29 (1.12–1.30) |
+| List100 | 266.1 µs | 238.5 µs | 314.9 µs | 1.17 (1.14–1.29) | — |
+| Preload100 | 793.9 µs | 682.9 µs | 977.4 µs | 1.25 (1.22–1.31) | — |
+| InsertBatch1000 | 5.45 ms | 5.13 ms | 5.90 ms | 1.09 (1.08–1.11) | — |
+
+| MySQL FindByPK | `database/sql` per call | `database/sql`, statement reused | Quark | Quark, `interpolateParams=true` |
+| --- | ---: | ---: | ---: | ---: |
+| time | 193.6 µs | 101.7 µs | 268.5 µs | 157.0 µs |
+| Quark ÷ baseline | 1.40 (1.37–1.55) | 2.71 (2.61–3.15) | | |
+
+**One ratio recorded per CPU model.** Of the ten runs above, five drew an
+AMD EPYC 7763, and the median against the reused statement, 2.71, sits on
+that model. The 36 runs on the five models that followed, on 2026-10-05 and
+06, measured the two ratios of `FindByPK` on MySQL like this (medians, with
+their range); the changes merged in between left its allocations where they
+were, and no run on the EPYC 7763 moved more than 5 % from the record:
+
+| CPU model | runs | Quark ÷ `database/sql` | Quark ÷ `database/sql`, statement reused | `database/sql` ÷ statement reused |
+| --- | ---: | ---: | ---: | ---: |
+| AMD EPYC 7763 | 18 | 1.40 (1.37–1.42) | 2.68 (2.60–2.74) | 1.91 |
+| AMD EPYC 9V45 | 5 | 1.40 (1.38–1.47) | 2.89 (2.84–2.95) | 2.05 |
+| AMD EPYC 9V74 | 9 | 1.57 (1.54–1.60) | 3.21 (3.12–3.29) | 2.04 |
+| Intel Xeon 6973P-C | 2 | 1.46 (1.45–1.46) | 2.75 (2.72–2.77) | 1.88 |
+| Intel Xeon Platinum 8370C | 2 | 1.54 (1.54–1.55) | 3.10 (3.08–3.13) | 2.01 |
+
+Every run of a model fell within 3 % of its model's median, but the medians
+against the reused statement are 20 % apart, and three of the nine runs on the
+EPYC 9V74 moved more than the 20 % the drift check tolerates from 2.71 — as
+three of the twelve before the record had from the one before it. That
+ratio is the first column times the last, and the last — the per-call program
+over the reused statement, two round trips against one — has no Quark code in
+it, yet moves with the model as well. A tolerance wide enough for it would
+blunt every other check, so the bench records that ratio per model — the
+medians above — and a run on one of these models is measured from its own.
+The median of the ten runs stays the figure the recorded verdicts show. Two
+runs drew a sixth model, an Intel Xeon Platinum 8573C, which no reference run
+had drawn: 3.03 and 3.10 against the reused statement, reported and not
+asserted.
+
+**Three controls added on 2026-10-06** — `PG-06`, `MY-02` and `MY-03` — are
+recorded from five runs of the same runner that day, which drew three of the
+five models: AMD EPYC 7763 twice, AMD EPYC 9V74 twice, Intel Xeon Platinum
+8370C once. Times are the two EPYC 7763 runs' (their mean); ratios are the
+five runs' medians, with their range.
+
+| Operation | baseline | Quark | informational arm | Quark ÷ baseline |
+| --- | ---: | ---: | ---: | ---: |
+| InsertBatch10000 | `database/sql` 61.4 ms | 66.8 ms | pgx `CopyFrom`, no ids: 25.9 ms | 1.09 (1.08–1.10) |
+| MySQL FindByPK, `WithStatementCache` | statement reused 100.1 µs · per call 193.5 µs | 145.2 µs | Quark without the cache: 270.0 µs | 1.65 (1.44–1.73) · 0.81 (0.74–0.83) |
+| MySQL InsertBatch1000 | `database/sql`, one multi-row `INSERT`, 9.21 ms | 9.65 ms | one `INSERT` per row: 241.2 ms | 1.10 (1.04–1.12) |
+
+With the statement cache, Quark's `FindByPK` on MySQL took 46–48 % less time
+than without it in every one of the five runs. The MySQL batch runs on a
+server started with `innodb_autoinc_lock_mode=1`; on MySQL 8's default, 2,
+Quark sends the form the informational arm measures.
+
+The informational arm of Preload100 — the hand-written program sending the
+children's query as `SELECT *` with an `IN` list of 100 placeholders, the
+shape Quark sent on PostgreSQL before 2026-10-05 — took 1.25 ms on the EPYC
+7763 runner.
+
+**What moved on 2026-10-05.** The record before this one was taken the day
+before, on seven runs over three of the same models, against code that
+serialized every `List` result to JSON with no cache configured, selected
+preloaded children with one placeholder per key and appended them one
+reflection call at a time, decided per row and column how to scan each field,
+formatted every placeholder with `fmt`, and validated models that declare no
+rule:
+
+| Control | Quark ÷ baseline, before | after | Quark allocs/op, before | after | Quark B/op, before | after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `PG-01` InsertOne | 1.26 · 1.31 | 1.26 · 1.29 | 86 | 81 | 4425 | 4360 |
+| `PG-02` FindByPK | 1.24 · 1.30 | 1.24 · 1.29 | 74 | 72 | 4830 | 4755 |
+| `PG-03` List100 | 1.35 | 1.17 | 576 | 573 | 37000 | 25780 |
+| `PG-04` Preload100 | 1.98 | 1.25 | 4757 | 2869 | 208500 | 156240 |
+| `PG-05` InsertBatch1000 | 1.33 | 1.09 | 27880 | 13040 | 1906000 | 1401900 |
+| `MY-01` FindByPK | 1.42 · 2.72 | 1.40 · 2.71 | 69 | 67 | 4470 | 4390 |
+
+The single-row operations did not move: what they spend beyond the baselines
+is elsewhere (building the statement, and the row going through the generic
+path), and is described in the recorded block above.
+
+**What moved on 2026-10-06.** Since A11 Q7 every statement goes through one
+execution path, which runs the middleware chain and reports to the observers.
+When no middleware is registered, that path calls the engine directly. The
+single-row read of an insert's generated id no longer builds a function value
+that captured the query, so the copy of the query that `Create` makes for the
+insert stays on the stack. `PG-01` drops from 81 allocations and 4360 bytes to
+79 and 3706. Both figures were measured on the laptop below, the old one on the
+code before the change. No other control moved, and the ratios were not
+retaken.
+
+**A laptop**, for comparison — Apple M4 Pro, Docker Desktop's Linux VM with
+12 CPUs, three runs on 2026-10-05 with the rest of the machine busy:
+
+| Operation | `database/sql` | pgx | Quark | Quark ÷ `database/sql` | Quark ÷ pgx |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| InsertOne | 58.5 µs | 59.9 µs | 69.7 µs | 1.14 | 1.16 |
+| FindByPK | 54.1 µs | 55.1 µs | 58.8 µs | 1.09 | 1.13 |
+| List100 | 107.9 µs | 100.3 µs | 125.2 µs | 1.15 | — |
+| Preload100 | 341.9 µs | 280.3 µs | 383.2 µs | 1.17 | — |
+| InsertBatch1000 | 2.17 ms | 2.05 ms | 2.56 ms | 1.14 | — |
+| MySQL FindByPK | 81.2 µs per call, 39.1 µs reused | — | 101.2 µs (65.2 µs with `interpolateParams=true`) | 1.23 · 2.54 | — |
+
+Two runs on 2026-10-06 measured the three controls added that day on the same
+laptop:
+
+| Operation | baseline | Quark | informational arm | Quark ÷ baseline |
+| --- | ---: | ---: | ---: | ---: |
+| InsertBatch10000 | `database/sql` 24.8 · 25.5 ms | 27.0 · 28.0 ms | pgx `CopyFrom`: 10.1 · 10.5 ms | 1.08 · 1.09 |
+| MySQL FindByPK, `WithStatementCache` | reused 44.5 · 43.6 µs, per call 90.9 · 86.8 µs | 59.9 · 56.5 µs | without the cache: 102.6 · 95.3 µs | 1.34 · 1.32 (reused) |
+| MySQL InsertBatch1000 | `database/sql` 3.08 · 3.05 ms | 3.49 · 3.73 ms | one `INSERT` per row: 140.9 · 131.0 ms | 1.13 · 1.20 |
+
+The same code is measured closer to the limit on the laptop: Quark's own work
+on a single-row insert costs a few µs there and about 30 µs on the runner's
+vCPU, while the round trip only a little more than doubles. A verdict on a
+15 % limit is therefore a statement about a machine, and the verdicts above
+are the CI runner's.
+
+A ratio is shown only against the baselines a control is judged against; the
+times of the other arms are there to divide by. Allocations are the same on
+both machines and are in the recorded block above.
+
+### Method
+
+**Where the binary runs.** The bench starts PostgreSQL 16 and MySQL 8.4 —
+with `innodb_autoinc_lock_mode=1`, which only inserts into an
+`AUTO_INCREMENT` column notice — in one container network namespace, builds its test binary for Linux, and runs
+it inside that namespace, so every connection is loopback. Loopback is the
+strictest place to measure an ORM: the round trip is as short as it gets, so
+the client's CPU is the largest share of each operation it can ever be, and
+nothing hides it. Over a real network the same microseconds of Quark are a
+smaller fraction of a longer round trip. Running inside the namespace also
+matters on macOS: there, a published port crosses Docker Desktop's virtual
+machine and its proxy, and when this was measured a FindByPK took 120–380 µs
+through the port against 48–60 µs from inside the namespace — the proxy was
+most of the time and most of the scatter. The CI job runs the same script on
+a Linux runner.
+
+**Durability is off.** PostgreSQL runs with `synchronous_commit=off` and both
+engines keep their data on tmpfs. With durable commits a single-row insert
+measured anywhere between 150 and 600 µs on the same machine, from one sample
+to the next: that is the disk's flush, not the code, and no ratio survives it.
+
+**Interleaved samples, compared as ratios.** For each operation every arm is
+warmed up, then measured for ten rounds. A round is about 200 ms of each arm,
+cut into blocks of 20 ms that alternate between the arms in a rotating order,
+so all arms' samples cover the same stretch of wall clock: a machine that
+slows down for 50 ms slows a block of every arm, not the whole sample of one.
+A garbage collection runs before every block, outside the clock, so the
+garbage one arm leaves is not collected on the next arm's time. The ratio of a
+round is Quark's time over the baseline's; the bench reports the **median of
+the ten ratios**, and the median absolute deviation as their scatter. Cutting
+samples into blocks narrowed that scatter several times on the single-row
+operations.
+
+**What the test asserts, and the tolerances.** The CI runner is a shared
+virtual machine, and a test that compares a timing with a fixed number fails
+for reasons that are not in the code. So the test compares only medians of
+ratios, with bands, and the checks that depend on the machine are asserted
+only on the machine the record was taken on:
+
+- **Around the limit**, a band of ±0.10, or twice the run's scatter if that is
+  wider. A ratio inside it is *on the threshold*: the run cannot tell met from
+  missed, the table says so, and the verdict is not asserted. Outside it, the
+  measured verdict must be the recorded one. Asserted on the CI runner only.
+- **Around the recorded ratio**, a drift of ±20 %, or twice the run's relative
+  scatter if that is wider. A ratio that moves further fails the test and asks
+  for the record to move in the same change. Asserted on the CI runner only.
+  One ratio — MySQL's `FindByPK` against the reused statement — is recorded
+  per CPU model, because its models are further apart than that (see
+  *Reference runs*), and a run's drift is measured from its own model's.
+- Both time checks are asserted only when the runner's CPU is a model the
+  record was taken on. GitHub draws the runner's CPU from a pool, and the model
+  moves whole runs: across 34 runs on 2026-10-04 and 05, before this record, the
+  runs on one model agreed within 3 % (22 on an AMD EPYC 7763, 7 on an EPYC
+  9V74), while from one model to another List100 moved by up to 24 % and
+  MySQL's FindByPK by up to 20 %, with the same allocations. On a model no
+  reference run drew, the run reports its verdicts and ratios like a laptop
+  does; its allocations are still asserted.
+- **Around Quark's recorded allocations** — count and bytes per operation — a
+  tolerance of ±5 %. Allocations do not depend on the machine: they were the
+  same on the laptop and on every runner, and moved by under 2 % from run to
+  run. So this check is asserted everywhere, and it can be tight where the
+  clock cannot.
+
+Anywhere else — a laptop — the verdicts and ratios are compared with the record
+and marked in the table where they differ, but they do not fail the run: a
+laptop is for comparing a change with itself, before and after, on the same
+machine.
+
+The widths come from the measurement, not from a guess. Within one run the
+scatter of the per-round ratios is small, but whole runs shift against each
+other, and nothing inside a run can see it. On the CI runner the shift follows
+the CPU model: the five EPYC runs agreed within 2 %, while the Xeon 8370C put
+MySQL's FindByPK 16 % higher. On the busy laptop, eight runs put a single-row
+insert anywhere between 58 and 134 µs while its ratio to `database/sql` stayed
+between 1.11 and 1.28. So the bench notices a regression or a gain of more than
+about 20 % in a ratio — on the EPYC runner, about 30 µs of Quark's time on a
+single-row operation — any crossing of the limit by more than the band, and any
+change of more than 5 % in what Quark allocates. Smaller moves of time show in
+the table every run produces and are not asserted.
+
+Both checks were tried against deliberate regressions, on the laptop and against
+a record taken there. A busy loop of 20 µs added to Quark's `List` — which
+`Find` goes through — moved FindByPK from 1.10 to 1.48 against `database/sql`,
+List100 by 23 % and MySQL's FindByPK by 34 %, and the test failed on all three;
+it moved Preload100 by 3 %, and the test did not. A second JSON serialization of
+every list result moved List100's ratio by 12 %, inside the drift, and its
+bytes per call by 28 %, which the allocation check caught — and since
+allocations are the same on every machine, it would catch it on the runner too.
+
+**Where it runs.** A CI workflow of its own runs the bench on every pull
+request and every push to `main`, publishes the table as the job's summary and
+as an artifact, and is deliberately not required for merging: a job that
+measures time on a shared machine must not be able to block one.
+
+### Reproduce it
+
+```bash
+cd benchmarks
+bash engines/run.sh /tmp/engine-bench     # needs Docker; writes bench-table.md
+```
+
+The same operations are ordinary Go benchmarks for `benchstat` and profiling
+(`BenchmarkPostgres`, `BenchmarkMySQL`); the
+[harness README](https://github.com/jcsvwinston/quark/blob/main/benchmarks/README.md)
+shows how to profile one arm inside the same network namespace.
+
+## A comparison with GORM, ent and sqlc on SQLite (2026-05-27, Quark v0.13)
+
+:::caution Dated
+These figures were measured once, on 2026-05-27, against Quark v0.13 — before
+v1.0 — and have not been re-measured since. They are kept for the comparison
+they draw between libraries, not as a statement about the current release. The
+engine bench above is the measurement that is kept current.
+:::
+
+The harness runs against **in-memory SQLite**, which isolates ORM and driver
+CPU and allocation overhead from disk and network I/O, and compares five ways
+of doing the same five operations on the same `bench_users` table:
+
+- **Raw** — hand-written `database/sql` with manual `Scan`/`Exec`; the floor.
+- **Quark** — the `quark.For[T]` API on the reflection path.
+- **GORM** — the reflection-based peer.
+- **ent** — a code-generation ORM: a typed client generated from a schema,
+  with a runtime of builders, mutations and hooks.
+- **sqlc** — a code generator that turns annotated SQL into thin typed
+  wrappers over `database/sql`, with no runtime of its own.
+
+| Benchmark     | Operation                                           |
+| ------------- | --------------------------------------------------- |
+| `InsertOne`   | Insert a single row                                 |
+| `InsertBatch` | Insert 100 rows in one batch                        |
+| `FindByPK`    | Select one row by primary key                       |
+| `ListWhere`   | Select up to 50 rows with a `WHERE age >= ?` filter |
+| `Update`      | Update one row (all non-PK columns) by primary key  |
+
+sqlc emits no multi-row `INSERT` for SQLite (its `:copyfrom` and `:batch`
+helpers are pgx-only), so its `InsertBatch` is a transaction-wrapped loop of
+single-row inserts; read that figure with the asymmetry in mind.
+
+Apple M4 Pro, macOS, go1.26.0, `modernc.org/sqlite v1.23.1`, `gorm.io/gorm
+v1.31.0`, `entgo.io/ent v0.14.6`, `sqlc v1.31.1`. Medians of
+`-bench=. -benchmem -count=6`, summarized with
+[`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat).
+
+Time per operation (ns/op, lower is better):
+
+| Operation     |     Raw |   Quark |    GORM |     ent |    sqlc |
+| ------------- | ------: | ------: | ------: | ------: | ------: |
+| InsertOne     |   6,572 |  12,940 |  19,120 |  13,080 |   6,009 |
+| InsertBatch   | 175,300 | 263,600 | 265,500 | 302,300 | 279,000 |
+| FindByPK      |   7,864 |  14,140 |  10,400 |  11,750 |   7,544 |
+| ListWhere(50) |  33,900 |  66,540 |  54,360 |  45,330 |  35,770 |
+| Update        |   2,851 |   4,611 |   8,327 |  21,000 |   3,014 |
+
+Allocations per operation (allocs/op, lower is better):
+
+| Operation     | Raw | Quark |  GORM |   ent | sqlc |
+| ------------- | --: | ----: | ----: | ----: | ---: |
+| InsertOne     |  20 |    61 |    78 |    77 |   21 |
+| InsertBatch   | 622 | 1,277 | 1,287 | 3,278 | 2,307 |
+| FindByPK      |  24 |    65 |    66 |   100 |   25 |
+| ListWhere(50) | 365 |   468 |   705 |   756 |  374 |
+| Update        |  15 |    55 |    84 |   143 |   18 |
+
+What that run showed, at the time:
+
+- **Code generation alone does not put a library at the floor; the absence of
+  a runtime does.** sqlc sat on the `database/sql` floor because its generated
+  code is thin wrappers; ent, also generated but with a runtime of builders and
+  mutations, landed with the reflection-based libraries on writes.
+- **Quark, GORM and ent were in the same class**, with none ahead on every
+  operation: Quark faster than GORM on inserts and updates, GORM and ent
+  faster on the single-row read and the filtered list.
+- **Quark's optional code generation is about type safety, not speed.**
+  Profiled against this baseline, the generated scanners and binders
+  recovered 2–5 % on scans and 1 % on inserts; what remained was allocation
+  and the driver round trip.
