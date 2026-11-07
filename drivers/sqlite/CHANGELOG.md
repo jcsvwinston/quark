@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/jcsvwinston/quark/compare/drivers/sqlite/v0.3.0...drivers/sqlite/v0.3.1) (2026-11-07)
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.17.0 ([#480](https://github.com/jcsvwinston/quark/issues/480)) ([acc2cc2](https://github.com/jcsvwinston/quark/commit/acc2cc286372aa3320acdcd5363097c8efa121d4))
+
 ## [0.3.0](https://github.com/jcsvwinston/quark/compare/drivers/sqlite/v0.2.5...drivers/sqlite/v0.3.0) (2026-10-12)
 
 
