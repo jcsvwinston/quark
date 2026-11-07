@@ -90,9 +90,13 @@ will not overrun a dialect's parameter limit. Chunks run on the bound executor
 and are not wrapped in an implicit transaction — wrap `CreateBatch` in
 `client.Tx` if you need all-or-nothing across chunks.
 
-If the first entity has a zero single-column integer primary key, Quark omits
-that PK column and lets the database assign it. Dialects with `RETURNING` can
-write generated primary keys back to the entity pointers.
+An entity with a zero single-column primary key has that PK column left out of
+its row, so the database assigns it; an entity that carries a key writes it,
+as `Create` does. A batch that mixes the two is written as consecutive runs of
+entities that agree, in the batch's order, each run its own statements — the
+rows are inserted in the order given, and a batch that alternates goes row by
+row. Dialects with `RETURNING` write generated primary keys back to the entity
+pointers.
 
 `CreateBatch` returns `nil` for an empty slice.
 

@@ -125,8 +125,10 @@ conflict columns. The
 [CRUD reference](../reference/api/crud#upsert)
 has the tables per engine.
 
-When the first entity has a zero primary key, Quark omits the PK column so the
-database assigns it, just like `CreateBatch`. Each dialect gets its native form:
+An entity with a zero primary key has the PK column left out of its row, so
+the database assigns it; an entity that carries a key writes it. A batch that
+mixes the two is written as consecutive runs of entities that agree, in the
+batch's order — just like `CreateBatch`. Each dialect gets its native form:
 
 | Dialect | SQL generated |
 |---|---|
