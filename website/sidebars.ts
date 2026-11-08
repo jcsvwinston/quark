@@ -34,6 +34,9 @@ const sidebars: SidebarsConfig = {
         'guides/codegen',
         'guides/frameworks',
         'guides/writing-a-driver',
+        'guides/caching-in-production',
+        'guides/read-replicas-in-production',
+        'guides/sharding-in-production',
       ],
     },
     {

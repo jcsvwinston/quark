@@ -15,6 +15,13 @@
 // of its section of the guide is not, line for line, code of the package —
 // so the page cannot drift from what CI compiles.
 //
+// The use-case guides are held the same way: caching, readreplicas and
+// sharding are the code of "Caching in production", "Read replicas in
+// production" and "Sharding in production" (website/docs/guides/*-in-
+// production.mdx), small services run on SQLite whose tests check the
+// claims those pages make — what a write invalidates, where a read goes,
+// which shard a row lands on — and hold each page's blocks to the package.
+//
 // It is a module of its own for the reason the engine suites and the
 // acceptance harness are (ADR-0024): the frameworks it requires must never
 // reach the library's go.mod, and an application that imports Quark must not

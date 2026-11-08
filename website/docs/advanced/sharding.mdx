@@ -15,6 +15,10 @@ Unlike [read replicas](read-replicas), shards hold **disjoint** data and scale
 `ShardRouter` is a `ClientProvider`, so it drops into `quark.For[T]` like any
 client — the rest of the ORM is unaware of sharding.
 
+For running shards in a service — the key, the cost of a scatter, migrating and
+auditing every shard, adding a shard, and tenants inside a shard — see
+[Sharding in production](../guides/sharding-in-production).
+
 ```go
 shards := map[string]*quark.Client{
     "shard-a": clientA, // each is a normal quark.New(...) client
@@ -127,7 +131,7 @@ number.
 - **Resharding** (changing the `ShardFunc` + migrating data) is an operator
   task; the shard set is fixed at construction.
 
-Multi-tenancy composes orthogonally: a shard's `*Client` can itself sit behind a
-`TenantRouter`. Sharding is a router in front of ordinary clients, not a mode
-inside the client, which is what lets the two stack without either knowing about
-the other.
+Multi-tenancy composes with one tenant router per shard, the shard chosen first:
+Quark adds the tenant predicate only to a query built on a `TenantRouter`, and
+`ShardRouter` hands back a plain client, so the two routers do not nest. The
+arrangement is in [Sharding in production](../guides/sharding-in-production#several-tenants-on-one-shard).

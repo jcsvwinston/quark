@@ -1,0 +1,366 @@
+---
+sidebar_position: 14
+title: Caching in production
+description: Running Quark's query cache in a service — what to cache and for how long, what a write invalidates and what it does not, stampedes across instances, how to see hits and misses, what happens when the backend is down, and how each claim is verified.
+---
+
+# Caching in production
+
+This guide is for the person switching the query cache on in a running
+service. The [Caching and Observability](../advanced/caching-observability)
+page describes the API; this page is about the decisions around it — which
+reads to cache, what the TTL buys, which writes reach the cache and which do
+not, what several instances do to a cold key, how to measure the cache, and
+what the service does when the cache backend is unreachable.
+
+The code on this page is the package
+[`internal/integrations/caching`](https://github.com/jcsvwinston/quark/tree/main/internal/integrations/caching)
+of the Quark repository: a small catalogue service that CI compiles and
+runs on SQLite, and a test that fails when a block on this page stops
+matching the package's code. Every claim below names the test that checks
+it, in that package or in Quark's own.
+
+## Choosing what to cache
+
+A cached read is worth it when the same query — the same SQL and the same
+arguments — is asked again before its answer changes. The cache key is the
+dialect, the tenant, the schema, the SQL text and every bound argument, so
+two filters, or two tenants, never share an entry. The other side of that:
+a query whose arguments change on every call never hits. A filter on
+`time.Now()`, a pagination cursor, a request id in a `WHERE` all produce a
+new key each time; caching them fills the store and serves nothing.
+
+Only `List`, and what runs through it — `First`, `Find`, and the rows of
+`Paginate` and `PaginateAfter` — reads the cache. `Count` (including the
+total `Paginate` computes), the aggregates, `Iter` and raw SQL always go to
+the database, whatever `.Cache()` was called on them.
+
+What a hit returns is the JSON of the rows, not the rows: a field tagged
+`json:"-"` or left out of the JSON comes back as its zero value from a hit,
+however the database has it (`TestHitReturnsTheJSONOfTheRows`). Give a
+cached model json tags that carry every field the readers use.
+
+```go
+// Product is the catalogue row this service caches: read on every page
+// view, written by an operator a few times a day. The cache stores rows as
+// JSON, so the json tags decide what a hit gives back.
+type Product struct {
+    ID     int64  `db:"id" pk:"true" json:"id"`
+    SKU    string `db:"sku" quark:"unique,not_null" json:"sku"`
+    Name   string `db:"name" json:"name"`
+    Price  int64  `db:"price_cents" json:"price_cents"`
+    Active bool   `db:"active" json:"active"`
+}
+```
+
+The catalogue page is the read to cache: hot, the same for everyone, and
+fine a few minutes stale. The product page is the second: hot per product,
+and best left in place when another product changes.
+
+```go
+// ActiveProducts is the catalogue page: the hottest read and the one worth
+// caching. The table tag "products" is what every write drops, so it stays
+// in the list when custom tags are added; "catalogue" is a tag the service
+// drops by hand.
+func ActiveProducts(ctx context.Context, client *quark.Client) ([]Product, error) {
+    return quark.For[Product](ctx, client).
+        Where("active", "=", true).
+        OrderBy("name", "ASC").
+        Limit(200).
+        Cache(5*time.Minute, "products", "catalogue").
+        List()
+}
+
+// ProductByID is the detail page, cached under the row tag alone,
+// "<table>:<pk>". Every write drops the table tag, so an entry that carried
+// it too would go with every write to the table; under the row tag alone it
+// goes only when a write that knows this key runs. The price: UpdateMap,
+// DeleteBy and raw SQL do not know keys and leave this entry in place.
+func ProductByID(ctx context.Context, client *quark.Client, id int64) (Product, error) {
+    return quark.For[Product](ctx, client).
+        Cache(10*time.Minute, "products:"+strconv.FormatInt(id, 10)).
+        Find(id)
+}
+```
+
+The two reads tag their entries differently on purpose, and the
+[invalidation section](#invalidation-on-writes) says why.
+
+## Opening the client
+
+```go
+// Open builds the one client the service shares. Quark wraps the store with
+// singleflight, TTL jitter and early refresh on its own; cross-instance
+// coordination is opt-in and only works on a store with a lock (the Redis
+// store has one). Raw statements are allowed for Deactivate below.
+func Open(dsn string, store quark.CacheStore, obs quark.QueryObserver) (*quark.Client, error) {
+    limits := quark.DefaultLimits()
+    limits.AllowRawQueries = true
+    return quark.New("sqlite", dsn,
+        quark.WithCacheStore(store),
+        quark.WithCacheJitter(0.2),
+        quark.WithCacheXFetchBeta(1),
+        quark.WithCacheCrossInstance(),
+        quark.WithQueryObserver(obs),
+        quark.WithLimits(limits),
+    )
+}
+```
+
+`WithCacheStore` is the whole switch. Quark wraps the store you give it with
+three in-process protections that cannot be turned off separately from the
+store: a cold key is computed once per process however many requests ask
+for it (singleflight), every TTL is randomised by the jitter so entries
+warmed together do not expire together, and an entry near its end may be
+recomputed before it expires (early refresh). `WithCacheJitter(0.2)` makes a
+five-minute TTL anything between four and six minutes.
+`WithCacheXFetchBeta(1)` is the default refresh aggressiveness.
+
+`WithCacheCrossInstance` only does something when the store has a lock —
+the bundled Redis store does; the memory store's lock is per process, so
+with the memory store the option changes nothing across instances.
+
+## TTLs
+
+The TTL is the bound on staleness you accept for everything invalidation
+does not reach. Writes through the query builder drop the tags of the
+entries they make stale (next section), from any instance, because the
+store is shared; everything else — raw SQL, a write by another program, a
+migration, an invalidation call that failed — leaves an entry in place until
+its TTL ends. Set the TTL for that case, not for the happy path.
+
+Two things about the stores matter for the TTL. The memory store has no
+size bound: it evicts expired entries about once a minute and nothing else,
+so a long TTL over many distinct keys is memory that grows until the keys
+expire. The Redis store keeps each tag's set of keys for the TTL plus
+twenty-four hours, so an invalidation can still reach an entry whose tag
+set would otherwise have expired first; the commands it uses for that need
+Redis 7 or newer, and the store is not tested against older servers.
+
+## Invalidation on writes
+
+Every write through the query builder drops the table tag once its
+statement has written — `Create`, `Update`, `UpdateFields`, `UpdateMap`,
+`Delete`, `DeleteBy`, `Upsert`, the batch forms, `Restore`, `Tracked.Save`.
+A write that knows the primary key of the row it changed also drops the row
+tag `<table>:<pk>`. A write that identifies its rows by a `WHERE`
+(`UpdateMap`, `DeleteBy`), and every write on a model with a composite key,
+drops the table tag only.
+
+That is why the two reads above tag themselves differently. An entry
+tagged with the table tag goes with every write to the table, whatever row
+it touched — so a product page cached under `products` and `products:7`
+would be dropped by a reprice of product 8. Cached under `products:7` alone
+it survives every write to another row and goes when a write that knows key
+7 runs. The price is the other half of the rule: an `UpdateMap`, a
+`DeleteBy` or raw SQL that happens to change product 7 drops the table tag
+only, and the page keeps the old row until its TTL ends
+(`TestWritesInvalidateWhatTheyChange` checks both halves). Pick per read:
+the table tag for entries that must never be stale after a write, the row
+tag alone for entries that must survive other rows' writes.
+
+```go
+// Reprice is the operator's write. UpdateFields knows the key, so once the
+// UPDATE has run Quark drops "products" and "products:<id>" — the catalogue
+// and this product's detail page — and nothing else is needed.
+func Reprice(ctx context.Context, client *quark.Client, id, priceCents int64) error {
+    p := Product{ID: id, Price: priceCents}
+    _, err := quark.For[Product](ctx, client).UpdateFields(&p, "price_cents")
+    return err
+}
+
+// Import loads a catalogue in one transaction. The tags are dropped when
+// each INSERT runs and again when the transaction commits, so a request
+// that read and cached the old catalogue between the two does not leave it
+// cached past the commit.
+func Import(ctx context.Context, client *quark.Client, products []*Product) error {
+    return client.Tx(ctx, func(tx *quark.Tx) error {
+        for _, p := range products {
+            if err := quark.ForTx[Product](ctx, tx).Create(p); err != nil {
+                return err
+            }
+        }
+        return nil
+    })
+}
+```
+
+A write inside a transaction drops its tags twice: when its statement runs
+and again when the transaction commits. The second drop is what makes a
+read from another request, made between the two, not outlive the commit —
+that read saw and cached the rows as they were committed then
+(`TestTransactionDropsTagsOnCommit`). A rollback drops nothing more.
+
+```go
+// Deactivate is a raw statement. Quark does not parse raw SQL for the tables
+// it writes, so it drops no tag: a cached ActiveProducts would keep the row
+// until its TTL ended. The service drops the table tag itself.
+func Deactivate(ctx context.Context, client *quark.Client, store quark.CacheStore, sku string) error {
+    if err := client.Exec(ctx, "UPDATE products SET active = 0 WHERE sku = ?", sku); err != nil {
+        return err
+    }
+    return store.InvalidateTags(ctx, "products")
+}
+```
+
+What Quark does not invalidate: raw SQL — `Client.Exec`, `RawQuery`, `Raw`,
+`quark.Call` — is not parsed for the tables it writes and drops nothing
+(`TestRawSQLDropsNothing`); writes made by another program or another
+Quark client without this store never reach it; and a migration or `Sync`
+that rewrites a table drops no tag. When a service has those, it drops the
+tags itself, as `Deactivate` does, or lets the TTL do it.
+
+## Stampede protection and several instances
+
+Within one process, singleflight means a cold hot key costs one query
+however many requests wait for it, and early refresh recomputes an entry
+shortly before it expires so the readers rarely see the miss. Across
+processes, the default is N instances computing the same cold key N times.
+`WithCacheCrossInstance` adds one lock round-trip per miss on a store with a
+lock: the instance that acquires the per-key lock computes, the others poll
+the store every 25 ms for up to 5 s and return what the winner stored. The
+lock expires after 5 s on its own, so a crashed winner cannot wedge the key;
+a waiter that times out computes the value itself. If the lock call fails —
+the backend is slow or unreachable — the instance computes without
+coordination and logs a warning. Coordination is best effort; correctness
+never depends on it.
+
+A store wrapper, like the `Counting` store below, hides the lock unless it
+forwards it: Quark finds the lock by a type assertion on the store it was
+given, and a wrapper without the `AcquireLock` method silently turns
+cross-instance coordination off.
+
+## Observing hits and misses
+
+Quark has no hit or miss counter. A hit is logged at debug level
+(`cache hit`, with the key and the table) and a failed store write at
+warning level; the OpenTelemetry middleware and the query observers see
+statements, and a hit runs no statement, so they do not see it either. The
+two counts a service needs come from two small types.
+
+```go
+// Counting wraps a store and counts what Quark asks of it: a hit is a Get
+// that returned bytes, a miss one that did not. Embedding the store forwards
+// its lock too — Quark finds the lock by a type assertion on the store it
+// was given, so a wrapper that hid it would switch cross-instance
+// coordination off without a word.
+type Counting struct {
+    LockingStore
+    Hits, Misses, Sets, Invalidations atomic.Int64
+}
+
+func (c *Counting) Get(ctx context.Context, key string) ([]byte, error) {
+    b, err := c.LockingStore.Get(ctx, key)
+    if err != nil {
+        c.Misses.Add(1)
+    } else {
+        c.Hits.Add(1)
+    }
+    return b, err
+}
+
+func (c *Counting) Set(ctx context.Context, key string, val []byte, ttl time.Duration, tags ...string) error {
+    c.Sets.Add(1)
+    return c.LockingStore.Set(ctx, key, val, ttl, tags...)
+}
+
+func (c *Counting) InvalidateTags(ctx context.Context, tags ...string) error {
+    c.Invalidations.Add(1)
+    return c.LockingStore.InvalidateTags(ctx, tags...)
+}
+
+// Statements counts the SELECTs that reached the database. A read answered
+// from the cache runs no statement and reports no event, so for a cached
+// read the hit ratio is 1 - Selects/calls.
+type Statements struct{ Selects atomic.Int64 }
+
+func (s *Statements) ObserveQuery(e quark.QueryEvent) {
+    if e.Operation == "SELECT" && e.Error == nil {
+        s.Selects.Add(1)
+    }
+}
+```
+
+`Counting` sees every call Quark makes to the store, so its hits and misses
+are the store's. `Statements` counts what reached the database; for a read
+that is always cached, calls minus `Selects` is the number of hits
+(`TestWritesInvalidateWhatTheyChange` reads both). The memory store cannot
+report its size, and the Redis store cannot report its, so capacity is
+watched on the backend.
+
+## When the cache backend is down
+
+Quark treats a store that fails as a store that is empty. A failed `Get` is
+a miss and the read runs on the database; a failed `Set` after the compute
+is logged (`cache set failed after compute`) and the rows are returned
+anyway. The caller sees correct rows and no error, and every read pays the
+database until the backend returns
+(`TestBackendDownReadsFromTheDatabase`).
+
+```go
+// ErrCacheDown is what a store returns when its backend is unreachable.
+var ErrCacheDown = errors.New("cache backend unreachable")
+
+// Down is a store whose backend is unreachable: every call fails. Quark
+// treats a failed Get as a miss and a failed Set as a warning in the log,
+// so every read answers from the database and the caller sees no error;
+// nothing is served stale, and nothing is cached until the backend returns.
+type Down struct{}
+
+func (Down) Get(context.Context, string) ([]byte, error)                         { return nil, ErrCacheDown }
+func (Down) Set(context.Context, string, []byte, time.Duration, ...string) error { return ErrCacheDown }
+func (Down) Delete(context.Context, string) error                                { return ErrCacheDown }
+func (Down) InvalidateTags(context.Context, ...string) error                     { return ErrCacheDown }
+```
+
+Two things the service has to know. First, latency: Quark passes the
+query's context to the store, so a backend that times out rather than
+refuses adds its dial or read timeout to every cached read until the
+store's client gives up; set the store client's timeouts for that case. The
+memory store cannot be down.
+
+Second, the partial outage, which is worse than the total one.
+
+```go
+// HalfDown is the worse outage: reads and writes to the store work and
+// invalidation does not. Quark does not check the error InvalidateTags
+// returns, so a write succeeds, the entries it should have dropped stay,
+// and cached reads answer with the old rows until their TTL ends.
+type HalfDown struct{ quark.CacheStore }
+
+func (HalfDown) InvalidateTags(context.Context, ...string) error { return ErrCacheDown }
+```
+
+When reads and writes to the store work and invalidation fails, Quark does
+not check the error `InvalidateTags` returns: the write succeeds, the
+entries it should have dropped stay, and cached reads answer with the old
+rows until their TTL ends (`TestInvalidationDownServesStaleRows`). The
+bundled Redis store does not return that error at all — a tag whose set
+cannot be read is skipped and the call reports success — so not even a
+counting wrapper sees it. The TTL is the only bound on this case, which is
+the reason to set it for the failure and not for the happy path.
+
+## Verifying each claim
+
+- Hits, misses and what a write drops: `TestWritesInvalidateWhatTheyChange`
+  in the fixture; the write paths across the six engines in Quark's
+  `CacheWritePaths` suite.
+- The second drop on commit: `TestTransactionDropsTagsOnCommit`.
+- Raw SQL drops nothing: `TestRawSQLDropsNothing`.
+- What a hit returns: `TestHitReturnsTheJSONOfTheRows`.
+- A backend that is down, totally or for invalidation only:
+  `TestBackendDownReadsFromTheDatabase`,
+  `TestInvalidationDownServesStaleRows`.
+- Singleflight, jitter, early refresh and the cross-instance lock: Quark's
+  `cache_stampede_test.go` and `cache_stampede_crossinstance_test.go`; the
+  Redis lock against a real server in `cache/redis`.
+
+## What this guide does not cover
+
+- Running Redis itself: memory policy, persistence, failover between Redis
+  nodes.
+- Warming the cache before taking traffic; Quark has no warm-up.
+- Negative caching (an empty result is cached like any other; a miss on a
+  key that does not exist is not special), compression of large entries,
+  and read-through or write-through — Quark's cache is cache-aside only.
+- Caching `Count`, aggregates or streamed reads: they are not cached.
