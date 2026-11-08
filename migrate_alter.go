@@ -380,7 +380,7 @@ func (c *Client) sqliteAddForeignKey(ctx context.Context, exec Executor, table s
 
 func (c *Client) sqliteDropForeignKey(ctx context.Context, exec Executor, table, name string) error {
 	if name == "" {
-		return fmt.Errorf("%w: drop fk on %s: the operation names no constraint, and SQLite keeps no other handle", ErrInvalidQuery, table)
+		return fmt.Errorf("%w: drop fk on %s: the operation names no constraint, and SQLite keeps no other handle — set OpDropForeignKey.ForeignKey to the constraint name, or drop the column that carries it", ErrInvalidQuery, table)
 	}
 	return c.sqliteRebuild(ctx, exec, table, func(t *Table) error {
 		kept := t.ForeignKeys[:0]

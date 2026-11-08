@@ -22,6 +22,10 @@ import (
 // sets the session variable on every query, but with no policy installed
 // (or with the owner exemption still active) PostgreSQL applies no
 // predicate — every tenant reads every row, silently.
+//
+// What to do: run [InstallRLSPolicies] (or `quark tenant
+// install-rls-policies --from-models`) and verify again; the error lists
+// each table and its gap.
 var ErrRLSNotEnforced = quark.ErrRLSNotEnforced
 
 // VerifyFinding describes one table whose engine-level enforcement is
@@ -104,7 +108,7 @@ func VerifyRLSPolicies(ctx context.Context, client *quark.Client, opts InstallOp
 		return nil, errors.New("quarktenant: client must not be nil")
 	}
 	if dn := client.Dialect().Name(); dn != "postgres" {
-		return nil, fmt.Errorf("%w: verify-rls-policies requires PostgreSQL, got dialect %q",
+		return nil, fmt.Errorf("%w: verify-rls-policies requires PostgreSQL, got dialect %q — run it against the PostgreSQL client RowLevelSecurityNative uses",
 			quark.ErrUnsupportedFeature, dn)
 	}
 

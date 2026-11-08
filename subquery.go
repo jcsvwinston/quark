@@ -99,7 +99,7 @@ type subExpr struct{ s *Subquery }
 
 func (e subExpr) ToSQL(_ Dialect, _ *SQLGuard) (string, []any, error) {
 	if e.s == nil {
-		return "", nil, fmt.Errorf("%w: Sub(nil)", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: Sub(nil) — pass a built *Subquery", ErrInvalidQuery)
 	}
 	args := append([]any{}, e.s.args...)
 	return "(" + e.s.sql + ")", args, nil
@@ -130,7 +130,7 @@ type existsExpr struct {
 
 func (e existsExpr) ToSQL(_ Dialect, _ *SQLGuard) (string, []any, error) {
 	if e.s == nil {
-		return "", nil, fmt.Errorf("%w: Exists/NotExists(nil)", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: Exists/NotExists(nil) — pass a built *Subquery", ErrInvalidQuery)
 	}
 	args := append([]any{}, e.s.args...)
 	if e.negate {
@@ -155,10 +155,10 @@ type inSubExpr struct {
 
 func (e inSubExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	if e.s == nil {
-		return "", nil, fmt.Errorf("%w: In/NotIn subquery is nil", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: In/NotIn subquery is nil — pass a built *Subquery", ErrInvalidQuery)
 	}
 	if e.lhs == nil {
-		return "", nil, fmt.Errorf("%w: In/NotIn subquery requires a left-hand expression", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: In/NotIn subquery requires a left-hand expression — give it the column to compare, e.g. Col(\"id\")", ErrInvalidQuery)
 	}
 	lsql, largs, err := e.lhs.ToSQL(d, g)
 	if err != nil {

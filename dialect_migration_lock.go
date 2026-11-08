@@ -67,7 +67,7 @@ func (d *PostgresDialect) AcquireMigrationLock(ctx context.Context, db DBConnect
 	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock(hashtext($1))", name); err != nil {
 		_ = conn.Close()
 		if isPGLockTimeout(err) {
-			return nil, ErrLockTimeout
+			return nil, fmt.Errorf("%w (postgres advisory lock %q)", ErrLockTimeout, name)
 		}
 		return nil, fmt.Errorf("pg migration lock: acquire: %w", err)
 	}
@@ -151,7 +151,7 @@ func acquireMySQLLikeLock(ctx context.Context, db DBConnector, name string, time
 	}
 	if result.Int64 == 0 {
 		_ = conn.Close()
-		return nil, ErrLockTimeout
+		return nil, fmt.Errorf("%w (%s GET_LOCK %q)", ErrLockTimeout, dialectName, name)
 	}
 	return &mysqlMigrationLock{conn: conn, name: name, dialectName: dialectName}, nil
 }
@@ -220,7 +220,7 @@ func (d *MSSQLDialect) AcquireMigrationLock(ctx context.Context, db DBConnector,
 		return &mssqlMigrationLock{conn: conn, name: name}, nil
 	case status == -1:
 		_ = conn.Close()
-		return nil, ErrLockTimeout
+		return nil, fmt.Errorf("%w (mssql sp_getapplock %q)", ErrLockTimeout, name)
 	default:
 		_ = conn.Close()
 		return nil, fmt.Errorf("mssql migration lock: sp_getapplock returned status %d", status)
@@ -311,7 +311,7 @@ func (d *OracleDialect) AcquireMigrationLock(ctx context.Context, db DBConnector
 		return &oracleMigrationLock{conn: conn, name: name}, nil
 	case 1:
 		_ = conn.Close()
-		return nil, ErrLockTimeout
+		return nil, fmt.Errorf("%w (oracle DBMS_LOCK %q)", ErrLockTimeout, name)
 	default:
 		_ = conn.Close()
 		return nil, fmt.Errorf("oracle migration lock: DBMS_LOCK.REQUEST returned %d", result)

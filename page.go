@@ -25,7 +25,7 @@ type Page[T any] struct {
 //	page, err := quark.For[User](ctx, client).Where("active", "=", true).Paginate(50, 2)
 func (q *Query[T]) Paginate(pageSize, page int) (*Page[T], error) {
 	if q.client == nil {
-		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	if pageSize <= 0 {

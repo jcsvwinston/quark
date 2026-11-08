@@ -289,7 +289,7 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 	// Open database connection
 	db, err := sql.Open(driverName, dataSource)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrConnection, err)
+		return nil, fmt.Errorf("%w: open %q: %v — check the driver name and the DSN", ErrConnection, driverName, err)
 	}
 
 	return newClient(db, driverName, dataSource, false, opts)
@@ -323,7 +323,7 @@ func New(driverName, dataSource string, opts ...any) (*Client, error) {
 //     client, err := quark.NewWithDB("pgx", db)
 func NewWithDB(driverName string, db *sql.DB, opts ...any) (*Client, error) {
 	if db == nil {
-		return nil, fmt.Errorf("%w: quark.NewWithDB requires a non-nil *sql.DB", ErrConnection)
+		return nil, fmt.Errorf("%w: quark.NewWithDB requires a non-nil *sql.DB — open the pool with sql.Open first", ErrConnection)
 	}
 	if err := validateClientOpts("quark.NewWithDB", opts); err != nil {
 		return nil, err
@@ -374,7 +374,7 @@ func newClient(db *sql.DB, driverName, dataSource string, borrowed bool, opts []
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrConnection, err)
+		return nil, fmt.Errorf("%w: ping: %v — check that the server accepts connections from this host and that the DSN credentials are right", ErrConnection, err)
 	}
 
 	c := &Client{
@@ -472,7 +472,7 @@ func newClient(db *sql.DB, driverName, dataSource string, borrowed bool, opts []
 		rdb, err := sql.Open(driverName, rdsn)
 		if err != nil {
 			_ = c.Close()
-			return nil, fmt.Errorf("%w: open replica: %v", ErrConnection, err)
+			return nil, fmt.Errorf("%w: open replica: %v — check the DSN passed to WithReplicas", ErrConnection, err)
 		}
 		for _, opt := range opts {
 			if poolOpt, ok := opt.(PoolOption); ok {
@@ -486,7 +486,7 @@ func newClient(db *sql.DB, driverName, dataSource string, borrowed bool, opts []
 			// double-close if this ordering is ever refactored.
 			_ = rdb.Close()
 			_ = c.Close()
-			return nil, fmt.Errorf("%w: ping replica: %v", ErrConnection, err)
+			return nil, fmt.Errorf("%w: ping replica: %v — check that the replica accepts connections and the DSN passed to WithReplicas", ErrConnection, err)
 		}
 		c.replicas = append(c.replicas, rdb)
 	}
@@ -658,7 +658,7 @@ func applyTenantConfinement(q *BaseQuery, router *TenantRouter, client *Client, 
 		// WHERE predicate — the policy does it server-side. See
 		// ADR-0012.
 		if client.dialect.Name() != "postgres" {
-			q.err = fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
+			q.err = fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q — use RowLevelSecurityClient on this engine",
 				ErrUnsupportedFeature, client.dialect.Name())
 			return
 		}

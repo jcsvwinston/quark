@@ -296,7 +296,7 @@ func (q *Query[T]) List() ([]T, error) {
 		return nil, q.err
 	}
 	if q.client == nil {
-		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	// Strict reads (#247): feed the per-context N+1 detector. Gated here
@@ -554,7 +554,7 @@ func (q *Query[T]) Find(id any) (T, error) {
 		return zero, q.err
 	}
 	if q.client == nil {
-		return zero, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return zero, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	// DX-9: without this guard a PK-less model died deeper down with
 	// "invalid identifier: identifier is empty" — a message that named
@@ -603,7 +603,7 @@ func (q *Query[T]) Cursor() (*Cursor[T], error) {
 		return nil, q.err
 	}
 	if q.client == nil {
-		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	// Strict reads (#247): warn or reject an unbounded cursor before any
@@ -656,7 +656,7 @@ func (q *Query[T]) Cursor() (*Cursor[T], error) {
 //	})
 func (q *Query[T]) Iter(fn func(T) error) error {
 	if q.client == nil {
-		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	// Strict reads (#247): warn or reject an unbounded stream before any
@@ -721,7 +721,7 @@ func (q *Query[T]) Count() (int64, error) {
 		return 0, q.err
 	}
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	// A compound select (UNION / INTERSECT / EXCEPT) cannot be counted by
@@ -773,7 +773,7 @@ func (q *Query[T]) Count() (int64, error) {
 				return 0, err
 			}
 			if n != len(j.args) {
-				return 0, fmt.Errorf("%w: OnExpr on %q expected %d markers, substituted %d",
+				return 0, fmt.Errorf("%w: OnExpr on %q expected %d markers, substituted %d — pass one arg per '?' marker",
 					ErrInvalidQuery, j.table, len(j.args), n)
 			}
 			sqlBuf.WriteString(rendered)
@@ -988,7 +988,7 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 					return "", nil, err
 				}
 				if n != len(e.args) {
-					return "", nil, fmt.Errorf("%w: SelectExpr %q expected %d markers, substituted %d",
+					return "", nil, fmt.Errorf("%w: SelectExpr %q expected %d markers, substituted %d — pass one arg per '?' marker",
 						ErrInvalidQuery, e.alias, len(e.args), n)
 				}
 				sqlBuf.WriteString(rendered)
@@ -1052,7 +1052,7 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 	// JOIN clauses
 	if len(q.joins) > 0 {
 		if len(q.joins) > q.client.limits.MaxJoins {
-			return "", nil, fmt.Errorf("%w: query exceeds maximum of %d joins", ErrInvalidQuery, q.client.limits.MaxJoins)
+			return "", nil, fmt.Errorf("%w: query exceeds maximum of %d joins — raise Limits.MaxJoins with WithLimits, or split the query", ErrInvalidQuery, q.client.limits.MaxJoins)
 		}
 		for _, j := range q.joins {
 			if err := q.guard.ValidateIdentifier(j.table); err != nil {
@@ -1076,7 +1076,7 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 					return "", nil, err
 				}
 				if n != len(j.args) {
-					return "", nil, fmt.Errorf("%w: OnExpr on %q expected %d markers, substituted %d",
+					return "", nil, fmt.Errorf("%w: OnExpr on %q expected %d markers, substituted %d — pass one arg per '?' marker",
 						ErrInvalidQuery, j.table, len(j.args), n)
 				}
 				sqlBuf.WriteString(rendered)
@@ -1092,7 +1092,7 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 
 	// WHERE clause — enforce MaxWhereConditions limit
 	if q.client != nil && len(q.where) > q.client.limits.MaxWhereConditions {
-		return "", nil, fmt.Errorf("%w: query has %d WHERE conditions, exceeds maximum of %d",
+		return "", nil, fmt.Errorf("%w: query has %d WHERE conditions, exceeds maximum of %d — raise Limits.MaxWhereConditions with WithLimits, or split the query",
 			ErrInvalidQuery, len(q.where), q.client.limits.MaxWhereConditions)
 	}
 
@@ -1175,7 +1175,7 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 				return "", nil, err
 			}
 			if n != len(op.args) {
-				return "", nil, fmt.Errorf("%w: %s operand expected %d markers, substituted %d",
+				return "", nil, fmt.Errorf("%w: %s operand expected %d markers, substituted %d — pass one arg per '?' marker",
 					ErrInvalidQuery, op.kind, len(op.args), n)
 			}
 			sqlBuf.WriteString(" ")
@@ -1256,7 +1256,7 @@ func (q *Query[T]) buildSelect() (string, []any, error) {
 
 	// Enforce MaxQueryLength
 	if q.client != nil && q.client.limits.MaxQueryLength > 0 && len(sqlStr) > q.client.limits.MaxQueryLength {
-		return "", nil, fmt.Errorf("%w: generated SQL length %d exceeds maximum of %d bytes",
+		return "", nil, fmt.Errorf("%w: generated SQL length %d exceeds maximum of %d bytes — raise Limits.MaxQueryLength with WithLimits, or narrow the query",
 			ErrInvalidQuery, len(sqlStr), q.client.limits.MaxQueryLength)
 	}
 
@@ -1318,7 +1318,7 @@ func substitutePathMarkers(fragment string, expectedMarkers int, dialect Dialect
 		b.WriteByte(fragment[i])
 	}
 	if count != expectedMarkers {
-		return "", 0, fmt.Errorf("%w: raw fragment has %d '?' markers, expected %d (extraArgs mismatch)", ErrInvalidQuery, count, expectedMarkers)
+		return "", 0, fmt.Errorf("%w: raw fragment has %d '?' markers, expected %d (extraArgs mismatch) — pass exactly one extra arg per '?' marker", ErrInvalidQuery, count, expectedMarkers)
 	}
 	return b.String(), count, nil
 }
@@ -1515,7 +1515,7 @@ func (q *BaseQuery) buildWhereClause(conds []condition, argIndex int) (string, [
 			// did: refusing them would change what a call that works today
 			// does, which QADR-0010 leaves to the major.
 			if len(values) < 2 {
-				return "", nil, fmt.Errorf("%w: %s takes two values, got %d", ErrInvalidQuery, op, len(values))
+				return "", nil, fmt.Errorf("%w: %s takes two values, got %d — pass []any{low, high}", ErrInvalidQuery, op, len(values))
 			}
 			condSQL.WriteString(q.dialect.Placeholder(argIndex))
 			condSQL.WriteString(" AND ")
@@ -1565,7 +1565,7 @@ func listOperand(op string, v any) ([]any, error) {
 			return nil, fmt.Errorf("%w: %s takes a list of values, and %T is a single value to database/sql (a byte string); wrap it: []any{v}", ErrInvalidQuery, op, v)
 		}
 	default:
-		return nil, fmt.Errorf("%w: %s takes a slice or an array of values, got %T", ErrInvalidQuery, op, v)
+		return nil, fmt.Errorf("%w: %s takes a slice or an array of values, got %T — pass []any{v1, v2, ...} or a typed slice", ErrInvalidQuery, op, v)
 	}
 	out := make([]any, rv.Len())
 	for i := range out {
@@ -1849,7 +1849,7 @@ func (q *BaseQuery) loadPreloadTree(parents reflect.Value, ownerMeta *ModelMeta,
 // use a database view, RawQuery, or wait for the Phase 2 AST.
 func (q *Query[T]) aggregate(fn, column string) (float64, error) {
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	if err := q.guard.ValidateIdentifier(column); err != nil {
 		return 0, err
@@ -1935,7 +1935,7 @@ func (q *Query[T]) Max(column string) (float64, error) {
 func (q *Query[T]) WhereSubquery(column, operator, subquery string) *Query[T] {
 	c := q.clone()
 	if !c.client.limits.AllowRawQueries {
-		c.err = fmt.Errorf("%w: WhereSubquery requires AllowRawQueries to be enabled", ErrInvalidQuery)
+		c.err = fmt.Errorf("%w: WhereSubquery requires AllowRawQueries to be enabled — set Limits.AllowRawQueries with WithLimits", ErrInvalidQuery)
 		return c
 	}
 	c.where = ownedAppend(c.where, condition{

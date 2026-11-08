@@ -373,7 +373,7 @@ func (c *Client) applyOne(ctx context.Context, exec Executor, op Operation) erro
 		}
 		return c.dropCheck(ctx, exec, o.Table, o.Check)
 	default:
-		return fmt.Errorf("%w: unknown Operation type %T", ErrUnsupportedFeature, op)
+		return fmt.Errorf("%w: unknown Operation type %T — use one of the Op* types of this package", ErrUnsupportedFeature, op)
 	}
 }
 

@@ -173,7 +173,7 @@ func (q *BaseQuery) emitEvent(kind string, entity any) error {
 				"event", "quark.event.emit_failure",
 				"kind", kind, "table", q.table, "err", err)
 		}
-		return fmt.Errorf("%w: publish %s event for %s: %v",
+		return fmt.Errorf("%w: publish %s event for %s: %v — the write is committed; retry the emit, not the write",
 			ErrEventEmitFailed, kind, q.table, err)
 	}
 	return nil
@@ -561,7 +561,7 @@ func (q *Query[T]) Create(entity *T) error {
 		return q.err
 	}
 	if q.client == nil {
-		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	// DX-9: the insert path needs the PK for RETURNING / LastInsertId; a
 	// PK-less model used to die with "sql: no rows in result set", naming
@@ -778,7 +778,7 @@ func (q *Query[T]) Update(entity *T) (int64, error) {
 		return 0, q.err
 	}
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	// AQ-03: make the recursive save visible before it happens. A loaded
@@ -884,10 +884,10 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		return 0, q.err
 	}
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	if len(fields) == 0 {
-		return 0, fmt.Errorf("%w: UpdateFields requires at least one field name", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: UpdateFields requires at least one field name — pass the Go field names to write", ErrInvalidQuery)
 	}
 
 	if hook, ok := any(entity).(BeforeUpdateHook); ok {
@@ -939,14 +939,14 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 	for _, name := range fields {
 		idx, ok := idxByName[name]
 		if !ok {
-			return 0, fmt.Errorf("%w: UpdateFields: unknown field %q on %s", ErrInvalidQuery, name, t.Name())
+			return 0, fmt.Errorf("%w: UpdateFields: unknown field %q on %s — use the struct field's Go name", ErrInvalidQuery, name, t.Name())
 		}
 		dbTag := columnFromDBTag(t.Field(idx).Tag.Get("db"))
 		if dbTag == "" {
 			dbTag = name
 		}
 		if _, isPK := pkCols[dbTag]; isPK {
-			return 0, fmt.Errorf("%w: UpdateFields: cannot overwrite primary key column %q", ErrInvalidQuery, dbTag)
+			return 0, fmt.Errorf("%w: UpdateFields: cannot overwrite primary key column %q — remove it from the field list", ErrInvalidQuery, dbTag)
 		}
 		if err := q.guard.ValidateIdentifier(dbTag); err != nil {
 			return 0, err
@@ -989,7 +989,7 @@ func (q *Query[T]) UpdateFields(entity *T, fields ...string) (int64, error) {
 		}
 	} else {
 		if q.pk.Column == "" {
-			return 0, fmt.Errorf("%w: UpdateFields requires a primary key", ErrInvalidModel)
+			return 0, fmt.Errorf("%w: UpdateFields requires a primary key — tag a field pk:\"true\" or name a column db:\"id\"", ErrInvalidModel)
 		}
 		sqlBuf.WriteString(q.dialect.Quote(q.pk.Column))
 		sqlBuf.WriteString(" = ")
@@ -1092,16 +1092,16 @@ func (q *Query[T]) UpdateMap(data map[string]any) (int64, error) {
 		return 0, q.err
 	}
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	if len(data) == 0 {
-		return 0, fmt.Errorf("%w: no fields to update", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: no fields to update — pass a non-empty map of column to value", ErrInvalidQuery)
 	}
 
 	// Require WHERE clause for safety — validate BEFORE building SQL
 	if len(q.where) == 0 {
-		return 0, fmt.Errorf("%w: UpdateMap requires Where clause to prevent accidental full table update", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: UpdateMap requires Where clause to prevent accidental full table update — add a Where condition that selects the rows to change", ErrInvalidQuery)
 	}
 
 	// Under RowLevelSecurityClient the tenant column holds the resolved
@@ -1217,7 +1217,7 @@ func (q *BaseQuery) buildUpdate(v reflect.Value) (string, []any, error) {
 	}
 
 	if len(setClauses) == 0 {
-		return "", nil, fmt.Errorf("%w: no non-zero fields to update", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: no non-zero fields to update — set at least one non-zero field, or use UpdateFields to write zero values", ErrInvalidQuery)
 	}
 
 	var sql strings.Builder
@@ -1310,7 +1310,7 @@ func (q *BaseQuery) buildUpdateMap(data map[string]any) (string, []any, error) {
 				return "", nil, err
 			}
 			if n != len(eargs) {
-				return "", nil, fmt.Errorf("%w: UpdateMap expression for %q expected %d markers, substituted %d",
+				return "", nil, fmt.Errorf("%w: UpdateMap expression for %q expected %d markers, substituted %d — pass one arg per '?' marker",
 					ErrInvalidQuery, col, len(eargs), n)
 			}
 			setClauses = append(setClauses, fmt.Sprintf("%s = %s", q.dialect.Quote(col), sub))
@@ -1402,7 +1402,7 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 		return 0, q.err
 	}
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	if hook, ok := any(entity).(BeforeDeleteHook); ok {
@@ -1415,7 +1415,7 @@ func (q *Query[T]) Delete(entity *T) (int64, error) {
 	t := v.Type()
 
 	if q.pk.Column == "" {
-		return 0, fmt.Errorf("%w: no primary key field found", ErrInvalidModel)
+		return 0, fmt.Errorf("%w: no primary key field found — tag a field pk:\"true\" or name a column db:\"id\"", ErrInvalidModel)
 	}
 
 	hasDeletedAt := false
@@ -1467,11 +1467,11 @@ func (q *Query[T]) DeleteBy() (int64, error) {
 		return 0, q.err
 	}
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	if len(q.where) == 0 {
-		return 0, fmt.Errorf("%w: DeleteBy requires Where clause to prevent accidental full table delete", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: DeleteBy requires Where clause to prevent accidental full table delete — add a Where condition that selects the rows to delete", ErrInvalidQuery)
 	}
 
 	return q.hardDeleteWhere()
@@ -1492,7 +1492,7 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 		return 0, q.err
 	}
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 
 	if hook, ok := any(entity).(BeforeDeleteHook); ok {
@@ -1502,7 +1502,7 @@ func (q *Query[T]) HardDelete(entity *T) (int64, error) {
 	}
 
 	if q.pk.Column == "" {
-		return 0, fmt.Errorf("%w: no primary key field found", ErrInvalidModel)
+		return 0, fmt.Errorf("%w: no primary key field found — tag a field pk:\"true\" or name a column db:\"id\"", ErrInvalidModel)
 	}
 
 	v := reflect.ValueOf(entity).Elem()
@@ -1779,13 +1779,13 @@ func (q *Query[T]) Upsert(entity *T, conflictCols []string, updateCols []string)
 		return q.err
 	}
 	if q.client == nil {
-		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	// An empty conflict target has no portable meaning and used to diverge
 	// wildly by engine (PG: DO NOTHING, MySQL: panic on conflictCols[0],
 	// MSSQL/Oracle: invalid MERGE). Fail the same way everywhere.
 	if len(conflictCols) == 0 {
-		return fmt.Errorf("%w: Upsert requires at least one conflict column", ErrInvalidQuery)
+		return fmt.Errorf("%w: Upsert requires at least one conflict column — pass the unique or primary-key columns as conflictCols", ErrInvalidQuery)
 	}
 	if err := q.checkTenantUpsert(); err != nil {
 		return err
@@ -2123,7 +2123,7 @@ func (q *Query[T]) CreateBatch(entities []*T) error {
 		return q.err
 	}
 	if q.client == nil {
-		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	if len(entities) == 0 {
 		return nil
@@ -2577,13 +2577,13 @@ func (q *Query[T]) DeleteBatch(ids []any) (int64, error) {
 		return 0, q.err
 	}
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	if len(ids) == 0 {
 		return 0, nil
 	}
 	if q.pk.Column == "" {
-		return 0, fmt.Errorf("%w: no primary key field found", ErrInvalidModel)
+		return 0, fmt.Errorf("%w: no primary key field found — tag a field pk:\"true\" or name a column db:\"id\"", ErrInvalidModel)
 	}
 
 	table := q.fullTableName()
@@ -2676,12 +2676,12 @@ func (q *Query[T]) UpsertBatch(entities []*T, conflictCols []string, updateCols 
 		return q.err
 	}
 	if q.client == nil {
-		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	// Same contract as Upsert: an empty conflict target is an error, not an
 	// engine-dependent surprise (see Upsert).
 	if len(conflictCols) == 0 {
-		return fmt.Errorf("%w: UpsertBatch requires at least one conflict column", ErrInvalidQuery)
+		return fmt.Errorf("%w: UpsertBatch requires at least one conflict column — pass the unique or primary-key columns as conflictCols", ErrInvalidQuery)
 	}
 	if err := q.checkTenantUpsert(); err != nil {
 		return err
@@ -3083,7 +3083,7 @@ func (q *Query[T]) upsertBatchMSSQLKeys(ctx context.Context, entities []*T, merg
 		}
 		if ord < 0 || ord >= int64(len(entities)) {
 			_ = rows.Close()
-			return fmt.Errorf("%w: UpsertBatch read back key %d for row %d of a statement of %d", ErrInvalidQuery, key, ord, len(entities))
+			return fmt.Errorf("%w: UpsertBatch read back key %d for row %d of a statement of %d — the engine returned keys that do not match the rows: report it with the engine and driver versions; Upsert per row avoids this path", ErrInvalidQuery, key, ord, len(entities))
 		}
 		keys[ord] = key
 		written[ord]++
@@ -3193,13 +3193,13 @@ func (q *Query[T]) UpdateBatch(entities []*T) error {
 		return q.err
 	}
 	if q.client == nil {
-		return fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	if len(entities) == 0 {
 		return nil
 	}
 	if q.pk.Column == "" && !q.meta.HasCompositePK {
-		return fmt.Errorf("%w: no primary key field found", ErrInvalidModel)
+		return fmt.Errorf("%w: no primary key field found — tag a field pk:\"true\" or name a column db:\"id\"", ErrInvalidModel)
 	}
 
 	ctx, cancel := context.WithTimeout(q.ctx, q.client.limits.QueryTimeout)

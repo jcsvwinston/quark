@@ -635,7 +635,7 @@ func (r *TenantRouter) Tx(ctx context.Context, fn func(tx *Tx) error) error {
 	if r.config.Strategy == RowLevelSecurityNative && client.dialect.Name() != "postgres" {
 		// Refused before a transaction is opened; confineTx would refuse it
 		// too, but after a BEGIN with nothing to run under it.
-		return fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
+		return fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q — use RowLevelSecurityClient on this engine",
 			ErrUnsupportedFeature, client.dialect.Name())
 	}
 	return client.Tx(ctx, func(tx *Tx) error {

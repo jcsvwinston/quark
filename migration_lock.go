@@ -44,6 +44,10 @@ type Row = quarkdriver.Row
 // distributed locks at all). Distinct from generic driver errors.
 // It holds the value of quarkdriver.ErrLockTimeout, so errors.Is matches
 // an error a driver module built from either name.
+//
+// What to do: wait for the other migrator to finish and run again, or pass
+// a longer timeout to AcquireMigrationLock; if it never clears, look for a
+// stuck session holding the lock.
 var ErrLockTimeout = quarkdriver.ErrLockTimeout
 
 // AcquireMigrationLock attempts to acquire a cluster-wide advisory
@@ -79,7 +83,7 @@ var ErrLockTimeout = quarkdriver.ErrLockTimeout
 func (c *Client) AcquireMigrationLock(ctx context.Context, name string, timeout time.Duration) (MigrationLock, error) {
 	locker, ok := c.dialect.(MigrationLocker)
 	if !ok {
-		return nil, fmt.Errorf("%w: dialect %s does not support distributed migration locks", ErrUnsupportedFeature, c.dialect.Name())
+		return nil, fmt.Errorf("%w: dialect %s does not support distributed migration locks — run migrations from a single process, or implement quarkdriver.MigrationLocker on the dialect", ErrUnsupportedFeature, c.dialect.Name())
 	}
 	return locker.AcquireMigrationLock(ctx, sqlDBAdapter{client: c, db: c.db}, name, timeout)
 }

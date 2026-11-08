@@ -186,7 +186,7 @@ type inExpr struct {
 
 func (e inExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	if len(e.values) == 0 {
-		return "", nil, fmt.Errorf("%w: In/NotIn requires at least one value", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: In/NotIn requires at least one value — pass at least one, or skip the predicate when the list is empty", ErrInvalidQuery)
 	}
 	lsql, largs, err := e.lhs.ToSQL(d, g)
 	if err != nil {
@@ -292,7 +292,7 @@ type countDistinctExpr struct{ inner Expr }
 
 func (c countDistinctExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	if c.inner == nil {
-		return "", nil, fmt.Errorf("%w: CountDistinct requires a non-nil expression", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: CountDistinct requires a non-nil expression — pass the column, e.g. Col(\"id\")", ErrInvalidQuery)
 	}
 	s, args, err := c.inner.ToSQL(d, g)
 	if err != nil {
@@ -351,14 +351,14 @@ func (c *CaseBuilder) Else(result Expr) *CaseBuilder {
 
 func (c *CaseBuilder) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	if len(c.whens) == 0 {
-		return "", nil, fmt.Errorf("%w: Case requires at least one When branch", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: Case requires at least one When branch — add When(cond, result) before Else", ErrInvalidQuery)
 	}
 	var b strings.Builder
 	var args []any
 	b.WriteString("CASE")
 	for _, w := range c.whens {
 		if w.cond == nil || w.result == nil {
-			return "", nil, fmt.Errorf("%w: Case.When requires a non-nil condition and result", ErrInvalidQuery)
+			return "", nil, fmt.Errorf("%w: Case.When requires a non-nil condition and result — pass both as Expr values", ErrInvalidQuery)
 		}
 		csql, cargs, err := w.cond.ToSQL(d, g)
 		if err != nil {
@@ -405,7 +405,7 @@ type jsonExtractExpr struct {
 
 func (j jsonExtractExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	if d == nil {
-		return "", nil, fmt.Errorf("%w: JSONExtract requires a dialect", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: JSONExtract requires a dialect — render it through a query built with quark.For, which supplies the client's dialect", ErrInvalidQuery)
 	}
 	if g != nil {
 		if err := g.ValidateIdentifier(j.column); err != nil {
@@ -453,7 +453,7 @@ type arithExpr struct {
 
 func (a arithExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	if a.lhs == nil || a.rhs == nil {
-		return "", nil, fmt.Errorf("%w: arithmetic requires two non-nil operands", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: arithmetic requires two non-nil operands — pass two Expr values (a column, a literal or another expression)", ErrInvalidQuery)
 	}
 	lsql, largs, err := a.lhs.ToSQL(d, g)
 	if err != nil {

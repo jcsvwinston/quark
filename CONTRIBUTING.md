@@ -216,6 +216,22 @@ go test -run TestBenchmarkEngines -v -timeout 10m
 - **`go vet` + `gofmt`** — what CI's Lint lane actually runs; `make lint` reproduces it. (There is no golangci-lint config in this repo.)
 - **No `interface{}` in public APIs** — Quark's core value proposition is type safety. Generics or concrete types only.
 - **Error handling** — always wrap errors with `fmt.Errorf("...: %w", err)` for caller unwrapping.
+- **Error sentinels carry a recipe** — every exported `Err*` variable in a
+  published package (the root, `quarkdriver`, `quarktenant`, …; not
+  `internal/`) has a godoc with a sentence that begins `What to do:` and
+  names the step the caller should take. A sentinel that is returned bare
+  (no `%w` wrapping, so its text is all the user sees) carries the hint in
+  its message too, after a colon. A `fmt.Errorf("%w: …", ErrX)` wrap site
+  names the method that refused the call and, when there is a step to take
+  — an option to set, a method to call, a tag to add — says it; when the
+  only fix is the input, it says what the input must look like. Keep
+  `errors.Is` identity: never rename a sentinel or change which one a path
+  returns to improve a message. The convention test
+  `TestEveryExportedSentinelNamesWhatToDo` (`errors_recipe_test.go`) walks
+  the AST of the public packages, fails on a sentinel without the sentence,
+  and holds `website/docs/reference/api/errors.mdx` to the same list and
+  count — a new sentinel needs its godoc recipe, a row on that page, and
+  the published figure updated.
 - **No silent failures** — functions that can fail must return `error`.
 - **Tests alongside code** — add `_test.go` in the same package. Integration tests (requiring external databases) must be guarded by env-var checks or build tags.
 - **Comments on exported symbols** — every exported type and function must have a Go doc comment.

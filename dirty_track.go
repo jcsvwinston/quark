@@ -78,7 +78,7 @@ func (t *Tracked[T]) Changed() []string {
 // success so subsequent Save calls diff against the new state.
 func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 	if t == nil || t.Entity == nil {
-		return 0, fmt.Errorf("%w: nil tracked entity", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: nil tracked entity — pass the handle returned by Track()", ErrInvalidQuery)
 	}
 	if t.client == nil {
 		return 0, fmt.Errorf("%w: tracked entity has no client (was Track() called?)", ErrInvalidQuery)
@@ -203,7 +203,7 @@ func (t *Tracked[T]) Save(ctx context.Context) (int64, error) {
 		}
 	} else {
 		if t.pk.Column == "" {
-			return 0, fmt.Errorf("%w: dirty tracking requires a primary key", ErrInvalidModel)
+			return 0, fmt.Errorf("%w: dirty tracking requires a primary key — tag a field pk:\"true\" or name a column db:\"id\"", ErrInvalidModel)
 		}
 		sqlBuf.WriteString(t.dialect.Quote(t.pk.Column))
 		sqlBuf.WriteString(" = ")

@@ -42,16 +42,16 @@ func (q *Query[T]) PaginateAfter(pageSize int, after string) (*KeysetPage[T], er
 		return nil, q.err
 	}
 	if q.client == nil {
-		return nil, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	if pageSize <= 0 {
 		pageSize = 100
 	}
 	if q.meta == nil {
-		return nil, fmt.Errorf("%w: PaginateAfter needs a model with metadata", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: PaginateAfter needs a model with metadata — register the model with Client.RegisterModel", ErrInvalidQuery)
 	}
 	if q.pk.Column == "" {
-		return nil, fmt.Errorf("%w: PaginateAfter needs a primary key to make the order total", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: PaginateAfter needs a primary key to make the order total — tag a field pk:\"true\" or name a column db:\"id\"", ErrInvalidQuery)
 	}
 
 	// The ordering, made total with the primary key.
@@ -69,7 +69,7 @@ func (q *Query[T]) PaginateAfter(pageSize int, after string) (*KeysetPage[T], er
 	for i, o := range orders {
 		fm, ok := q.meta.FieldByCol[strings.ToLower(o.column)]
 		if !ok {
-			return nil, fmt.Errorf("%w: PaginateAfter: ORDER BY column %q is not a column of %s, so no token can be read from it",
+			return nil, fmt.Errorf("%w: PaginateAfter: ORDER BY column %q is not a column of %s, so no token can be read from it — order by a column of the model",
 				ErrInvalidQuery, o.column, q.table)
 		}
 		fields[i] = fm
@@ -158,14 +158,14 @@ func encodeKeysetToken(orders []order, values []any) (string, error) {
 func decodeKeysetToken(s string, orders []order) ([]any, error) {
 	b, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
-		return nil, fmt.Errorf("%w: PaginateAfter: the token is not one this query minted", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: PaginateAfter: the token is not one this query minted — pass the Next value of the previous page unchanged, or \"\" for the first page", ErrInvalidQuery)
 	}
 	var tok keysetToken
 	if err := json.Unmarshal(b, &tok); err != nil {
-		return nil, fmt.Errorf("%w: PaginateAfter: the token is not one this query minted", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: PaginateAfter: the token is not one this query minted — pass the Next value of the previous page unchanged, or \"\" for the first page", ErrInvalidQuery)
 	}
 	if len(tok.Order) != len(orders) || len(tok.Values) != len(orders) {
-		return nil, fmt.Errorf("%w: PaginateAfter: the token was minted under another ORDER BY", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: PaginateAfter: the token was minted under another ORDER BY — paginate with the same OrderBy the first page used", ErrInvalidQuery)
 	}
 	for i, o := range orders {
 		if tok.Order[i] != orderSpec(o) {

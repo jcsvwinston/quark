@@ -270,7 +270,7 @@ func (q *Query[T]) createBatchMSSQLChunk(ctx context.Context, chunk []*T, column
 			return false, nil
 		}
 		if ord < 0 || ord >= int64(len(chunk)) || !id.Valid {
-			return false, fmt.Errorf("%w: CreateBatch read back key %v for row %d of a chunk of %d", ErrInvalidQuery, id, ord, len(chunk))
+			return false, fmt.Errorf("%w: CreateBatch read back key %v for row %d of a chunk of %d — the engine returned keys that do not match the rows: report it with the engine and driver versions; Create per row avoids this path", ErrInvalidQuery, id, ord, len(chunk))
 		}
 		ids[ord] = id.Int64
 		got++
@@ -279,7 +279,7 @@ func (q *Query[T]) createBatchMSSQLChunk(ctx context.Context, chunk []*T, column
 		return false, wrapDBError(err)
 	}
 	if got != len(chunk) {
-		return false, fmt.Errorf("%w: CreateBatch inserted a chunk of %d rows and read back %d keys", ErrInvalidQuery, len(chunk), got)
+		return false, fmt.Errorf("%w: CreateBatch inserted a chunk of %d rows and read back %d keys — the engine returned keys that do not match the rows: report it with the engine and driver versions; Create per row avoids this path", ErrInvalidQuery, len(chunk), got)
 	}
 	pks := make([]any, len(chunk))
 	for k, entity := range chunk {

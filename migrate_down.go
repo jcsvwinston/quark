@@ -55,7 +55,12 @@ func (p Plan) Down() (Plan, error) {
 }
 
 // ErrIrreversibleOperation is returned by [Plan.Down] for an operation whose
-// inverse is not derivable from the plan. Check with errors.Is.
+// inverse is not derivable from the plan: a DROP keeps the object's name but
+// not its shape. Check with errors.Is.
+//
+// What to do: write the inverse the message names (the CREATE TABLE, ADD
+// COLUMN, CREATE INDEX, ADD CONSTRAINT or ADD CHECK) by hand in your down
+// migration.
 var ErrIrreversibleOperation = fmt.Errorf("operation cannot be reversed from the plan alone")
 
 func invertOperation(op Operation) (Operation, error) {
@@ -76,21 +81,21 @@ func invertOperation(op Operation) (Operation, error) {
 		return OpAlterColumn{Table: o.Table, Old: o.New, New: o.Old}, nil
 
 	case OpDropTable:
-		return nil, fmt.Errorf("%w: DROP TABLE %s — the plan records the name but not the table's shape",
+		return nil, fmt.Errorf("%w: DROP TABLE %s — the plan records the name but not the table's shape — write the CREATE TABLE by hand in your down migration",
 			ErrIrreversibleOperation, o.Table)
 	case OpDropColumn:
-		return nil, fmt.Errorf("%w: DROP COLUMN %s.%s — the plan records the name but not the column's type, nullability or default",
+		return nil, fmt.Errorf("%w: DROP COLUMN %s.%s — the plan records the name but not the column's type, nullability or default — write the ADD COLUMN by hand in your down migration",
 			ErrIrreversibleOperation, o.Table, o.Column)
 	case OpDropIndex:
-		return nil, fmt.Errorf("%w: DROP INDEX %s ON %s — the plan records the name but not the indexed columns or uniqueness",
+		return nil, fmt.Errorf("%w: DROP INDEX %s ON %s — the plan records the name but not the indexed columns or uniqueness — write the CREATE INDEX by hand in your down migration",
 			ErrIrreversibleOperation, o.Index, o.Table)
 	case OpDropForeignKey:
-		return nil, fmt.Errorf("%w: DROP FOREIGN KEY %s ON %s — the plan records the name but not the referenced table or columns",
+		return nil, fmt.Errorf("%w: DROP FOREIGN KEY %s ON %s — the plan records the name but not the referenced table or columns — write the ADD CONSTRAINT by hand in your down migration",
 			ErrIrreversibleOperation, fkLabel(o.ForeignKey), o.Table)
 	case OpDropCheck:
-		return nil, fmt.Errorf("%w: DROP CHECK %s ON %s — the plan records the name but not the expression",
+		return nil, fmt.Errorf("%w: DROP CHECK %s ON %s — the plan records the name but not the expression — write the ADD CHECK by hand in your down migration",
 			ErrIrreversibleOperation, o.Check, o.Table)
 	default:
-		return nil, fmt.Errorf("%w: %T", ErrIrreversibleOperation, op)
+		return nil, fmt.Errorf("%w: %T has no derivable inverse — write the down operation by hand", ErrIrreversibleOperation, op)
 	}
 }

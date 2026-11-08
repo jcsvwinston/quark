@@ -43,7 +43,7 @@ func (q *BaseQuery) tenantGuarded() bool {
 // errUpsertOutsideTenant is what an upsert returns when its conflict key is
 // held by a row of another tenant (QK-43).
 func (q *BaseQuery) errUpsertOutsideTenant() error {
-	return fmt.Errorf("%w: upsert into %s under RowLevelSecurityClient: a row with the same conflict key belongs to another tenant; it was not updated and no row was inserted",
+	return fmt.Errorf("%w: upsert into %s under RowLevelSecurityClient: a row with the same conflict key belongs to another tenant; it was not updated and no row was inserted — include the tenant column in the conflict key",
 		ErrConstraintViolation, q.table)
 }
 
@@ -90,10 +90,10 @@ func (q *BaseQuery) checkTenantUpsert() error {
 			ErrUnsupportedFeature, q.dialect.Name())
 	}
 	if q.meta == nil {
-		return fmt.Errorf("%w: Upsert under RowLevelSecurityClient needs model metadata", ErrInvalidModel)
+		return fmt.Errorf("%w: Upsert under RowLevelSecurityClient needs model metadata — register the model with Client.RegisterModel", ErrInvalidModel)
 	}
 	if _, ok := q.meta.FieldByCol[strings.ToLower(q.tenantCol)]; !ok {
-		return fmt.Errorf("%w: Upsert under RowLevelSecurityClient needs the tenant column %q on %s",
+		return fmt.Errorf("%w: Upsert under RowLevelSecurityClient needs the tenant column %q on %s — add the field to the model, or set TenantConfig.TenantColumn to the column it uses",
 			ErrInvalidModel, q.tenantCol, q.table)
 	}
 	return q.guard.ValidateIdentifier(q.tenantCol)
@@ -156,7 +156,7 @@ func (q *BaseQuery) guardedConflictClause(conflictCols, updateCols []string, arg
 		}
 		return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", "), args, true, nil
 	default:
-		return "", nil, false, fmt.Errorf("%w: no tenant-guarded conflict clause for dialect %q", ErrUnsupportedFeature, q.dialect.Name())
+		return "", nil, false, fmt.Errorf("%w: no tenant-guarded conflict clause for dialect %q — use RowLevelSecurityNative, or Create/Update with an explicit tenant filter on this engine", ErrUnsupportedFeature, q.dialect.Name())
 	}
 }
 
@@ -181,7 +181,7 @@ func (q *BaseQuery) finishGuardedDuplicateKey(ctx context.Context, v reflect.Val
 	for _, c := range conflictCols {
 		fm, ok := q.meta.FieldByCol[strings.ToLower(c)]
 		if !ok {
-			return fmt.Errorf("%w: conflict column %q is not a field of %s", ErrInvalidQuery, c, q.table)
+			return fmt.Errorf("%w: conflict column %q is not a field of %s — use a column name declared in the model's db tags", ErrInvalidQuery, c, q.table)
 		}
 		f := v.Field(fm.Index)
 		if (f.Kind() == reflect.Ptr || f.Kind() == reflect.Interface) && f.IsNil() {

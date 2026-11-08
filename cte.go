@@ -40,7 +40,7 @@ type cteEntry struct {
 func (q *Query[T]) With(name string, sub *Subquery) *Query[T] {
 	c := q.clone()
 	if sub == nil {
-		c.err = fmt.Errorf("%w: With(%q, nil) — subquery must be non-nil", ErrInvalidQuery, name)
+		c.err = fmt.Errorf("%w: With(%q, nil) — pass a built *Query as the CTE body", ErrInvalidQuery, name)
 		return c
 	}
 	if err := c.guard.ValidateIdentifier(name); err != nil {

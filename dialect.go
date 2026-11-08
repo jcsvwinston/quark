@@ -959,7 +959,7 @@ func DetectDialect(driverName string) (Dialect, error) {
 	case "oracle", "godror", "oci8":
 		return Oracle(), nil
 	default:
-		return nil, fmt.Errorf("%w: %s", ErrDialectNotSupported, driverName)
+		return nil, fmt.Errorf("%w: no dialect registered for driver %q — import the engine's driver module, or pass WithDialect / call RegisterDialect", ErrDialectNotSupported, driverName)
 	}
 }
 

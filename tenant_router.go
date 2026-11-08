@@ -211,7 +211,7 @@ func (r *TenantRouter) tenantFor(ctx context.Context, tx *Tx) (string, error) {
 		return r.ResolveTenant(ctx)
 	}
 	if fromCtx := r.resolver(ctx); fromCtx != "" && fromCtx != tx.tenantID {
-		return "", fmt.Errorf("%w: the query's context resolves tenant %q but the transaction was opened for tenant %q",
+		return "", fmt.Errorf("%w: the query's context resolves tenant %q but the transaction was opened for tenant %q — open the transaction for that tenant, or query with a context that resolves the same tenant (or none)",
 			ErrTenantMismatch, fromCtx, tx.tenantID)
 	}
 	return tx.tenantID, nil
@@ -249,7 +249,7 @@ func (r *TenantRouter) confineTx(ctx context.Context, tx *Tx) error {
 	}
 	if r.config.Strategy == RowLevelSecurityNative {
 		if tx.client.dialect.Name() != "postgres" {
-			return fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
+			return fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q — use RowLevelSecurityClient on this engine",
 				ErrUnsupportedFeature, tx.client.dialect.Name())
 		}
 		if _, err := tx.client.execStmt(ctx, tx.tx, stmt{kind: StatementExec, op: "EXEC"}, "SELECT set_config($1, $2, true)", []any{r.config.defaultNativeRLSVar(), tenantID}); err != nil {
@@ -331,7 +331,7 @@ func (r *TenantRouter) GetClient(ctx context.Context) (*Client, error) {
 		// tenant's rows — the silent degradation the strategy claims not
 		// to have.
 		if r.config.Strategy == RowLevelSecurityNative && r.config.BaseClient.dialect.Name() != "postgres" {
-			return nil, fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q",
+			return nil, fmt.Errorf("%w: RowLevelSecurityNative requires PostgreSQL, got dialect %q — use RowLevelSecurityClient on this engine",
 				ErrUnsupportedFeature, r.config.BaseClient.dialect.Name())
 		}
 		return r.config.BaseClient, nil

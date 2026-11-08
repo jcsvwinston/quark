@@ -232,6 +232,9 @@ type ColumnTypeMapper interface {
 // LockSuffix on an engine without row locks, AcquireMigrationLock on one
 // without a distributed lock. Package quark's quark.ErrUnsupportedFeature
 // holds this same value, so errors.Is matches under either name.
+//
+// What to do: branch on the dialect, or take the alternative the message
+// names — another lock mode, a distinct set operation, RawQuery.
 var ErrUnsupportedFeature = errors.New("feature not supported by dialect")
 
 // ErrLockTimeout is returned by AcquireMigrationLock when the lock
@@ -239,7 +242,10 @@ var ErrUnsupportedFeature = errors.New("feature not supported by dialect")
 // ErrUnsupportedFeature (which means the dialect doesn't model
 // distributed locks at all). Distinct from generic driver errors.
 // Package quark's quark.ErrLockTimeout holds this same value.
-var ErrLockTimeout = errors.New("migration lock acquisition timed out")
+//
+// What to do: wait for the other migrator to finish and run again, or pass
+// a longer timeout to AcquireMigrationLock.
+var ErrLockTimeout = errors.New("migration lock acquisition timed out: another migrator holds the lock; wait for it or pass a longer timeout to AcquireMigrationLock")
 
 // dialectMu guards dialects. A registration can happen after start-up — a
 // test registering its own dialect, a module that registers late — while

@@ -71,13 +71,13 @@ func (c *Client) RegisterModel(models ...any) error {
 		// on the cached meta; we wrap it in the public sentinel here.
 		if meta := GetModelMetaByType(t); meta != nil {
 			if meta.TZError != nil {
-				return fmt.Errorf("%w: %v", ErrInvalidTimezone, meta.TZError)
+				return fmt.Errorf("%w: %v — use an IANA name time.LoadLocation accepts", ErrInvalidTimezone, meta.TZError)
 			}
 			// Same fail-fast contract for the rest of the tag vocabulary
 			// (DX-8): a typo must break here naming every offending field,
 			// not emit DDL missing NOT NULL/UNIQUE/columns.
 			if meta.TagError != nil {
-				return fmt.Errorf("%w: %v", ErrInvalidTag, meta.TagError)
+				return fmt.Errorf("%w: %v — fix the token on each field named", ErrInvalidTag, meta.TagError)
 			}
 			// Legal but near-certainly wrong tag shapes warn instead of
 			// failing: a column really can be called "pk". See

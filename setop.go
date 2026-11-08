@@ -48,7 +48,7 @@ func setOpKeyword(d Dialect, kind string, all bool) (string, error) {
 			return "MINUS", nil
 		case "INTERSECT":
 			if all {
-				return "", fmt.Errorf("%w: INTERSECT ALL requires Oracle 21c+, which quark cannot assume without a version probe", ErrUnsupportedFeature)
+				return "", fmt.Errorf("%w: INTERSECT ALL requires Oracle 21c+, which quark cannot assume without a version probe — use distinct Intersect instead", ErrUnsupportedFeature)
 			}
 		}
 	case "mysql":
@@ -57,7 +57,7 @@ func setOpKeyword(d Dialect, kind string, all bool) (string, error) {
 		}
 	case "sqlite":
 		if all && (kind == "INTERSECT" || kind == "EXCEPT") {
-			return "", fmt.Errorf("%w: SQLite does not support INTERSECT ALL / EXCEPT ALL", ErrUnsupportedFeature)
+			return "", fmt.Errorf("%w: SQLite does not support INTERSECT ALL / EXCEPT ALL — use the distinct Intersect/Except", ErrUnsupportedFeature)
 		}
 	case "mssql", "sqlserver":
 		// T-SQL has INTERSECT and EXCEPT but no ALL variants of either.
@@ -66,7 +66,7 @@ func setOpKeyword(d Dialect, kind string, all bool) (string, error) {
 		// clean "unsupported" — reject it here so the caller gets the same
 		// ErrUnsupportedFeature every other unsupported dialect returns.
 		if all && (kind == "INTERSECT" || kind == "EXCEPT") {
-			return "", fmt.Errorf("%w: SQL Server does not support INTERSECT ALL / EXCEPT ALL", ErrUnsupportedFeature)
+			return "", fmt.Errorf("%w: SQL Server does not support INTERSECT ALL / EXCEPT ALL — use the distinct Intersect/Except", ErrUnsupportedFeature)
 		}
 	}
 	if all {
@@ -165,7 +165,7 @@ func (q *Query[T]) ExceptAll(other *Query[T]) *Query[T] {
 func (q *Query[T]) attachSetOp(kind string, all bool, other *Query[T]) *Query[T] {
 	c := q.clone()
 	if other == nil {
-		c.err = fmt.Errorf("%w: %s operand is nil", ErrInvalidQuery, kind)
+		c.err = fmt.Errorf("%w: %s operand is nil — pass a built *Query", ErrInvalidQuery, kind)
 		return c
 	}
 	if !c.lock.IsZero() {
@@ -177,7 +177,7 @@ func (q *Query[T]) attachSetOp(kind string, all bool, other *Query[T]) *Query[T]
 		return c
 	}
 	if !other.lock.IsZero() {
-		c.err = fmt.Errorf("%w: %s operand cannot have pessimistic-lock options", ErrUnsupportedFeature, kind)
+		c.err = fmt.Errorf("%w: %s operand cannot have pessimistic-lock options — drop ForUpdate/ForShare from the operand", ErrUnsupportedFeature, kind)
 		return c
 	}
 	if len(other.ctes) > 0 {
@@ -185,7 +185,7 @@ func (q *Query[T]) attachSetOp(kind string, all bool, other *Query[T]) *Query[T]
 		return c
 	}
 	if len(other.setOps) > 0 {
-		c.err = fmt.Errorf("%w: nested set-ops on a %s operand are not supported", ErrUnsupportedFeature, kind)
+		c.err = fmt.Errorf("%w: nested set-ops on a %s operand are not supported — chain Union/Intersect/Except on one outer query instead", ErrUnsupportedFeature, kind)
 		return c
 	}
 	// Mixed-kind guard (QK5-1). A chain like A.Union(B).Intersect(C)
