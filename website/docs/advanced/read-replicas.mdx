@@ -25,6 +25,10 @@ client, err := quark.New("pgx", primaryDSN,
 `New` opens one connection pool per replica DSN (same pool options and dialect
 as the primary) and pings each. `Close` closes them all.
 
+For running replicas in a service — lag and the reads to pin, a replica that
+is down or behind, and measuring the split — see
+[Read replicas in production](../guides/read-replicas-in-production).
+
 ## What routes where
 
 - **Reads** route to a replica — both **multi-row** reads (`List`, `Iter`,

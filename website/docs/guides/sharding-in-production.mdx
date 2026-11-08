@@ -1,0 +1,389 @@
+---
+sidebar_position: 16
+title: Sharding in production
+description: Running Quark over several shard databases — the shard key and the router, writes routed by the entity and reads by the key, what a scatter query costs, transactions on one shard, migrating and auditing every shard, adding a shard without moving data, tenants inside a shard, and how each claim is verified.
+---
+
+# Sharding in production
+
+This guide is for the person putting a service on several databases that
+each hold part of the data. The [Sharding](../advanced/sharding) page
+describes the API; this page is about operating it — choosing the key,
+what the router does and does not do for you, the cost of a query that
+touches every shard, how schema changes and new shards happen, how tenants
+and shards relate, and how to check that rows are where routing says.
+
+The code on this page is the package
+[`internal/integrations/sharding`](https://github.com/jcsvwinston/quark/tree/main/internal/integrations/sharding)
+of the Quark repository: an order service over two SQLite files that CI
+compiles and runs, and a test that fails when a block on this page stops
+matching the package's code.
+
+## Choosing the shard key
+
+The router resolves one shard per query from a string in the context; a
+query with no key, or an entity whose `ShardKey()` is empty, fails with
+`quark.ErrInvalidQuery` rather than search every shard. So the key must be
+something every read knows before it runs — the tenant, the customer, the
+account — and every row of one key must be able to live on one shard: a
+`JOIN` sees one shard, and a transaction runs on one shard. A key with few
+distinct values gives hot shards; a key that a read does not have forces a
+scatter.
+
+`HashShardFunc` hashes the key with FNV-1a onto the shard names in the
+order given, so the list of names is data placement: reorder it and every
+query routes somewhere else. Keep it with the configuration, not in code.
+
+## Opening the shards
+
+```go
+// Order is partitioned by tenant: every order of a tenant lives on the
+// tenant's shard, so a tenant's reads and writes never cross shards.
+type Order struct {
+    ID       int64  `db:"id" pk:"true"`
+    Tenant   string `db:"tenant_id" quark:"not_null"`
+    Customer string `db:"customer" quark:"not_null"`
+    Total    int64  `db:"total_cents"`
+}
+
+// ShardKey makes Order route itself on writes: WithShardKeyOf reads it.
+func (o Order) ShardKey() string { return o.Tenant }
+
+// Shards is the operator's map of shard name to client. The router keeps
+// its own copy and hands clients out only through For, so the service
+// keeps this map for the work the router does not do: migrating and
+// closing every shard, and auditing where the rows are.
+type Shards map[string]*quark.Client
+
+// Open opens one client per shard and the router over them. The names are
+// part of the data placement: HashShardFunc hashes a key onto the names in
+// the order given, so the list is configuration kept with the data, never
+// a literal that a refactor may reorder.
+func Open(dsns map[string]string, names []string) (Shards, *quark.ShardRouter, error) {
+    shards := make(Shards, len(dsns))
+    for name, dsn := range dsns {
+        c, err := quark.New("sqlite", dsn)
+        if err != nil {
+            _ = shards.Close()
+            return nil, nil, fmt.Errorf("shard %s: %w", name, err)
+        }
+        shards[name] = c
+    }
+    router, err := quark.NewShardRouter(shards, quark.DefaultShardResolver, quark.HashShardFunc(names))
+    if err != nil {
+        _ = shards.Close()
+        return nil, nil, err
+    }
+    return shards, router, nil
+}
+
+// Migrate runs the schema on every shard. The router has no migrate and
+// the CLI has no shard list: a shard that is missing a table fails every
+// query routed to it, so this runs before the service takes traffic and
+// again, on every shard, each time the model changes.
+func (s Shards) Migrate(ctx context.Context) error {
+    for name, c := range s {
+        if err := c.Migrate(ctx, &Order{}); err != nil {
+            return fmt.Errorf("shard %s: %w", name, err)
+        }
+    }
+    return nil
+}
+
+// Close closes every shard; the router closes nothing.
+func (s Shards) Close() error {
+    var errs []error
+    for _, c := range s {
+        errs = append(errs, c.Close())
+    }
+    return errors.Join(errs...)
+}
+```
+
+The router holds a copy of the map and hands clients out only through
+`For` and `GetClient`; it does not migrate, close or list them. The service
+keeps its own map for that, which is what `Shards` is.
+
+## Routing writes and reads
+
+```go
+// Place writes the order on the shard that owns its tenant.
+func Place(ctx context.Context, router *quark.ShardRouter, o *Order) error {
+    return quark.For[Order](quark.WithShardKeyOf(ctx, o), router).Create(o)
+}
+
+// OrdersOf reads a tenant's orders. A read carries no entity, so the key is
+// passed by hand; a query with no key fails rather than search every shard.
+// The key routes and does not filter: the shard holds every tenant that
+// hashes to it, so the query still says whose rows it wants.
+func OrdersOf(ctx context.Context, router *quark.ShardRouter, tenant string) ([]Order, error) {
+    return quark.For[Order](quark.WithShardKey(ctx, tenant), router).
+        Where("tenant_id", "=", tenant).
+        OrderBy("id", "DESC").
+        Limit(100).
+        List()
+}
+```
+
+The key routes; it does not filter. A shard holds every tenant that hashes
+to it, and a read without its own `WHERE` returns all of them
+(`TestConfinedKeepsTenantsApartInsideAShard` reads two tenants' rows
+through the shard router). The [last section](#several-tenants-on-one-shard)
+has the arrangement that confines a query to its tenant.
+
+## Scatter queries and their cost
+
+```go
+// LargestOrders is a cross-shard read, written as one on purpose: every
+// shard runs the query at the same time, each returns its own n largest,
+// and the merge keeps the n largest of all. Its cost is one query on every
+// shard per call, and the rows of every shard in memory before the merge.
+func LargestOrders(ctx context.Context, router *quark.ShardRouter, n int) ([]Order, error) {
+    return quark.ScatterGather(ctx, router,
+        func(q *quark.Query[Order]) *quark.Query[Order] {
+            return q.OrderBy("total_cents", "DESC").Limit(n)
+        },
+        quark.ScatterMerge[Order]{
+            Less:  func(a, b Order) bool { return a.Total > b.Total },
+            Limit: n,
+        })
+}
+
+// TotalOrders sums the count of every shard. The shards are disjoint, so
+// the sum is exact; a shard that fails fails the call, never a low total.
+func TotalOrders(ctx context.Context, router *quark.ShardRouter) (int64, error) {
+    return quark.ScatterCount[Order](ctx, router, nil)
+}
+```
+
+A scatter runs the same query on every shard at the same time and holds
+every shard's rows in memory before merging, so its cost is one query per
+shard per call and the sum of the per-shard results in memory. For a top-N
+the per-shard `Limit(n)` keeps that bounded. A scatter whose query sets no
+`Limit` is a `List` with no `Limit` on every shard, and that returns at
+most 100 rows per shard with a warning in the log
+(`TestScatterWithoutLimitIsCappedPerShard`), so the count is exact and the
+rows are not.
+
+Any shard that fails fails the call; there is no partial result. `ScatterCount`
+is the only merged aggregate: `AVG`, `MIN`, `MAX` and a cross-shard
+`GROUP BY` are not merged and run per shard, and there is no scatter write.
+
+## Transactions stay on one shard
+
+```go
+// Refund is a transaction on one shard: the router resolves the shard, the
+// shard's client opens the transaction, and every statement in it stays
+// there. There is no transaction across shards; a change that must touch
+// two tenants is two transactions and a reconciliation the service owns.
+func Refund(ctx context.Context, router *quark.ShardRouter, tenant string, id int64) error {
+    ctx = quark.WithShardKey(ctx, tenant)
+    client, err := router.GetClient(ctx)
+    if err != nil {
+        return err
+    }
+    return client.Tx(ctx, func(tx *quark.Tx) error {
+        o, err := quark.ForTx[Order](ctx, tx).Find(id)
+        if err != nil {
+            return err
+        }
+        o.Total = 0
+        _, err = quark.ForTx[Order](ctx, tx).UpdateFields(&o, "total_cents")
+        return err
+    })
+}
+```
+
+There is no transaction across shards and no two-phase commit. A change
+that must touch two tenants on two shards is two transactions, and the
+service owns the reconciliation if the second fails.
+
+## Migrations across shards
+
+Quark migrates one client at a time and the CLI knows no shard list, so a
+schema change is `Migrate` on every shard, as `Shards.Migrate` does, with
+the migrator's per-database lock keeping two instances from applying it
+twice on the same shard. The failure mode of a shard that was skipped is
+every query routed to it failing on the missing table or column, not a
+quiet degradation. Roll the schema out to every shard before the code that
+needs it, and let the audit below confirm the data.
+
+## Verifying where the rows are
+
+```go
+// Audit reads every shard directly and reports the rows whose tenant the
+// function would route elsewhere. It is the check that data landed where
+// routing says, and the check to run after a deployment that changed the
+// shard list or the function.
+func Audit(ctx context.Context, shards Shards, shardFor quark.ShardFunc) ([]string, error) {
+    var misplaced []string
+    for name, c := range shards {
+        err := quark.For[Order](ctx, c).Iter(func(o Order) error {
+            if owner := shardFor(o.Tenant); owner != name {
+                misplaced = append(misplaced, fmt.Sprintf("order %d of tenant %s is on %s and routes to %s", o.ID, o.Tenant, name, owner))
+            }
+            return nil
+        })
+        if err != nil {
+            return nil, fmt.Errorf("shard %s: %w", name, err)
+        }
+    }
+    return misplaced, nil
+}
+```
+
+`Audit` opens each shard directly and asks, for every row, whether the
+function would route it here (`TestRowsLandOnTheShardTheKeyRoutesTo`). It is
+how to check that writes land where reads will look, and the check to run
+after any change to the shard list or the function; `Shards.Migrate` is the
+other thing that runs over the service's own map rather than the router.
+
+## Adding a shard
+
+The shard set is fixed when the router is built: adding a shard is building
+a new router and swapping it in. The trap is the function. Re-hashing with
+`HashShardFunc` over three names instead of two routes about two tenants in
+three to a shard that does not have their rows
+(`TestAddingAShardWithoutMovingData` audits the old data against the new
+hash and finds them). Quark ships no consistent hashing and no data mover;
+the shard function is the seam, and a directory is the simplest one.
+
+```go
+// Directory is a shard function that adds a shard without moving data. The
+// tenants placed before the change keep the shard they are on, recorded
+// here when the new shard joins; every other tenant hashes over the new
+// list. Replacing the hash's list alone would route most existing tenants
+// to a shard that does not have their rows.
+type Directory struct {
+    Pinned map[string]string // tenant -> the shard it was on when the list changed
+    Hash   quark.ShardFunc   // over the new list, for everyone else
+}
+
+func (d Directory) ShardFor(tenant string) string {
+    if shard, ok := d.Pinned[tenant]; ok {
+        return shard
+    }
+    return d.Hash(tenant)
+}
+
+// Placements reads every shard and records which shard each tenant is on:
+// the Pinned map of a Directory, taken while the old router still serves.
+func Placements(ctx context.Context, shards Shards) (map[string]string, error) {
+    pinned := make(map[string]string)
+    for name, c := range shards {
+        err := quark.For[Order](ctx, c).Iter(func(o Order) error {
+            pinned[o.Tenant] = name
+            return nil
+        })
+        if err != nil {
+            return nil, fmt.Errorf("shard %s: %w", name, err)
+        }
+    }
+    return pinned, nil
+}
+```
+
+Take the placements while the old router still serves, build the new
+router over the grown map with `dir.ShardFor`, and audit against it: no
+row is misplaced, every old tenant reads its own shard, and the new shard
+takes the new tenants the hash sends to it. Moving a tenant later is a
+change to `Pinned` and a copy of its rows that the service performs.
+
+## Several tenants on one shard
+
+Quark adds the tenant predicate of `RowLevelSecurityClient` to a query only
+when the provider the query was built on is a `TenantRouter`. A
+`ShardRouter` hands back a plain client, so a query built on it carries no
+tenant predicate, even when that client is the base client of a tenant
+router. The two routers do not nest; they are composed the other way round,
+one tenant router per shard, with the shard chosen first from the same
+value.
+
+```go
+type tenantKey struct{}
+
+// WithTenant carries the tenant the request authenticated.
+func WithTenant(ctx context.Context, tenant string) context.Context {
+    return context.WithValue(ctx, tenantKey{}, tenant)
+}
+
+// TenantFromContext is the resolver both routers below read.
+func TenantFromContext(ctx context.Context) string {
+    tenant, _ := ctx.Value(tenantKey{}).(string)
+    return tenant
+}
+
+// Confined is one tenant router per shard, each confining queries to the
+// tenant's rows inside the shard's client. The shard router alone does not
+// do that: it hands back the shard's client, and Quark adds the tenant
+// predicate only to a query built on a TenantRouter — so when several
+// tenants share a shard, the query is built on the tenant router of the
+// shard, not on the shard router.
+type Confined struct {
+    shardFor quark.ShardFunc
+    routers  map[string]*quark.TenantRouter
+}
+
+func NewConfined(shards Shards, shardFor quark.ShardFunc) *Confined {
+    c := &Confined{shardFor: shardFor, routers: make(map[string]*quark.TenantRouter, len(shards))}
+    for name, client := range shards {
+        cfg := quark.DefaultTenantConfig()
+        cfg.Strategy = quark.RowLevelSecurityClient
+        cfg.BaseClient = client
+        c.routers[name] = quark.NewTenantRouter(cfg, TenantFromContext, nil)
+    }
+    return c
+}
+
+// Router returns the tenant router of the shard that owns the tenant in
+// ctx; the query is built on it.
+func (c *Confined) Router(ctx context.Context) (*quark.TenantRouter, error) {
+    tenant := TenantFromContext(ctx)
+    if tenant == "" {
+        return nil, errors.New("no tenant in context")
+    }
+    router, ok := c.routers[c.shardFor(tenant)]
+    if !ok {
+        return nil, fmt.Errorf("tenant %s routes to shard %s, which has no router", tenant, c.shardFor(tenant))
+    }
+    return router, nil
+}
+
+// TenantOrders reads the tenant's orders from the tenant's shard, confined
+// to the tenant.
+func TenantOrders(ctx context.Context, confined *Confined) ([]Order, error) {
+    router, err := confined.Router(ctx)
+    if err != nil {
+        return nil, err
+    }
+    return quark.For[Order](ctx, router).OrderBy("id", "DESC").Limit(100).List()
+}
+```
+
+`TenantOrders` returns the tenant's rows and no other tenant's, while the
+same shard read through the shard router returns every tenant on it
+(`TestConfinedKeepsTenantsApartInsideAShard`). A write through the tenant
+router also fills the tenant column from the context. The database-per-tenant
+strategy is not a way to compose either: its router closes a client's pool
+when it evicts a tenant from its cache, so a shard client shared by several
+tenants there would be closed under the others.
+
+## Verifying each claim
+
+- Rows land on the shard the key routes to, reads find them, a read with
+  no key fails, counts and top-N merge: `TestRowsLandOnTheShardTheKeyRoutesTo`.
+- The 100-row cap of a scatter without a `Limit`:
+  `TestScatterWithoutLimitIsCappedPerShard`.
+- A transaction on one shard: `TestRefundStaysOnOneShard`.
+- What re-hashing moves and what the directory keeps:
+  `TestAddingAShardWithoutMovingData`.
+- Tenants inside a shard: `TestConfinedKeepsTenantsApartInsideAShard`.
+
+## What this guide does not cover
+
+- Moving a tenant's rows between shards, or rebalancing: Quark has no data
+  mover; the directory above only decides where new rows go.
+- Cross-shard joins, cross-shard transactions, or merged aggregates beyond
+  `COUNT`: none exist.
+- Engine-level partitioning of one database: that is a property of the
+  table, unrelated to the router, and the two can be used together.

@@ -9,6 +9,10 @@ description: Add a query cache with tag invalidation, plus middleware, observers
 Quark's extension points wrap the normal `database/sql` path, so you can add a
 cache and full observability without changing a single model.
 
+For running the cache in a service — what to cache and for how long, what a
+write does and does not invalidate, several instances, hits and misses, and
+a backend that is down — see [Caching in production](../guides/caching-in-production).
+
 This page has two halves. **Caching** comes first, then **observability** —
 middleware, observers, slow-query logging, and OpenTelemetry.
 
@@ -57,8 +61,9 @@ fmt.Println(len(warm), "->", len(after))
 A write that knows the primary key of a row it changed — `Create`, `Update`,
 `UpdateFields`, `Tracked.Save`, `Delete`, `Restore`, `UpdateBatch`,
 `DeleteBatch`, and `Upsert` once it reads the key back — also invalidates that
-row's `<table>:<pk>` tag. Cache a by-key read under that tag (and the table tag)
-and a write to another row leaves it in place.
+row's `<table>:<pk>` tag. Cache a by-key read under that tag alone and a write
+to another row leaves it in place; an entry that also carries the table tag is
+dropped by every write to the table, because every write drops the table tag.
 
 The WHERE-based methods (`UpdateMap`, `DeleteBy`) and composite keys invalidate
 the table tag alone, because the affected keys are not enumerated. Raw SQL

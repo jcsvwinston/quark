@@ -83,18 +83,22 @@ anything: see [Manual Invalidation](#manual-invalidation).
 When a mutation knows the affected primary key — `Update`, `UpdateFields`,
 `Tracked.Save`, the by-PK delete paths, `Restore`, and `Create` or `Upsert`
 once the key is read back — Quark **also** invalidates the `<table>:<pk>` tag
-in the same `InvalidateTags` call. Cache by-PK queries with that tag to avoid
-flushing the whole table on every row write:
+in the same `InvalidateTags` call. Cache a by-PK query under that tag alone
+so that a write to another row leaves it in place; an entry that also carries
+the table tag goes with every write to the table, since every write drops the
+table tag:
 
 ```go
 user, err := quark.For[User](ctx, client).
     Where("id", "=", 1).
-    Cache(5*time.Minute, "users", "users:1"). // both tags
+    Cache(5*time.Minute, "users:1"). // the row tag alone
     First()
 ```
 
 A later `UpdateFields(&u, "name")` on the row with `id = 1` invalidates
-both tags; an update on a different row leaves `users:1` intact:
+the entry; an update on a different row leaves `users:1` intact, and so does
+a `WHERE`-based write (`UpdateMap`, `DeleteBy`) that happens to change row 1,
+because it drops the table tag only:
 
 ```go
 quark.For[User](ctx, client).UpdateFields(&u, "name") // u.ID == 1

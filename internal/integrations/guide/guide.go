@@ -1,15 +1,17 @@
 // Copyright 2026 jcsvwinston
 // SPDX-License-Identifier: Apache-2.0
 
-// Package guide holds the frameworks guide to the code of the fixtures.
+// Package guide holds a guide of the site to the code of the fixtures.
 //
-// The guide (website/docs/guides/frameworks.mdx) used to show code that
-// compiled nowhere: it pointed the reader at runnable examples that had left
-// the tree, and nothing noticed. Here every Go block of a section — and every
-// protobuf block, for the service definition the gRPC section shows — is
-// checked against the package that section describes, line for line, by a
-// test of that package: a block edited on the page and not in the code, or
-// the other way round, fails the fixture's own run.
+// The frameworks guide (website/docs/guides/frameworks.mdx) used to show
+// code that compiled nowhere: it pointed the reader at runnable examples that
+// had left the tree, and nothing noticed. Here every Go block of a section —
+// and every protobuf block, for the service definition the gRPC section
+// shows — is checked against the package that section describes, line for
+// line, by a test of that package: a block edited on the page and not in the
+// code, or the other way round, fails the fixture's own run. The use-case
+// guides (caching, read replicas and sharding in production) are held the
+// same way, by CheckPage, each to the fixture package that runs its code.
 //
 // The comparison is exact up to indentation. The page indents with four
 // spaces and gofmt with tabs, so leading tabs count as four spaces; and a
@@ -29,7 +31,8 @@ import (
 	"testing"
 )
 
-// Page is the guide's path from the repository root.
+// Page is the frameworks guide's path from the repository root — the page
+// Check holds a fixture to. CheckPage takes the page as an argument.
 const Page = "website/docs/guides/frameworks.mdx"
 
 var (
@@ -37,23 +40,32 @@ var (
 	blockRE   = regexp.MustCompile("(?ms)^```(?:go|protobuf)\n(.*?)^```")
 )
 
-// Check fails t unless the section of the guide under the level-two heading
-// "## <heading>" shows at least one Go or protobuf block, and every such
-// block is code of the given files (paths relative to the test's package
-// directory). heading "" names the text above the first level-two heading.
+// Check fails t unless the section of the frameworks guide under the
+// level-two heading "## <heading>" shows at least one Go or protobuf block,
+// and every such block is code of the given files (paths relative to the
+// test's package directory). heading "" names the text above the first
+// level-two heading.
 func Check(t testing.TB, heading string, files ...string) {
 	t.Helper()
-	raw, err := read()
+	CheckPage(t, Page, heading, files...)
+}
+
+// CheckPage is Check for any page of the site: page is the guide's path from
+// the repository root. A use-case guide calls it from the fixture that runs
+// the code the guide shows.
+func CheckPage(t testing.TB, page, heading string, files ...string) {
+	t.Helper()
+	raw, err := read(page)
 	if err != nil {
 		t.Fatal(err)
 	}
 	section, ok := Section(raw, heading)
 	if !ok {
-		t.Fatalf("%s has no section %q: the fixture is the code that section shows", Page, "## "+heading)
+		t.Fatalf("%s has no section %q: the fixture is the code that section shows", page, "## "+heading)
 	}
 	blocks := Blocks(section)
 	if len(blocks) == 0 {
-		t.Fatalf("the section %q of %s shows no Go or protobuf block, so there is nothing to hold to this fixture", "## "+heading, Page)
+		t.Fatalf("the section %q of %s shows no Go or protobuf block, so there is nothing to hold to this fixture", "## "+heading, page)
 	}
 
 	var source []string
@@ -69,7 +81,7 @@ func Check(t testing.TB, heading string, files ...string) {
 	for i, block := range blocks {
 		if msg := match(normalize(block), source); msg != "" {
 			t.Errorf("block %d of the section %q of %s is not code of %s: %s",
-				i+1, "## "+heading, Page, strings.Join(files, ", "), msg)
+				i+1, "## "+heading, page, strings.Join(files, ", "), msg)
 		}
 	}
 }
@@ -99,15 +111,15 @@ func Blocks(section string) []string {
 	return out
 }
 
-// read finds the guide by walking up from the working directory — the
+// read finds the page by walking up from the working directory — the
 // package directory under `go test` — to the repository root.
-func read() (string, error) {
+func read(page string) (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
 	for {
-		b, err := os.ReadFile(filepath.Join(dir, Page))
+		b, err := os.ReadFile(filepath.Join(dir, page))
 		if err == nil {
 			return string(b), nil
 		}
@@ -116,7 +128,7 @@ func read() (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no %s above the working directory: the fixtures are checked against the guide of the tree they live in", Page)
+			return "", fmt.Errorf("no %s above the working directory: the fixtures are checked against the guide of the tree they live in", page)
 		}
 		dir = parent
 	}

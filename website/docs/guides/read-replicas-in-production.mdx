@@ -1,0 +1,234 @@
+---
+sidebar_position: 15
+title: Read replicas in production
+description: Running Quark against a primary and its read replicas — what routes where, replication lag and reads that must see their own writes, transactions on the primary, what happens when a replica is down or behind, how to measure the split, and how each claim is verified.
+---
+
+# Read replicas in production
+
+This guide is for the person pointing a running service at read replicas.
+The [Read replicas](../advanced/read-replicas) page describes the API; this
+page is about operating it — which reads leave the primary, what
+replication lag does to each of them, which reads to pin, what a replica
+that is down or behind does to the service, and how to see where the reads
+went.
+
+The code on this page is the package
+[`internal/integrations/readreplicas`](https://github.com/jcsvwinston/quark/tree/main/internal/integrations/readreplicas)
+of the Quark repository: an order service that CI compiles and runs on
+SQLite — with a second file standing in for a replica that nothing
+replicates into, the worst case of lag — and a test that fails when a block
+on this page stops matching the package's code.
+
+## Opening the client
+
+```go
+// Order is the row this service writes once and reads many times.
+type Order struct {
+    ID       int64  `db:"id" pk:"true"`
+    Customer string `db:"customer" quark:"not_null"`
+    Total    int64  `db:"total_cents"`
+    Status   string `db:"status"`
+}
+
+// Open gives the service one client: the primary for writes, the replicas
+// for reads, each read going to the replica with the fewest connections in
+// use. New opens and pings every replica; one that does not answer is an
+// error, not a replica skipped, so the service does not start on a broken
+// topology. A replica that fails later is skipped for the cooldown.
+func Open(primaryDSN string, replicaDSNs ...string) (*quark.Client, error) {
+    return quark.New("sqlite", primaryDSN,
+        quark.WithReplicas(replicaDSNs...),
+        quark.WithReplicaStrategy(quark.ReplicaLeastConn),
+        quark.WithReplicaDownCooldown(10*time.Second),
+        quark.WithMaxOpenConns(8),
+    )
+}
+```
+
+`New` opens one pool per replica DSN with the primary's pool options and
+the primary's driver, and pings each. A replica that does not answer makes
+`New` fail with `quark.ErrConnection` (`TestReplicaDownAtOpenIsAnError`):
+the service does not start degraded on a broken topology, which also means
+a deployment during a replica outage needs the replica removed from the
+configuration first. The replica set is fixed at `New`; there is no way to
+add or remove a replica on a running client. `Close` closes every pool.
+
+Three strategies choose the replica for a read: round robin (the default),
+random, and the pool with the fewest connections in use. The last one
+steers reads away from a slow replica without any health check, which is
+why the service above uses it.
+
+## What routes where
+
+Every read built by the query builder goes to a replica: `List`, `Iter`,
+`Paginate`, `First`, `Find`, `Count`, the aggregates and the eager loads of
+`Preload`. Everything else stays on the primary: every write, including
+the read of the key an `INSERT` generates; every statement inside a
+transaction; every read under native row-level security, which must run
+on the connection that set the tenant; and every read on a context marked
+`Sticky`. Raw SQL through `Client.RawQuery` and `Client.Exec` runs on the
+primary too.
+
+Routing is decided per statement when it runs, not when the query is built,
+and the only observable difference between a routed and an unrouted read is
+the pool it ran on. A cached read computes its rows through the same
+routing, so a cache entry may hold rows that were already behind when they
+were read, for as long as its TTL.
+
+## Replica lag and read-your-writes
+
+Quark does not measure replication lag, does not ask the engine how far a
+replica is behind, and does not pin reads to the primary for a while after
+a write. A read routed to a replica returns what that replica has, and a
+replica that is behind returns a missing or older row with no error
+(`TestWritesLandOnThePrimaryAndReadsRoute` reads an empty replica right
+after a write). The one tool is `Sticky`, per read: the service decides,
+at each call site, whether that read must see the writes this request
+just made.
+
+## Reads that must see their own writes
+
+```go
+// Place writes the order. Writes never route: the INSERT runs on the
+// primary, and so does the read of the key it generates.
+func Place(ctx context.Context, client *quark.Client, o *Order) error {
+    return quark.For[Order](ctx, client).Create(o)
+}
+
+// Confirmation is the page shown right after Place. It must see the row
+// that was just written, so it pins the read to the primary: a replica may
+// not have it yet. Sticky marks this read only; the next query built on
+// the plain context routes again.
+func Confirmation(ctx context.Context, client *quark.Client, id int64) (Order, error) {
+    return quark.For[Order](quark.Sticky(ctx), client).Find(id)
+}
+
+// History is the customer's order list. It tolerates replication lag — an
+// order placed a moment ago may be missing from it — so it reads from a
+// replica.
+func History(ctx context.Context, client *quark.Client, customer string) ([]Order, error) {
+    return quark.For[Order](ctx, client).
+        Where("customer", "=", customer).
+        OrderBy("id", "DESC").
+        Limit(50).
+        List()
+}
+```
+
+`Sticky` marks the one context it is given; the next query built on the
+plain context routes again. A request that writes and then reads several
+times pins each of those reads, or runs them in a transaction.
+
+## Transactions stay on the primary
+
+```go
+// Settle reads and writes in one transaction. Every statement inside it
+// runs on the transaction's connection, which is on the primary, so the
+// reads see the write without Sticky.
+func Settle(ctx context.Context, client *quark.Client, id int64) (Order, error) {
+    var settled Order
+    err := client.Tx(ctx, func(tx *quark.Tx) error {
+        o, err := quark.ForTx[Order](ctx, tx).Find(id)
+        if err != nil {
+            return err
+        }
+        o.Status = "settled"
+        if _, err := quark.ForTx[Order](ctx, tx).Update(&o); err != nil {
+            return err
+        }
+        settled, err = quark.ForTx[Order](ctx, tx).Find(id)
+        return err
+    })
+    return settled, err
+}
+```
+
+Every statement in a transaction runs on the transaction's connection,
+which is on the primary, so the reads inside see the writes inside without
+`Sticky`. A read-heavy request that needs consistency across several reads
+can open a read-only transaction for the same effect, at the cost of
+holding a primary connection for its duration.
+
+## Health and fallback
+
+A routed read that fails with a connection failure — the connection was
+refused, reset or timed out at the network level, the pool reported a bad
+connection, or the engine reported a connection-class error — is retried
+once on the primary, and that replica is skipped for the cooldown (10 s in
+`Open`; the default is 5 s). Recovery is passive: when the cooldown ends,
+the next read tries the replica again, and a replica still down is marked
+down again. There is no health-check goroutine, so a replica that is down
+costs one failed read per cooldown; one that has recovered is back in
+rotation at the first read after the cooldown. The event is logged as
+`quark.replica.down`.
+
+Three things the failover does not do. It does not fail over on anything
+but a connection failure: a read that fails on a replica with a query error
+— a table or column the replica does not have yet, because its schema is
+behind the primary's — is returned as it failed, not quietly served by the
+primary (`TestSchemaDriftOnAReplicaIsAnError`). Roll the schema out to the
+replicas before the code that reads it. It does not fail over a context
+deadline or cancellation: that is the caller's timeout, not the replica's
+fault. And it does not fail over the primary: when every replica is down,
+every read runs on the primary, which then carries the whole read load,
+so size the primary for that or alert on the event.
+
+A failure at the network level, or a bad pooled connection, is recognised
+on every engine. A connection failure the engine reports as one of its own
+error codes is recognised on PostgreSQL by its SQLSTATE and on the other
+engines by the driver module (`drivers/mysql`, `drivers/mssql`, …);
+importing the bare `database/sql` driver instead leaves those codes
+unclassified, and such a read fails instead of failing over. Quark logs the
+missing classifier once at startup (`quark.driver.no_classifier`).
+
+## Measuring the split
+
+```go
+// Split counts the statements Quark reports: the SELECTs that could have
+// routed to a replica and the writes that never do. Quark reports every
+// statement to its observers but not the pool that ran it, so this is the
+// most the client can tell; which replica served what is read on the
+// servers.
+type Split struct{ Reads, Writes atomic.Int64 }
+
+func (s *Split) ObserveQuery(e quark.QueryEvent) {
+    switch e.Operation {
+    case "SELECT", "SELECT (stream)", "SELECT (cursor)", "PRELOAD":
+        s.Reads.Add(1)
+    case "EXEC":
+        s.Writes.Add(1)
+    }
+}
+```
+
+Quark reports every statement to its observers, with its operation, but not
+the pool that ran it, and exposes no per-replica counters: `Split` says how
+many reads could have routed, which is the ceiling of the split
+(`TestSplitCountsWhatCouldRoute`). Where each read actually went is read on
+the servers — connection and statement counters per host, or a distinct
+`application_name` in each replica's DSN so the engine's activity views
+attribute the connections.
+
+## Verifying each claim
+
+- Writes land on the primary, routed reads read the replica, `Sticky` and
+  transactions read the primary: `TestWritesLandOnThePrimaryAndReadsRoute`,
+  and Quark's `TestReadReplicaRouting`, `TestCreateBatchWritesToPrimary`
+  and `TestSingleRowReadsRouteToReplica`.
+- A replica down at `New` is an error: `TestReplicaDownAtOpenIsAnError`.
+- A query error on a replica is not failed over:
+  `TestSchemaDriftOnAReplicaIsAnError`.
+- Failover on a connection failure, the cooldown and the passive recovery:
+  Quark's `TestReplicaFailoverToPrimary` and `TestReplicaHealthRecovery`;
+  what counts as a connection failure: `TestIsTransientConnErr`.
+- What the client can and cannot count: `TestSplitCountsWhatCouldRoute`.
+
+## What this guide does not cover
+
+- Setting up replication, promoting a replica, or a proxy that does its own
+  routing; Quark only chooses a pool per read.
+- Reads that need a bounded lag (wait until the replica has applied a given
+  position): Quark has no such wait.
+- Pinning by session or by user for a period after a write: there is only
+  `Sticky`, per read.

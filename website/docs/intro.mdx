@@ -98,6 +98,9 @@ first-class rather than an afterthought.
 | [Code Generation](guides/codegen) | Opt-in `quark gen` — typed scanners, INSERT binder, compile-time column accessors |
 | [Web Frameworks](guides/frameworks) | net/http, chi, Echo, Gin, gRPC and Nucleus: one client per process, the request context, errors as status codes |
 | [Writing a driver](guides/writing-a-driver) | A driver module for an engine Quark does not ship, checked by the conformance kit and the engine suite |
+| [Caching in production](guides/caching-in-production) | What to cache and for how long, what a write invalidates and what it does not, stampedes across instances, hits and misses, a backend that is down |
+| [Read replicas in production](guides/read-replicas-in-production) | What routes where, replication lag and reads that must see their own writes, a replica that is down or behind, measuring the split |
+| [Sharding in production](guides/sharding-in-production) | The shard key and the router, scatter queries and their cost, migrating and auditing every shard, adding a shard without moving data, tenants inside a shard |
 
 ### Advanced
 
