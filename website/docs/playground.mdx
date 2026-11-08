@@ -1,0 +1,401 @@
+---
+title: Query playground
+description: Build a query with a form and read the SQL Quark emits for PostgreSQL, MySQL, MariaDB, SQLite, SQL Server and Oracle, without running anything.
+---
+
+import BrowserOnly from '@docusaurus/BrowserOnly';
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import React, {useState, useEffect, useRef} from 'react';
+
+export const WASM_GZIP_BYTES = 3259744;
+
+# Query playground
+
+This page shows the SQL Quark emits. You describe a query with the form —
+model, columns, filters, order, limit — and the page prints the statement
+each of the six dialects would receive, the arguments bound to its
+placeholders, and the Go chain that produces it.
+
+What it is not: it runs nothing. There is no database behind the page; Quark
+is compiled to WebAssembly and pointed at a driver that records the statement
+and answers an empty result. The SQL is what the Quark version this site is
+pinned to emits today; it is not a promise about the next version.
+
+## A rendered example
+
+This is what the form shows before you touch it. The chain is the Go you
+would write; the table is the statement each dialect receives. The text here is generated from the same code the live builder
+runs, and a test fails when the two drift apart.
+
+{/* playground-static-example:begin */}
+```go
+quark.For[User](ctx, client).
+	Select("id", "email", "country").
+	Where("country", "=", "ES").
+	Where("created_at", ">=", time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)).
+	OrderBy("created_at", "DESC").
+	Limit(10).
+	Offset(20).
+	List()
+```
+
+| Dialect | SQL |
+|---|---|
+| PostgreSQL | `` SELECT "id", "email", "country" FROM "users" WHERE "deleted_at" IS NULL  AND ("country" = $1 AND "created_at" >= $2) ORDER BY "created_at" DESC LIMIT 10 OFFSET 20 `` |
+| MySQL | `` SELECT `id`, `email`, `country` FROM `users` WHERE `deleted_at` IS NULL  AND (`country` = ? AND `created_at` >= ?) ORDER BY `created_at` DESC LIMIT 20, 10 `` |
+| MariaDB | `` SELECT `id`, `email`, `country` FROM `users` WHERE `deleted_at` IS NULL  AND (`country` = ? AND `created_at` >= ?) ORDER BY `created_at` DESC LIMIT 10 OFFSET 20 `` |
+| SQLite | `` SELECT "id", "email", "country" FROM "users" WHERE "deleted_at" IS NULL  AND ("country" = ? AND "created_at" >= ?) ORDER BY "created_at" DESC LIMIT 10 OFFSET 20 `` |
+| SQL Server | `` SELECT [id], [email], [country] FROM [users] WHERE [deleted_at] IS NULL  AND ([country] = @p1 AND [created_at] >= @p2) ORDER BY [created_at] DESC OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY `` |
+| Oracle | `` SELECT "ID", "EMAIL", "COUNTRY" FROM "USERS" WHERE "DELETED_AT" IS NULL  AND ("COUNTRY" = :1 AND "CREATED_AT" >= :2) ORDER BY "CREATED_AT" DESC OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY `` |
+
+Arguments bound, in placeholder order: `"ES"`, `"2026-01-01T00:00:00Z"`.
+{/* playground-static-example:end */}
+
+Three things to read in it. The soft-delete predicate `deleted_at IS NULL`
+is there because the `User` model has a `deleted_at` column, not because the
+form asked for it. MySQL writes the offset first (`LIMIT 20, 10`) while
+MariaDB, which shares its quoting, writes `LIMIT 10 OFFSET 20`. SQL Server and
+Oracle have no `LIMIT`: Quark emits `OFFSET … ROWS FETCH NEXT … ROWS ONLY`,
+and when the query has no `ORDER BY` of its own it adds one over the primary
+key, because those engines require an order for that clause to be valid.
+
+## The live builder
+
+The builder is Quark itself, compiled to WebAssembly. It is not loaded with
+the page: the button below fetches it, and the size on the button is measured
+in CI on every change — the build fails if the module grows past its budget
+or if this page states a size more than 10 % away from the real one.
+
+<Playground />
+
+## Presets
+
+The form covers the filtering family of the query bench. The presets cover
+the families the form cannot express with its fields, one fixed query each:
+a join, a grouped aggregate with `HAVING`, a `Count()`, a correlated `EXISTS`
+subquery, a window function, a `UNION`, and a read through a common table
+expression. Pick one from the first select of the form; the Go text shows
+how the fluent API spells it.
+
+export const DIALECT_NAMES = {
+  postgres: 'PostgreSQL',
+  mysql: 'MySQL',
+  mariadb: 'MariaDB',
+  sqlite: 'SQLite',
+  mssql: 'SQL Server',
+  oracle: 'Oracle',
+};
+
+export const DEFAULT_SPEC = {
+  model: 'User',
+  columns: ['id', 'email', 'country'],
+  filters: [
+    {column: 'country', op: '=', value: 'ES'},
+    {column: 'created_at', op: '>=', value: '2026-01-01'},
+  ],
+  orderBy: [{column: 'created_at', direction: 'DESC'}],
+  limit: 10,
+  offset: 20,
+  withTrashed: false,
+  preset: '',
+};
+
+export function loadPlayground(execUrl, wasmUrl) {
+  return new Promise((resolve, reject) => {
+    const start = () => {
+      const go = new window.Go();
+      fetch(wasmUrl)
+        .then((r) => {
+          if (!r.ok) throw new Error('could not fetch ' + wasmUrl + ' (' + r.status + ')');
+          return r.arrayBuffer();
+        })
+        .then((bytes) => WebAssembly.instantiate(bytes, go.importObject))
+        .then(({instance}) => {
+          go.run(instance);
+          const since = Date.now();
+          const poll = () => {
+            if (typeof window.quarkRender === 'function') return resolve();
+            if (Date.now() - since > 15000) return reject(new Error('the module did not start'));
+            setTimeout(poll, 25);
+          };
+          poll();
+        })
+        .catch(reject);
+    };
+    if (window.Go) return start();
+    const s = document.createElement('script');
+    s.src = execUrl;
+    s.onload = start;
+    s.onerror = () => reject(new Error('could not load ' + execUrl));
+    document.head.appendChild(s);
+  });
+}
+
+export const styles = {
+  box: {
+    border: '1px solid var(--ifm-color-emphasis-300)',
+    borderRadius: 'var(--ifm-global-radius)',
+    padding: '1rem',
+    marginBottom: '1.5rem',
+    background: 'var(--ifm-background-surface-color)',
+  },
+  row: {display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.6rem'},
+  label: {fontSize: '0.85rem', color: 'var(--ifm-color-emphasis-700)', minWidth: '5.5rem'},
+  control: {
+    font: 'inherit',
+    fontSize: '0.9rem',
+    padding: '0.25rem 0.4rem',
+    border: '1px solid var(--ifm-color-emphasis-400)',
+    borderRadius: '4px',
+    background: 'var(--ifm-background-color)',
+    color: 'var(--ifm-font-color-base)',
+  },
+  button: {
+    font: 'inherit',
+    fontSize: '0.9rem',
+    padding: '0.3rem 0.7rem',
+    border: '1px solid var(--ifm-color-primary)',
+    borderRadius: '4px',
+    background: 'var(--ifm-color-primary)',
+    color: 'var(--ifm-color-white)',
+    cursor: 'pointer',
+  },
+  linkButton: {
+    font: 'inherit',
+    fontSize: '0.85rem',
+    padding: '0.2rem 0.5rem',
+    border: '1px solid var(--ifm-color-emphasis-400)',
+    borderRadius: '4px',
+    background: 'transparent',
+    color: 'var(--ifm-font-color-base)',
+    cursor: 'pointer',
+  },
+  // Explicit colours: the theme styles <pre> for its highlighter, and a
+  // bare <pre><code> would otherwise inherit a dark background with no
+  // readable foreground in light mode.
+  pre: {
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    fontSize: '0.8rem',
+    margin: '0.25rem 0 0.75rem',
+    padding: '0.6rem 0.8rem',
+    background: 'var(--ifm-code-background)',
+    color: 'var(--ifm-font-color-base)',
+    border: '1px solid var(--ifm-color-emphasis-200)',
+    borderRadius: 'var(--ifm-global-radius)',
+  },
+  code: {
+    background: 'transparent',
+    color: 'inherit',
+    border: 'none',
+    padding: 0,
+    fontSize: 'inherit',
+  },
+  dialect: {fontWeight: 600, fontSize: '0.9rem', marginTop: '0.75rem'},
+  args: {fontSize: '0.8rem', color: 'var(--ifm-color-emphasis-700)'},
+  error: {
+    border: '1px solid var(--ifm-color-danger)',
+    borderRadius: '4px',
+    padding: '0.5rem 0.75rem',
+    color: 'var(--ifm-color-danger-darkest)',
+    background: 'var(--ifm-color-danger-contrast-background)',
+    fontSize: '0.9rem',
+  },
+};
+
+export const Builder = ({wasmUrl, execUrl}) => {
+  const [status, setStatus] = useState('idle');
+  const [loadError, setLoadError] = useState('');
+  const [spec, setSpec] = useState(DEFAULT_SPEC);
+  const [result, setResult] = useState(null);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+
+  const render = (s) => {
+    try {
+      const out = JSON.parse(window.quarkRender(JSON.stringify(s)));
+      setResult(out);
+    } catch (e) {
+      setResult({error: 'the module answered something unexpected: ' + e.message, dialects: [], catalog: null});
+    }
+  };
+
+  const load = () => {
+    setStatus('loading');
+    loadPlayground(execUrl, wasmUrl).then(
+      () => { if (mounted.current) { setStatus('ready'); render(spec); } },
+      (e) => { if (mounted.current) { setStatus('error'); setLoadError(e.message); } },
+    );
+  };
+
+  const change = (patch) => {
+    const next = {...spec, ...patch};
+    setSpec(next);
+    if (status === 'ready') render(next);
+  };
+
+  const mb = (WASM_GZIP_BYTES / 1e6).toFixed(1);
+
+  if (status !== 'ready') {
+    return (
+      <div style={styles.box}>
+        <p style={{marginBottom: '0.75rem'}}>
+          The builder downloads Quark compiled to WebAssembly. Nothing is fetched until you ask.
+        </p>
+        <button type="button" style={styles.button} onClick={load} disabled={status === 'loading'}>
+          {status === 'loading' ? 'Loading…' : 'Load the live builder (≈' + mb + ' MB compressed)'}
+        </button>
+        {status === 'error' && (
+          <p style={{...styles.error, marginTop: '0.75rem'}}>
+            The module could not be loaded: {loadError}. The rendered example above still applies.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const catalog = (result && result.catalog) || {models: [], operators: [], presets: []};
+  const model = catalog.models.find((m) => m.name === spec.model) || catalog.models[0] || {columns: []};
+  const usingPreset = spec.preset !== '';
+
+  const setFilter = (i, patch) => {
+    const filters = spec.filters.map((f, j) => (j === i ? {...f, ...patch} : f));
+    change({filters});
+  };
+  const removeFilter = (i) => change({filters: spec.filters.filter((_, j) => j !== i)});
+  const addFilter = () => change({filters: [...spec.filters, {column: model.columns[0].name, op: '=', value: ''}]});
+  const toggleColumn = (name) => {
+    const has = spec.columns.includes(name);
+    change({columns: has ? spec.columns.filter((c) => c !== name) : [...spec.columns, name]});
+  };
+  const switchModel = (name) => change({model: name, columns: [], filters: [], orderBy: [], withTrashed: false});
+  const order = spec.orderBy[0] || {column: '', direction: 'ASC'};
+  const setOrder = (patch) => {
+    const o = {...order, ...patch};
+    change({orderBy: o.column ? [o] : []});
+  };
+
+  return (
+    <div>
+      <div style={styles.box}>
+        <div style={styles.row}>
+          <span style={styles.label}>Preset</span>
+          <select style={styles.control} value={spec.preset} onChange={(e) => change({preset: e.target.value})}>
+            <option value="">Build from the form</option>
+            {catalog.presets.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+        {usingPreset ? (
+          <p style={{fontSize: '0.9rem', margin: 0}}>
+            {(catalog.presets.find((p) => p.id === spec.preset) || {}).description}
+          </p>
+        ) : (
+          <>
+            <div style={styles.row}>
+              <span style={styles.label}>Model</span>
+              <select style={styles.control} value={spec.model} onChange={(e) => switchModel(e.target.value)}>
+                {catalog.models.map((m) => (
+                  <option key={m.name} value={m.name}>{m.name} ({m.table})</option>
+                ))}
+              </select>
+              {model.softDelete && (
+                <label style={{fontSize: '0.9rem'}}>
+                  <input type="checkbox" checked={spec.withTrashed} onChange={(e) => change({withTrashed: e.target.checked})} />{' '}
+                  WithTrashed()
+                </label>
+              )}
+            </div>
+            <div style={styles.row}>
+              <span style={styles.label}>Columns</span>
+              {model.columns.map((c) => (
+                <label key={c.name} style={{fontSize: '0.9rem'}}>
+                  <input type="checkbox" checked={spec.columns.includes(c.name)} onChange={() => toggleColumn(c.name)} />{' '}
+                  {c.name}
+                </label>
+              ))}
+              <span style={styles.args}>(none checked selects every column)</span>
+            </div>
+            <div style={{...styles.row, alignItems: 'flex-start'}}>
+              <span style={{...styles.label, paddingTop: '0.3rem'}}>Filters</span>
+              <div style={{flex: 1}}>
+                {spec.filters.map((f, i) => (
+                  <div key={i} style={{...styles.row, marginBottom: '0.4rem'}}>
+                    <select style={styles.control} value={f.column} onChange={(e) => setFilter(i, {column: e.target.value})}>
+                      {model.columns.map((c) => (
+                        <option key={c.name} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                    <select style={styles.control} value={f.op} onChange={(e) => setFilter(i, {op: e.target.value})}>
+                      {catalog.operators.map((op) => (
+                        <option key={op} value={op}>{op}</option>
+                      ))}
+                    </select>
+                    {f.op !== 'IS NULL' && f.op !== 'IS NOT NULL' && (
+                      <input
+                        style={{...styles.control, minWidth: '10rem'}}
+                        value={f.value}
+                        placeholder={f.op === 'BETWEEN' ? 'low, high' : f.op.endsWith('IN') ? 'a, b, c' : (model.columns.find((c) => c.name === f.column) || {}).type}
+                        onChange={(e) => setFilter(i, {value: e.target.value})}
+                      />
+                    )}
+                    <button type="button" style={styles.linkButton} onClick={() => removeFilter(i)} aria-label="Remove filter">×</button>
+                  </div>
+                ))}
+                <button type="button" style={styles.linkButton} onClick={addFilter}>Add a filter</button>
+              </div>
+            </div>
+            <div style={styles.row}>
+              <span style={styles.label}>Order by</span>
+              <select style={styles.control} value={order.column} onChange={(e) => setOrder({column: e.target.value})}>
+                <option value="">none</option>
+                {model.columns.map((c) => (
+                  <option key={c.name} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+              <select style={styles.control} value={order.direction} onChange={(e) => setOrder({direction: e.target.value})} disabled={!order.column}>
+                <option value="ASC">ASC</option>
+                <option value="DESC">DESC</option>
+              </select>
+            </div>
+            <div style={styles.row}>
+              <span style={styles.label}>Limit</span>
+              <input type="number" min="0" style={{...styles.control, width: '6rem'}} value={spec.limit} onChange={(e) => change({limit: Number(e.target.value) || 0})} />
+              <span style={styles.label}>Offset</span>
+              <input type="number" min="0" style={{...styles.control, width: '6rem'}} value={spec.offset} onChange={(e) => change({offset: Number(e.target.value) || 0})} />
+              <span style={styles.args}>(a limit of 0 omits Limit(); List() then caps at 100)</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {result && result.error && <p style={styles.error}>{result.error}</p>}
+      {result && !result.error && (
+        <div style={styles.box}>
+          <div style={styles.dialect}>Go</div>
+          <pre style={styles.pre}><code style={styles.code}>{result.go}</code></pre>
+          {result.dialects.map((d) => (
+            <div key={d.name}>
+              <div style={styles.dialect}>{DIALECT_NAMES[d.name] || d.name}</div>
+              <pre style={styles.pre}><code style={styles.code}>{d.sql}</code></pre>
+              <div style={styles.args}>
+                {d.args.length === 0 ? 'No arguments bound.' : 'Arguments: ' + d.args.map((a) => JSON.stringify(a)).join(', ')}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const Playground = () => (
+  <BrowserOnly fallback={<p>The live builder needs JavaScript; the rendered example above does not.</p>}>
+    {() => {
+      const wasmUrl = useBaseUrl('/quark-playground/quark.wasm');
+      const execUrl = useBaseUrl('/quark-playground/wasm_exec.js');
+      return <Builder wasmUrl={wasmUrl} execUrl={execUrl} />;
+    }}
+  </BrowserOnly>
+);
