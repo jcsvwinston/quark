@@ -122,6 +122,7 @@ const sidebars: SidebarsConfig = {
         'reference/comparison',
         'reference/configuration',
         'reference/dialects',
+        'playground',
         'reference/extension-contract',
         'reference/type-matrix',
         'reference/benchmarks',

@@ -52,6 +52,9 @@ website/build/
 website/.docusaurus/
 website/node_modules/
 website/test-results/
+# The query playground's WebAssembly build: scripts/ci/build_playground.sh
+# writes it here for a local site build; the published site builds its own.
+website/static/quark-playground/
 
 # Bug-bash run artifacts (trazabilidad local; no se versionan)
 bugbash/REPORTS/

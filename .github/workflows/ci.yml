@@ -212,6 +212,14 @@ jobs:
           GOOS=linux GOARCH=arm64 go build ./...
           (cd cmd/quark && GOOS=linux GOARCH=arm64 go build ./...)
 
+      # The documentation site's query playground is the root package compiled
+      # to WebAssembly. The script fails when the compressed module grows past
+      # its budget, or when the size the page states drifts from the measured
+      # one, so a dependency that bloats the graph is caught here and not by a
+      # reader waiting for a download.
+      - name: Playground wasm weight
+        run: bash scripts/ci/check_playground_weight.sh
+
   drivers:
     name: Driver modules
     runs-on: ubuntu-latest
