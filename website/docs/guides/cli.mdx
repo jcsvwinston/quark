@@ -174,9 +174,24 @@ Tables come out in dependency order, parents before children. Each carries the
 clauses and indexes for every `rel:"belongs_to"` / `join:` pair, and the `Down`
 drops them in reverse order.
 
-`--dialect` accepts `postgresql|mysql|mariadb|sqlite|mssql|oracle` and defaults
-to the configured `database.default.driver`. The result is a regular migration
-file — review and edit it like any other.
+`--dialect` accepts `postgresql|postgres|mysql|mariadb|sqlite|mssql|sqlserver|oracle`
+and defaults to the configured `database.default.driver`. The result is a
+regular migration file — review and edit it like any other.
+
+Add `--emit json` to get the same statements as data instead of a file. The
+command then writes nothing and prints one JSON document on stdout:
+`schema` (the contract version, `1` today; it moves only on an incompatible
+change), `tool` (`quark`), `version` (what `quark version` prints), `dialect`
+(the normalized name: `postgres`, `mysql`, `mariadb`, `sqlite`, `mssql`,
+`oracle`), `models` (each struct's `name` and `table`), and `up` / `down` (the
+statement lists in execution order, without trailing semicolons). It exists so
+another tool can write the pair in its own migration format — Nucleus's
+`makemigrations` does. The progress line goes to stderr, and the flag requires
+`--from-models`. `--emit go` is the default and writes the file as above.
+
+```bash
+quark migrate create domain_schema --from-models ./models --dialect postgresql --emit json
+```
 
 :::caution The standalone binary cannot see your migrations
 **What happens.** `migrate up` / `migrate down` and `seed run` exit non-zero with
