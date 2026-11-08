@@ -19,24 +19,43 @@
 # auditorías/planes ya cerrados—: son actas de lo que era cierto entonces, y
 # "corregirlas" sería falsificar el registro.
 #
-# Uso: bash scripts/ci/check_internal_docs_drift.sh [dir]   (default docs)
+# Dos reglas más, nacidas de derivas que este guard no vio (QK-73, QK-77):
+#
+# - `docs/deprecations/**` es ESTRICTO: un aviso de deprecación cita ESTE repo
+#   por contrato (el test que cubre el alias, el manifiesto que lo justifica),
+#   así que ahí toda ruta entre comillas invertidas con extensión de fichero
+#   —con directorio o sin él— debe existir desde la raíz. Dos avisos citaron
+#   durante dos meses `tenant_router_test.go` y `examples/superapp/…`, que no
+#   existían, y la regla general no los miró: uno no llevaba directorio y el
+#   otro empezaba por un directorio que no es de este repo.
+# - `acceptance/*.md` entra en el barrido por defecto (README, COVERAGE,
+#   HANDOFF del arnés): hasta ahora nada los leía.
+#
+# Uso: bash scripts/ci/check_internal_docs_drift.sh [dir]   (default: docs acceptance)
 set -uo pipefail
 
-DOCS_DIR="${1:-docs}"
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT" || exit 1
 
-if [ ! -d "$DOCS_DIR" ]; then
-  echo "FAIL: no existe $DOCS_DIR"
-  exit 1
+if [ $# -gt 0 ]; then
+  DOCS_DIRS="$*"
+else
+  DOCS_DIRS="docs acceptance"
 fi
 
-DOCS_DIR="$DOCS_DIR" python3 - <<'PY'
+for d in $DOCS_DIRS; do
+  if [ ! -d "$d" ]; then
+    echo "FAIL: no existe $d"
+    exit 1
+  fi
+done
+
+DOCS_DIRS="$DOCS_DIRS" python3 - <<'PY'
 import os
 import re
 import sys
 
-docs_dir = os.environ["DOCS_DIR"]
+docs_dirs = os.environ["DOCS_DIRS"].split()
 
 # 1) Enlaces markdown relativos: [texto](ruta.md) / (ruta.md#ancla).
 #    Se buscan fuera de los bloques de código: un enlace no puede vivir en un
@@ -53,6 +72,14 @@ REPO_DIRS = ("internal/", "cmd/", "scripts/", "docs/", "website/",
              "acceptance/", "migrate/", "quarkmigrate/", "quarktenant/",
              "quarktest/", "cache/", "otel/", ".github/")
 path_re = re.compile(r'`((?:[\w.-]+/)+[\w.-]+\.(?:go|md|yml|yaml|json|sql|sh|ts|tsx|csv|txt))`')
+# 3) Regla estricta (docs/deprecations/**): cualquier fichero citado, con
+#    directorio o sin él, debe existir desde la raíz del repo.
+strict_path_re = re.compile(r'`((?:[\w.-]+/)*[\w.-]+\.(?:go|md|mdx|yml|yaml|json|sql|sh|ts|tsx|csv|txt))`')
+STRICT_DIRS = {"deprecations"}
+# Una ruta calificada con el nombre de otro repo de la suite (el contrato del
+# 2.0 vive en `quantum/docs/planes/quantum-2.0.md`) no es de este árbol: la
+# regla estricta la deja pasar en vez de exigir un fichero que nunca estará aquí.
+SIBLING_REPOS = ("quantum/", "nucleus/", "orbit/")
 
 # Escape por página, para las que documentan de arriba abajo el proyecto del
 # lector (el layout generado, el tutorial): ahí toda ruta es ajena.
@@ -65,9 +92,14 @@ scanned = 0
 HISTORICAL = {"adr", "assets", "benchmarks", "playbooks"}
 HISTORICAL_FILES = re.compile(r'^(RELEASE_NOTES_v|MIGRATION_v|AUDITORIA_|BUGBASH_|ANALISIS_)')
 
-for dirpath, dirnames, filenames in os.walk(docs_dir):
-    if os.path.dirname(dirpath) == docs_dir or dirpath == docs_dir:
-        dirnames[:] = [d for d in dirnames if d not in HISTORICAL]
+def walk_all():
+    for docs_dir in docs_dirs:
+        for dirpath, dirnames, filenames in os.walk(docs_dir):
+            if os.path.dirname(dirpath) == docs_dir or dirpath == docs_dir:
+                dirnames[:] = [d for d in dirnames if d not in HISTORICAL]
+            yield dirpath, filenames
+
+for dirpath, filenames in walk_all():
     for filename in filenames:
         if not filename.endswith(".md"):
             continue
@@ -86,6 +118,13 @@ for dirpath, dirnames, filenames in os.walk(docs_dir):
                 broken.append((page, target, "enlace"))
 
         if ESCAPE in text:
+            continue
+        if os.path.basename(dirpath) in STRICT_DIRS:
+            for target in strict_path_re.findall(text):
+                if target.startswith(SIBLING_REPOS):
+                    continue
+                if not os.path.exists(os.path.normpath(target)):
+                    broken.append((page, target, "ruta citada (regla estricta de deprecations)"))
             continue
         for target in path_re.findall(text):
             # Las rutas en código se citan desde la raíz del repo.

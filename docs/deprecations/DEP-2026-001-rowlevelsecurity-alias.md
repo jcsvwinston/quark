@@ -113,12 +113,12 @@ one-word rename described above.
 ## Validation
 
 - **Compatibility test:** `TestRowLevelSecurityAliasBackwardCompat` in
-  `tenant_router_test.go` asserts that both spellings name the same value and
+  `internal/enginesuite/tenant_router_test.go` asserts that both spellings name the same value and
   that the alias still type-checks inside a `TenantConfig`. It carries a
   sunset comment pointing at the alias declaration; that comment was re-dated
   alongside the marker.
 - **Exported-surface manifest:** the alias is recorded in
-  `examples/superapp/allowlist.json` with its reason, so the acceptance gate
+  `acceptance/allowlist.json` with its reason, so the acceptance gate
   does not demand that a deprecated symbol be exercised.
 - **Release note updated:** no. This is a documentation and godoc change; it
   does not cut a release, and there is no `Unreleased` changelog section to

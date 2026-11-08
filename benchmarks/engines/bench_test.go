@@ -28,10 +28,9 @@ const (
 )
 
 // limit is the target every control is judged against: quark's time over the
-// baseline's, at most 1.15 — "within 15 %". It is a PROPOSAL. The owner of the
-// decision has not adopted it; until then the bench measures against it so
-// that the work it is meant to steer has a number to move, and the page says
-// that the target is still open.
+// baseline's, at most 1.15 — "within 15 %". Adopted on 2026-10-06 (the owner's
+// decision 1 of A12 S0): the bench measures against it so that the work it is
+// meant to steer has a number to move, and the page states the target.
 const limit = 1.15
 
 // The two tolerances, and why they are what they are.
@@ -574,7 +573,7 @@ func renderRun(rows []reportRow, cfg config, servers map[string]string) string {
 	} else {
 		fmt.Fprintf(&b, "This run is %s: verdicts and ratios are compared with the record and marked ✗ where they differ, but only allocations are asserted.\n\n", why)
 	}
-	fmt.Fprintf(&b, "Medians of %d rounds; a round is about %s of each arm, in blocks of %s interleaved across the arms. Target (proposed, not adopted): quark within %.0f %% of every baseline a control names. "+
+	fmt.Fprintf(&b, "Medians of %d rounds; a round is about %s of each arm, in blocks of %s interleaved across the arms. Target (adopted 2026-10-06): quark within %.0f %% of every baseline a control names. "+
 		"A ratio within its band of %.2f is on the threshold and its verdict is not asserted.\n\n",
 		cfg.rounds, cfg.sample, cfg.block, 100*(limit-1), limit)
 

@@ -1,11 +1,14 @@
 # Cobertura de la API de Quark por el superapp
 
 > **Qué es esto.** Un inventario *manual* de qué superficie pública de Quark
-> ejerce cada componente del arnés de aceptación, hoy. Es un mapa de "qué se ha
-> tocado", no el gate: el denominador autoritativo (todo lo que Quark expone) lo
-> generará **S3 (`cmd/gen-apisurface` → `apisurface.json`)** y el reconciliador
-> de `control/manifest.go` lo cruzará contra lo invocado. Hasta entonces, este
-> documento evita que algo "se escape" sin querer.
+> ejerce cada componente del arnés de aceptación. Es un mapa de "qué se ha
+> tocado", no el gate: el denominador autoritativo (todo lo que Quark expone)
+> lo genera `cmd/gen-apisurface` en `apisurface.json` y el reconciliador de
+> `control/manifest.go` lo cruza contra lo invocado; las cifras del
+> denominador las publica el README y las comprueba `TestReadmeFiguresMatchManifest`.
+> Este documento es la vista humana de ese cruce, y
+> `scripts/ci/check_internal_docs_drift.sh` lo lee como al resto de la
+> documentación interna.
 >
 > **Cómo regenerarlo** (cuando se añadan slices): `grep` sobre las cuatro
 > superficies — ver § "Regeneración" al final.
@@ -119,5 +122,5 @@ grep -rhoE 'GetTableInfo|NewMigrator|codegen\.(Load|Render|Generate)|\.(Up|Down|
   ../../cmd/quark/commands/*.go ../../cmd/quark/internal/db/*.go | sort | uniq -c
 ```
 
-Cuando exista `apisurface.json` (S3), este documento pasa a ser una vista humana
-y el gate cuantitativo manda.
+`apisurface.json` existe y el gate cuantitativo manda; este documento es la
+vista humana.
