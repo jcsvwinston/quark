@@ -66,16 +66,16 @@ consecutive, which needs `innodb_autoinc_lock_mode` 0 or 1, and the bench's
 MySQL runs with 1. Under MySQL 8's default, 2, Quark sends one `INSERT` per
 row; an informational arm measures that form.
 
-### The target, which is not decided yet
+### The target
 
 Each control is judged by **Quark's time divided by the baseline's time**,
 and the target is that this ratio stays at or under **1.15** — "within 15 %" —
 against `database/sql` for every operation, and against pgx's native pool too
 for the single-row operations, InsertOne and FindByPK.
 
-**This target is a proposal. The project has not adopted it.** The bench
-measures against it so the work it is meant to steer has a number to move,
-and the verdicts below mean "against the proposed target".
+The target is 15 % over `database/sql` per operation; adopted 2026-10-06. The
+bench measures against it so the work it is meant to steer has a number to
+move, and the verdicts below mean "against that target".
 
 Why two baselines and not one: a single-row read through pgx's pool costs no
 less than through `database/sql`, so there is no reason Quark should be
@@ -83,8 +83,8 @@ further from either. A 100-row list is different — pgx scans rows faster than
 `database/sql` can, 10–25 % before any ORM code runs — so a target of 15 % from
 pgx on lists would ask Quark to beat the interface it is built on. The MySQL
 control applies the same 15 % to both ways a hand-written program sends the
-query; the proposal names PostgreSQL only, and that part is as open as the
-rest.
+query; the adopted target names PostgreSQL, and the MySQL controls apply the
+same figure so the statement work has a number to move.
 
 A control is **present** when Quark is within the limit of every baseline it
 is judged against, **partial** when within the limit of some, **absent** when

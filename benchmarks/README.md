@@ -237,7 +237,7 @@ on a real engine, as a meter with a verdict per operation:
 | `PG-05` | InsertBatch1000 — one statement, 1000 ids back | `database/sql` |
 | `MY-01` | FindByPK on MySQL | `database/sql` per call, and with the statement reused |
 
-The target is a **proposal, not adopted**: quark within 15 % of every baseline
+The target is adopted (2026-10-06): quark within 15 % of every baseline
 a control names. The record is the CI runner's (the `Engine bench` workflow
 sets `QUARK_BENCH_REFERENCE=1`), and the verdict and the ratio drift are
 asserted only there, and only on a CPU model the record was taken on

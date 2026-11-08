@@ -32,9 +32,9 @@ var referenceCPUs = []string{
 // program can send the query: per call (the driver prepares, executes and
 // closes) and with the statement prepared once and reused — MY-01 with
 // Quark's defaults, MY-02 with WithStatementCache. MY-03, the batch, is judged
-// against the same multi-row INSERT written by hand. The proposed target names
-// PostgreSQL only; the same 15 % is applied here so that the statement work
-// has a number to move, and it is as open as the rest.
+// against the same multi-row INSERT written by hand. The adopted target names
+// PostgreSQL; the same 15 % is applied here so that the statement work has a
+// number to move.
 //
 // PG-06, MY-02 and MY-03 (A12 Q3) record the medians of five runs on the
 // reference machine on 2026-10-06, which drew three of the five models in

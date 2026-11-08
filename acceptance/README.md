@@ -53,7 +53,7 @@ acceptance/
 │   ├── workload/        ← runnable: go run … → REPORTS/workload-<stamp>/{report,metrics,log}
 │   └── gen-apisurface/  ← go/packages+go/types → apisurface.json (determinista; go:generate)
 ├── REPORTS/             ← [generado, gitignored] artefactos de cada corrida del workload
-├── apisurface.json      ← [generado, versionado] denominador: 720 símbolos en 11 paquetes (cifra de `make regen`, 2026-09-03)
+├── apisurface.json      ← [generado, versionado] denominador: 928 símbolos en 12 paquetes (cifra que `TestReadmeFiguresMatchManifest` comprueba contra el JSON)
 ├── allowlist.json       ← out-of-scope justificado (Symbol.Key → motivo)
 └── main.go              ← [S6] wiring: corre exercisers, reconcilia, emite matriz a REPORTS/, gatea
 ```
@@ -121,7 +121,7 @@ corre en proceso.
 
 ## Scope (honesto)
 
-"100% cobertura" = 100% de la superficie **in-scope** (720 símbolos en el manifiesto al 2026-09-03, regenerado con `make regen`; el gate descuenta los de `allowlist.json`). Lo
+"100% cobertura" = 100% de la superficie **in-scope**: 928 símbolos en el manifiesto (regenerado con `make regen`), 581 en `allowlist.json` con motivo, 347 in-scope — el gate estricto cubre el 37 % del denominador; `TestReadmeFiguresMatchManifest` (`figures_test.go`) comprueba estas cifras contra los dos JSON en cada `make check`. Lo
 fuera de scope vive en `allowlist.json` con motivo (`Symbol.Key → razón`). Nota
 verificada al generar el manifiesto: los **diferidos a v1.2** (F6-3b binder
 codegen, scatter-gather + shard-key-from-entity, stampede cross-instancia) **no
@@ -142,7 +142,7 @@ matriz de `control/capability.go` lo codifica y el exerciser exige
 - [x] Núcleo de control: capability/report/manifest (stdlib)
 - [x] Dominio
 - [x] recorder (`Middleware` símbolo→SQL por `context` + `QueryObserver` filas; `Mark`/`Note`/`Collect` → `control.Invoked`, `Statements` → snapshots; e2e SQLite verde)
-- [x] cmd/gen-apisurface + apisurface.json (720 símbolos en 11 paquetes al 2026-09-03, determinista) + allowlist.json (S3)
+- [x] cmd/gen-apisurface + apisurface.json (928 símbolos en 12 paquetes, determinista; cifra comprobada por `TestReadmeFiguresMatchManifest`) + allowlist.json (S3)
 - [x] engine matrix runner (`engine/`, S4): docker-run + anti-fugas; verde en SQLite in-process + Postgres docker-run (pool 0/0, goroutines estables)
 - [~] exercisers (S5, en curso): harness `suite.go` + `crud` + `tx` + `builder` + `relations` + `security` verdes en SQLite y PG real (34 símbolos); faltan cache/tenant/migrate/security/ha/observability + oráculo de paridad
 - [~] CLI `cmd/quark` (S9): exerciser SQLite verde (`cli/`, 20/21 comandos + `tenant provision` en allowlist; database-first `model generate --from-table` → compila); falta manifiesto enumerado de cobra + golden output + cross-engine

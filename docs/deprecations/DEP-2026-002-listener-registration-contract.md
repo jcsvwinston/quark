@@ -152,7 +152,7 @@ nothing: the fix belongs to whoever ships the driver module.
   adapter path this notice covers. That assertion is removed in the same PR
   that removes the symbols.
 - **Exported-surface manifest:** all four names carry their reason in
-  `examples/superapp/allowlist.json`, so the acceptance gate does not demand
+  `acceptance/allowlist.json`, so the acceptance gate does not demand
   that a driver-module contract be exercised as an application entry point.
 - **Release note updated:** no. This is a documentation and godoc change; it
   does not cut a release, and there is no `Unreleased` changelog section to
