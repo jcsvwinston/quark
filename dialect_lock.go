@@ -80,7 +80,7 @@ func (m *MSSQLDialect) LockSuffix(opts LockOptions) (string, string, error) {
 		return "", "", fmt.Errorf("%w: mssql has no NOWAIT for table hints; use SET LOCK_TIMEOUT 0 in your transaction or RawQuery", ErrUnsupportedFeature)
 	}
 	if opts.Mode == LockForShare && opts.SkipLocked {
-		return "", "", fmt.Errorf("%w: mssql cannot skip locked rows under a shared lock (HOLDLOCK is SERIALIZABLE, and READPAST needs READ COMMITTED or REPEATABLE READ)", ErrUnsupportedFeature)
+		return "", "", fmt.Errorf("%w: mssql cannot skip locked rows under a shared lock (HOLDLOCK is SERIALIZABLE, and READPAST needs READ COMMITTED or REPEATABLE READ); use ForUpdate().SkipLocked(), or RawQuery with READPAST under READ COMMITTED", ErrUnsupportedFeature)
 	}
 	hints := make([]string, 0, 3)
 	switch opts.Mode {

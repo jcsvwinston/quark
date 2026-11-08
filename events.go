@@ -166,7 +166,7 @@ func NewListenerFactory(client *Client) *ListenerFactory {
 // portable equivalent and Quark does not emulate it with polling.
 func (f *ListenerFactory) CreateListener() (EventListener, error) {
 	if f.client.dialect.Name() != "postgres" {
-		return nil, fmt.Errorf("%w: LISTEN/NOTIFY listener is PostgreSQL-only, dialect %q has no equivalent (ADR-0019)",
+		return nil, fmt.Errorf("%w: LISTEN/NOTIFY listener is PostgreSQL-only, dialect %q has no equivalent — poll a table or use an external broker on this engine",
 			ErrDialectNotSupported, f.client.dialect.Name())
 	}
 	newListener, ok := quarkdriver.LookupListenerFactory("postgres")

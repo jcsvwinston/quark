@@ -128,19 +128,29 @@ func DefaultInstallOptions() InstallOptions {
 
 // ErrNoTenantColumn is returned by [InstallRLSPolicies] when a
 // registered model does not declare the configured TenantColumn.
-// Wrap your model with the column or skip it from registration.
+//
+// What to do: add the column to the model (a field whose db tag is the
+// configured TenantColumn), set TenantColumn to the column it uses, or do
+// not register that model on the tenant Client.
 var ErrNoTenantColumn = errors.New("quarktenant: model is missing the configured TenantColumn")
 
-// ErrNoRegisteredModels is returned when [InstallRLSPolicies] is
-// invoked on a Client that has no models registered. Register
-// models with [quark.Client.RegisterModel] before calling.
-var ErrNoRegisteredModels = errors.New("quarktenant: no models registered on the Client")
+// ErrNoRegisteredModels is returned bare when [InstallRLSPolicies] or
+// [VerifyRLSPolicies] is invoked on a Client that has no models
+// registered, so its text carries the hint.
+//
+// What to do: call [quark.Client.RegisterModel] for each tenant-scoped
+// model before installing or verifying the policies.
+var ErrNoRegisteredModels = errors.New("quarktenant: no models registered on the Client: call RegisterModel for each tenant-scoped model before InstallRLSPolicies or VerifyRLSPolicies")
 
 // ErrInvalidCast is returned by [InstallRLSPolicies] when the
 // TenantColumnSQLCast value (or the `--cast` CLI flag) does not match
 // a single PostgreSQL type token. See [castIdentifier] for the
 // allowed shape. This guard exists to prevent the policy SQL from
 // being extended with arbitrary statements via the cast input.
+//
+// What to do: pass a single PostgreSQL type token (text, uuid, bigint,
+// varchar(64)), or leave the cast empty to derive it from the field's
+// Go type.
 var ErrInvalidCast = errors.New("quarktenant: invalid SQL cast")
 
 // InstallRLSPolicies generates the policy DDL (and, when
@@ -176,7 +186,7 @@ func InstallRLSPolicies(ctx context.Context, client *quark.Client, opts InstallO
 		return nil, errors.New("quarktenant: client must not be nil")
 	}
 	if dn := client.Dialect().Name(); dn != "postgres" {
-		return nil, fmt.Errorf("%w: install-rls-policies requires PostgreSQL, got dialect %q",
+		return nil, fmt.Errorf("%w: install-rls-policies requires PostgreSQL, got dialect %q — run it against the PostgreSQL client RowLevelSecurityNative uses",
 			quark.ErrUnsupportedFeature, dn)
 	}
 
@@ -274,7 +284,7 @@ func renderPolicyDDL(model any, opts InstallOptions) ([]string, error) {
 
 	field, ok := meta.FieldByCol[opts.TenantColumn]
 	if !ok {
-		return nil, fmt.Errorf("%w: model %s (table %q) does not declare column %q",
+		return nil, fmt.Errorf("%w: model %s (table %q) does not declare column %q — add the field to the model, set TenantColumn to the column it uses, or do not register the model",
 			ErrNoTenantColumn, modelTypeName(model), table, opts.TenantColumn)
 	}
 

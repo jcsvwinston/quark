@@ -168,10 +168,10 @@ type overExpr struct {
 
 func (e overExpr) ToSQL(d Dialect, g *SQLGuard) (string, []any, error) {
 	if e.inner == nil {
-		return "", nil, fmt.Errorf("%w: Over requires a non-nil inner expression", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: Over requires a non-nil inner expression — pass the aggregate or function to window, e.g. Count()", ErrInvalidQuery)
 	}
 	if e.w == nil {
-		return "", nil, fmt.Errorf("%w: Over requires a non-nil Window", ErrInvalidQuery)
+		return "", nil, fmt.Errorf("%w: Over requires a non-nil Window — build one with NewWindow().PartitionBy(...).OrderBy(...)", ErrInvalidQuery)
 	}
 	isql, iargs, err := e.inner.ToSQL(d, g)
 	if err != nil {

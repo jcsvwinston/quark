@@ -55,12 +55,12 @@ func (c *Client) createTable(ctx context.Context, exec Executor, model any) erro
 	}
 	// Fail fast on an invalid quark:"tz=..." tag before emitting any DDL.
 	if meta.TZError != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidTimezone, meta.TZError)
+		return fmt.Errorf("%w: %v — use an IANA name time.LoadLocation accepts", ErrInvalidTimezone, meta.TZError)
 	}
 	// And on any other invalid tag token (DX-8) — the DDL this function is
 	// about to emit would silently drop whatever the typo meant to declare.
 	if meta.TagError != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidTag, meta.TagError)
+		return fmt.Errorf("%w: %v — fix the token on each field named", ErrInvalidTag, meta.TagError)
 	}
 	if c.logger != nil {
 		for _, w := range meta.TagWarnings {

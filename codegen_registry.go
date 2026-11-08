@@ -173,6 +173,11 @@ func lookupTypedBinder(t reflect.Type) (TypedBinder, bool) {
 // reflection path, so it is transparent to callers — it only surfaces when
 // generated code is invoked directly, or when a generated file predates the
 // current contract version and the version gate keeps it from being used.
+//
+// What to do: nothing when it comes through the ORM — the reflection path
+// already took over. When you call the generated code directly, regenerate
+// it with `quark gen` and use the ORM method for the operation it does not
+// cover.
 var ErrGeneratedStub = errors.New("quark: generated code does not cover this operation (UPDATE/partial/batch binding, or a non-integer primary key); the reflection path is used instead")
 
 // StubScanner is the inert scanner registered by generated code that predates

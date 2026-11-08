@@ -592,7 +592,7 @@ func checkOperatorDialect(d Dialect, op string) error {
 		if d != nil {
 			name = d.Name()
 		}
-		return fmt.Errorf("%w: operator %q is a PostgreSQL operator (array, range and network containment) and this query runs on %s",
+		return fmt.Errorf("%w: operator %q is a PostgreSQL operator (array, range and network containment) and this query runs on %s — run it on PostgreSQL, or express the predicate with a portable operator",
 			ErrUnsupportedFeature, op, name)
 	}
 	return nil

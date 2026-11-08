@@ -82,7 +82,7 @@ func (c *Client) mapColumnType(t string) string {
 func (c *Client) IntrospectSchema(ctx context.Context) (Schema, error) {
 	introspector, ok := c.dialect.(SchemaIntrospector)
 	if !ok {
-		return Schema{}, fmt.Errorf("%w: dialect %s does not yet support schema introspection (F3-2)", ErrUnsupportedFeature, c.dialect.Name())
+		return Schema{}, fmt.Errorf("%w: dialect %s does not support schema introspection — implement SchemaIntrospector on the dialect", ErrUnsupportedFeature, c.dialect.Name())
 	}
 	return introspector.IntrospectSchema(ctx, c.observed(c.db, StatementIntrospection, StatementIntrospection))
 }

@@ -160,11 +160,14 @@ func LookupListener(engine string) (NewListenerFunc, bool) {
 // variable preserves identity, so errors.Is matches across both names.
 var (
 	// ErrListenerClosed reports an operation attempted after Close. The
-	// dedicated connection has gone back to the pool; create a fresh
-	// listener. See ADR-0019.
-	ErrListenerClosed = errors.New("event listener closed")
+	// dedicated connection has gone back to the pool. See ADR-0019.
+	//
+	// What to do: create a fresh listener; a closed one cannot be reopened.
+	ErrListenerClosed = errors.New("event listener closed: Close was called; create a fresh listener")
 
-	// ErrNoSubscription reports Receive called with no channel subscribed —
-	// Listen must be called at least once first. See ADR-0019.
-	ErrNoSubscription = errors.New("event listener has no channel subscribed")
+	// ErrNoSubscription reports Receive called with no channel subscribed.
+	// See ADR-0019.
+	//
+	// What to do: call Listen(channel) at least once before Receive.
+	ErrNoSubscription = errors.New("event listener has no channel subscribed: call Listen(channel) before Receive")
 )

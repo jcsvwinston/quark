@@ -86,7 +86,7 @@ var ErrInvalidQuery = errors.New("invalid query")
 // ValidateIdentifier checks if a table or column identifier is safe to use.
 func (g *SQLGuard) ValidateIdentifier(name string) error {
 	if len(name) == 0 {
-		return fmt.Errorf("%w: identifier is empty", ErrInvalidIdentifier)
+		return fmt.Errorf("%w: identifier is empty — pass a column or table name", ErrInvalidIdentifier)
 	}
 
 	if len(name) > g.maxIdentifierLen {
@@ -101,7 +101,7 @@ func (g *SQLGuard) ValidateIdentifier(name string) error {
 
 	upper := strings.ToUpper(name)
 	if g.reservedKeywords[upper] {
-		return fmt.Errorf("%w: identifier %q is a reserved SQL keyword", ErrInvalidIdentifier, name)
+		return fmt.Errorf("%w: identifier %q is a reserved SQL keyword — rename it, or read it through RawQuery with the engine's quoting", ErrInvalidIdentifier, name)
 	}
 
 	return nil
@@ -297,7 +297,7 @@ func (g *SQLGuard) ValidateOperator(op string) error {
 
 	upper := strings.ToUpper(strings.TrimSpace(op))
 	if !allowedOperators[upper] {
-		return fmt.Errorf("%w: operator %q is not allowed", ErrInvalidQuery, op)
+		return fmt.Errorf("%w: operator %q is not allowed — use a comparison (=, !=, <>, <, <=, >, >=), LIKE/NOT LIKE, IN/NOT IN, IS/IS NOT [NULL], BETWEEN/NOT BETWEEN, or a PostgreSQL containment/network operator", ErrInvalidQuery, op)
 	}
 	return nil
 }
@@ -434,7 +434,7 @@ func (g *SQLGuard) ValidateRawQuery(query string, requirePlaceholders bool) erro
 			text = upperMasked
 		}
 		if p.re.MatchString(text) {
-			return fmt.Errorf("%w: raw query contains %s, which may indicate SQL injection", ErrInvalidQuery, p.desc)
+			return fmt.Errorf("%w: raw query contains %s, which may indicate SQL injection — bind values as parameters and keep comments and statement separators out of the SQL", ErrInvalidQuery, p.desc)
 		}
 	}
 

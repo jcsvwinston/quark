@@ -56,10 +56,10 @@ type ScatterMerge[T any] struct {
 // those per shard. The merged rows are materialised in memory.
 func ScatterGather[T any](ctx context.Context, r *ShardRouter, build func(*Query[T]) *Query[T], merge ScatterMerge[T]) ([]T, error) {
 	if r == nil {
-		return nil, fmt.Errorf("%w: ScatterGather requires a non-nil ShardRouter", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: ScatterGather requires a non-nil ShardRouter — pass the router returned by NewShardRouter", ErrInvalidQuery)
 	}
 	if build == nil {
-		return nil, fmt.Errorf("%w: ScatterGather requires a non-nil build func", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: ScatterGather requires a non-nil build func — pass the func that builds the per-shard query", ErrInvalidQuery)
 	}
 
 	// Stable shard-name order: deterministic concat when no comparator is given,
@@ -105,7 +105,7 @@ func ScatterGather[T any](ctx context.Context, r *ShardRouter, build func(*Query
 // on exactly one shard.
 func ScatterCount[T any](ctx context.Context, r *ShardRouter, build func(*Query[T]) *Query[T]) (int64, error) {
 	if r == nil {
-		return 0, fmt.Errorf("%w: ScatterCount requires a non-nil ShardRouter", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: ScatterCount requires a non-nil ShardRouter — pass the router returned by NewShardRouter", ErrInvalidQuery)
 	}
 	names := r.ShardNames()
 	sort.Strings(names)

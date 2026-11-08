@@ -83,16 +83,16 @@ func (q *BaseQuery) softDeletePredicate() *condition {
 // Phase-1 F1-5. Returns ErrInvalidModel when the model has no deleted_at.
 func (q *Query[T]) Restore(entity *T) (int64, error) {
 	if q.client == nil {
-		return 0, fmt.Errorf("%w: client not initialized", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: client not initialized — build the query with quark.For[T](ctx, client) on a non-nil *Client", ErrInvalidQuery)
 	}
 	if _, hasDeletedAt := q.meta.FieldByCol["deleted_at"]; !hasDeletedAt {
-		return 0, fmt.Errorf("%w: Restore requires a deleted_at column on %s", ErrInvalidModel, q.meta.Table)
+		return 0, fmt.Errorf("%w: Restore requires a deleted_at column on %s — add a nullable time field with db:\"deleted_at\" to the model", ErrInvalidModel, q.meta.Table)
 	}
 
 	v := reflect.ValueOf(entity).Elem()
 	pkVal := getPKValue(v, q.pk)
 	if pkVal == nil {
-		return 0, fmt.Errorf("%w: Restore requires a populated primary key", ErrInvalidQuery)
+		return 0, fmt.Errorf("%w: Restore requires a populated primary key — load the entity first, or set its key field before calling Restore", ErrInvalidQuery)
 	}
 
 	var sqlBuf strings.Builder

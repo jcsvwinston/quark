@@ -634,7 +634,7 @@ type JoinBuilder[T any] struct {
 func (b *JoinBuilder[T]) OnExpr(e Expr) *Query[T] {
 	c := b.q.clone()
 	if e == nil {
-		c.err = fmt.Errorf("%w: OnExpr requires a non-nil expression", ErrInvalidQuery)
+		c.err = fmt.Errorf("%w: OnExpr requires a non-nil expression — pass the join condition as an Expr, or use On(left, op, right)", ErrInvalidQuery)
 		return c
 	}
 	// Render with '?' markers; buildSelect renumbers them for the dialect at
@@ -839,7 +839,7 @@ func (q *Query[T]) HavingAggregate(fn, column, operator string, value any) *Quer
 	var expr string
 	if column == "*" {
 		if upperFn != "COUNT" {
-			c.err = fmt.Errorf("%w: HavingAggregate column \"*\" only valid with COUNT, got %s", ErrInvalidQuery, upperFn)
+			c.err = fmt.Errorf("%w: HavingAggregate column \"*\" only valid with COUNT, got %s — name a column for that function", ErrInvalidQuery, upperFn)
 			return c
 		}
 		expr = upperFn + "(*)"
@@ -905,7 +905,7 @@ func (q *Query[T]) Apply(scopes ...Scope[T]) *Query[T] {
 func (q *Query[T]) SelectExpr(alias string, e Expr) *Query[T] {
 	c := q.clone()
 	if e == nil {
-		c.err = fmt.Errorf("%w: SelectExpr(%q, nil)", ErrInvalidQuery, alias)
+		c.err = fmt.Errorf("%w: SelectExpr(%q, nil) — pass a non-nil Expr to project under that alias", ErrInvalidQuery, alias)
 		return c
 	}
 	if err := c.guard.ValidateIdentifier(alias); err != nil {

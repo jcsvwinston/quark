@@ -41,17 +41,17 @@ type ShardRouter struct {
 // are setup mistakes worth catching at construction.
 func NewShardRouter(shards map[string]*Client, resolve ShardResolver, shardFor ShardFunc) (*ShardRouter, error) {
 	if len(shards) == 0 {
-		return nil, fmt.Errorf("%w: ShardRouter requires at least one shard", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: ShardRouter requires at least one shard — pass a non-empty map of shard name to *Client to NewShardRouter", ErrInvalidQuery)
 	}
 	if resolve == nil || shardFor == nil {
-		return nil, fmt.Errorf("%w: ShardRouter requires non-nil resolve and shardFor funcs", ErrInvalidQuery)
+		return nil, fmt.Errorf("%w: ShardRouter requires non-nil resolve and shardFor funcs — pass both to NewShardRouter: resolve reads the key from the context, shardFor maps it to a shard name", ErrInvalidQuery)
 	}
 	// Defensive copy so a caller mutating its map afterwards can't change
 	// routing under live queries.
 	cp := make(map[string]*Client, len(shards))
 	for name, c := range shards {
 		if c == nil {
-			return nil, fmt.Errorf("%w: ShardRouter shard %q has a nil Client", ErrInvalidQuery, name)
+			return nil, fmt.Errorf("%w: ShardRouter shard %q has a nil Client — open it with quark.New before building the router", ErrInvalidQuery, name)
 		}
 		cp[name] = c
 	}
@@ -69,7 +69,7 @@ func (r *ShardRouter) GetClient(ctx context.Context) (*Client, error) {
 	name := r.shardFor(key)
 	c, ok := r.shards[name]
 	if !ok {
-		return nil, fmt.Errorf("%w: shard %q (resolved for key %q) is not registered", ErrInvalidQuery, name, key)
+		return nil, fmt.Errorf("%w: shard %q (resolved for key %q) is not registered — add it to the shards passed to NewShardRouter, or fix the shardFor mapping", ErrInvalidQuery, name, key)
 	}
 	return c, nil
 }
