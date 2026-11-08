@@ -28,6 +28,7 @@ var (
 	migrateMessage    string
 	migrateFromModels string
 	migrateDialect    string
+	migrateEmit       string
 )
 
 // errNoMigrationsRegistered is returned by up/down when this binary's
@@ -69,7 +70,8 @@ func init() {
 
 	migrateCreateCmd.Flags().StringVar(&migrateMessage, "message", "", "Migration message")
 	migrateCreateCmd.Flags().StringVar(&migrateFromModels, "from-models", "", "Render domain DDL from the model structs in this package (e.g. ./models)")
-	migrateCreateCmd.Flags().StringVar(&migrateDialect, "dialect", "", "SQL dialect for --from-models (postgresql|postgres|mysql|mariadb|sqlite|mssql|oracle); defaults to the configured driver")
+	migrateCreateCmd.Flags().StringVar(&migrateDialect, "dialect", "", "SQL dialect for --from-models (postgresql|postgres|mysql|mariadb|sqlite|mssql|sqlserver|oracle); defaults to the configured driver")
+	migrateCreateCmd.Flags().StringVar(&migrateEmit, "emit", "go", "What to produce: go writes the migration file; json prints the DDL rendered by --from-models on stdout as one JSON document and writes nothing")
 	migrateUpCmd.Flags().IntVar(&migrateUpSteps, "steps", 0, "Number of migrations to apply (0 = all pending)")
 	migrateUpCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Preview SQL without executing")
 	migrateDownCmd.Flags().IntVar(&migrateDownSteps, "steps", 1, "Number of migrations to revert")
@@ -87,8 +89,10 @@ var migrateCmd = &cobra.Command{
 // prints it and exits 1. Cobra's own usage/error dump is silenced so that
 // single line is the only output.
 var migrateCreateCmd = &cobra.Command{
-	Use:           "create <name>",
-	Example:       `  quark migrate create add_users_table --message "users base table"`,
+	Use: "create <name>",
+	Example: `  quark migrate create add_users_table --message "users base table"
+  quark migrate create domain_schema --from-models ./models --dialect postgresql
+  quark migrate create domain_schema --from-models ./models --dialect postgresql --emit json`,
 	Short:         "Create a new migration file",
 	Args:          cobra.ExactArgs(1),
 	SilenceUsage:  true,
@@ -143,22 +147,28 @@ var migrateVersionCmd = &cobra.Command{
 	},
 }
 
+// emitGo and emitJSON are the two values of --emit.
+const (
+	emitGo   = "go"
+	emitJSON = "json"
+)
+
 func runMigrateCreate(name string) error {
-	timestamp := time.Now().Format("20060102150405")
-	filename := fmt.Sprintf("%s_%s.go", timestamp, name)
-	dir := viper.GetString("paths.migrations")
-	if dir == "" {
-		dir = "./migrations"
+	emit := strings.ToLower(strings.TrimSpace(migrateEmit))
+	switch emit {
+	case "":
+		emit = emitGo
+	case emitGo, emitJSON:
+	default:
+		return fmt.Errorf("--emit %q is not a mode: pass --emit go (the default, writes the migration file) or --emit json (prints the rendered DDL)", migrateEmit)
 	}
-
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating migrations directory: %w", err)
+	if emit == emitJSON && migrateFromModels == "" {
+		return fmt.Errorf("--emit json needs --from-models <dir>: it prints the DDL rendered from your model structs and there is nothing to render without them")
 	}
-
-	path := filepath.Join(dir, filename)
 
 	// DX-18: with --from-models the Up/Down bodies carry rendered domain
-	// DDL instead of the empty skeleton.
+	// DDL instead of the empty skeleton. DX-N3: with --emit json the same
+	// statements go to stdout as data and no file is written.
 	upBody, downBody := "", ""
 	if migrateFromModels != "" {
 		dialect := normalizeDDLDialect(migrateDialect)
@@ -176,10 +186,29 @@ func runMigrateCreate(name string) error {
 		if err != nil {
 			return err
 		}
+		if emit == emitJSON {
+			// stdout carries the document and nothing else; the progress
+			// line keeps its place on stderr for whoever is watching.
+			fmt.Fprintf(os.Stderr, "Rendered DDL for %d model(s) from %s (dialect %s)\n", len(models), migrateFromModels, dialect)
+			return writeDDLDocument(os.Stdout, newDDLDocument(dialect, models, up, down))
+		}
 		upBody = renderExecBody(up)
 		downBody = renderExecBody(down)
 		fmt.Printf("Rendered DDL for %d model(s) from %s (dialect %s)\n", len(models), migrateFromModels, dialect)
 	}
+
+	timestamp := time.Now().Format("20060102150405")
+	filename := fmt.Sprintf("%s_%s.go", timestamp, name)
+	dir := viper.GetString("paths.migrations")
+	if dir == "" {
+		dir = "./migrations"
+	}
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating migrations directory: %w", err)
+	}
+
+	path := filepath.Join(dir, filename)
 
 	data := struct {
 		ID       string
