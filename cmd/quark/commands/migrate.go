@@ -69,7 +69,7 @@ func init() {
 	migrateCmd.AddCommand(migrateVersionCmd)
 
 	migrateCreateCmd.Flags().StringVar(&migrateMessage, "message", "", "Migration message")
-	migrateCreateCmd.Flags().StringVar(&migrateFromModels, "from-models", "", "Render domain DDL from the model structs in this package (e.g. ./models)")
+	migrateCreateCmd.Flags().StringVar(&migrateFromModels, "from-models", "", "Render domain DDL from the model structs in this package (e.g. ./models; relative to the current directory, absolute paths work from anywhere)")
 	migrateCreateCmd.Flags().StringVar(&migrateDialect, "dialect", "", "SQL dialect for --from-models (postgresql|postgres|mysql|mariadb|sqlite|mssql|sqlserver|oracle); defaults to the configured driver")
 	migrateCreateCmd.Flags().StringVar(&migrateEmit, "emit", "go", "What to produce: go writes the migration file; json prints the DDL rendered by --from-models on stdout as one JSON document and writes nothing")
 	migrateUpCmd.Flags().IntVar(&migrateUpSteps, "steps", 0, "Number of migrations to apply (0 = all pending)")
