@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -58,13 +60,25 @@ type ddlModel struct {
 }
 
 // loadModelsForDDL statically extracts every exported struct carrying db
-// tags from the package at dir.
+// tags from the package at dir. A relative dir is relative to the current
+// directory, like paths.migrations; the loader runs INSIDE dir, so the
+// package is resolved in its own module — an absolute path works from
+// anywhere, which is how another tool (nucleus makemigrations) calls the
+// CLI (QK-100: with the loader run in the current directory, a models
+// package in another module came back as "no Go package found").
 func loadModelsForDDL(dir string) ([]ddlModel, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolving models directory %s: %w", dir, err)
+	}
+	if st, err := os.Stat(absDir); err != nil || !st.IsDir() {
+		return nil, fmt.Errorf("no Go package found at %s — check the path exists and is inside a Go module (run 'go mod init' or 'quark init' first)", dir)
+	}
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo,
-		Dir:  ".",
+		Dir:  absDir,
 	}
-	pkgs, err := packages.Load(cfg, dir)
+	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
 		return nil, fmt.Errorf("loading models from %s: %w", dir, err)
 	}

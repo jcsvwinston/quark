@@ -175,7 +175,10 @@ clauses and indexes for every `rel:"belongs_to"` / `join:` pair, and the `Down`
 drops them in reverse order.
 
 `--dialect` accepts `postgresql|postgres|mysql|mariadb|sqlite|mssql|sqlserver|oracle`
-and defaults to the configured `database.default.driver`. The result is a
+and defaults to the configured `database.default.driver`. `--from-models` is
+relative to the directory you run the command from, like `paths.migrations`;
+an absolute path works from anywhere, because the package is loaded inside
+its own module. The result is a
 regular migration file — review and edit it like any other.
 
 Add `--emit json` to get the same statements as data instead of a file. The
