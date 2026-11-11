@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/jcsvwinston/quark/compare/cmd/quark/v1.2.2...cmd/quark/v1.3.0) (2026-11-11)
+
+
+### Added
+
+* **cli:** migrate create --from-models --emit json prints the rendered DDL for another tool to write (DX-N3) ([#486](https://github.com/jcsvwinston/quark/issues/486)) ([123caba](https://github.com/jcsvwinston/quark/commit/123caba1020e2d7b635932cec97ba50a1d986fe7))
+
+
+### Fixed
+
+* **cli:** migrate create --from-models loads the models package inside its own module, so an absolute path works from any directory (QK-100) ([#487](https://github.com/jcsvwinston/quark/issues/487)) ([a3a8bfd](https://github.com/jcsvwinston/quark/commit/a3a8bfd70d6dc01d6936834177f10f2774a968da))
+* **deps:** raise the sibling module floors to quark v1.18.0 ([#490](https://github.com/jcsvwinston/quark/issues/490)) ([8acd426](https://github.com/jcsvwinston/quark/commit/8acd4265463f24a63fb178d5b7deb8ca09c0ee4a))
+
 ## [1.2.2](https://github.com/jcsvwinston/quark/compare/cmd/quark/v1.2.1...cmd/quark/v1.2.2) (2026-11-07)
 
 
