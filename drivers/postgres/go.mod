@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/jcsvwinston/quark v1.17.0
+	github.com/jcsvwinston/quark v1.18.0
 )
 
 require (
