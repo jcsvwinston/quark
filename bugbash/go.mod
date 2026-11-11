@@ -9,7 +9,7 @@ module github.com/jcsvwinston/quark/bugbash
 
 go 1.25.7
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 replace github.com/jcsvwinston/quark => ../
 
