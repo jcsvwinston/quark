@@ -1,0 +1,172 @@
+---
+sidebar_position: 4
+title: Verifying a release
+description: Check that a downloaded quark CLI archive is the one this repository's release workflow built, using cosign and gh attestation.
+---
+
+# Verifying a release
+
+A GitHub release page is not a chain of custody. Anyone with write access —
+or anyone who takes it — can replace an asset with a binary that runs just as
+happily as the real one. Quark releases cut from the first signed tag onward
+therefore publish two independent proofs of where their archives came from,
+and this page is how you consume them.
+
+Signing cannot be applied retroactively: a release is signed by the run that
+builds it, with a certificate minted for that run. Every Quark release cut
+before this shipped publishes an **empty asset list** — there is no archive
+to verify and no checksum file to check one against, so for those tags
+`go install github.com/jcsvwinston/quark/cmd/quark@vX.Y.Z` remains the way in,
+and the module proxy's own checksum database is what stands behind it. Look at
+the release page before you start: a signed release lists `checksums.txt.sig`.
+
+A signed release carries:
+
+| Asset | What it is |
+| --- | --- |
+| `quark_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) | The CLI archive, six in total: Linux, macOS and Windows on amd64 and arm64. `<version>` is the **library** release these assets belong to. |
+| `<archive>.spdx.json` | An SPDX SBOM, one per archive, listing what went into it. |
+| `checksums.txt` | SHA-256 of every archive and every SBOM. |
+| `checksums.txt.sig` / `checksums.txt.pem` | A keyless signature over `checksums.txt`, and the short-lived certificate that made it. |
+
+There is no long-lived signing key to trust, and none is published. The
+signature is made by the release workflow itself with a certificate minted for
+that single run, and what you check is not "who holds the key" but **which
+workflow, in which repository, at which tag** produced the release. A build
+provenance attestation, stored by GitHub rather than on the release page,
+records the same thing a second way.
+
+The tags for the five driver modules (`drivers/postgres/vX.Y.Z` and friends)
+publish no assets and nothing to verify here: those are Go modules you add
+with `go get`, and the module proxy verifies them. The CLI's own tags
+(`cmd/quark/vX.Y.Z`) publish none either, and that is worth knowing before you
+go looking: the CLI is a Go module of its own, but its archives ride on the
+library release, are named after the library tag, and are produced by the run
+at that tag. The binary inside reports both numbers, which is why a downloaded
+`quark_1.13.0_linux_amd64.tar.gz` prints something like:
+
+```text
+quark v0.1.0 linux/amd64 (go1.26.6)
+built against github.com/jcsvwinston/quark v1.13.0
+```
+
+The second line is the one that matches the archive you downloaded and the tag
+you are verifying against.
+
+## Before you start
+
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/)
+and the [GitHub CLI](https://cli.github.com/). Then set the release you are
+verifying:
+
+```bash
+export TAG=vX.Y.Z             # the signed release you downloaded
+export VERSION=${TAG#v}
+export PKG=quark_${VERSION}_linux_amd64.tar.gz
+```
+
+## 1. Verify the signature over the checksum file
+
+Download the checksum file, its signature and its certificate, then check
+them:
+
+```bash
+gh release download "$TAG" --repo jcsvwinston/quark \
+  --pattern checksums.txt \
+  --pattern checksums.txt.sig \
+  --pattern checksums.txt.pem
+
+cosign verify-blob checksums.txt \
+  --signature checksums.txt.sig \
+  --certificate checksums.txt.pem \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "https://github.com/jcsvwinston/quark/.github/workflows/release.yml@refs/tags/${TAG}"
+```
+
+`Verified OK` means the checksum file was produced by
+`.github/workflows/release.yml` in `jcsvwinston/quark`, running at the tag you
+named, and has not been altered since.
+
+:::caution The identity ends at the tag, not at `main`
+Nearly every cosign example on the internet ends the identity in
+`@refs/heads/main`. That string verifies nothing here. The release workflow is
+dispatched at the **tag** ref, so the certificate it signs with names
+`@refs/tags/<tag>` — substitute the tag you are verifying, exactly as the
+command above does. An identity ending in `refs/heads/main` will fail with
+`none of the expected identities matched`, and that failure is correct.
+:::
+
+If you verify releases from a script and would rather not rewrite the identity
+for each tag, match the shape instead of the value:
+
+```bash
+cosign verify-blob checksums.txt \
+  --signature checksums.txt.sig \
+  --certificate checksums.txt.pem \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/jcsvwinston/quark/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+```
+
+Keep the anchors and keep `refs/tags/` in the pattern. A regexp loose enough to
+match any ref accepts a signature made from any branch of the repository, which
+is most of the guarantee gone.
+
+## 2. Carry the proof across to your archive
+
+The signature covers `checksums.txt`. The checksum file covers the archive, so
+one more step moves the trust onto the file you are about to run:
+
+```bash
+gh release download "$TAG" --repo jcsvwinston/quark --pattern "$PKG"
+awk -v f="$PKG" '$2 == f' checksums.txt | sha256sum -c -
+```
+
+On macOS, where there is no `sha256sum`, the last command is
+`awk -v f="$PKG" '$2 == f' checksums.txt | shasum -a 256 -c -`.
+
+The SBOM beside each archive is listed in the same signed checksum file, so the
+same two commands verify it: append `.spdx.json` to `PKG` and run them again.
+
+## 3. Verify the build provenance
+
+The second, independent proof does not use the release assets at all: it asks
+GitHub which workflow run built the file in front of you.
+
+```bash
+gh attestation verify "$PKG" \
+  --repo jcsvwinston/quark \
+  --signer-workflow jcsvwinston/quark/.github/workflows/release.yml
+```
+
+This matches the archive by digest against the attestation the release job
+wrote, and `--signer-workflow` is the part that matters: it refuses an
+attestation signed by any other workflow, in any other repository. The command
+reads public data and needs no credentials beyond a logged-in `gh`.
+
+## What the SBOM says is inside
+
+The `quark` CLI connects to every engine Quark supports, so a single binary
+links all five database drivers — `jackc/pgx`, `go-sql-driver/mysql`,
+`microsoft/go-mssqldb`, `sijms/go-ora` and `modernc.org/sqlite`. The SBOM
+beside each archive lists them by name and version, which is the point of
+publishing it: what a scanner reports about this binary is a fact you can read
+yourself before you run it.
+
+That is a property of the **CLI**, not of the library. An application that
+imports `github.com/jcsvwinston/quark` links only the driver module it
+actually adds — see [Installation](../guides/installation).
+
+## When verification fails
+
+- **`no matching signatures` or `none of the expected identities matched`** —
+  the identity string is the first thing to check, and the tag inside it the
+  first part of that. See the note above.
+- **The release publishes no `checksums.txt.sig`** — releases cut before
+  signing was introduced publish no assets at all. Install that tag with
+  `go install` instead, or upgrade to a release that publishes a signature.
+- **`gh attestation verify` reports no attestation** — same reason, same
+  answer.
+
+Report anything that verifies against an identity other than the one above, or
+an archive whose digest is absent from a validly signed checksum file, through
+the repository's security policy rather than a public issue.
