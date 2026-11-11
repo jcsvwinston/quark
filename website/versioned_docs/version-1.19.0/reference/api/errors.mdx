@@ -1,0 +1,248 @@
+# Errors API Reference
+
+Quark never returns a bare string error you have to pattern-match. Every failure
+mode it knows about wraps a package-level sentinel, so you branch with
+`errors.Is` and keep the original message for logs. This page lists the
+sentinels, says what each one asks you to do, and explains, one by one,
+exactly what causes the non-obvious ones.
+
+## Every sentinel says what to do
+
+Every exported `Err*` sentinel of the published packages — `quark`,
+`quarkdriver`, `quarktenant` — carries a recipe: its godoc has a sentence
+that begins with **"What to do:"** and names the step the caller should take.
+Where Quark wraps a sentinel with `fmt.Errorf("%w: …")`, the text after the
+prefix names the method that refused the call and, when there is a step to
+take — an option to set, a method to call, a tag to add — says it; where the
+only fix is the input, it says what the input must look like. The three
+sentinels that are returned bare (`ErrNotFound`, `ErrTimeout`,
+`ErrConstraintViolation`) carry the hint in their own message.
+
+The figure is counted, not estimated: the convention test
+`TestEveryExportedSentinelNamesWhatToDo` (`errors_recipe_test.go` in the
+root package) walks the AST of the public packages, finds every exported
+`var Err… = …` — declared alone, inside a `var (...)` block, or re-exported
+from another package — and fails the build when one lacks the sentence. It
+also holds this page to the same list and to the same count. As of this
+version, **30 of 30 exported `Err*` sentinels** carry a recipe.
+
+Matching is by identity, never by text: `errors.Is(err, quark.ErrNotFound)`
+holds whatever the message says, and the re-exported sentinels share their
+value across packages (`quark.ErrUnsupportedFeature` is
+`quarkdriver.ErrUnsupportedFeature`; `quarktenant.ErrRLSNotEnforced` is
+`quark.ErrRLSNotEnforced`), so a check written against either name matches.
+Message text may change between minor versions as recipes improve; do not
+parse it.
+
+## Sentinel Errors
+
+### Package `quark`
+
+| Sentinel | When | What to do |
+| --- | --- | --- |
+| `ErrNotFound` | `First` / `Find` matched no row. | Use `List` or `Exists` when zero rows are valid; otherwise check the filter, the key and the tenant. |
+| `ErrInvalidModel` | The struct has no metadata, no primary key, or lacks a column the operation needs. | Register it with `RegisterModel`, give it a primary key (`pk:"true"` or an `id` column), add the column the message names. |
+| `ErrInvalidQuery` | The builder rejected the call before any SQL ran. | Fix the call as the text after the prefix says: a non-nil operand, a `Where`, a primary key, an option such as `Limits.AllowRawQueries`. |
+| `ErrInvalidIdentifier` | A table or column name failed validation. | Use `^[a-zA-Z_][a-zA-Z0-9_]*$`, at most 64 characters, no reserved keyword; rename it, or read a legacy name through `RawQuery`. |
+| `ErrInvalidJSONPath` | `WhereJSON` received a path outside the dotted grammar. | Pass `"user.name"`-shaped paths; use `RawQuery` for indexes or engine syntax. |
+| `ErrInvalidJoin` | An `ON` clause fell outside the identifier-only grammar. | Write `a.b = c.d` joined by `AND`/`OR`, or use `OnExpr` / `RawQuery`. |
+| `ErrStaleEntity` | An optimistic-locking write found the row's version moved. | Reload, replay the change on the fresh state and retry — or surface the conflict. |
+| `ErrUnsupportedFeature` | The dialect cannot do what the builder asked. | Branch on the dialect, or take the alternative the message names. |
+| `ErrInvalidTimezone` | A `quark:"tz=..."` tag is not an IANA name. | Use a name `time.LoadLocation` accepts on the field the message names. |
+| `ErrInvalidTag` | A model carries a tag token Quark does not read. | Fix the token on each field the message lists; the accepted tokens are in the [modeling guide](/docs/guides/modeling). |
+| `ErrDialectNotSupported` | No dialect is registered for the driver name, or the dialect has no implementation of what was asked. | Import the engine's driver module, or pass `WithDialect` / call `RegisterDialect`; branch on the dialect for an engine-specific feature. |
+| `ErrConnection` | `sql.Open` or the first ping failed (primary or replica), the driver is not imported, or `NewWithDB` got a nil pool. | Check the DSN and that the server accepts connections; add the import the message shows. |
+| `ErrTimeout` | The context's deadline passed, it was cancelled, or the driver reported a timeout. | Give the context more time, or make the query cheaper (an index, a `Limit`). |
+| `ErrConstraintViolation` | The database rejected the write: unique, primary key, foreign key, `NOT NULL` or `CHECK`. | Call `IsUniqueViolation` for a duplicate key; for the rest, the engine's message names the constraint. |
+| `ErrEventEmitFailed` | `EventBus.Publish` failed after the write was committed. | Do not retry the write; retry the emit, or rely on an idempotent subscriber. |
+| `ErrListenerClosed` | An operation on a closed `EventListener`. | Create a fresh listener with `ListenerFactory.CreateListener`. |
+| `ErrNoSubscription` | `Receive` before any `Listen`. | Call `Listen(channel)` first. |
+| `ErrTenantMismatch` | A query inside a transaction names a different tenant from the one the transaction was opened for. | Open the transaction for that tenant, or query with a context that resolves the same tenant (or none). |
+| `ErrRLSNotEnforced` | The `RowLevelSecurityNative` router cannot confirm the engine enforces row security on a table. | Install the policies (`quarktenant.InstallRLSPolicies` or `quark tenant install-rls-policies --from-models`) and verify them. |
+| `ErrLockTimeout` | `AcquireMigrationLock` did not get the lock within the timeout. | Wait for the other migrator and run again, or pass a longer timeout; look for a stuck session if it never clears. |
+| `ErrIrreversibleOperation` | `Plan.Down` met a `DROP` whose inverse is not in the plan. | Write the `CREATE TABLE` / `ADD COLUMN` / `CREATE INDEX` / `ADD CONSTRAINT` by hand in your down migration. |
+| `ErrGeneratedStub` | Generated code does not cover the operation (an `UPDATE` binder, a non-integer key). | Nothing through the ORM — reflection took over; if you call the generated code directly, regenerate it with `quark gen`. |
+
+### Package `quarkdriver`
+
+A driver module returns these; package `quark` re-exports each one under the
+same name with the same value, so `errors.Is` matches under either.
+
+| Sentinel | When | What to do |
+| --- | --- | --- |
+| `ErrUnsupportedFeature` | The engine cannot do what was asked (`LockSuffix` without row locks, `AcquireMigrationLock` without a distributed lock). | Branch on the dialect, or take the alternative the message names. |
+| `ErrLockTimeout` | The migration lock was not acquired in time. | Wait for the other migrator, or pass a longer timeout. |
+| `ErrListenerClosed` | An operation after `Close`. | Create a fresh listener. |
+| `ErrNoSubscription` | `Receive` with no channel subscribed. | Call `Listen(channel)` first. |
+
+### Package `quarktenant`
+
+| Sentinel | When | What to do |
+| --- | --- | --- |
+| `ErrRLSNotEnforced` | At least one registered model's table does not enforce engine-level row security (same value as `quark.ErrRLSNotEnforced`). | Run `InstallRLSPolicies` and verify again; the error lists each table and its gap. |
+| `ErrNoTenantColumn` | A registered model does not declare the configured `TenantColumn`. | Add the column to the model, point `TenantColumn` at the one it uses, or do not register that model. |
+| `ErrNoRegisteredModels` | `InstallRLSPolicies` / `VerifyRLSPolicies` on a client with no models. | Call `RegisterModel` for each tenant-scoped model first. |
+| `ErrInvalidCast` | `TenantColumnSQLCast` (or `--cast`) is not a single PostgreSQL type token. | Pass one token (`text`, `uuid`, `bigint`, `varchar(64)`), or leave it empty to derive it from the field's type. |
+
+### `ErrInvalidIdentifier`
+
+A table or column name was rejected before any SQL was assembled. It covers
+every identifier you can pass in: a `Where` / `OrderBy` / `GroupBy` column, a
+table name, a CTE name, an event channel, a migration target.
+
+To be accepted, a name must match `^[a-zA-Z_][a-zA-Z0-9_]*$`, be at most 64
+characters, and not be a reserved SQL keyword. Identifiers cannot be bound as
+parameters, which is why they are checked instead: a rejected one never reaches
+the database. The sentinel is wrapped at the point of rejection, so
+`errors.Is(err, quark.ErrInvalidIdentifier)` holds no matter which call site
+produced it.
+
+### `ErrInvalidJSONPath`
+
+[`WhereJSON`](/docs/guides/querying#json-predicates) received a path outside its
+dotted-identifier grammar: `^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$`,
+up to 256 characters. Quark binds the path as a parameter on every dialect, so a
+malformed one is not an injection risk — it is rejected at the API surface so you
+get a clear error instead of surprising SQL.
+
+### `ErrUnsupportedFeature`
+
+The active dialect does not implement what the builder asked for — for example
+[`ForUpdate`](/docs/guides/querying#pessimistic-locking) on SQLite, or `NoWait`
+on SQL Server. Quark returns this rather than emitting SQL the engine will
+reject.
+
+The message names the dialect and the specific gap, so you can branch by engine
+or fall back to another strategy — dropping down to a transaction-level lock,
+for instance.
+
+### `ErrStaleEntity`
+
+An `Update`, `UpdateFields`, or `Tracked.Save` on a model with a
+`quark:"version"` field tried to write a row that had already moved on. The
+version predicate did not match, so no rows were written. Reload and replay, or
+surface the conflict to the caller. See
+[Optimistic Locking](/docs/guides/modeling#optimistic-locking) for the tag
+contract and a retry example.
+
+`UpdateBatch` returns it only under `CheckVersions()`: the whole batch is
+rolled back, and the error joins one `ErrStaleEntity` per stale row, each
+naming its key (`table accounts pk=7`). `errors.Is(err, quark.ErrStaleEntity)`
+matches the joined error. Without `CheckVersions`, `UpdateBatch` skips a stale
+row and returns `nil`; Quark 2.0 makes the check the default. See
+[`UpdateBatch`](/docs/reference/api/crud#versioned-models-and-checkversions).
+
+### `ErrInvalidJoin`
+
+The `ON` clause of a [`Join` / `LeftJoin` / `RightJoin`](/docs/guides/querying#joins)
+fell outside the identifier-only grammar Quark validates at execution time. This
+applies to both `.On(left, op, right)` and `.OnRaw(clause)`.
+
+The grammar accepts identifier-to-identifier comparisons (`a.b = c.d`), joined by
+`AND` / `OR`, using the operators `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=`. Literals,
+function calls, subqueries, and parentheses are rejected. Prefer the structured
+`.On(...)` form; `.OnRaw` is the escape hatch for clauses that don't fit the
+simple binary shape.
+
+### `ErrInvalidTimezone`
+
+A model field carries a `quark:"tz=..."` tag whose value is not a valid IANA
+timezone name. `Client.RegisterModel` and `Client.Migrate` reject the model
+immediately rather than failing later on the first query that binds or scans the
+column, and the wrapped error names the field, the column, and the offending
+string. See [Timezones](/docs/guides/modeling#timezones) for the per-column
+contract.
+
+### Event errors
+
+Three sentinels come from the event subsystem:
+
+- **`ErrEventEmitFailed`** wraps an `EventBus.Publish` failure that happens
+  *after* the transaction commits. The commit stands; only the post-commit emit
+  could not be delivered.
+- **`ErrListenerClosed`** — you called `Listen` after closing the inbound
+  PostgreSQL `LISTEN/NOTIFY` listener.
+- **`ErrNoSubscription`** — you called `Receive` before subscribing to any
+  channel.
+
+See [Events](/docs/advanced/events) for the bus and listener contracts.
+
+## Error Checking
+
+```go
+user, err := quark.For[User](ctx, client).Find(id)
+if errors.Is(err, quark.ErrNotFound) {
+    return nil, fmt.Errorf("user %d not found", id)
+}
+if errors.Is(err, quark.ErrTimeout) {
+    // Retry with backoff
+}
+if errors.Is(err, quark.ErrConstraintViolation) {
+    // Handle duplicate key, FK violation, etc.
+}
+```
+
+## Classifying a failure
+
+`ErrConstraintViolation` tells you the database rejected the write, but not
+which rule it broke — unique, foreign key, not-null and check violations all
+arrive as the same sentinel. When the answer changes what you do, two
+predicates give you the specific one:
+
+```go
+if err := quark.For[User](ctx, client).Create(u); err != nil {
+    if quark.IsUniqueViolation(err) {
+        http.Error(w, "email already registered", http.StatusConflict)
+        return
+    }
+    return err
+}
+```
+
+| Predicate | True when | Typical response |
+| --- | --- | --- |
+| `quark.IsUniqueViolation(err)` | A unique or primary-key constraint rejected the row | `409 Conflict`, naming the field |
+| `quark.IsDeadlock(err)` | The engine picked this transaction as a deadlock victim | Re-run the transaction |
+
+Both work on every supported engine and on both PostgreSQL drivers, and both
+match on the **error code the driver reports** rather than on the text of the
+message. That distinction matters more than it looks: a database server
+configured for a non-English locale translates its messages, so any check
+written against English wording stops recognising the very errors it was
+meant to catch. Code matching is unaffected by the server's locale and by
+wording changes between driver releases.
+
+Both also walk the wrapping chain, so an error you have wrapped yourself
+still classifies.
+
+On PostgreSQL the code comes from the `SQLState() string` method that both
+pgx and lib/pq errors have — the interface `quarkdriver.SQLStater`. Quark reads
+any error in the chain that implements it as a PostgreSQL SQLSTATE (`23505` is
+a unique violation, `40P01` a deadlock). Every other engine's errors are
+recognised by the driver module you import, which registers a
+`quarkdriver.Classifier`; see the [extension contract](../extension-contract)
+for both.
+
+`IsDeadlock` is for callers driving their own retry loop. If you build the
+client with [`WithDeadlockRetry`](/docs/reference/api/client), quark already
+re-runs the victim transaction for you and you will not see the error at all.
+SQLite never reports a deadlock — it serialises writes — so the predicate is
+always false there.
+
+## Error Wrapping
+
+Quark wraps database errors with context:
+
+```go
+// Timeout errors wrap context.DeadlineExceeded
+if errors.Is(err, context.DeadlineExceeded) {
+    // Detected as ErrTimeout
+}
+```
+
+Unique violations reach `ErrConstraintViolation` through the driver's error
+code, the same route `IsUniqueViolation` uses. The remaining constraint kinds
+— foreign key, not-null, check — are still recognised by matching the message
+text each engine produces, which means they can go unclassified on a server
+running in another language. Prefer `IsUniqueViolation` where the distinction
+matters; the sentinel remains the broad "the database rejected this" signal.
