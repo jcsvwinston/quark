@@ -88,29 +88,29 @@ func TestMigrateCreateFromModelsPostgres(t *testing.T) {
 	body := string(src)
 
 	for _, want := range []string{
-		`CREATE TABLE IF NOT EXISTS users`,
+		`CREATE TABLE IF NOT EXISTS "users"`,
 		// 64-bit key and 64-bit float (QK-21): SERIAL is four bytes, and
 		// PostgreSQL's REAL is single precision.
 		`BIGSERIAL PRIMARY KEY`,
 		`VARCHAR(190) UNIQUE`,
 		`NOT NULL`,
-		`CREATE TABLE IF NOT EXISTS articles`,
-		`score DOUBLE PRECISION`,
+		`CREATE TABLE IF NOT EXISTS "articles"`,
+		`"score" DOUBLE PRECISION`,
 		`BOOLEAN`,
-		`REFERENCES users(id)`,
-		`CREATE INDEX IF NOT EXISTS idx_articles_author_id`,
-		`DROP TABLE IF EXISTS articles`,
-		`DROP TABLE IF EXISTS users`,
+		`REFERENCES "users"("id")`,
+		`CREATE INDEX IF NOT EXISTS "idx_articles_author_id" ON "articles" ("author_id")`,
+		`DROP TABLE IF EXISTS "articles"`,
+		`DROP TABLE IF EXISTS "users"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("generated migration missing %q:\n%s", want, body)
 		}
 	}
 	// Order: users (parent) must be created before articles; dropped after.
-	if strings.Index(body, "CREATE TABLE IF NOT EXISTS users") > strings.Index(body, "CREATE TABLE IF NOT EXISTS articles") {
+	if strings.Index(body, `CREATE TABLE IF NOT EXISTS "users"`) > strings.Index(body, `CREATE TABLE IF NOT EXISTS "articles"`) {
 		t.Errorf("parent table must be created first:\n%s", body)
 	}
-	if strings.Index(body, "DROP TABLE IF EXISTS articles") > strings.Index(body, "DROP TABLE IF EXISTS users") {
+	if strings.Index(body, `DROP TABLE IF EXISTS "articles"`) > strings.Index(body, `DROP TABLE IF EXISTS "users"`) {
 		t.Errorf("child table must be dropped first:\n%s", body)
 	}
 }

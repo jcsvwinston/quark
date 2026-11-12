@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -389,7 +390,14 @@ func normalizeDDLDialect(d string) string {
 func renderExecBody(stmts []string) string {
 	var b strings.Builder
 	for _, stmt := range stmts {
-		b.WriteString("\t\t\tif err := client.Exec(ctx, `" + stmt + "`); err != nil {\n")
+		// A raw string literal cannot hold a backtick, and MySQL quotes
+		// identifiers with them: that statement goes in an interpreted
+		// literal instead.
+		lit := "`" + stmt + "`"
+		if strings.Contains(stmt, "`") {
+			lit = strconv.Quote(stmt)
+		}
+		b.WriteString("\t\t\tif err := client.Exec(ctx, " + lit + "); err != nil {\n")
 		b.WriteString("\t\t\t\treturn err\n")
 		b.WriteString("\t\t\t}\n")
 	}

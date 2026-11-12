@@ -129,7 +129,7 @@ func TestStaticReaderLearnsIndexCheckAndDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(up, "\n")
-	for _, want := range []string{"CONSTRAINT ck_docs_status CHECK (status IN ('draft','live'))", "CREATE INDEX IF NOT EXISTS idx_docs_slug ON docs (slug)", "DEFAULT 'draft'"} {
+	for _, want := range []string{`CONSTRAINT "ck_docs_status" CHECK (status IN ('draft','live'))`, `CREATE INDEX IF NOT EXISTS "idx_docs_slug" ON "docs" ("slug")`, "DEFAULT 'draft'"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("DDL lacks %q:\n%s", want, joined)
 		}

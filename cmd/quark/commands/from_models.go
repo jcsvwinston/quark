@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jcsvwinston/quark"
 	"github.com/jcsvwinston/quark/internal/migrate"
 	"github.com/jcsvwinston/quark/internal/schema"
 	"golang.org/x/tools/go/packages"
@@ -158,8 +159,18 @@ func literalTableNames(p *packages.Package) map[string]string {
 
 // buildDDLStatements renders CREATE/DROP statement lists for the dialect,
 // parents before children (Kahn over the FK graph, declaration order as the
-// stable tie-break).
+// stable tie-break). The statements are the dialect's own (QK-101): tables,
+// columns and indexes quoted the way the runtime migrator quotes them, and
+// "create only what is missing" written the way each engine accepts it —
+// CREATE TABLE IF NOT EXISTS where the engine has it, a sys.tables guard on
+// SQL Server, a plain CREATE TABLE on Oracle, a plain CREATE INDEX on MySQL
+// — through the same quarkdriver.IdempotentDDL the runtime uses, so a
+// migration rendered here applies on the engine it names.
 func buildDDLStatements(models []ddlModel, dialect string) (up, down []string, err error) {
+	d, err := quark.DetectDialectByName(dialect)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dialect %s: %w", dialect, err)
+	}
 	ordered := topoOrderModels(models)
 
 	for _, m := range ordered {
@@ -169,7 +180,7 @@ func buildDDLStatements(models []ddlModel, dialect string) (up, down []string, e
 			if cerr != nil {
 				return nil, nil, fmt.Errorf("model %s, column %s: %w", m.Name, f.Column, cerr)
 			}
-			cols = append(cols, "\t"+f.Column+" "+colSQL)
+			cols = append(cols, d.Quote(f.Column)+" "+colSQL)
 		}
 		var fkCols []string
 		for col := range m.FKs {
@@ -177,28 +188,37 @@ func buildDDLStatements(models []ddlModel, dialect string) (up, down []string, e
 		}
 		sort.Strings(fkCols)
 		for _, col := range fkCols {
-			cols = append(cols, fmt.Sprintf("\tFOREIGN KEY (%s) REFERENCES %s(id)", col, m.FKs[col]))
+			cols = append(cols, fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s(%s)", d.Quote(col), d.Quote(m.FKs[col]), d.Quote("id")))
 		}
 		for _, f := range m.Fields {
 			if f.Check != "" {
-				cols = append(cols, fmt.Sprintf("\tCONSTRAINT ck_%s_%s CHECK (%s)", m.Table, f.Column, f.Check))
+				cols = append(cols, fmt.Sprintf("CONSTRAINT %s CHECK (%s)", d.Quote("ck_"+m.Table+"_"+f.Column), f.Check))
 			}
 		}
-		up = append(up, fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n%s\n)", m.Table, strings.Join(cols, ",\n")))
+		up = append(up, migrate.CreateTableIfNotExists(d, m.Table, strings.Join(cols, ",\n  ")))
 		for _, col := range fkCols {
-			up = append(up, fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_%s_%s ON %s (%s)", m.Table, col, m.Table, col))
+			up = append(up, migrate.CreateIndexIfNotExists(d, m.Table, "idx_"+m.Table+"_"+col, []string{col}, false))
 		}
 		for _, f := range m.Fields {
 			if f.IndexName != "" {
-				up = append(up, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s)", f.IndexName, m.Table, f.Column))
+				up = append(up, migrate.CreateIndexIfNotExists(d, m.Table, f.IndexName, []string{f.Column}, false))
 			}
 		}
 	}
 
 	for i := len(ordered) - 1; i >= 0; i-- {
-		down = append(down, "DROP TABLE IF EXISTS "+ordered[i].Table)
+		down = append(down, dropTableStatement(d, dialect, ordered[i].Table))
 	}
 	return up, down, nil
+}
+
+// dropTableStatement drops table the way the engine accepts: DROP TABLE IF
+// EXISTS everywhere but Oracle, which has IF EXISTS only since 23ai.
+func dropTableStatement(d quark.Dialect, dialect, table string) string {
+	if dialect == "oracle" {
+		return "DROP TABLE " + d.Quote(table)
+	}
+	return "DROP TABLE IF EXISTS " + d.Quote(table)
 }
 
 // ddlColumnSQL maps one field to its dialect column fragment using the
