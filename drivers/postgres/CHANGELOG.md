@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/jcsvwinston/quark/compare/drivers/postgres/v0.3.2...drivers/postgres/v0.3.3) (2026-11-14)
+
+
+### Fixed
+
+* **deps:** raise the sibling module floors to quark v1.19.0 ([#494](https://github.com/jcsvwinston/quark/issues/494)) ([a335f8b](https://github.com/jcsvwinston/quark/commit/a335f8bdb25560a27017a133e498d2e513dbcf74))
+
 ## [0.3.2](https://github.com/jcsvwinston/quark/compare/drivers/postgres/v0.3.1...drivers/postgres/v0.3.2) (2026-11-11)
 
 
