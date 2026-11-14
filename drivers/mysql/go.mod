@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/go-sql-driver/mysql v1.10.1
-	github.com/jcsvwinston/quark v1.18.0
+	github.com/jcsvwinston/quark v1.19.0
 )
 
 require (
